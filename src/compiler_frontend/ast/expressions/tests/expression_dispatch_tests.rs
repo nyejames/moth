@@ -32,7 +32,6 @@ use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarati
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticPayload, InvalidExpressionReason,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
@@ -162,6 +161,7 @@ fn hash_in_expression_position_rejected() {
         expression_builder: &mut expression_builder,
         const_values: &mut const_values,
         group_frames: &mut group_frames,
+        route_argument_context: None,
     };
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -231,6 +231,7 @@ fn hash_before_template_head_allowed() {
         expression_builder: &mut expression_builder,
         const_values: &mut const_values,
         group_frames: &mut group_frames,
+        route_argument_context: None,
     };
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -289,6 +290,7 @@ fn negative_token_before_identifier_pushes_unary_negation_operator() {
         expression_builder: &mut expression_builder,
         const_values: &mut const_values,
         group_frames: &mut group_frames,
+        route_argument_context: None,
     };
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -468,7 +470,7 @@ fn constant_identifier_uses_module_store_tir() {
                     .try_intern_components(&[constant_name])
                     .expect("test path fits"),
                 type_id: template_type_id,
-                diagnostic_type: DataType::StringSlice,
+                type_syntax: None,
                 value_mode: ValueMode::ImmutableOwned,
                 value: DeclarationValue::Initializer(template_expression.id()),
                 binding_span: None,

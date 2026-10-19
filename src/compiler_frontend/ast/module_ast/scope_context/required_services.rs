@@ -80,7 +80,9 @@ impl ScopeContext {
             ScopeDeclarationRef::Shared(declaration) => {
                 declaration.id == *path && self.is_explicit_compile_time_constant(declaration)
             }
-            ScopeDeclarationRef::PendingNumeric { .. } => false,
+            ScopeDeclarationRef::PendingNumeric { .. } | ScopeDeclarationRef::RouteParameter(_) => {
+                false
+            }
         };
         is_explicit
             .then(|| const_values.value_for_path(path))
@@ -133,6 +135,7 @@ impl ScopeContext {
             template_const_loop_iteration_limit: self.shared.template_const_loop_iteration_limit,
             bindings: Vec::new(),
             source_scope: Some(self),
+            external_package_registry: Some(self.shared.external_package_registry.as_ref()),
         }
     }
 }

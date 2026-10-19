@@ -1,0 +1,7 @@
+@facade Holder, Label
+@contracts DISPLAY_TEXT
+
+held = Holder(Label(text = "held"))
+shown = held.value.display()
+
+[:[shown]]

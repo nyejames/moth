@@ -1,0 +1,8 @@
+LOCAL_DISPLAY must:
+    display |This| -> String
+;
+
+Maybe type T is LOCAL_DISPLAY ::
+    Some | value T |,
+    Empty,
+;

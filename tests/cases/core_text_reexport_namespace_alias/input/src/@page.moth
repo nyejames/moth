@@ -1,0 +1,14 @@
+@core/text as txt
+@facade measure, is_empty
+@helper begins, ends_with
+
+show_len |s String| -> I32:
+    return measure(s)
+;
+
+folded_len #= txt.length("a😊b")
+folded_empty #= txt.is_empty("")
+folded_prefix #= begins("😊b", "😊")
+folded_suffix #= ends_with("a😊", "😊")
+
+[:namespace_alias folded_len=[folded_len] folded_empty=[folded_empty] runtime_len=[show_len("a😊b")] prefix=[folded_prefix] suffix=[folded_suffix]]

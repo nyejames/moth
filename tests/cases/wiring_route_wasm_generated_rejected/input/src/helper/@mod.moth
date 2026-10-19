@@ -1,0 +1,13 @@
+export:
+    Message ::
+        Update | value String |,
+    ;
+
+    accept_route |event Route of String -> Message| -> String:
+        return "wasm-route"
+    ;
+
+    build_route type Seed |seed Seed| -> String:
+        return accept_route(Message::Update)
+    ;
+;

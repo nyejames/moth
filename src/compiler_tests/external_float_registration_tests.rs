@@ -6,7 +6,7 @@
 //!       executes the emitted bundle in Node. The host helper
 //!       returns a driver-set raw payload, so no invalid value crosses a Moth parameter before the
 //!       boundary itself.
-//! WHY:  the Phase 3 exit contract is that a raw fixed F64 boundary keeps binary64 width, that the
+//! WHY:  the boundary contract is that a raw fixed F64 boundary keeps binary64 width, that the
 //!       finite guard cannot be bypassed, and that a declared `Error!` route delivers the shared
 //!       boundary code as a returned error. Those are runtime properties of the generated
 //!       JavaScript, so only executing the emitted bundle proves them, and the boundary must enter
@@ -97,6 +97,7 @@ impl RawFixedF64Function {
             error_return_type: self
                 .declares_error_slot
                 .then_some(ExternalSignatureType::BuiltinError),
+            const_eval: None,
             lowerings: ExternalFunctionLowerings {
                 js: Some(ExternalJsLowering::RuntimeFunction(
                     self.js_helper.to_owned(),

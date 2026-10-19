@@ -20,7 +20,8 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
 };
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::places::HirPlace;
+use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::{
     HirAssertionMessageEvaluation, HirFallibleOperation, HirTerminator,
 };
@@ -821,7 +822,17 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
 
         match &statement.kind {
             // Expressions and calls: recurse into sub-expressions only.
-            HirStatementKind::Write { value, .. } | HirStatementKind::Expr(value) => {
+            HirStatementKind::Write { target, value } => {
+                if let HirWriteTarget::AssignPlace(place) = target {
+                    expression_collector.collect_place_indexes(
+                        &mut self.direct_facts,
+                        *place,
+                        span,
+                    );
+                }
+                expression_collector.collect(&mut self.direct_facts, *value, span);
+            }
+            HirStatementKind::Expr(value) => {
                 expression_collector.collect(&mut self.direct_facts, *value, span);
             }
 
@@ -861,7 +872,6 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 expression_collector.collect(&mut self.direct_facts, *end, span);
                 expression_collector.collect(&mut self.direct_facts, *ascending, span);
             }
-            HirStatementKind::Drop(_) => {}
 
             HirStatementKind::NumericOp {
                 op,
@@ -1017,8 +1027,16 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 self.collect_runtime_feature_uses_from_invoke(operation, span);
             }
 
-            HirTerminator::Match { scrutinee, .. } => {
+            HirTerminator::Match { scrutinee, arms } => {
                 expression_collector.collect(&mut self.direct_facts, *scrutinee, fallback_span);
+                for arm in arms {
+                    if let Some(value) = arm.pattern.value() {
+                        expression_collector.collect(&mut self.direct_facts, value, fallback_span);
+                    }
+                    if let Some(guard) = arm.guard {
+                        expression_collector.collect(&mut self.direct_facts, guard, fallback_span);
+                    }
+                }
             }
 
             // Terminators that return a value.
@@ -1042,13 +1060,12 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 message,
                 message_evaluation,
             } => {
-                let message_row = self.index.hir.expressions.expression(*message);
                 let span = self
                     .index
                     .hir
-                    .side_table
-                    .value_source_span(*message)
-                    .or(message_row.span)
+                    .expressions
+                    .expression(*message)
+                    .span
                     .or(fallback_span);
                 self.direct_facts
                     .reachable_assertion_messages
@@ -1068,6 +1085,13 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
     }
 }
 
+/// One expression still to record, with the span it inherits when it has none of its own.
+#[derive(Clone, Copy)]
+struct PendingExpression {
+    expression_id: HirValueId,
+    fallback_span: Option<SourceSpan>,
+}
+
 struct RuntimeFeatureUseCollector<'hir> {
     hir: &'hir HirModule,
     owner_function: FunctionId,
@@ -1081,39 +1105,47 @@ impl<'hir> RuntimeFeatureUseCollector<'hir> {
         }
     }
 
+    /// Records the runtime facts of `expression_id` and of every expression it evaluates.
+    ///
+    /// WHY: nested expressions are walked from an explicit work list instead of native recursion,
+    /// so expression depth cannot consume the compiler's main-thread stack.
     fn collect(
         &self,
         direct_facts: &mut HirBlockRuntimeFacts,
         expression_id: HirValueId,
         fallback_span: Option<SourceSpan>,
     ) {
-        let expression = self.hir.expressions.expression(expression_id);
-        let expression_span = self
-            .hir
-            .side_table
-            .value_source_span(expression_id)
-            .or(expression.span)
-            .or(fallback_span);
+        let mut pending = Vec::new();
+        let mut next = Some(PendingExpression {
+            expression_id,
+            fallback_span,
+        });
+        while let Some(entry) = next.take().or_else(|| pending.pop()) {
+            next = self.collect_expression(direct_facts, entry, &mut pending);
+        }
+    }
+
+    /// Records the facts owned by one expression row and returns its first child to visit next.
+    ///
+    /// WHY: the other children are queued last-first so `pop` visits them in source order after
+    /// the first child's subtree. A chain of single-operand expressions never touches the queue.
+    fn collect_expression(
+        &self,
+        direct_facts: &mut HirBlockRuntimeFacts,
+        entry: PendingExpression,
+        pending: &mut Vec<PendingExpression>,
+    ) -> Option<PendingExpression> {
+        let expression = self.hir.expressions.expression(entry.expression_id);
+        let expression_span = expression.span.or(entry.fallback_span);
 
         match &expression.kind {
-            HirExpressionKind::MapLiteral(entries) => {
+            HirExpressionKind::MapLiteral(_) => {
                 direct_facts.reachable_map_uses.push(ReachableMapUse {
                     kind: ReachableMapUseKind::Literal,
                     span: expression_span,
                 });
-                for entry in self.hir.expressions.map_entries(*entries) {
-                    self.collect(direct_facts, entry.key, expression_span);
-                    self.collect(direct_facts, entry.value, expression_span);
-                }
             }
-            HirExpressionKind::BinOp { left, right, .. } => {
-                self.collect(direct_facts, *left, expression_span);
-                self.collect(direct_facts, *right, expression_span);
-            }
-            HirExpressionKind::Cast {
-                source: operand,
-                policy,
-            } => {
+            HirExpressionKind::Cast { policy, .. } => {
                 direct_facts
                     .reachable_runtime_casts
                     .push(ReachableRuntimeCastUse {
@@ -1121,30 +1153,6 @@ impl<'hir> RuntimeFeatureUseCollector<'hir> {
                         policy: *policy,
                         form: ReachableRuntimeCastForm::Expression,
                     });
-                self.collect(direct_facts, *operand, expression_span);
-            }
-            HirExpressionKind::UnaryOp { operand, .. }
-            | HirExpressionKind::VariantPayloadGet {
-                source: operand, ..
-            } => self.collect(direct_facts, *operand, expression_span),
-            HirExpressionKind::StructConstruct { fields, .. } => {
-                for (_, value) in self.hir.expressions.struct_fields(*fields) {
-                    self.collect(direct_facts, *value, expression_span);
-                }
-            }
-            HirExpressionKind::Collection(elements) => {
-                for element in self.hir.expressions.values(*elements) {
-                    self.collect(direct_facts, *element, expression_span);
-                }
-            }
-            HirExpressionKind::Range { start, end } => {
-                self.collect(direct_facts, *start, expression_span);
-                self.collect(direct_facts, *end, expression_span);
-            }
-            HirExpressionKind::VariantConstruct { fields, .. } => {
-                for field in self.hir.expressions.variant_fields(*fields) {
-                    self.collect(direct_facts, field.value, expression_span);
-                }
             }
             HirExpressionKind::StructuralString { pieces } => {
                 for piece in self.hir.expressions.string_pieces(*pieces) {
@@ -1170,13 +1178,45 @@ impl<'hir> RuntimeFeatureUseCollector<'hir> {
                     }
                 }
             }
+            // These kinds record no facts of their own; their children are visited below.
             HirExpressionKind::FixedScalar(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
             | HirExpressionKind::StringLiteral(_)
             | HirExpressionKind::Number(_)
             | HirExpressionKind::Load(_)
-            | HirExpressionKind::Copy(_) => {}
+            | HirExpressionKind::Copy(_)
+            | HirExpressionKind::BinOp { .. }
+            | HirExpressionKind::UnaryOp { .. }
+            | HirExpressionKind::StructConstruct { .. }
+            | HirExpressionKind::Collection(_)
+            | HirExpressionKind::Range { .. }
+            | HirExpressionKind::VariantConstruct { .. }
+            | HirExpressionKind::RouteConstruct { .. }
+            | HirExpressionKind::VariantPayloadGet { .. } => {}
+        }
+
+        self.hir.expressions.push_child_values_in_source_order(
+            entry.expression_id,
+            pending,
+            |child| PendingExpression {
+                expression_id: child,
+                fallback_span: expression_span,
+            },
+        )
+    }
+
+    /// Visits the index expressions a place evaluates.
+    ///
+    /// WHY: a write target has no value row of its own, but `a[i] = v` still evaluates `i`.
+    fn collect_place_indexes(
+        &self,
+        direct_facts: &mut HirBlockRuntimeFacts,
+        place: HirPlace,
+        fallback_span: Option<SourceSpan>,
+    ) {
+        for index in self.hir.expressions.place_index_values(place) {
+            self.collect(direct_facts, index, fallback_span);
         }
     }
 }

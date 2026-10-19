@@ -58,6 +58,7 @@ fn body_context(scope: PathId, paths: &PathInternerFork) -> ScopeContext {
         success_types: Vec::new(),
         authored_success_slot_count: 0,
         error_type: None,
+        parameter_contracts: Vec::new(),
     }));
     context
 }

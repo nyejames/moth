@@ -1,0 +1,8 @@
+needs_wire |value Wire of String| -> String:
+    return value
+;
+
+render || -> String:
+    value = "text"
+    return needs_wire(~value)
+;

@@ -1473,7 +1473,7 @@ Before full `TypeEnvironment` retention is deleted, tests must compare the old a
 every supported type shape and for representative nested combinations. The new store must preserve
 user-visible spelling unless an explicitly authorized diagnostics-improvement slice changes it.
 
-The compact typed-expression cutover can release expression stores after copying their diagnostic
+The compact typed-expression foundation can release expression stores after copying their diagnostic
 facts into the existing report boundary. It does not by itself deliver this snapshot architecture
 or authorise dropping a type environment still needed by a current report. That final retention
 change belongs to the diagnostic-layout migration and its complete type-lifetime proof.

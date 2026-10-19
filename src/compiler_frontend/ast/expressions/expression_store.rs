@@ -376,6 +376,11 @@ pub(crate) enum ExpressionOp<E = ExprId> {
         tag: u32,
         fields: ConstructorFieldRange,
     },
+    RouteConstruct {
+        tag: u32,
+        fields: ConstructorFieldRange,
+        future_input: bool,
+    },
     ValueBlock(ValueBlockId),
     RuntimeTemplate(RuntimeTemplateId),
     RuntimeSlotApplication(RuntimeSlotApplicationId),
@@ -452,6 +457,15 @@ impl<E> ExpressionOp<E> {
             Self::Collection(range) => ExpressionOp::Collection(range),
             Self::Map(range) => ExpressionOp::Map(range),
             Self::Struct { fields } => ExpressionOp::Struct { fields },
+            Self::RouteConstruct {
+                tag,
+                fields,
+                future_input,
+            } => ExpressionOp::RouteConstruct {
+                tag,
+                fields,
+                future_input,
+            },
             Self::Choice { tag, fields } => ExpressionOp::Choice { tag, fields },
             Self::ValueBlock(block) => ExpressionOp::ValueBlock(block),
             Self::RuntimeTemplate(template) => ExpressionOp::RuntimeTemplate(template),
@@ -491,6 +505,7 @@ impl<E: Copy> ExpressionOp<E> {
             | Self::Map(_)
             | Self::Struct { .. }
             | Self::Choice { .. }
+            | Self::RouteConstruct { .. }
             | Self::ValueBlock(_)
             | Self::RuntimeTemplate(_)
             | Self::RuntimeSlotApplication(_)
@@ -580,15 +595,6 @@ macro_rules! storage {
                 self.owner = OwnerToken::mint()?;
                 $(self.$field.shrink_to_fit();)*
                 Ok(self)
-            }
-            #[cfg(test)]
-            pub(crate) fn into_builder(mut self) -> Result<AstExpressionBuilder, CompilerError> {
-                self.owner = OwnerToken::mint()?;
-                Ok(AstExpressionBuilder {
-                    storage: self,
-                    candidate_serial: 0,
-                    limit: u32::MAX,
-                })
             }
             #[cfg(any(test, feature = "benchmark_counters"))]
             pub(crate) fn storage_statistics(&self) -> ExpressionStorageStatistics {
@@ -1382,7 +1388,9 @@ impl ExpressionStore {
                     visit(entry.value);
                 }
             }
-            ExpressionOp::Struct { fields } | ExpressionOp::Choice { fields, .. } => {
+            ExpressionOp::Struct { fields }
+            | ExpressionOp::Choice { fields, .. }
+            | ExpressionOp::RouteConstruct { fields, .. } => {
                 for field in
                     &self.constructor_fields[fields.bounds(self.constructor_fields.len())?]
                 {
@@ -1502,6 +1510,9 @@ pub(crate) use scratch::*;
 #[cfg(test)]
 #[path = "tests/owner_boundary_tests.rs"]
 mod owner_boundary_tests;
+#[cfg(test)]
+#[path = "expression_store_test_support.rs"]
+pub(crate) mod test_support;
 #[cfg(test)]
 #[path = "tests/expression_store_tests.rs"]
 mod tests;

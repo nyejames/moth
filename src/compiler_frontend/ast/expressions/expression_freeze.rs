@@ -219,7 +219,9 @@ impl FreezeRemap {
                 self.children.select_range(range.start, range.len)?
             }
             ExpressionOp::Map(range) => self.map_entries.select_range(range.start, range.len)?,
-            ExpressionOp::Struct { fields } | ExpressionOp::Choice { fields, .. } => self
+            ExpressionOp::Struct { fields }
+            | ExpressionOp::Choice { fields, .. }
+            | ExpressionOp::RouteConstruct { fields, .. } => self
                 .constructor_fields
                 .select_range(fields.start, fields.len)?,
             ExpressionOp::ValueBlock(id) => {
@@ -318,7 +320,9 @@ impl FreezeRemap {
             }
             ExpressionOp::Collection(values) => range!(children, values),
             ExpressionOp::Map(values) => range!(map_entries, values),
-            ExpressionOp::Struct { fields } | ExpressionOp::Choice { fields, .. } => {
+            ExpressionOp::Struct { fields }
+            | ExpressionOp::Choice { fields, .. }
+            | ExpressionOp::RouteConstruct { fields, .. } => {
                 range!(constructor_fields, fields)
             }
             ExpressionOp::ValueBlock(id) => side!(value_blocks, id, ValueBlockId),

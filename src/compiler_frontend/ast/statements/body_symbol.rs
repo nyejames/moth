@@ -999,7 +999,9 @@ pub(crate) fn parse_symbol_statement(
 
     // If the symbol already names a visible local, treat it as a use
     // (assignment, field access, or expression) rather than a new declaration.
-    if let Some(existing_reference) = context.get_reference(&symbol_id) {
+    if let Some(existing_reference) =
+        context.get_value_reference(&symbol_id, Some(token_stream.current_span()))?
+    {
         let reference_span = Some(token_stream.current_span());
         match token_stream.peek_next_tag() {
             // Direct reassignment of an existing local variable.

@@ -1,17 +1,17 @@
 //! Frontend type identity, environment, and resolution support.
 //!
 //! WHAT: owns resolved semantic type identity for the compiler frontend.
-//! WHY: AST should carry compact `TypeId`s instead of cloned `DataType` payloads.
+//! WHY: AST retains authored `ParsedTypeRef` syntax and stores resolved semantics as compact
+//!      `TypeId`s.
 //!
 //! Module boundaries:
-//! - `datatype.rs` — the `DataType` enum and its intrinsic methods.
 //! - `ids.rs` — compact type identifiers and canonical keys.
 //! - `environment.rs` — `TypeEnvironment` owns all type definitions and interning.
 //! - `definitions.rs` — type definition shapes stored in the environment.
 //! - `numeric_scalar.rs` — the canonical numeric scalar vocabulary (fixed scalars and exact `Dec`).
 //! - `number.rs` — compiler-owned `Dec` coefficients, arithmetic and conversions; shared scale
 //!   identity and normalized-text facts live in `moth_lexical`.
-//! - `parsed.rs` — parsed type syntax before resolution (no semantic identity).
+//! - `parsed.rs` — retained authored type syntax before resolution (no semantic identity).
 //! - `display.rs` — type name rendering through `StringTable`.
 //! - `queries.rs` — semantic fact queries over `TypeId + TypeEnvironment`.
 //! - `generic_parameters.rs` — parsed generic parameter declarations and scopes.
@@ -23,7 +23,6 @@
 //! Backend layout, ABI, drop strategy, and runtime representation do NOT belong here.
 //! Type compatibility POLICY does NOT belong here (see `type_coercion`).
 
-pub mod datatype;
 pub mod definitions;
 pub mod display;
 pub mod environment;
@@ -39,9 +38,6 @@ pub mod parsed;
 pub mod queries;
 
 // Re-exports for convenience.
-pub use datatype::DataType;
-pub(crate) use datatype::diagnostic_type_spelling;
-
 pub use ids::*;
 
 use crate::compiler_frontend::external_packages::ExternalTypeId;

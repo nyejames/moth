@@ -169,6 +169,15 @@ impl<'a> ExpressionView<'a> {
                 tag,
                 fields: fields(range),
             },
+            ExpressionOp::RouteConstruct {
+                tag,
+                fields: range,
+                future_input,
+            } => O::RouteConstruct {
+                tag,
+                fields: fields(range),
+                future_input,
+            },
             ExpressionOp::ValueBlock(id) => O::ValueBlock(owner.value_blocks[id.index()].clone()),
             ExpressionOp::RuntimeTemplate(id) => {
                 O::RuntimeTemplate(owner.runtime_templates[id.index()].clone())

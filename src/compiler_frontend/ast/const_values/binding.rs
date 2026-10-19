@@ -7,6 +7,7 @@
 //! which only reads the bound content afterwards.
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::const_eval::FoldServices;
 use crate::compiler_frontend::ast::const_values::store::{
     ConstStringPiece, ConstStringValue, ConstTemplateValue, ConstValueId, ConstValueStore,
     ConstValueStoreError,
@@ -117,7 +118,11 @@ pub(crate) fn resolve_const_expression_content(
             &store,
             builder,
             constants,
-            strings,
+            FoldServices::new(
+                strings,
+                None,
+                Some(scope.external_package_registry.as_ref()),
+            ),
             scope.template_const_loop_iteration_limit,
             resources.as_deref(),
         )?;
@@ -249,10 +254,15 @@ pub(crate) fn project_const_template_value(
     store: &crate::compiler_frontend::ast::templates::tir::TemplateIrStore,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
-    string_table: &mut StringTable,
+    fold_services: FoldServices<'_>,
     template_const_loop_iteration_limit: usize,
     module_resources: Option<&ModuleResourceTable>,
 ) -> Result<ProjectedConstTemplateValue, ConstValueStoreError> {
+    let FoldServices {
+        string_table,
+        scope: _,
+        registry,
+    } = fold_services;
     let reference = template.tir_reference;
     let view = TirView::with_minimum_phase(
         store,
@@ -266,6 +276,7 @@ pub(crate) fn project_const_template_value(
         &*expression_builder,
         &*const_values,
         TemplatePreparationMode::ConstRequired,
+        registry,
     )?;
     let kind = prepared.facts.final_value_kind;
     let publish = matches!(prepared.outcome, TemplatePreparationOutcome::Foldable)
@@ -283,9 +294,10 @@ pub(crate) fn project_const_template_value(
     }
     let (public, emission, provenance) = {
         let mut fold_context = TirFoldContext::new(
-            string_table,
+            &mut *string_table,
             expression_builder,
             const_values,
+            registry,
             template_const_loop_iteration_limit,
         );
         let mut visiting = FxHashSet::default();
@@ -531,6 +543,7 @@ fn project_wrapper_set(
             &*fold_context.expression_builder,
             &*fold_context.const_values,
             TemplatePreparationMode::ConstRequired,
+            fold_context.external_package_registry,
         )?;
         wrappers.push(
             project_const_template_view(

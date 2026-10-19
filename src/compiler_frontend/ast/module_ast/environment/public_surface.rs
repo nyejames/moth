@@ -55,7 +55,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             }
 
-            if !header_is_public_export_declaration(header) {
+            if !self.header_is_public_export_declaration(header) {
                 continue;
             }
 
@@ -195,14 +195,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         string_table: &StringTable,
     ) -> Result<(), CompilerMessages> {
         for parameter in &signature.parameters {
-            self.validate_public_type_id(
-                exported_name,
-                parameter.type_id,
-                public_root_file,
-                parameter.binding_span,
-                trait_environment,
-                string_table,
-            )?;
+            for type_id in parameter.semantic_type_ids() {
+                self.validate_public_type_id(
+                    exported_name,
+                    type_id,
+                    public_root_file,
+                    parameter.binding_span,
+                    trait_environment,
+                    string_table,
+                )?;
+            }
         }
 
         for return_slot in &signature.returns {
@@ -346,6 +348,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .is_some_and(|path| self.source_path_is_public_from_root_file(path, public_root_file))
     }
 
+    /// Whether a trait may appear in a public signature or relation, judged by its owner.
+    ///
+    /// WHAT: core traits and source traits marked `exported` are public at their owner. An
+    ///      unexported source trait counts only when `public_root_file` re-exports it. Callers
+    ///      pass the root of the module that owns the declaration naming the trait.
+    /// WHY: an unexported trait belongs to the module that names it, so that module's root is its
+    ///      owner. Traits imported from a provider's public interface are marked `exported`, so a
+    ///      public generic may be bounded by them without the consumer re-exporting them. A trait
+    ///      private at its owner is still rejected.
     pub(in crate::compiler_frontend::ast) fn public_trait_definition_is_nameable(
         &self,
         trait_definition: &crate::compiler_frontend::traits::definitions::ResolvedTraitDefinition,
@@ -353,8 +364,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         trait_environment: &TraitEnvironment,
     ) -> bool {
         match trait_definition.visibility {
-            TraitVisibility::Core => true,
-            TraitVisibility::Source { .. } => trait_environment
+            TraitVisibility::Core | TraitVisibility::Source { exported: true } => true,
+            TraitVisibility::Source { exported: false } => trait_environment
                 .paths_for(trait_definition.id)
                 .iter()
                 .any(|path| self.source_path_is_public_from_root_file(path, public_root_file)),
@@ -405,6 +416,26 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         }
 
         false
+    }
+
+    /// Whether a header is a public authored declaration reachable from its module root.
+    ///
+    /// WHAT: the declaration kind must pass the shared `HeaderKind` gate, and the root that owns
+    ///       the declaring file must report the declaration as public, either directly or through
+    ///       a re-export.
+    /// WHY: a re-exported declaration is consumed through the root's public surface exactly like a
+    ///      direct export, so its private field, parameter, and requirement types must be checked
+    ///      too. Gating on the header's own file role and export mode skipped re-exports, which
+    ///      then failed later as an internal compiler error.
+    pub(in crate::compiler_frontend::ast) fn header_is_public_export_declaration(
+        &self,
+        header: &Header,
+    ) -> bool {
+        header.kind.is_authored_public_export_declaration()
+            && self.source_path_is_public_from_root_file(
+                &header.declaration_path,
+                &self.header_source_path(header),
+            )
     }
 
     /// Validate exported `TRAIT must not TRAIT` relations in a module-root public export.
@@ -479,20 +510,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
         Ok(())
     }
-}
-
-/// Whether a header is a public authored module-root export declaration.
-///
-/// WHAT: only declarations marked public by a strict module-root file `export:` block and
-///       admitted by the shared declaration-kind gate become public export entries. The
-///       declaration-kind gate is the shared [`HeaderKind::is_authored_public_export_declaration`]
-///       owner so the header, AST and semantic-origin public-export predicates cannot drift;
-///       this predicate keeps the stage-local file-role and export-mode policy (export-capable
-///       roots plus explicit `Public` mode).
-fn header_is_public_export_declaration(header: &Header) -> bool {
-    header.file_role.is_export_capable()
-        && header.export_mode.is_public()
-        && header.kind.is_authored_public_export_declaration()
 }
 
 fn is_public_export_trait_incompatibility_header(header: &Header) -> bool {

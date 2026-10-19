@@ -156,6 +156,7 @@ fn convert_parsed_function_to_spec(
         parameters,
         returns,
         error_return_type,
+        const_eval: None,
         lowerings: ExternalFunctionLowerings {
             js: Some(ExternalJsLowering::ExternalModuleExport {
                 export_name: function.js_name.clone(),

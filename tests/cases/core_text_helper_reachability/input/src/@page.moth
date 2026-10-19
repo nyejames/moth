@@ -1,5 +1,10 @@
-@core/text length
+@core/text length, contains
 
-value = length("abc")
+measure |value String| -> I32:
+    return length(value)
+;
 
-[:core_text_helper_reachability length=[value]]
+value = measure("abc")
+folded_sibling = contains("mothball", "ball")
+
+[:core_text_helper_reachability length=[value] folded_sibling=[folded_sibling]]

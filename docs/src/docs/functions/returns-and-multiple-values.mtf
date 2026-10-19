@@ -45,6 +45,8 @@ A comma promises another target, so a trailing comma before `=` is invalid. This
 continuation rule used by delimiter-free dependency selections. Delimited collections and call
 arguments keep their own list grammar.
 
+Multi-bind targets are runtime bindings. A `#` compile-time marker is invalid on every target, new or existing, so `name #, count = pair()` and `name #String, count = pair()` are rejected.
+
 Multiple return values are not a user-visible tuple value. A normal
 single-target declaration cannot receive a multi-return call.
 

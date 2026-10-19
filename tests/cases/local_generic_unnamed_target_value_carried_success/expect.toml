@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "visibility anchor local_generic_unnamed_target_value_carried_success hidden"

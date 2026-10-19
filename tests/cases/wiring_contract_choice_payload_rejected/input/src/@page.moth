@@ -1,0 +1,3 @@
+Choice ::
+    Variant |item Wire of String|,
+;

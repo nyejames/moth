@@ -1,0 +1,29 @@
+Helper = |
+    text String,
+|
+
+HELPER_SOURCE must:
+    helper_for |This| -> Helper
+;
+
+Maker = |
+    label String,
+|
+
+helper_for |this Maker| -> Helper:
+    return Helper(text = this.label)
+;
+
+Maker must HELPER_SOURCE
+
+make_maker || -> Maker:
+    return Maker(label = "maker")
+;
+
+Box type T = |
+    value T,
+|
+
+render type T is HELPER_SOURCE |this Box of T| -> String:
+    return this.value.helper_for().text
+;

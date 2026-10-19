@@ -116,6 +116,11 @@ pub(crate) enum CompletedOperation<E> {
         tag: u32,
         fields: Vec<ConstructorField<E>>,
     },
+    RouteConstruct {
+        tag: u32,
+        fields: Vec<ConstructorField<E>>,
+        future_input: bool,
+    },
     ValueBlock(ValueBlock),
     RuntimeTemplate(OwnedRuntimeTemplateHandoff),
     RuntimeSlotApplication(OwnedRuntimeSlotApplicationHandoff),

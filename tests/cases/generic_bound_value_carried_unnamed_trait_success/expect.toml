@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "generic_bound_value_carried_unnamed_trait_success result=hello"

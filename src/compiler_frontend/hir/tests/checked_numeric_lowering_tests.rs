@@ -1,4 +1,4 @@
-//! Focused tests for checked numeric HIR lowering (Phase 6b).
+//! Focused tests for checked numeric HIR lowering.
 //!
 //! Verifies numeric domains, operand conversions and native failure delivery. Recoverable
 //! operations define success and error locals on Invoke edges; discharged and trapping operations
@@ -17,7 +17,6 @@ use crate::compiler_frontend::ast::expressions::expression_types::{
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastPolicyId,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -474,13 +473,7 @@ fn lower_u8_compound_add_assignment(
         .expect("fixture cast fits store");
     let statement = node(
         NodeKind::Assignment {
-            target: assignment_target(
-                &mut expressions,
-                target_name,
-                DataType::Inferred,
-                u8_type,
-                None,
-            ),
+            target: assignment_target(&mut expressions, target_name, u8_type, None),
             value: value.id(),
         },
         None,
@@ -528,13 +521,7 @@ fn lower_same_type_compound_add_assignment(
     );
     let statement = node(
         NodeKind::Assignment {
-            target: assignment_target(
-                &mut expressions,
-                target_name,
-                DataType::Inferred,
-                scalar_type,
-                None,
-            ),
+            target: assignment_target(&mut expressions, target_name, scalar_type, None),
             value,
         },
         None,

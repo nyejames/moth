@@ -1,0 +1,8 @@
+needs_wire |value Wire of String| -> String:
+    return value
+;
+
+render || -> String, Error!:
+    values = {"lookup"}
+    return needs_wire(values.get(0)!)
+;

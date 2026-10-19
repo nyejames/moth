@@ -9,8 +9,9 @@ use super::super::overlays::{
     TemplateViewContext, TirExpressionOverlay, TirSlotResolutionOverlay, TirWrapperContextOverlay,
 };
 use super::super::refs::{TemplateTirChildReference, TemplateWrapperReference};
-use super::super::slot_composition::contributions::route_tir_slot_contributions;
-use super::super::slot_composition::{TirSlotContributions, compose_tir_head_chain};
+use super::super::slot_composition::contributions::route_tir_fill_nodes_against_schema;
+use super::super::slot_composition::helpers::{children_of_node, root_node_id_for_template};
+use super::super::slot_composition::{TirSlotContributions, compose_tir_head_chain_from_root};
 use super::super::slot_layout::{TirSlotSchema, collect_tir_slot_layout, collect_tir_slot_schema};
 use super::super::slot_plan::TemplateSlotPlan;
 use super::super::store::{TemplateIrStore, TemplateWrapperSet};
@@ -818,6 +819,32 @@ fn skipped_node_kinds_do_not_contribute_to_schema() {
 //  Routing Tests
 // -------------------------
 
+/// Routes a fill template against a wrapper's slot layout.
+///
+/// WHY: mirrors head-chain composition. The layout comes from the wrapper, the
+/// fill children come from the fill root, and routing runs through the shared
+/// schema router, so the tests exercise the production path.
+fn route_fill_against_wrapper(
+    store: &TemplateIrStore,
+    wrapper_template_id: TemplateIrId,
+    fill_template_id: TemplateIrId,
+    string_table: &StringTable,
+) -> Result<TirSlotContributions, TemplateError> {
+    let layout = collect_tir_slot_layout(store, wrapper_template_id)?;
+    let fill_root = root_node_id_for_template(store, fill_template_id)?;
+    let fill_children = children_of_node(store, fill_root)?;
+    let fill_span = store
+        .get_template(fill_template_id)
+        .and_then(|template| template.span);
+    route_tir_fill_nodes_against_schema(
+        store,
+        &layout.schema,
+        &fill_children,
+        fill_span,
+        string_table,
+    )
+}
+
 /// Exercises every explicit-insert target branch and its exact routed bucket.
 #[test]
 fn route_explicit_insert_to_each_target_slot_key() {
@@ -837,7 +864,7 @@ fn route_explicit_insert_to_each_target_slot_key() {
         };
         let fill = build_fill_template(&mut store, vec![insert_node]);
 
-        let routed = route_tir_slot_contributions(&store, wrapper, fill, &string_table)
+        let routed = route_fill_against_wrapper(&store, wrapper, fill, &string_table)
             .expect("named-target routing should succeed");
 
         let insert_body_node = template_root_node_id(insert_template, &store);
@@ -889,7 +916,7 @@ fn route_explicit_insert_to_each_target_slot_key() {
         };
         let fill = build_fill_template(&mut store, vec![insert_node]);
 
-        let routed = route_tir_slot_contributions(&store, wrapper, fill, &string_table)
+        let routed = route_fill_against_wrapper(&store, wrapper, fill, &string_table)
             .expect("default-target routing should succeed");
 
         let insert_body_node = template_root_node_id(insert_template, &store);
@@ -937,7 +964,7 @@ fn route_explicit_insert_to_each_target_slot_key() {
         };
         let fill = build_fill_template(&mut store, vec![insert_node]);
 
-        let routed = route_tir_slot_contributions(&store, wrapper, fill, &string_table)
+        let routed = route_fill_against_wrapper(&store, wrapper, fill, &string_table)
             .expect("positional-target routing should succeed");
 
         let insert_body_node = template_root_node_id(insert_template, &store);
@@ -987,7 +1014,7 @@ fn route_missing_loose_node_produces_internal_error() {
         )
     };
 
-    let error = route_tir_slot_contributions(&store, wrapper, fill, &string_table)
+    let error = route_fill_against_wrapper(&store, wrapper, fill, &string_table)
         .expect_err("missing loose nodes must not be treated as ordinary content");
 
     assert_internal_authority_error(&error, "fill template child node ID");
@@ -1016,7 +1043,7 @@ fn route_missing_insert_body_node_produces_internal_error() {
     };
     let fill = build_fill_template(&mut store, vec![insert_node]);
 
-    let error = route_tir_slot_contributions(&store, wrapper, fill, &string_table)
+    let error = route_fill_against_wrapper(&store, wrapper, fill, &string_table)
         .expect_err("missing insert body nodes must fail routing");
 
     assert_internal_authority_error(&error, "insert contribution child node ID");
@@ -1036,7 +1063,7 @@ fn route_loose_content_to_positional_slots() {
     let second_child = build_child_template_node(&mut store, &mut string_table);
     let fill = build_fill_template(&mut store, vec![first_child, second_child]);
 
-    let routed = route_tir_slot_contributions(&store, wrapper, fill, &string_table)
+    let routed = route_fill_against_wrapper(&store, wrapper, fill, &string_table)
         .expect("routing should succeed");
 
     // Two authored child contributions fill two positional slots in authored
@@ -1091,7 +1118,7 @@ fn route_loose_content_to_default_slot_after_positional_exhaustion() {
     );
     let fill = build_fill_template(&mut store, vec![leading_text, child, trailing_text]);
 
-    let routed = route_tir_slot_contributions(&store, wrapper, fill, &string_table)
+    let routed = route_fill_against_wrapper(&store, wrapper, fill, &string_table)
         .expect("routing should succeed");
 
     // Positional slots fill first in authored order; once they are exhausted
@@ -1141,7 +1168,7 @@ fn route_loose_whitespace_after_head_fill_to_next_child_contribution() {
     let child = build_child_template_node(&mut store, &mut string_table);
     let fill = build_fill_template(&mut store, vec![head_fill, separator, child]);
 
-    let routed = route_tir_slot_contributions(&store, wrapper, fill, &string_table)
+    let routed = route_fill_against_wrapper(&store, wrapper, fill, &string_table)
         .expect("routing should succeed");
 
     // A head-origin contribution opens a new positional chunk, so a following
@@ -1192,7 +1219,7 @@ fn route_loose_content_to_default_slot_only() {
     let child = build_child_template_node(&mut store, &mut string_table);
     let fill = build_fill_template(&mut store, vec![text, child]);
 
-    let routed = route_tir_slot_contributions(&store, wrapper, fill, &string_table)
+    let routed = route_fill_against_wrapper(&store, wrapper, fill, &string_table)
         .expect("routing should succeed");
 
     // With only a default slot, every authored loose chunk flows straight into
@@ -1232,7 +1259,7 @@ fn unknown_insert_target_produces_diagnostic() {
 
     // The wrapper has a valid default slot, so only the unknown insert target
     // can own this rejection.
-    let error = route_tir_slot_contributions(&store, wrapper, fill, &string_table)
+    let error = route_fill_against_wrapper(&store, wrapper, fill, &string_table)
         .expect_err("unknown insert target should produce an error");
 
     assert_invalid_template_slot_reason(
@@ -1259,7 +1286,7 @@ fn loose_content_without_default_or_positional_slots_produces_diagnostic() {
 
     // Meaningful loose content with no default or positional target is a
     // diagnostic rather than discardable formatting whitespace.
-    let error = route_tir_slot_contributions(&store, wrapper, fill, &string_table)
+    let error = route_fill_against_wrapper(&store, wrapper, fill, &string_table)
         .expect_err("loose content with no default slot should produce an error");
 
     assert_invalid_template_slot_reason(
@@ -1297,7 +1324,7 @@ fn named_only_slots_discard_loose_whitespace_around_insert_contributions() {
         vec![leading_whitespace, insert_node, trailing_whitespace],
     );
 
-    let routed = route_tir_slot_contributions(&store, wrapper, fill, &string_table)
+    let routed = route_fill_against_wrapper(&store, wrapper, fill, &string_table)
         .expect("formatting whitespace should not require a default slot");
 
     // A named-only wrapper discards formatting whitespace around an explicit
@@ -1347,7 +1374,7 @@ fn extra_loose_content_beyond_positional_capacity_produces_diagnostic() {
 
     // One positional slot accepts the first chunk, leaving the second chunk
     // without a target or default fallback.
-    let error = route_tir_slot_contributions(&store, wrapper, fill, &string_table)
+    let error = route_fill_against_wrapper(&store, wrapper, fill, &string_table)
         .expect_err("extra loose content should produce an error");
 
     assert_invalid_template_slot_reason(
@@ -1364,7 +1391,7 @@ fn empty_fill_template_with_slots_wrapper_routes_to_empty_contributions() {
     let wrapper = build_single_slot_template(&mut store, SlotKey::Default);
     let fill = build_fill_template(&mut store, vec![]);
 
-    let routed = route_tir_slot_contributions(&store, wrapper, fill, &string_table)
+    let routed = route_fill_against_wrapper(&store, wrapper, fill, &string_table)
         .expect("routing should succeed");
 
     // An empty fill against a default-slot wrapper discovers the slot schema
@@ -1417,7 +1444,7 @@ fn mixed_explicit_inserts_and_loose_content_are_bucketed() {
     // Explicit inserts and loose content in one fill are routed to disjoint
     // buckets: the insert body fills its named target, and authored loose
     // content fills the default slot in authored order.
-    let routed = route_tir_slot_contributions(&store, wrapper, fill, &string_table)
+    let routed = route_fill_against_wrapper(&store, wrapper, fill, &string_table)
         .expect("routing should succeed");
 
     let insert_body_node = template_root_node_id(insert_template, &store);
@@ -2396,13 +2423,15 @@ fn single_receiver_routes_head_and_body_fill_in_authored_order() {
     let template_id =
         build_template_with_children(&mut store, vec![wrapper_node, head_fill, body_fill]);
 
-    let composed_root = compose_tir_head_chain(
+    let root_node_id = template_root_node_id(template_id, &store);
+    let composed_root = compose_tir_head_chain_from_root(
         &mut store,
         &expressions,
         &const_values,
-        template_id,
+        root_node_id,
         &string_table,
         false,
+        None,
     )
     .expect("composition should succeed");
 
@@ -2453,14 +2482,16 @@ fn head_chain_receiver_collects_one_slot_layout() {
     );
     let template_id = build_template_with_children(&mut store, vec![wrapper_node, fill]);
 
+    let root_node_id = template_root_node_id(template_id, &store);
     reset_ast_counters();
-    compose_tir_head_chain(
+    compose_tir_head_chain_from_root(
         &mut store,
         &expressions,
         &const_values,
-        template_id,
+        root_node_id,
         &string_table,
         false,
+        None,
     )
     .expect("head-chain composition should succeed");
 
@@ -2488,13 +2519,15 @@ fn composed_wrapper_published_summary_matches_the_expanded_tree() {
     );
     let template_id = build_template_with_children(&mut store, vec![wrapper_node, fill]);
 
-    let composed_root = compose_tir_head_chain(
+    let root_node_id = template_root_node_id(template_id, &store);
+    let composed_root = compose_tir_head_chain_from_root(
         &mut store,
         &expressions,
         &const_values,
-        template_id,
+        root_node_id,
         &string_table,
         false,
+        None,
     )
     .expect("composition should succeed");
     let composed_children = root_child_node_ids_for_node(composed_root, &store);
@@ -2529,24 +2562,15 @@ fn head_chain_missing_root_authority_remains_infrastructure_error() {
     let expressions = AstExpressionBuilder::new().unwrap();
     let const_values = ConstValueStore::default();
     let missing_root = TemplateIrNodeId::new(99);
-    let template_id = store.push_template(TemplateIr::new(
-        missing_root,
-        Style::default(),
-        TemplateType::String,
-        TemplateIrSummary {
-            child_template_count: 1,
-            ..TemplateIrSummary::default()
-        },
-        None,
-    ));
 
-    let error = compose_tir_head_chain(
+    let error = compose_tir_head_chain_from_root(
         &mut store,
         &expressions,
         &const_values,
-        template_id,
+        missing_root,
         &string_table,
         false,
+        None,
     )
     .expect_err("missing head-chain root authority must fail composition");
 
@@ -2596,13 +2620,15 @@ fn nested_receivers_route_multiple_fills_in_chain_order() {
         ],
     );
 
-    let composed_root = compose_tir_head_chain(
+    let root_node_id = template_root_node_id(template_id, &store);
+    let composed_root = compose_tir_head_chain_from_root(
         &mut store,
         &expressions,
         &const_values,
-        template_id,
+        root_node_id,
         &string_table,
         false,
+        None,
     )
     .expect("composition should succeed");
 
@@ -2661,13 +2687,14 @@ fn receiver_with_no_fill_stays_unresolved() {
     let template_id = build_template_with_children(&mut store, vec![wrapper_node]);
     let original_root = template_root_node_id(template_id, &store);
 
-    let composed_root = compose_tir_head_chain(
+    let composed_root = compose_tir_head_chain_from_root(
         &mut store,
         &expressions,
         &const_values,
-        template_id,
+        original_root,
         &string_table,
         false,
+        None,
     )
     .expect("composition should succeed");
 
@@ -2697,13 +2724,15 @@ fn receiver_with_named_slots() {
 
     let template_id = build_template_with_children(&mut store, vec![wrapper_node, insert_node]);
 
-    let composed_root = compose_tir_head_chain(
+    let root_node_id = template_root_node_id(template_id, &store);
+    let composed_root = compose_tir_head_chain_from_root(
         &mut store,
         &expressions,
         &const_values,
-        template_id,
+        root_node_id,
         &string_table,
         false,
+        None,
     )
     .expect("composition should succeed");
 
@@ -2753,13 +2782,15 @@ fn mixed_head_text_and_receiver() {
     let template_id =
         build_template_with_children(&mut store, vec![head_text, wrapper_node, body_text]);
 
-    let composed_root = compose_tir_head_chain(
+    let root_node_id = template_root_node_id(template_id, &store);
+    let composed_root = compose_tir_head_chain_from_root(
         &mut store,
         &expressions,
         &const_values,
-        template_id,
+        root_node_id,
         &string_table,
         false,
+        None,
     )
     .expect("composition should succeed");
 
@@ -2807,13 +2838,14 @@ fn no_receiver_returns_original_root_with_head_and_body_in_order() {
     let template_id = build_template_with_children(&mut store, vec![head_text, body_text]);
     let original_root = template_root_node_id(template_id, &store);
 
-    let composed_root = compose_tir_head_chain(
+    let composed_root = compose_tir_head_chain_from_root(
         &mut store,
         &expressions,
         &const_values,
-        template_id,
+        original_root,
         &string_table,
         false,
+        None,
     )
     .expect("composition should succeed");
 
@@ -2849,13 +2881,14 @@ fn compose_preserves_non_receiver_head_child_templates() {
     let template_id = build_template_with_children(&mut store, vec![non_receiver_node, body_text]);
     let original_root = template_root_node_id(template_id, &store);
 
-    let composed_root = compose_tir_head_chain(
+    let composed_root = compose_tir_head_chain_from_root(
         &mut store,
         &expressions,
         &const_values,
-        template_id,
+        original_root,
         &string_table,
         false,
+        None,
     )
     .expect("composition should succeed");
 
@@ -3156,13 +3189,14 @@ fn head_chain_returns_the_original_root_when_no_receiver_exists() {
     let template_id = build_template_with_children(&mut store, vec![body_text]);
     let original_root = store.get_template(template_id).expect("template").root;
 
-    let composed_root = compose_tir_head_chain(
+    let composed_root = compose_tir_head_chain_from_root(
         &mut store,
         &expressions,
         &const_values,
-        template_id,
+        original_root,
         &string_table,
         false,
+        None,
     )
     .expect("head-chain composition should succeed");
 

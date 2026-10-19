@@ -1,0 +1,7 @@
+PrivateData = |
+    value String,
+|
+
+PublicData = |
+    private_data PrivateData,
+|

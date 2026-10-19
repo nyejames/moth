@@ -45,6 +45,7 @@ pub(crate) fn is_expression_statement(expression: ExpressionView<'_>) -> bool {
         | Operation::MapBuiltin { .. }
         | Operation::HandleFallible { .. } => true,
         Operation::ValueBlock(ValueBlock::Catch(block)) => block.result_type_ids.is_empty(),
+        Operation::ValueBlock(ValueBlock::LexicalScope(block)) => block.result_type_ids.is_empty(),
         Operation::NumericUnary { operand, .. } | Operation::LogicalNot { operand } => {
             is_expression_statement(operand)
         }

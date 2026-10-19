@@ -9,7 +9,7 @@
 //!      this boundary owns the final range check against the exact `I32` capacity domain.
 
 use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
-use crate::compiler_frontend::ast::module_ast::scope_context::{ScopeContext, ScopeDeclarationRef};
+use crate::compiler_frontend::ast::module_ast::scope_context::{ScopeContext, ValueDeclarationRef};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidCollectionTypeReason,
 };
@@ -73,7 +73,7 @@ pub(crate) fn fold_collection_capacity(
                 .into());
             };
 
-            let Some(declaration_ref) = scope_context.get_reference(name) else {
+            let Some(declaration_ref) = scope_context.get_value_reference(name, span)? else {
                 return Err(CompilerDiagnostic::invalid_collection_type(
                     InvalidCollectionTypeReason::CapacityNotConstant,
                     span,
@@ -82,11 +82,11 @@ pub(crate) fn fold_collection_capacity(
             };
 
             let declaration = match &declaration_ref {
-                ScopeDeclarationRef::Local { declaration, .. } => declaration.as_ref(),
-                ScopeDeclarationRef::Shared(declaration) => declaration,
+                ValueDeclarationRef::Local { declaration, .. } => declaration.as_ref(),
+                ValueDeclarationRef::Shared(declaration) => declaration,
                 // An unresolved body-local numeric binding has no declaration or folded value
                 // yet, so it can never satisfy the capacity constant contract.
-                ScopeDeclarationRef::PendingNumeric { .. } => {
+                ValueDeclarationRef::PendingNumeric { .. } => {
                     return Err(CompilerDiagnostic::invalid_collection_type(
                         InvalidCollectionTypeReason::CapacityNotConstant,
                         span,

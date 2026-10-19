@@ -1,15 +1,16 @@
 //! Struct field type resolution and canonical folded-default validation.
 
+use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::type_resolution::{
-    TypeResolutionContext, resolve_diagnostic_type_to_type_id_checked,
+    TypeResolutionContext, resolve_parsed_type_annotation, reusable_type_id_for_parsed_ref,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, InvalidTypeAnnotationReason, TypeAnnotationContext,
+};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-
-use super::resolve_named_signature_type;
 
 pub(crate) enum StructFieldResolutionError {
     Diagnostic(CompilerDiagnostic),
@@ -45,9 +46,14 @@ pub(crate) fn resolve_struct_field_types(
     type_resolution_context: &mut TypeResolutionContext<'_>,
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
+    scope_context: Option<&ScopeContext>,
 ) -> Result<Vec<Declaration>, StructFieldResolutionError> {
-    let resolved_fields =
-        resolve_struct_field_type_shells(fields, type_resolution_context, string_table)?;
+    let resolved_fields = resolve_struct_field_type_shells(
+        fields,
+        type_resolution_context,
+        string_table,
+        scope_context,
+    )?;
     validate_struct_field_defaults(&resolved_fields, type_resolution_context)?;
 
     validate_resolved_field_parent_paths(struct_path, &resolved_fields, path_fork)?;
@@ -66,9 +72,14 @@ pub(crate) fn resolve_struct_constructor_shell_types(
     type_resolution_context: &mut TypeResolutionContext<'_>,
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
+    scope_context: Option<&ScopeContext>,
 ) -> Result<Vec<Declaration>, StructFieldResolutionError> {
-    let resolved_fields =
-        resolve_struct_field_type_shells(fields, type_resolution_context, string_table)?;
+    let resolved_fields = resolve_struct_field_type_shells(
+        fields,
+        type_resolution_context,
+        string_table,
+        scope_context,
+    )?;
 
     validate_resolved_field_parent_paths(struct_path, &resolved_fields, path_fork)?;
 
@@ -107,27 +118,55 @@ fn resolve_struct_field_type_shells(
     fields: &[Declaration],
     type_resolution_context: &mut TypeResolutionContext<'_>,
     string_table: &mut StringTable,
+    scope_context: Option<&ScopeContext>,
 ) -> Result<Vec<Declaration>, StructFieldResolutionError> {
-    // WHY: Struct fields must enter AST/HIR in fully resolved nominal form so later
-    // phases do not carry unresolved `NamedType` placeholders.
+    // WHY: Struct fields enter AST/HIR with canonical `TypeId`s while authored syntax remains
+    // available for later diagnostics and phase-specific re-resolution.
     let mut resolved_fields = Vec::with_capacity(fields.len());
     for field in fields {
         let mut resolved_field = field.to_owned();
 
-        resolved_field.diagnostic_type = resolve_named_signature_type(
-            &field.diagnostic_type,
-            field.binding_span,
-            type_resolution_context,
-            string_table,
-        )?;
-
-        let type_environment = &mut *type_resolution_context.type_environment;
-
-        resolved_field.type_id = resolve_diagnostic_type_to_type_id_checked(
-            &resolved_field.diagnostic_type,
-            type_environment,
-            resolved_field.binding_span,
-        )?;
+        resolved_field.type_id = if let Some(type_syntax) = &field.type_syntax {
+            let type_id = if let Some(type_id) = reusable_type_id_for_parsed_ref(
+                type_syntax,
+                Some(field.type_id),
+                type_resolution_context,
+            ) {
+                Some(type_id)
+            } else {
+                resolve_parsed_type_annotation(
+                    type_syntax,
+                    field.binding_span,
+                    type_resolution_context,
+                    string_table,
+                    scope_context,
+                )?
+                .type_id
+            };
+            type_id
+                .filter(|type_id| {
+                    *type_id != type_resolution_context.type_environment.builtins().none
+                })
+                .ok_or_else(|| {
+                    CompilerDiagnostic::invalid_type_annotation(
+                        TypeAnnotationContext::DeclarationTarget,
+                        InvalidTypeAnnotationReason::NoneNotAllowed,
+                        field.binding_span,
+                    )
+                })?
+        } else if field.type_id != type_resolution_context.type_environment.builtins().none
+            && type_resolution_context
+                .type_environment
+                .get(field.type_id)
+                .is_some()
+        {
+            field.type_id
+        } else {
+            return Err(CompilerError::compiler_error(
+                "struct field shell has neither authored type syntax nor a valid canonical type ID",
+            )
+            .into());
+        };
 
         resolved_fields.push(resolved_field);
     }

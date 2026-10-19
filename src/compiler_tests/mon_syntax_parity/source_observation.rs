@@ -1058,6 +1058,9 @@ fn observe_expression(
         ExpressionOperationView::Range { .. } => {
             ObservedSourceKind::Unsupported("range values are not a MON Value carrier".into())
         }
+        ExpressionOperationView::RouteConstruct { .. } => ObservedSourceKind::Unsupported(
+            "constructor routes are not ordinary values for MON parity".into(),
+        ),
         _ => ObservedSourceKind::Unsupported(
             "source expression operation has no parity observation adapter".into(),
         ),

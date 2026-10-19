@@ -52,7 +52,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use std::sync::Arc;
 
-use crate::compiler_frontend::ast::type_resolution::resolve_diagnostic_type_to_type_id_checked;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::generic_parameters::{
     ActiveGenericTypeContext, GenericParameterScope,
@@ -60,7 +59,6 @@ use crate::compiler_frontend::datatypes::generic_parameters::{
 use crate::compiler_frontend::datatypes::ids::{
     GenericParameterId, GenericParameterListId, TypeId,
 };
-use crate::compiler_frontend::datatypes::{DataType, diagnostic_type_spelling};
 use crate::compiler_frontend::headers::SyntheticContentPayload;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
@@ -88,6 +86,11 @@ fn enclosing_callable_contract(
         success_types: signature.success_return_type_ids(),
         authored_success_slot_count,
         error_type: signature.error_return_type_id(),
+        parameter_contracts: signature
+            .parameters
+            .iter()
+            .map(|parameter| (parameter.id, parameter.contract))
+            .collect(),
     })
 }
 
@@ -320,7 +323,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         .with_known_infallible_functions(Rc::clone(&self.known_infallible_functions))
         .with_receiver_methods(Rc::clone(&self.environment.lookups.receiver_methods))
         .with_lookups(Rc::clone(&self.environment.lookups))
-        .with_generated_evidence_pairs(Rc::clone(&self.environment.generated_evidence_pairs))
         .with_source_file_scope(input.source_file_scope)
         .with_declaring_file_id(input.declaring_file_id);
         if let Some(services) = &self.context.file_value_resolution {
@@ -1171,23 +1173,19 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         let error_type = resolve_builtin_error_type_typed(&context, None, string_table)
             .map_err(|error| self.error_messages(error, string_table))?
             .type_id;
-        let start_return_type = DataType::collection(DataType::StringSlice);
-        let start_return_type_id = resolve_diagnostic_type_to_type_id_checked(
-            &start_return_type,
-            &mut self.environment.type_environment,
-            None,
-        )
-        .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
+        let builtin_string_type_id = self.environment.type_environment.builtins().string;
+        let start_return_type_id = self
+            .environment
+            .type_environment
+            .intern_collection(builtin_string_type_id, None);
         let start_signature = FunctionSignature {
             parameters: vec![],
             returns: vec![
                 ReturnSlot {
-                    value: start_return_type,
                     type_id: Some(start_return_type_id),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: diagnostic_type_spelling(error_type, &self.environment.type_environment),
                     type_id: Some(error_type),
                     channel: ReturnChannel::Error,
                 },
@@ -1369,14 +1367,20 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         );
         // Top-level const fragments are builder-facing rendered text metadata; no semantic or
         // fingerprint consumer owns provenance at this boundary in the current milestone.
-        let TemplateFoldResult { emission, .. } =
-            match fold_prepared_template(&prepared, view, &mut fold_context) {
-                Ok(result) => result,
-                Err(error) => {
-                    drop(fold_context);
-                    return Err(self.template_error_messages(error, string_table));
-                }
-            };
+        let mut result = match fold_prepared_template(&prepared, view, &mut fold_context) {
+            Ok(result) => result,
+            Err(error) => {
+                drop(fold_context);
+                return Err(self.template_error_messages(error, string_table));
+            }
+        };
+        if let Some(diagnostic) = result.take_required_diagnostic() {
+            // A top-level const fragment is rendered text metadata: structural text anchored to a
+            // resource or site root has no characters at this boundary.
+            drop(fold_context);
+            return Err(self.diagnostic_messages(diagnostic, string_table));
+        }
+        let TemplateFoldResult { emission, .. } = result;
         let value = match emission {
             TemplateEmission::Output(value) => value,
             TemplateEmission::NoOutput => {

@@ -10,11 +10,13 @@ use super::*;
 
 use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::nominal::imported_nominal_path;
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionParameter, FunctionSignature, MaterialisedFunctionSignature, ReturnChannel, ReturnSlot,
+    FunctionParameter, FunctionSignature, MaterialisedFunctionSignature, ParameterContract,
+    ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::ast::type_resolution::intern_resolved_function_signature;
 use crate::compiler_frontend::canonical_type_identity::GenericDeclarationOrigin;
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
+use crate::compiler_frontend::public_interface::PublicParameterContract;
 use crate::compiler_frontend::semantic_identity::{GeneratedDeclarationIdentity, OriginFunctionId};
 
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -70,7 +72,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let declaration = Declaration {
                 id: local_path,
                 type_id: function_type_id,
-                diagnostic_type: DataType::Inferred,
+                type_syntax: None,
                 value_mode: ValueMode::ImmutableReference,
                 value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
                 binding_span: None,
@@ -307,10 +309,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     },
                 );
 
-                if matches!(
-                    method.category,
-                    PublicReceiverMethodCategory::GenericTemplate
-                ) {
+                if let PublicReceiverMethodCategory::GenericTemplate(descriptor) = &method.category
+                {
                     if self
                         .projected_imported_receiver_methods_by_local_path
                         .insert(method_path, method.method_origin.clone())
@@ -328,37 +328,39 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         method_path,
                         string_table,
                     );
-                    let generic_parameter_list_id =
-                        receiver_generic_parameter_list_id.ok_or_else(|| {
-                            CompilerMessages::from_error_ref(
-                                CompilerError::compiler_error(
-                                    "Imported generic receiver method has no receiver generic parameter list",
-                                ),
-                                string_table,
-                            )
-                        })?;
+                    let owner_list_id = receiver_generic_parameter_list_id.ok_or_else(|| {
+                        CompilerMessages::from_error_ref(
+                            CompilerError::compiler_error(
+                                "Imported generic receiver method has no receiver generic parameter list",
+                            ),
+                            string_table,
+                        )
+                    })?;
                     let generic_parameter_owner = GenericDeclarationOrigin::nominal_type(
                         receiver_origin.clone(),
                     )
                     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-                    self.generic_function_templates_by_path.insert(
+                    let parameter_names = descriptor
+                        .generic_parameters
+                        .iter()
+                        .enumerate()
+                        .map(|(index, parameter)| {
+                            let name = string_table.intern(parameter.identity.authored_name());
+                            (TypeParameterId(index as u32), name)
+                        })
+                        .collect();
+                    let pending_method = PendingImportedGenericMethod {
                         method_path,
-                        GenericFunctionTemplate {
-                            function_path: self
-                                .path_fork
-                                .try_intern_child(imported_type_path, method_name)
-                                .expect("imported receiver method path table exhausted"),
-                            source_file: PathId::ROOT,
-                            declaration_identity: Some(GeneratedDeclarationIdentity::Public(
-                                method.method_origin.clone(),
-                            )),
-                            generic_parameter_owner: Some(generic_parameter_owner),
-                            generic_parameter_list_id,
-                            signature: signature.clone(),
-                            body_tokens: None,
-                            declaration_span: None,
-                        },
-                    );
+                        declaration_identity: GeneratedDeclarationIdentity::Public(
+                            method.method_origin.clone(),
+                        ),
+                        generic_parameter_owner,
+                        signature,
+                        owner_list_id,
+                        parameter_names,
+                        surfaces: descriptor.generic_parameters.clone(),
+                    };
+                    self.pending_imported_generic_methods.push(pending_method);
                     continue;
                 }
 
@@ -495,12 +497,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let mut parameters = Vec::with_capacity(parameter_surfaces.len());
         for (index, parameter) in parameter_surfaces.iter().enumerate() {
             let type_id = self.intern_imported_canonical_type(&parameter.type_identity)?;
-            let diagnostic_type = diagnostic_type_spelling(type_id, &self.type_environment);
             let name = parameter
                 .name
                 .as_deref()
                 .map(|name| string_table.intern(name))
-                .unwrap_or_else(|| string_table.intern(&format!("parameter_{index}")));
+                .unwrap_or_else(|| string_table.get_or_intern(format!("parameter_{index}")));
             let value_mode = match parameter.access {
                 PublicCallParameterAccess::Shared => ValueMode::ImmutableReference,
                 PublicCallParameterAccess::Mutable => ValueMode::MutableReference,
@@ -511,16 +512,26 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 }
                 None => None,
             };
+            let contract = match &parameter.contract {
+                PublicParameterContract::Value => ParameterContract::Value,
+                PublicParameterContract::Wire => ParameterContract::Wire,
+                PublicParameterContract::Route { input } => ParameterContract::Route {
+                    input: input
+                        .as_ref()
+                        .map(|input| self.intern_imported_canonical_type(input))
+                        .transpose()?,
+                },
+            };
             parameters.push(FunctionParameter {
                 id: self
                     .path_fork
                     .try_intern_child(*function_path, name)
                     .expect("imported callable parameter path table exhausted"),
                 type_id,
-                diagnostic_type,
                 value_mode,
                 default,
                 binding_span: None,
+                contract,
             });
         }
 
@@ -528,18 +539,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let mut return_type_ids = Vec::new();
         for returned in return_surfaces {
             let type_id = self.intern_imported_canonical_type(&returned.type_identity)?;
-            let diagnostic_type = diagnostic_type_spelling(type_id, &self.type_environment);
-            let mut slot = ReturnSlot::success(diagnostic_type);
-            slot.type_id = Some(type_id);
-            returns.push(slot);
+            returns.push(ReturnSlot {
+                type_id: Some(type_id),
+                channel: ReturnChannel::Success,
+            });
             return_type_ids.push(type_id);
         }
 
         let error_return = if let Some(error_identity) = error_surface {
             let type_id = self.intern_imported_canonical_type(error_identity)?;
-            let diagnostic_type = diagnostic_type_spelling(type_id, &self.type_environment);
             returns.push(ReturnSlot {
-                value: diagnostic_type,
                 type_id: Some(type_id),
                 channel: ReturnChannel::Error,
             });

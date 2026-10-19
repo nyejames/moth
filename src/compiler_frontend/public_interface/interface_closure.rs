@@ -13,7 +13,7 @@ use super::model::{
     PublicDeclarationRecord, PublicDeclarationSemantics, PublicEvidenceRecord,
     PublicFunctionCategory, PublicFunctionSemantics, PublicGenericParameterSurface,
     PublicInterfaceDraft, PublicReceiverMethodCategory, PublicReceiverMethodSemantics,
-    PublicSemanticInterface, PublicStructSemantics, PublicTraitSemantics, TraitSurfaceTypeIdentity,
+    PublicSemanticInterface, PublicStructSemantics, PublicTraitSemantics,
 };
 use super::{ProviderInterfaceId, SourceProviderDependencySet};
 use crate::compiler_frontend::canonical_type_identity::{
@@ -435,7 +435,9 @@ impl ClosureWork {
 
     fn enqueue_function_dependencies(&mut self, function: &PublicFunctionSemantics) {
         for parameter in &function.parameters {
-            self.enqueue_type(&parameter.type_identity);
+            for identity in parameter.semantic_type_identities() {
+                self.enqueue_type(identity);
+            }
             if let Some(default) = &parameter.folded_default {
                 self.enqueue_folded_value(default);
             }
@@ -478,7 +480,9 @@ impl ClosureWork {
 
     fn enqueue_receiver_method_dependencies(&mut self, method: &PublicReceiverMethodSemantics) {
         for parameter in &method.parameters {
-            self.enqueue_type(&parameter.type_identity);
+            for identity in parameter.semantic_type_identities() {
+                self.enqueue_type(identity);
+            }
             if let Some(default) = &parameter.folded_default {
                 self.enqueue_folded_value(default);
             }
@@ -489,20 +493,14 @@ impl ClosureWork {
         if let Some(error_return) = &method.error_return {
             self.enqueue_type(error_return);
         }
+        if let PublicReceiverMethodCategory::GenericTemplate(descriptor) = &method.category {
+            self.enqueue_generic_parameters(&descriptor.generic_parameters);
+        }
     }
 
     fn enqueue_trait_dependencies(&mut self, trait_semantics: &PublicTraitSemantics) {
-        for requirement in &trait_semantics.requirements {
-            for parameter in &requirement.parameters {
-                if let TraitSurfaceTypeIdentity::Concrete(identity) = &parameter.type_identity {
-                    self.enqueue_type(identity);
-                }
-            }
-            for return_slot in &requirement.returns {
-                if let TraitSurfaceTypeIdentity::Concrete(identity) = &return_slot.type_identity {
-                    self.enqueue_type(identity);
-                }
-            }
+        for identity in trait_semantics.concrete_type_identities() {
+            self.enqueue_type(identity);
         }
         for incompatibility in &trait_semantics.incompatibilities {
             self.enqueue_trait(incompatibility);

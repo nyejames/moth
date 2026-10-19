@@ -1012,7 +1012,7 @@ fn add_package_receiver_method_roots(
     for method in methods {
         if matches!(
             &method.category,
-            crate::compiler_frontend::public_interface::PublicReceiverMethodCategory::GenericTemplate
+            crate::compiler_frontend::public_interface::PublicReceiverMethodCategory::GenericTemplate(_)
         ) {
             continue;
         }

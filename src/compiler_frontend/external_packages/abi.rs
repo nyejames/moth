@@ -5,7 +5,6 @@
 //! type system because host boundaries are intentionally restricted.
 //! WHY: the frontend needs to know how to validate and lower arguments without embedding
 //! backend-specific knowledge into the AST.
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
@@ -34,24 +33,11 @@ pub enum ExternalAbiType {
 }
 
 impl ExternalAbiType {
-    /// Maps this ABI type to the corresponding frontend `DataType` when one exists.
-    pub(crate) fn to_datatype(&self) -> Option<DataType> {
-        match self {
-            ExternalAbiType::Fixed(scalar) => Some(DataType::FixedScalar(*scalar)),
-            ExternalAbiType::Bool => Some(DataType::Bool),
-            ExternalAbiType::Utf8Str => Some(DataType::StringSlice),
-            ExternalAbiType::Char => Some(DataType::Char),
-            ExternalAbiType::Void => None,
-            ExternalAbiType::Handle => None,
-            ExternalAbiType::Inferred => Some(DataType::Inferred),
-        }
-    }
-
     /// Maps this ABI type to the canonical frontend `TypeId` when one exists.
     ///
     /// WHAT: resolves builtin scalar ABI types to their canonical TypeEnvironment IDs.
     /// WHY: host/external parameter expectations should carry real canonical TypeIds,
-    ///      not placeholder NONE values that require diagnostic-type repair later.
+    ///      not placeholder NONE values.
     pub(crate) fn to_type_id(
         &self,
         type_environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
@@ -97,18 +83,18 @@ pub enum ExternalSignatureType {
 }
 
 impl ExternalSignatureType {
-    pub(crate) fn to_datatype(&self) -> Option<DataType> {
+    /// Whether a signature type has a source-language success-return representation.
+    ///
+    /// Builtin `Error` belongs to the separate error channel; `Void` and opaque
+    /// ABI handles do not represent source values. `Inferred` remains a placeholder
+    /// here and is rejected later if it lacks a resolved semantic `TypeId`.
+    pub(crate) fn supports_success_return_type(&self) -> bool {
         match self {
-            Self::Abi(abi_type) => abi_type.to_datatype(),
-            // The builtin Error type is nominal and registered per module, so the caller
-            // supplies its resolved spelling at the AST boundary.
-            Self::BuiltinError => None,
-            Self::External(type_id) => Some(DataType::External { type_id: *type_id }),
-            // StringContent resolves to the canonical string datatype for diagnostics.
-            Self::StringContent => Some(DataType::StringSlice),
-            Self::Optional(inner) => inner
-                .to_datatype()
-                .map(|inner_type| DataType::Option(Box::new(inner_type))),
+            Self::BuiltinError | Self::Abi(ExternalAbiType::Void | ExternalAbiType::Handle) => {
+                false
+            }
+            Self::Optional(inner) => inner.supports_success_return_type(),
+            _ => true,
         }
     }
 

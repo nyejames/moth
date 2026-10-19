@@ -1,8 +1,8 @@
 //! TypeId-native generic parameter binding helper.
 //!
 //! WHAT: records inferred `GenericParameterId -> TypeId` substitutions.
-//! WHY: constructor inference and generic function inference must use canonical
-//!      semantic type identity rather than parse-local `TypeParameterId`s or `DataType`.
+//! WHY: constructor and generic-function inference bind declared parameters to canonical
+//!      `TypeId`s owned by the active type environment.
 
 use super::environment::TypeEnvironment;
 use super::ids::{GenericParameterId, GenericParameterListId, TypeId};

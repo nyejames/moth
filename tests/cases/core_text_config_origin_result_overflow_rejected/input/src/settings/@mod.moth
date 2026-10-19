@@ -1,0 +1,7 @@
+@core/text length
+
+label #Config of String = "a😊b"
+
+export:
+    len #I32 = length(label)
+;

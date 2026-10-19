@@ -1,10 +1,11 @@
-Wiring is an accepted design for parameter contracts. The current Alpha
-compiler does not support Wire or Route syntax yet; that implementation is
-planned for Phase 6.
+Wiring adds two parameter contracts. Wire and Route compile and run on the
+JS/HTML target. HTML-Wasm supports Wire arguments and rejects reachable route
+formation with a target diagnostic.
 
-The word before `of` chooses the meaning of the following list:
+The word before `of` chooses the meaning of the following specification. These
+fragments show the syntax, not complete declarations:
 
-[codeblock, $code("moth"):
+[codeblock, $code("text"):
     Box of String
     value Wire of String
     submit Route of AppMessage
@@ -40,8 +41,8 @@ Wire and Route contracts are parameters only, never fields or payloads.
 
 Use the @../functions (Functions), @../structs (Structs),
 @../choices (Choices) and @../generics (Generics) references for those existing
-contracts. The detailed Wiring reference owns the accepted future syntax and
-edge cases.
+contracts. The detailed Wiring reference defines Wire and Route syntax, edge
+cases and the future channel boundary.
 
 The receiving type must be immediate. The same boundary rule applies to
 ordinary generic calls, optional values and casts:

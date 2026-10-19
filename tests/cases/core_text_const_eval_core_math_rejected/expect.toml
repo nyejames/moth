@@ -1,0 +1,8 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0053"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+reason = "compile_time_evaluation_error.constant_initializer_not_foldable"

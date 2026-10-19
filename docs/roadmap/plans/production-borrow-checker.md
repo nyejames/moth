@@ -11,13 +11,13 @@ STATUS: ongoing living record and new parallel development branch established
 BRANCH: borrow-checker-and-boracle-development
 AUDITED_MAIN: 36156b40849eecad12e69b8d4e62388672a1ecff
 CURRENT_SLICE: baseline inventory and recorded performance investigations
-BLOCKERS: new borrow precision and Boracle research activation await the
-          merged typed-expression/native-result checkpoint and a fresh audit
-NEXT_ACTION: retain reproducible borrow benchmarks, verify the post-cutover
+BLOCKERS: new borrow precision and Boracle research activation await a sync with main that
+          carries the merged typed-expression/native-result checkpoint and a fresh audit
+NEXT_ACTION: retain reproducible borrow benchmarks, verify the post-foundation
              baseline, then scope the measured production performance fixes
 ```
 
-The new branch starts at the audited `main` checkpoint. It is a parallel work area, not a claim that the typed-semantic-expressions programme has finished. Sync it with `main` after that programme's required capabilities have merged, rerun source/Boracle validation and refresh affected paths and measurements before activating migration or new research. The typed-expression programme currently reports an accepted Phase 3M closeout but paused Phase 4, with native result channels still pending. Dense HIR delivery alone is not the research activation gate.
+The new branch starts at the audited `main` checkpoint. It is a parallel work area, not a claim that the compact typed-expression foundation has finished. Sync it with `main` after that foundation's required capabilities have merged, rerun source/Boracle validation and refresh affected paths and measurements before activating migration or new research. The compact typed-expression foundation, including native result channels, is merged. Its later type and folding reductions, the bounded Wiring foundation and trusted Core constant evaluation are complete on `expression-refactor` and await merge. Dense HIR delivery alone is not the research activation gate.
 
 Recording and investigating defects can continue while those gates are closed. A confirmed bug or isolated performance correction may receive an independently scoped patch if it preserves existing source semantics, the canonical module transaction, summaries and validated HIR. Research packages 3-6 are inactive proposals, not accepted production implementation orders. There is no general switch to Boracle in normal builds.
 
@@ -153,7 +153,7 @@ A confirmed problem accepts the **need to investigate and fix** it, not the firs
 | `BC-06` | Known capability gap, gated | Later | Design the fast production checker against Boracle's validated provenance/loan/event model, including precise conflicts, loops, per-result summaries and aggregate storage only as those research rules are accepted. First common path should be cheap. Deeper conflict refinement should occur only on candidate conflicts. Do not port Boracle's slow storage. |
 | `BC-07` | Known capability gap, gated | Later | Complete solver-independent future/last-use and affine-transfer facts required by lifetime analysis, including loop final-iteration and detached stored-result cases. Missing optional transfer never becomes a rejection. Lifetime topology, retained-edge proofs and REC retain their own downstream ownership. |
 | `BC-08` | Evidence needed | Later | Investigate broad borrow-fact compaction only after measuring fact-table cost independently of lattice cloning. Keep immutable facts outside HIR and do not merge unrelated parser/statement layouts into this effort. |
-| `BC-09` | Untriaged | Later | Reassess use of folded private-constant HIR metadata in borrow analysis and temporary-local reduction after the typed-expression cutover. It was a deferred compiler follow-up, not evidence of a current bug or an accepted optimiser. |
+| `BC-09` | Untriaged | Later | Reassess use of folded private-constant HIR metadata in borrow analysis and temporary-local reduction after the typed-expression foundation and its reductions merge. It was a deferred compiler follow-up, not evidence of a current bug or an accepted optimiser. |
 | `BC-10` | Candidate only | Later | Investigate cheap production fast paths when no aliases, live loans, exclusive access, optional-transfer candidates, recursive call-summary SCCs or structural projections exist, or when a function is scalar-only or has an acyclic CFG. These are previously recorded Boracle observations, not implemented production skips. Require sound guards and evidence before promoting any. |
 
 ### Candidate approaches for BC-02 and BC-03

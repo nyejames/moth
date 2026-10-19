@@ -29,13 +29,6 @@ use super::helpers::{
 };
 use crate::compiler_frontend::ast::templates::tir::slot_layout::TirSlotSchema;
 
-#[cfg(test)]
-use super::helpers::span_for_template;
-#[cfg(test)]
-use crate::compiler_frontend::ast::templates::tir::slot_layout::{
-    TirSlotLayout, collect_tir_slot_layout,
-};
-
 /// Typed result for slot-contribution routing.
 type ContributionResult<T> = Result<T, TemplateError>;
 
@@ -93,53 +86,14 @@ impl TirSlotContributions {
     }
 }
 
-/// Routes fill template content against a wrapper's slot schema.
-///
-/// WHAT: discovers the wrapper's slot schema, walks the fill template's TIR
-///       nodes, buckets explicit `InsertContribution` nodes by their target
-///       slot key, groups remaining nodes into loose contribution chunks,
-///       and routes loose chunks to positional slots first, then the default
-///       slot.
-/// WHY: TIR-native slot composition needs a single routing entry point that
-///      partitions authored fill content before expansion or runtime planning.
-#[cfg(test)]
-pub(crate) fn route_tir_slot_contributions(
-    store: &TemplateIrStore,
-    wrapper_template_id: TemplateIrId,
-    fill_template_id: TemplateIrId,
-    string_table: &StringTable,
-) -> ContributionResult<TirSlotContributions> {
-    let layout = collect_tir_slot_layout(store, wrapper_template_id)?;
-    route_tir_fill_against_layout(store, &layout, fill_template_id, string_table)
-}
-
-#[cfg(test)]
-pub(super) fn route_tir_fill_against_layout(
-    store: &TemplateIrStore,
-    layout: &TirSlotLayout,
-    fill_template_id: TemplateIrId,
-    string_table: &StringTable,
-) -> ContributionResult<TirSlotContributions> {
-    if !layout.schema.has_any_slots() {
-        return Err(internal_compiler_error(
-            "Internal template wrapper state error: expected at least one '$slot' while composing.",
-        ));
-    }
-
-    let fill_root = root_node_id_for_template(store, fill_template_id)?;
-    let fill_children = children_of_node(store, fill_root)?;
-    let fill_span = span_for_template(store, fill_template_id)?;
-    route_tir_fill_nodes_against_schema(
-        store,
-        &layout.schema,
-        &fill_children,
-        fill_span,
-        string_table,
-    )
-}
-
 /// Routes already-collected fill nodes against a wrapper schema.
-pub(super) fn route_tir_fill_nodes_against_schema(
+///
+/// WHAT: buckets explicit `InsertContribution` nodes by their target slot key,
+///       groups the remaining nodes into loose contribution chunks, and routes
+///       those chunks to positional slots first, then the default slot.
+/// WHY: head-chain composition has already collected the receiver's fill nodes,
+///      so routing consumes that list directly.
+pub(crate) fn route_tir_fill_nodes_against_schema(
     store: &TemplateIrStore,
     schema: &TirSlotSchema,
     fill_children: &[TemplateIrNodeId],

@@ -1,0 +1,30 @@
+@core/text
+
+haystack #= "Moth😊ball"
+pattern #= "ball"
+
+const_length #= text.length("ab")
+const_empty #= text.is_empty("")
+const_contains #= text.contains(haystack, pattern)
+const_starts #= text.starts_with(haystack, "Moth")
+const_ends #= text.ends_with(haystack, pattern)
+const_length_text #String = cast const_length
+const_empty_text #String = cast const_empty
+const_contains_text #String = cast const_contains
+const_starts_text #String = cast const_starts
+const_ends_text #String = cast const_ends
+empty_contains String = cast text.contains("abc", "")
+empty_starts String = cast text.starts_with("abc", "")
+empty_ends String = cast text.ends_with("abc", "")
+emoji_length #= text.length("😊")
+emoji_length_text #String = cast emoji_length
+combining_length String = cast text.length("é")
+
+runtime_length String = cast text.length("ab")
+runtime_empty String = cast text.is_empty("")
+runtime_contains String = cast text.contains("mothball", "ball")
+runtime_starts String = cast text.starts_with("mothball", "moth")
+runtime_ends String = cast text.ends_with("mothball", "ball")
+operand_use String = cast (text.length("ab") + 1)
+
+[:core_text_const_eval_folded const_length=[const_length_text] const_empty=[const_empty_text] const_contains=[const_contains_text] const_starts=[const_starts_text] const_ends=[const_ends_text] empty_contains=[empty_contains] empty_starts=[empty_starts] empty_ends=[empty_ends] emoji_length=[emoji_length_text] combining_length=[combining_length] runtime_length=[runtime_length] runtime_empty=[runtime_empty] runtime_contains=[runtime_contains] runtime_starts=[runtime_starts] runtime_ends=[runtime_ends] operand_use=[operand_use]]

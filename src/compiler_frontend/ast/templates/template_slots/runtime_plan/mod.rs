@@ -21,8 +21,8 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 
+use super::RuntimeSlotPlanningServices;
 pub(in crate::compiler_frontend::ast::templates) use sources::tir_contributions_need_runtime;
 pub(crate) use types::{RuntimeSlotContributionSourceId, RuntimeSlotSiteId};
 
@@ -44,7 +44,7 @@ pub(in crate::compiler_frontend::ast::templates) fn materialize_tir_native_runti
     wrapper_template_id: crate::compiler_frontend::ast::templates::tir::TemplateIrId,
     schema: &TirSlotSchema,
     routed: &TirSlotContributions,
-    string_table: &StringTable,
+    services: &RuntimeSlotPlanningServices<'_>,
 ) -> Result<crate::compiler_frontend::ast::templates::tir::TemplateIrId, TemplateError> {
     let wrapper_root = store
         .get_template(wrapper_template_id)
@@ -71,7 +71,7 @@ pub(in crate::compiler_frontend::ast::templates) fn materialize_tir_native_runti
     let sources = sources::build_tir_native_contribution_sources(
         schema,
         routed,
-        string_table,
+        services,
         store,
         expressions,
         const_values,

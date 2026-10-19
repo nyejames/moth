@@ -31,6 +31,30 @@ use crate::compiler_frontend::value_mode::ValueMode;
 //  Public semantic leaf vocabulary
 // ===========================================================================
 
+/// Contract that remains attached to one public callable parameter.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PublicParameterContract {
+    Value,
+    Wire,
+    Route {
+        input: Option<CanonicalTypeIdentity>,
+    },
+}
+
+impl PublicParameterContract {
+    /// Canonical identity this contract contributes beyond the parameter's own type.
+    ///
+    /// WHAT: returns the projected `Route` input, or `None` for every other contract.
+    /// WHY: one owner keeps public collectors, validators and projectors from re-deriving the
+    ///      same projection and silently skipping the Route input.
+    pub(crate) fn input_type_identity(&self) -> Option<&CanonicalTypeIdentity> {
+        match self {
+            PublicParameterContract::Route { input } => input.as_ref(),
+            PublicParameterContract::Value | PublicParameterContract::Wire => None,
+        }
+    }
+}
+
 /// One parameter slot in a public function or receiver-method semantic record.
 ///
 /// WHAT: a draft/public semantic leaf type that crosses the draft boundary inside
@@ -40,6 +64,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 pub(crate) struct PublicParameterTypeSlot {
     pub(crate) name: Option<String>,
     pub(crate) type_identity: CanonicalTypeIdentity,
+    pub(crate) contract: PublicParameterContract,
     /// Source-level access selected by the resolved signature.
     ///
     /// WHAT: retains shared or mutable parameter access before HIR and borrow validation. This
@@ -57,6 +82,19 @@ pub(crate) struct PublicParameterTypeSlot {
     /// normally has no default and remains `None`. Choice payload fields remain
     /// default-free.
     pub(crate) folded_default: Option<PublicFoldedValue>,
+}
+
+impl PublicParameterTypeSlot {
+    /// Every canonical identity this slot's contract touches.
+    ///
+    /// WHAT: yields the slot's own type identity, then any contract-owned identity.
+    /// WHY: import origin collection, public closure enqueueing and projection must all see the
+    ///      Route input; this owner is the single traversal decision.
+    pub(crate) fn semantic_type_identities(
+        &self,
+    ) -> impl Iterator<Item = &CanonicalTypeIdentity> + '_ {
+        std::iter::once(&self.type_identity).chain(self.contract.input_type_identity())
+    }
 }
 
 /// One return slot in a public function or receiver-method semantic record.
@@ -138,6 +176,25 @@ pub(crate) enum PublicTraitReceiverAccess {
     Mutable,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PublicTraitParameterContract {
+    Value,
+    Wire,
+    Route {
+        input: Option<TraitSurfaceTypeIdentity>,
+    },
+}
+
+impl PublicTraitParameterContract {
+    /// Trait-surface identity this contract contributes beyond the parameter's own type.
+    pub(crate) fn input_type_identity(&self) -> Option<&TraitSurfaceTypeIdentity> {
+        match self {
+            PublicTraitParameterContract::Route { input } => input.as_ref(),
+            PublicTraitParameterContract::Value | PublicTraitParameterContract::Wire => None,
+        }
+    }
+}
+
 /// One non-receiver parameter in a trait requirement surface.
 ///
 /// `name` is the owned authored parameter name, or `None` when the source signature omits it.
@@ -146,6 +203,19 @@ pub(crate) struct PublicTraitRequirementParameter {
     pub(crate) name: Option<String>,
     pub(crate) value_mode: ValueMode,
     pub(crate) type_identity: TraitSurfaceTypeIdentity,
+    pub(crate) contract: PublicTraitParameterContract,
+}
+
+impl PublicTraitRequirementParameter {
+    /// Every trait-surface identity this requirement parameter touches.
+    ///
+    /// WHAT: yields the parameter's own type identity, then any contract-owned identity.
+    /// WHY: trait closure and validation must visit the same identities the surface publishes.
+    pub(crate) fn semantic_type_identities(
+        &self,
+    ) -> impl Iterator<Item = &TraitSurfaceTypeIdentity> + '_ {
+        std::iter::once(&self.type_identity).chain(self.contract.input_type_identity())
+    }
 }
 
 /// One return slot in a trait requirement surface.
@@ -186,17 +256,19 @@ pub(crate) enum PublicDeclarationSemantics {
     Trait(PublicTraitSemantics),
 }
 
-/// The explicit generic-template descriptor for one exported generic free function.
+/// The explicit generic-template descriptor for one exported generic free function or generic
+/// receiver method.
 ///
 /// WHAT: owns the stable generic parameter identities and their ordered canonical trait
 /// bounds — the current required-evidence shape — that a cross-module consumer needs for
-/// generic inference. It is present only on generic free-function records: a non-generic
-/// free function carries no descriptor. The enclosing [`PublicDeclarationRecord`] remains the
-/// stable declaration-origin owner and the enclosing [`PublicFunctionSemantics`] remains the
-/// canonical parameter and return contract owner, so the descriptor does not duplicate origin
-/// or signature types. No raw tokens, donor-local path, source span,
-/// `GenericParameterListId`, `GenericParameterId`, `TypeId`, `TraitId` or other local
-/// registry handle enters this descriptor.
+/// generic inference. It is present only on generic free-function and generic receiver-method
+/// records: a non-generic callable carries no descriptor. The enclosing
+/// [`PublicDeclarationRecord`] remains the stable declaration-origin owner and the enclosing
+/// callable semantics ([`PublicFunctionSemantics`] or [`PublicReceiverMethodSemantics`]) remain
+/// the canonical parameter and return contract owner, so the descriptor does not duplicate
+/// origin or signature types. No raw tokens, donor-local path, source span,
+/// `GenericParameterListId`, `GenericParameterId`, `TypeId`, `TraitId` or other local registry
+/// handle enters this descriptor.
 ///
 /// WHY: locked decision 10 separates consumer-visible generic semantic identity from the
 /// declaring module's retained template body and compilation context. This descriptor is the
@@ -241,17 +313,21 @@ pub(crate) struct PublicFunctionSemantics {
 /// The explicit callable category for one exported receiver method.
 ///
 /// WHAT: distinguishes a directly defined concrete-local receiver method, which receives exactly
-/// one concrete summary after borrow validation, from a generic-template receiver method, which is
-/// a declaration contract whose generated concrete summaries belong to sidecars. A generic
-/// receiver method carries no descriptor here because its stable generic parameter identities are
-/// owned by the enclosing nominal record's generic parameters.
+/// one concrete summary after borrow validation, from a generic-template receiver method, which
+/// is a declaration contract whose generated concrete summaries belong to sidecars. The generic
+/// variant carries the method's own generic parameter surfaces and bounds, as a generic free
+/// function's descriptor does.
+///
+/// WHY: the enclosing nominal's generic parameters carry no method bounds, so a cross-module
+/// consumer could not check the method's bounds or select its generated evidence from the
+/// nominal alone.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PublicReceiverMethodCategory {
     /// A directly defined non-generic receiver method. Receives exactly one concrete summary
     /// after borrow validation.
     ConcreteLocal,
     /// A generic-template receiver method. Never receives a base concrete summary.
-    GenericTemplate,
+    GenericTemplate(PublicGenericTemplateDescriptor),
 }
 
 /// The semantic facts for one exported receiver method, attached to its owning struct or choice
@@ -306,6 +382,36 @@ pub(crate) struct PublicConstantSemantics {
 pub(crate) struct PublicTraitSemantics {
     pub(crate) requirements: Vec<PublicTraitRequirementSurface>,
     pub(crate) incompatibilities: Vec<CanonicalTraitIdentity>,
+}
+
+impl PublicTraitSemantics {
+    /// Every concrete canonical identity a trait requirement names, in authored order.
+    ///
+    /// WHAT: walks each requirement's parameter identities, including contract-owned ones, then
+    ///       its return identities, skipping `Self`, which names no nominal.
+    /// WHY: the interface closure retains these identities and consumer nominal projection must
+    ///      declare the nominals they name, so both read the trait surface through this one walk.
+    pub(crate) fn concrete_type_identities(
+        &self,
+    ) -> impl Iterator<Item = &CanonicalTypeIdentity> + '_ {
+        self.requirements
+            .iter()
+            .flat_map(|requirement| {
+                let parameter_identities = requirement
+                    .parameters
+                    .iter()
+                    .flat_map(|parameter| parameter.semantic_type_identities());
+                let return_identities = requirement
+                    .returns
+                    .iter()
+                    .map(|return_slot| &return_slot.type_identity);
+                parameter_identities.chain(return_identities)
+            })
+            .filter_map(|identity| match identity {
+                TraitSurfaceTypeIdentity::Concrete(identity) => Some(identity.as_ref()),
+                TraitSurfaceTypeIdentity::SelfType => None,
+            })
+    }
 }
 
 /// One declaration-centric record in the public interface draft.

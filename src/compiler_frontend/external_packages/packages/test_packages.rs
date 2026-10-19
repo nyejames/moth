@@ -47,6 +47,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                     ExternalReturnAlias::Fresh,
                 ),
                 error_return_type: None,
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
                         "__moth_test_pkg_a_open".to_owned(),
@@ -69,6 +70,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                 }],
                 returns: vec![ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str)],
                 error_return_type: Some(ExternalSignatureType::BuiltinError),
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression(
                         "({ tag: \"ok\", value: #0 })".to_owned(),
@@ -88,6 +90,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                 parameters: Vec::new(),
                 returns: vec![ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str)],
                 error_return_type: Some(ExternalSignatureType::BuiltinError),
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression(
                         "({ tag: \"err\", value: { message: \"external failed\", code: 91 } })"
@@ -108,6 +111,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                 parameters: Vec::new(),
                 returns: vec![ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str)],
                 error_return_type: Some(ExternalSignatureType::External(ExternalTypeId(1005))),
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression(
                         "({ tag: \"ok\", value: \"custom-ok\" })".to_owned(),
@@ -139,6 +143,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                     ExternalReturnAlias::Fresh,
                 ),
                 error_return_type: None,
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
                         "__moth_test_pkg_b_open".to_owned(),
@@ -207,6 +212,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                 parameters: Vec::new(),
                 returns: vec![ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str)],
                 error_return_type: None,
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression(
                         "\"hello nested\"".to_owned(),
@@ -236,6 +242,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                 }],
                 returns: vec![ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str)],
                 error_return_type: None,
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression("#0".to_owned())),
                     wasm: None,
@@ -263,6 +270,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                     Box::new(ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)),
                 ))],
                 error_return_type: None,
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression(
                         "({ tag: \"some\", value: \"present\" })".to_owned(),
@@ -285,6 +293,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                     Box::new(ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)),
                 ))],
                 error_return_type: None,
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression(
                         "({ tag: \"none\" })".to_owned(),

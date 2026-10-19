@@ -1,0 +1,6 @@
+@utils DISPLAY_TEXT, Label, Box
+
+first = Box(Label(text = "a")).render()
+second = Box(Label(text = "42")).render()
+third = Box(Label(text = "b")).render()
+[:[first] [second] [third]]

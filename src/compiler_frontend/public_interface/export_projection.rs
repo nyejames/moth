@@ -540,8 +540,9 @@ pub(in crate::compiler_frontend) fn build_public_source_nominal_origin_index(
 ///       imported or alias-target project-graph trait resolves to that trait's defining provider
 ///       module origin rather than the active module origin. Source-package headers outside the
 ///       project-module graph are deliberately absent from the index because their traits are not
-///       project-graph-owned, and a projected public bound that requires one fails through the
-///       total bound resolver with a precise `CompilerError`.
+///       project-graph-owned. A bound or evidence that requires such an imported trait still
+///       projects: `ResolvedTraitSourceFact::classify` reads its registered `Source` identity
+///       before this index is consulted.
 ///
 /// Reuses the shared [`PublicExportTarget::is_source_path`] authority via
 /// [`any_retained_public_export_targets_source_path`] so trait origin indexing and nominal

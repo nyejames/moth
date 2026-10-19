@@ -15,7 +15,6 @@
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastTarget, cast_target_for_receiving_type,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -215,8 +214,6 @@ pub(crate) enum ExpectedCollectionContext {
 pub(crate) struct ExpectedMapContext {
     pub(crate) key_type_id: TypeId,
     pub(crate) value_type_id: TypeId,
-    pub(crate) key_diagnostic_type: DataType,
-    pub(crate) value_diagnostic_type: DataType,
     pub(crate) map_type_id: Option<TypeId>,
 }
 

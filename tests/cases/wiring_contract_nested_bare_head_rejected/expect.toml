@@ -1,0 +1,16 @@
+entry = "."
+
+# A bare contract head inside another type application names no specification,
+# so it is invalid in that position regardless of the enclosing head.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0038"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0038"
+reason = "invalid_parameter_contract.invalid_position"
+path = "input/@page.moth"
+line = 5
+count = 1

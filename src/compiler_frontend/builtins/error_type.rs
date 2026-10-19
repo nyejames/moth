@@ -5,13 +5,14 @@
 //! WHY: builtin error metadata should be centralized so parser/lowering/backend code cannot drift
 //! on the public error type shape.
 
-use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, Declaration, DeclarationShell, DeclarationValue, NodeKind,
 };
+use crate::compiler_frontend::ast::{ScopeContext, ScopeDeclarationRef};
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::ParameterContractKind;
+use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -54,6 +55,10 @@ pub(crate) fn is_reserved_builtin_symbol(name: &str) -> bool {
     matches!(name, ERROR_TYPE_NAME)
 }
 
+pub(crate) fn is_reserved_parameter_contract_symbol(name: &str) -> bool {
+    ParameterContractKind::from_spelling(name).is_some()
+}
+
 pub(crate) fn builtin_error_type_path(
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
@@ -83,21 +88,11 @@ pub(crate) fn register_builtin_error_types(
     folded_defaults_by_field_path.insert(code_path, u32_field_default(0));
 
     let error_fields = vec![
-        required_field(
-            message_path,
-            DataType::StringSlice,
-            builtin_type_ids::STRING,
-            None,
-        ),
+        required_field(message_path, builtin_type_ids::STRING, None),
         defaulted_u32_field(code_path, None),
     ];
 
-    let declarations = vec![type_declaration(
-        error_path,
-        DataType::runtime_struct(error_path, builtin_type_ids::NONE),
-        builtin_type_ids::NONE,
-        None,
-    )];
+    let declarations = vec![type_declaration(error_path, builtin_type_ids::NONE, None)];
 
     let mut resolved_struct_fields_by_path = FxHashMap::default();
     resolved_struct_fields_by_path.insert(error_path, error_fields);
@@ -147,49 +142,49 @@ fn resolve_builtin_named_type(
             "Builtin type '{type_name}' is missing from this compilation context."
         )));
     };
-    let Some(declaration) = reference.ready_declaration() else {
-        return Err(CompilerError::compiler_error(format!(
-            "Builtin type '{type_name}' resolved to a pending numeric binding at {span:?}."
-        )));
+    let type_id = match reference {
+        ScopeDeclarationRef::Local { declaration, .. } => declaration.type_id,
+        ScopeDeclarationRef::Shared(declaration) => declaration.type_id,
+        ScopeDeclarationRef::PendingNumeric { .. } => {
+            return Err(CompilerError::compiler_error(format!(
+                "Builtin type '{type_name}' resolved to a pending numeric binding at {span:?}."
+            )));
+        }
+        ScopeDeclarationRef::RouteParameter(_) => {
+            return Err(CompilerError::compiler_error(format!(
+                "Builtin type '{type_name}' resolved to a Route parameter at {span:?}."
+            )));
+        }
     };
 
-    if declaration.diagnostic_type == DataType::Inferred {
+    // The manifest registers the builtin error declaration before its nominal type identity
+    // exists, so a placeholder id here means this symbol resolved before registration. The
+    // display spelling cannot express that: a struct shell still spells `runtime_struct(NONE)`.
+    if type_id == builtin_type_ids::NONE {
         return Err(CompilerError::compiler_error(format!(
-            "Builtin type '{type_name}' resolved to an inferred placeholder at {span:?}.",
+            "Builtin type '{type_name}' resolved to a declaration without a canonical type identity at {span:?}.",
         )));
     }
 
-    Ok(ResolvedBuiltinType {
-        type_id: declaration.type_id,
-    })
+    Ok(ResolvedBuiltinType { type_id })
 }
 
-fn type_declaration(
-    id: PathId,
-    data_type: DataType,
-    type_id: TypeId,
-    span: Option<SourceSpan>,
-) -> Declaration {
+fn type_declaration(id: PathId, type_id: TypeId, span: Option<SourceSpan>) -> Declaration {
     Declaration {
         id,
         type_id,
-        diagnostic_type: data_type,
+        type_syntax: None,
         value_mode: ValueMode::ImmutableReference,
         value: DeclarationValue::Shell(DeclarationShell::Struct),
         binding_span: span,
         config_qualifier: None,
     }
 }
-fn required_field(
-    id: PathId,
-    data_type: DataType,
-    type_id: TypeId,
-    span: Option<SourceSpan>,
-) -> Declaration {
+fn required_field(id: PathId, type_id: TypeId, span: Option<SourceSpan>) -> Declaration {
     Declaration {
         id,
+        type_syntax: None,
         type_id,
-        diagnostic_type: data_type,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: span,
@@ -203,7 +198,7 @@ fn defaulted_u32_field(id: PathId, span: Option<SourceSpan>) -> Declaration {
     Declaration {
         id,
         type_id: builtin_type_ids::fixed_scalar(FixedScalar::U32),
-        diagnostic_type: DataType::FixedScalar(FixedScalar::U32),
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: span,

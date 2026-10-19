@@ -1,0 +1,18 @@
+identity type T |value Wire of T| -> T:
+    return value
+;
+
+forward type T |value Wire of T| -> T:
+    return identity(value)
+;
+
+accept_route type T |route Route of T| -> String:
+    return "route"
+;
+
+render || -> String:
+    value = "generic"
+    return [:generic=[forward(value)]]
+;
+
+[:wire [render()]]

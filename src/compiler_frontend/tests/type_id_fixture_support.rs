@@ -23,7 +23,6 @@ use crate::compiler_frontend::ast::expressions::expression_types::{
 };
 use crate::compiler_frontend::ast::statements::functions::{ReturnChannel, ReturnSlot};
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
     StructTypeDefinition,
@@ -55,7 +54,6 @@ pub(crate) struct HirTestChoiceDefinition {
 
 pub(crate) fn error_return_slot(type_id: TypeId) -> ReturnSlot {
     ReturnSlot {
-        value: DataType::Inferred,
         type_id: Some(type_id),
         channel: ReturnChannel::Error,
     }
@@ -69,7 +67,7 @@ pub(crate) fn loop_binding_with_type_id(name: PathId, type_id: TypeId) -> Declar
     Declaration {
         id: name,
         type_id,
-        diagnostic_type: DataType::Inferred,
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,

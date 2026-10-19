@@ -86,7 +86,6 @@ struct and choice references for those ordinary position contracts.
 
 ## Wires
 
-**Accepted design; unsupported by the current Alpha compiler until Phase 6.**
 A source function parameter may require `Wire of T`:
 
 [codeblock, $code("moth"):
@@ -113,10 +112,17 @@ binding identity. Neither operation supplies exclusive mutation authority.
   call demands it. No special declaration or call-site marker is needed.
 - An existing wire parameter can forward unchanged to a compatible wire
   parameter.
-- A field projection, collection lookup, literal, constructor call, function call
-  or computed expression cannot directly satisfy a V1 wire parameter.
-- An ordinary value parameter does not preserve its caller's identity. Inspecting
-  that function's body cannot infer a wire contract for it.
+- A field projection, collection lookup, literal, constructor call, function call,
+  `copy` or computed expression cannot directly satisfy a V1 wire parameter. A
+  `#=` constant is compile-time data, not a runtime binding, so it cannot either.
+- An ordinary value parameter does not preserve its caller's identity, so it
+  cannot supply a wire. Inspecting that function's body cannot infer a wire
+  contract for it.
+
+Compatibility means the same underlying semantic type. A wire never applies an
+optional, numeric or other coercion, because the receiver would then read a
+converted value rather than the binding itself. Ordinary aliases of the
+underlying type name the same type.
 
 Wiring an immutable local leaves it immutable. A mutable receiver or parameter
 still needs the ordinary exclusive authority. A wire supplies none.
@@ -144,7 +150,6 @@ UI ownership and cross-task retention require separate contracts.
 
 ## Constructor routes
 
-**Accepted design; unsupported by the current Alpha compiler until Phase 6.**
 The route contract allows zero or one future input:
 
 [codeblock, $code("text"):

@@ -15,6 +15,7 @@ use crate::compiler_frontend::ast::templates::template_control_flow::TemplateBra
 use crate::compiler_frontend::ast::templates::tir::ids::{
     ChildTemplateOccurrenceId, ExpressionSiteId, SlotOccurrenceId, TemplateIrNodeId,
 };
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
@@ -771,6 +772,7 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
                     end: integer(&mut expressions, &mut values, 10),
                     end_kind: crate::compiler_frontend::ast::ast_nodes::RangeEndKind::Exclusive,
                     step: Some(integer(&mut expressions, &mut values, 1)),
+                    domain: NumericScalar::Fixed(FixedScalar::I32),
                 }),
             },
             loop_body_b,
@@ -973,6 +975,7 @@ fn loop_range_header_assigns_start_end_and_optional_step_sites() {
                     end: integer(&mut expressions, &mut values, 10),
                     end_kind: crate::compiler_frontend::ast::ast_nodes::RangeEndKind::Exclusive,
                     step: Some(integer(&mut expressions, &mut values, 2)),
+                    domain: NumericScalar::Fixed(FixedScalar::I32),
                 }),
             },
             with_step_body,
@@ -998,6 +1001,7 @@ fn loop_range_header_assigns_start_end_and_optional_step_sites() {
                     end: integer(&mut expressions, &mut values, 10),
                     end_kind: crate::compiler_frontend::ast::ast_nodes::RangeEndKind::Exclusive,
                     step: None,
+                    domain: NumericScalar::Fixed(FixedScalar::I32),
                 }),
             },
             without_step_body,
@@ -1090,6 +1094,7 @@ fn expression_sites_share_one_document_order_counter() {
                     end: integer(&mut expressions, &mut values, 10),
                     end_kind: crate::compiler_frontend::ast::ast_nodes::RangeEndKind::Exclusive,
                     step: Some(integer(&mut expressions, &mut values, 1)),
+                    domain: NumericScalar::Fixed(FixedScalar::I32),
                 }),
             },
             loop_body,

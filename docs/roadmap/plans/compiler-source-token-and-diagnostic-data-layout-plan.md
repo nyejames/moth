@@ -36,9 +36,9 @@ red describe the pre-config state and must not be read as current blocking behav
 
 After the Phase 3 closeout, this plan remains paused. MON syntax, nested const records, MON Rust
 tooling, exact numeric identities and bounded body-local numeric construction are delivered.
-Remaining prerequisites cover compact typed expressions, native success slots with separate error
-channels, Wiring foundations and the bounded Core evaluator checkpoint. Phase 4 then requires
-explicit reactivation and a fresh inventory of those delivered owners.
+Compact typed expressions, dense HIR, native success slots with separate error channels, the
+bounded Wiring foundation and trusted Core constant evaluation are delivered. Phase 4 then requires
+a main containing them, explicit reactivation and a fresh inventory of those delivered owners.
 
 ## Purpose
 
@@ -81,10 +81,10 @@ The implementation must converge on:
 - separate user-diagnostic, operational-infrastructure and compiler-bug lanes
 - isolated tooling workers that discard failed compiler state
 
-Broad diagnostics-improvement work remains paused until this plan is complete. The typed semantic
-expression and native result cutover owns the pending multiple-success postfix `?` reason,
-enclosing propagation-boundary facts and single-target/multiple-result rejection. Those narrow
-semantic requirements land before this layout work. Delivered numeric semantics supply exact-receiver
+Broad diagnostics-improvement work remains paused until this plan is complete. The delivered
+compact typed-expression and native result-channel foundation supplies the multiple-success postfix
+`?` reason, enclosing propagation-boundary facts and single-target/multiple-result rejection.
+Delivered numeric semantics supply exact-receiver
 conflict/default-range and authored safety-catch diagnostics with their primary source coverage.
 Consume those facts and authored-order span witnesses without recreating their classification.
 After this layout migration completes, diagnostics work refreshes its inventory and resumes at
@@ -123,9 +123,9 @@ ACTIVE_PLAN:
   live/peak bytes for clean, warning, diagnosed, generic-heavy and early-malformed smokes.
 - Closeout status: R3 diagnostic projection, R4 preparation ownership and R5 evidence disposition
   are complete; deferred large-error carriers remain owned by later diagnostic-layout phases.
-- NEXT_SUBSTEP: remain paused until the compact typed-expression, dense-HIR, native result-channel,
-  Wiring foundation and bounded Core evaluator capabilities are delivered, then explicitly
-  reactivate Phase 4 with a fresh diagnostic and lifetime inventory.
+- NEXT_SUBSTEP: remain paused until explicit reactivation on a main containing the delivered Wiring
+  foundation and Core constant evaluation, then rebase and reactivate Phase 4 with a fresh
+  diagnostic and lifetime inventory.
 - Checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`, `f60def921`,
   `aed38042f`, `72f30dcfb`, `e7d9a7ab5`, `c17672bb5`, `98040fbd0`, `fbbe0119a`, `6309adf6d`,
   `4cfd9d492`.
@@ -267,7 +267,7 @@ BLOCKERS / RISKS:
 - Phase 3 is accepted at implementation checkpoint `6309adf6d` with R5 closeout checkpoint
   `4cfd9d492`; the post-Phase-3 compiler tidy-up is also accepted on main.
 - Broad user-facing diagnostic improvement remains paused until this migration completes. The
-  earlier native semantic cutover owns its transferred result-arity and propagation-context fixes.
+  earlier native result-channel work owns its transferred result-arity and propagation-context fixes.
 - release/profiling currently use aborting panics, which conflicts with thread-isolated tooling recovery.
 - compact-ID merge order must remain deterministic across file and module parallelism.
 - The first source-freeze experiment was deliberately rejected after mapping the final owner
@@ -465,7 +465,7 @@ through Phase 3, with implementation checkpoint `6309adf6d` and R5 closeout chec
 The canonical `SourceTokens` owner, bounded parser views, typed payload stores and preparation
 lifecycle are complete; Phase 3 is accepted with its explicitly recorded inherited generic-scaling
 exception before the plan pauses through the roadmap sequence toward Phase 4. Broad diagnostic
-improvement remains paused until this migration completes. The native semantic cutover separately
+improvement remains paused until this migration completes. The native result-channel work separately
 owns result-arity and propagation-context correctness needed before the layout migration.
 
 ### Approved private discovery-finalization contract
@@ -979,8 +979,8 @@ prerequisites. The remaining semantic capabilities below retain their own activa
   and lifetime boundaries, dense HIR, native zero/one/multiple success slots with a separate error
   channel, retired Reactivity V1, accepted Wire/Route parameter foundations and the bounded Core
   evaluator checkpoint
-- [ ] verify the result-arity and propagation-context diagnostics transferred into that semantic
-  cutover are delivered and retain one implementation and primary test owner
+- [ ] verify the result-arity and propagation-context diagnostics transferred into the compact
+  typed-expression and native result-channel work are delivered and retain one implementation and primary test owner
 - [ ] explicitly reactivate Phase 4 against those delivered capabilities. Their merge alone does
   not activate this plan or claim its 32-byte record and 48-byte draft model is implemented
 - [ ] re-run the owning validation gate after the rebase

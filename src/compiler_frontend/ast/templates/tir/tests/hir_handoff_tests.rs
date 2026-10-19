@@ -563,7 +563,7 @@ fn build_parent_with_inherited_wrapper_and_overlay(
             TemplateTirPhase::Finalized,
             wrapper_context,
         );
-        let wrapper_set_id = store.push_or_reuse_wrapper_set(vec![wrapper_reference]);
+        let wrapper_set_id = store.push_or_reuse_wrapper_set(&[wrapper_reference]);
         (parent_template_id, wrapper_set_id, child_occurrence_id)
     };
 
@@ -621,7 +621,7 @@ fn build_parent_with_inherited_wrapper_set(
             )
         })
         .collect();
-    let wrapper_set_id = store.push_or_reuse_wrapper_set(wrapper_refs);
+    let wrapper_set_id = store.push_or_reuse_wrapper_set(&wrapper_refs);
 
     let wrapper_overlay_id = store
         .allocate_wrapper_context_overlay(TirWrapperContextOverlay {
@@ -1142,7 +1142,7 @@ fn prepared_handoff_preserves_structural_and_nested_value_contexts_after_tir_rel
             .slot_resolution;
             let wrapper = build_slot_wrapper_template(&mut store_ref, &mut strings, before, after);
             let wrapper_set =
-                store_ref.push_or_reuse_wrapper_set(vec![TemplateWrapperReference::new(
+                store_ref.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
                     wrapper,
                     TemplateTirPhase::Finalized,
                     TemplateViewContext::default(),
@@ -1217,6 +1217,7 @@ fn prepared_handoff_preserves_structural_and_nested_value_contexts_after_tir_rel
             &expressions,
             &const_values,
             TemplatePreparationMode::Value,
+            None,
         )
         .expect("both structural and nested contexts prepare");
         assert_eq!(prepared.identity, view.identity());
@@ -1262,6 +1263,7 @@ fn prepared_handoff_preserves_structural_and_nested_value_contexts_after_tir_rel
             &expressions,
             &const_values,
             TemplatePreparationMode::Value,
+            None,
         )
         .expect("nested exact view prepares");
         assert!(matches!(
@@ -2300,7 +2302,7 @@ fn runtime_slot_handoff_preserves_root_conditional_wrapper() {
         "conditional-before",
         "conditional-after",
     );
-    let wrapper_set = store.push_or_reuse_wrapper_set(vec![TemplateWrapperReference::new(
+    let wrapper_set = store.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
         wrapper_template_id,
         TemplateTirPhase::Finalized,
         TemplateViewContext::default(),

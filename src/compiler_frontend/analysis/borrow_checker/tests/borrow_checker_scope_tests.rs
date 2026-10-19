@@ -11,7 +11,6 @@ use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchArm, MatchPattern, PatternValue,
 };
 use crate::compiler_frontend::compiler_messages::BorrowDiagnosticKind;
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
@@ -21,8 +20,8 @@ use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, function_node, make_test_variable, node, reference_expr_with_datatype,
-    symbol, test_if_branch_metadata, test_source_location,
+    assignment_target, function_node, immutable_reference_expr, make_test_variable, node, symbol,
+    test_if_branch_metadata, test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::{
     assert_borrow_error_kind, run_borrow_checker,
@@ -105,20 +104,18 @@ fn if_branch_local_alias_does_not_escape_merge() {
             ),
             node(
                 NodeKind::If(
-                    reference_expr_with_datatype(
+                    immutable_reference_expr(
                         &mut builder,
                         flag,
-                        DataType::Bool,
                         builtin_type_ids::BOOL,
                         test_source_location(2),
                     ),
                     vec![node(
                         NodeKind::VariableDeclaration(make_test_variable(
                             y,
-                            reference_expr_with_datatype(
+                            immutable_reference_expr(
                                 &mut builder,
                                 x,
-                                DataType::FixedScalar(FixedScalar::I32),
                                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(3),
                             ),
@@ -136,7 +133,6 @@ fn if_branch_local_alias_does_not_escape_merge() {
                     target: assignment_target(
                         &mut builder,
                         x,
-                        DataType::FixedScalar(FixedScalar::I32),
                         builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(4),
                     ),
@@ -199,10 +195,9 @@ fn match_arm_local_alias_does_not_escape_merge() {
         body: vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 y,
-                reference_expr_with_datatype(
+                immutable_reference_expr(
                     &mut builder,
                     x,
-                    DataType::FixedScalar(FixedScalar::I32),
                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     test_source_location(4),
                 ),
@@ -253,7 +248,6 @@ fn match_arm_local_alias_does_not_escape_merge() {
                     target: assignment_target(
                         &mut builder,
                         x,
-                        DataType::FixedScalar(FixedScalar::I32),
                         builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(5),
                     ),
@@ -335,10 +329,9 @@ fn while_body_local_alias_does_not_escape_exit() {
                     vec![node(
                         NodeKind::VariableDeclaration(make_test_variable(
                             y,
-                            reference_expr_with_datatype(
+                            immutable_reference_expr(
                                 &mut builder,
                                 x,
-                                DataType::FixedScalar(FixedScalar::I32),
                                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(3),
                             ),
@@ -354,7 +347,6 @@ fn while_body_local_alias_does_not_escape_exit() {
                     target: assignment_target(
                         &mut builder,
                         x,
-                        DataType::FixedScalar(FixedScalar::I32),
                         builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(4),
                     ),
@@ -441,20 +433,18 @@ fn dead_local_access_reports_borrow_error() {
             ),
             node(
                 NodeKind::If(
-                    reference_expr_with_datatype(
+                    immutable_reference_expr(
                         &mut builder,
                         flag,
-                        DataType::Bool,
                         builtin_type_ids::BOOL,
                         test_source_location(2),
                     ),
                     vec![node(
                         NodeKind::VariableDeclaration(make_test_variable(
                             y,
-                            reference_expr_with_datatype(
+                            immutable_reference_expr(
                                 &mut builder,
                                 x,
-                                DataType::FixedScalar(FixedScalar::I32),
                                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(3),
                             ),
@@ -472,7 +462,6 @@ fn dead_local_access_reports_borrow_error() {
                     target: assignment_target(
                         &mut builder,
                         x,
-                        DataType::FixedScalar(FixedScalar::I32),
                         builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(4),
                     ),
@@ -554,11 +543,8 @@ fn dead_local_access_reports_borrow_error() {
         .insert(0, synthetic_statement.clone());
     hir.side_table
         .map_statement(synthetic_statement.span, &synthetic_statement);
-    hir.side_table.map_value(
-        synthetic_statement.span,
-        synthetic_value,
-        synthetic_statement.span,
-    );
+    hir.side_table
+        .map_value(synthetic_statement.span, synthetic_value);
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("dead local access should fail");

@@ -6,13 +6,13 @@
 //!      and diagnostics still need source-like spelling. These keys must not decide
 //!      semantic equality in AST or HIR; use `TypeId` in `TypeEnvironment` for that.
 
-use super::DataType;
 use super::environment::TypeEnvironment;
 use super::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::external_packages::ExternalTypeId;
-use crate::compiler_frontend::symbols::path_interner::{
-    PathId, PathIdRemap, PathInternerFork, PathTable,
-};
+#[cfg(any(test, feature = "show_hir"))]
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
+#[cfg(any(test, feature = "show_hir"))]
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
@@ -20,21 +20,6 @@ use moth_lexical::numeric::fixed_scalar::FixedScalar;
 // -----------------------------------------------------------
 //  Identity Keys (HIR / Diagnostic Bridge)
 // -----------------------------------------------------------
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum GenericBaseType {
-    Named(StringId),
-    ResolvedNominal(PathId),
-    #[allow(dead_code)] // Deferred until external generic type metadata exists.
-    External(ExternalTypeId),
-    Builtin(BuiltinGenericType),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum BuiltinGenericType {
-    Collection { fixed_capacity: Option<usize> },
-    Map,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BuiltinTypeKey {
@@ -97,23 +82,19 @@ impl TypeIdentityKey {
     }
 }
 
-// Display helpers below retain the existing two-argument compatibility surface for
-// callers that have not yet been threaded with a path reader. New callers must use
-// one of the path-aware variants so a `PathId` is never rendered as source text.
+// Display helpers below render a `GenericInstantiationKey` through an explicit path reader.
+// The retained entry point is the fork-based diagnostic surface; a `PathId` is never rendered
+// as source text.
 
+#[cfg(any(test, feature = "show_hir"))]
 trait PathNameResolver {
     fn component(&self, path: PathId) -> Option<StringId>;
 }
 
+#[cfg(any(test, feature = "show_hir"))]
 impl PathNameResolver for PathInternerFork {
     fn component(&self, path: PathId) -> Option<StringId> {
         PathInternerFork::component(self, path)
-    }
-}
-
-impl PathNameResolver for PathTable {
-    fn component(&self, path: PathId) -> Option<StringId> {
-        PathTable::component(self, path)
     }
 }
 
@@ -126,14 +107,7 @@ pub fn display_generic_instantiation_key_with_fork(
     display_generic_instantiation_key_with_resolver(key, path_fork, string_table)
 }
 
-pub fn display_generic_instantiation_key(
-    key: &GenericInstantiationKey,
-    path_table: &PathTable,
-    string_table: &StringTable,
-) -> String {
-    display_generic_instantiation_key_with_resolver(key, path_table, string_table)
-}
-
+#[cfg(any(test, feature = "show_hir"))]
 fn display_generic_instantiation_key_with_resolver<R: PathNameResolver>(
     key: &GenericInstantiationKey,
     path_reader: &R,
@@ -152,6 +126,7 @@ fn display_generic_instantiation_key_with_resolver<R: PathNameResolver>(
     format!("{base_name} of {args}")
 }
 
+#[cfg(any(test, feature = "show_hir"))]
 fn display_type_identity_key_with_resolver<R: PathNameResolver>(
     key: &TypeIdentityKey,
     path_reader: &R,
@@ -200,103 +175,15 @@ fn display_type_identity_key_with_resolver<R: PathNameResolver>(
 }
 
 // -----------------------------------------------------------
-//  DataType -> Identity Key Bridge
-// -----------------------------------------------------------
-
-/// Converts a diagnostic `DataType` into a stable `TypeIdentityKey`.
-///
-/// WHAT: diagnostic/HIR compatibility bridge for generic instance registration.
-/// WHY: HIR generic struct/choice registration and parse resolution still use
-///      `TypeIdentityKey` as a lowering-local key. Prefer `TypeEnvironment::type_id_to_type_identity_key`
-///      for new code that starts from a canonical `TypeId`.
-///
-/// Returns `None` for unresolved or unsupported types (e.g., `TypeParameter`, `Inferred`).
-pub fn data_type_to_type_identity_key(data_type: &DataType) -> Option<TypeIdentityKey> {
-    match data_type {
-        DataType::Bool => Some(TypeIdentityKey::Builtin(BuiltinTypeKey::Bool)),
-        DataType::Number(scale) => Some(TypeIdentityKey::Builtin(BuiltinTypeKey::Number(*scale))),
-        DataType::StringSlice => Some(TypeIdentityKey::Builtin(BuiltinTypeKey::String)),
-        DataType::Char => Some(TypeIdentityKey::Builtin(BuiltinTypeKey::Char)),
-        DataType::Range => Some(TypeIdentityKey::Builtin(BuiltinTypeKey::Range)),
-        DataType::FixedScalar(scalar) => Some(TypeIdentityKey::Builtin(
-            BuiltinTypeKey::FixedScalar(*scalar),
-        )),
-        DataType::Struct {
-            nominal_path,
-            generic_instance_key: None,
-            ..
-        }
-        | DataType::Choices {
-            nominal_path,
-            generic_instance_key: None,
-            ..
-        } => Some(TypeIdentityKey::Nominal(nominal_path.to_owned())),
-        DataType::External { type_id } => Some(TypeIdentityKey::External(*type_id)),
-        DataType::GenericInstance {
-            base: GenericBaseType::ResolvedNominal(path),
-            arguments,
-        } => {
-            let argument_keys = arguments
-                .iter()
-                .map(data_type_to_type_identity_key)
-                .collect::<Option<Vec<_>>>()?;
-
-            Some(TypeIdentityKey::GenericInstance(GenericInstantiationKey {
-                base_path: path.to_owned(),
-                arguments: argument_keys,
-            }))
-        }
-        DataType::Struct {
-            generic_instance_key: Some(key),
-            ..
-        }
-        | DataType::Choices {
-            generic_instance_key: Some(key),
-            ..
-        } => Some(TypeIdentityKey::GenericInstance(key.to_owned())),
-        DataType::GenericInstance {
-            base: GenericBaseType::Builtin(BuiltinGenericType::Collection { fixed_capacity }),
-            arguments,
-        } => match arguments.as_slice() {
-            [element] => {
-                data_type_to_type_identity_key(element).map(|key| TypeIdentityKey::Collection {
-                    element: Box::new(key),
-                    fixed_capacity: *fixed_capacity,
-                })
-            }
-            _ => None,
-        },
-        DataType::GenericInstance {
-            base: GenericBaseType::Builtin(BuiltinGenericType::Map),
-            arguments,
-        } => match arguments.as_slice() {
-            [key, value] => {
-                let key_id = data_type_to_type_identity_key(key)?;
-                let value_id = data_type_to_type_identity_key(value)?;
-                Some(TypeIdentityKey::Map {
-                    key: Box::new(key_id),
-                    value: Box::new(value_id),
-                })
-            }
-            _ => None,
-        },
-        DataType::Option(inner) => {
-            data_type_to_type_identity_key(inner).map(|key| TypeIdentityKey::Option(Box::new(key)))
-        }
-        _ => None,
-    }
-}
-
-// -----------------------------------------------------------
 //  Identity Key -> TypeId Bridge
 // -----------------------------------------------------------
 
 /// Converts a `TypeIdentityKey` into canonical `TypeId` identity.
 ///
-/// WHAT: reverse lookup from the diagnostic/HIR bridge key to the module's canonical
+/// WHAT: resolves the lowering-local HIR bridge key against the module's canonical
 ///       `TypeEnvironment`.
-/// WHY: HIR still has to register generic nominal layouts from bridge keys, but the
-///      concrete instance it registers must still be the frontend `TypeId`.
+/// WHY: HIR registers generic nominal layouts from bridge keys, but concrete instances
+///      must retain the frontend's canonical `TypeId`.
 pub(crate) fn type_identity_key_to_type_id(
     key: &TypeIdentityKey,
     type_environment: &mut TypeEnvironment,
@@ -308,8 +195,6 @@ pub(crate) fn type_identity_key_to_type_id(
             BuiltinTypeKey::String => type_environment.builtins().string,
             BuiltinTypeKey::Char => type_environment.builtins().char,
             BuiltinTypeKey::Range => type_environment.builtins().range,
-            // Fixed scalars are seeded with the other builtins, so their deterministic
-            // `TypeId` needs no declaration-site lookup.
             BuiltinTypeKey::FixedScalar(scalar) => builtin_type_ids::fixed_scalar(*scalar),
         }),
         TypeIdentityKey::Nominal(path) => type_environment

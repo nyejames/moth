@@ -1,0 +1,6 @@
+TodoMessage ::
+    Rename | id I32, value String |,
+;
+
+todo_id = 7
+message = TodoMessage::Rename(todo_id)

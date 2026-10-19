@@ -1,0 +1,24 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "same=1 not_same=0 imported_same=1 imported_other=0 runtime_same=0 joined=xaby imported=xpqy mixed=xabycdz"
+
+# The local and imported constants fold to distinct strings, so each path must be proven
+# separately: `xaby` from the local `greeting` and `xpqy` from the imported `Token`.
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["\"xaby\"", "\"xpqy\""]
+must_not_contain = [
+    "\"ab\" === \"ab\"",
+    "\"ab\" !== \"ab\"",
+    "\"pq\" === \"pq\"",
+    "\"pq\" === \"ab\"",
+]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "same=1 not_same=0 imported_same=1 imported_other=0 runtime_same=0 joined=xaby imported=xpqy mixed=xabycdz"

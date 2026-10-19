@@ -6,7 +6,8 @@
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::SlotKey;
 use crate::compiler_frontend::ast::templates::template_slots::{
-    materialize_tir_native_runtime_slot_plan, tir_contributions_need_runtime,
+    RuntimeSlotPlanningServices, materialize_tir_native_runtime_slot_plan,
+    tir_contributions_need_runtime,
 };
 use crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind;
 use crate::compiler_frontend::ast::templates::tir::refs::{
@@ -83,7 +84,7 @@ pub(super) fn extra_loose_content_without_default_slot_error(
 }
 
 /// Returns the root node ID for a template, or an internal compiler error.
-pub(super) fn root_node_id_for_template(
+pub(crate) fn root_node_id_for_template(
     store: &TemplateIrStore,
     template_id: TemplateIrId,
 ) -> SlotCompositionResult<TemplateIrNodeId> {
@@ -97,7 +98,7 @@ pub(super) fn root_node_id_for_template(
 
 /// Returns the direct children of a node, or a single-element list for
 /// non-sequence roots.
-pub(super) fn children_of_node(
+pub(crate) fn children_of_node(
     store: &TemplateIrStore,
     node_id: TemplateIrNodeId,
 ) -> SlotCompositionResult<Vec<TemplateIrNodeId>> {
@@ -149,23 +150,6 @@ pub(crate) fn stored_insert_contribution_templates(
     }
 
     Ok(Some(contributions))
-}
-
-/// Returns a template's source span, or an internal error when the template
-/// authority is missing from the store.
-#[cfg(test)]
-pub(super) fn span_for_template(
-    store: &TemplateIrStore,
-    template_id: TemplateIrId,
-) -> SlotCompositionResult<Option<SourceSpan>> {
-    store
-        .get_template(template_id)
-        .map(|template| template.span)
-        .ok_or_else(|| {
-            internal_compiler_error(
-                "TIR slot routing: template ID was not present in the store while reading its span.",
-            )
-        })
 }
 
 /// Builds a composed wrapper template entry from an expanded root.
@@ -235,8 +219,13 @@ pub(super) fn compose_wrapper_application(
             store,
             inputs.expressions,
             inputs.const_values,
+            inputs.external_package_registry,
         )?;
     let composed_template_id = if needs_runtime {
+        let services = RuntimeSlotPlanningServices {
+            string_table: inputs.string_table,
+            external_package_registry: inputs.external_package_registry,
+        };
         materialize_tir_native_runtime_slot_plan(
             store,
             inputs.expressions,
@@ -244,7 +233,7 @@ pub(super) fn compose_wrapper_application(
             wrapper_reference.root,
             &layout.schema,
             &routed,
-            inputs.string_table,
+            &services,
         )?
     } else {
         let expanded_root = super::schema::expand_tir_slot_placeholders_into(

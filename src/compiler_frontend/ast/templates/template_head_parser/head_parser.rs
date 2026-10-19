@@ -22,6 +22,9 @@ use super::head_expressions::{
 };
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationValue};
+use crate::compiler_frontend::ast::const_eval::{
+    ExplicitConstantPayload, explicit_constant_operand,
+};
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
@@ -32,7 +35,7 @@ use crate::compiler_frontend::ast::expressions::parse_expression::create_express
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
-use crate::compiler_frontend::ast::module_ast::scope_context::ScopeDeclarationRef;
+use crate::compiler_frontend::ast::module_ast::scope_context::ValueDeclarationRef;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
@@ -454,13 +457,14 @@ pub fn parse_template_head(
                     token_stream,
                 )?;
                 let value_span = current_source_span(token_stream);
+                let value_reference = context.get_value_reference(&name, value_span)?;
 
                 // Extract an inlinable template before the mutable expression parse.
                 // The borrow from get_reference is released once the template is cloned.
                 // Known template references inline their template value. An imported template
                 // constant is rebuilt into this store first, so wrapper and slot composition
                 // applies the same way it does to an authored template.
-                let inlinable_reference = context.get_reference(&name).and_then(|reference| {
+                let inlinable_reference = value_reference.as_ref().and_then(|reference| {
                     // A pending numeric binding has no declaration and is never an inlinable
                     // template value, so it keeps the ordinary expression path below and
                     // stays pending for body completion.
@@ -528,8 +532,8 @@ pub fn parse_template_head(
                 } else {
                     // Resolve value_mode from the reference before the mutable
                     // expression parse so the context borrow does not overlap.
-                    let value_mode = match context.get_reference(&name) {
-                        Some(reference) => head_reference_value_mode(context, &reference)?,
+                    let value_mode = match value_reference.as_ref() {
+                        Some(reference) => head_reference_value_mode(context, reference)?,
                         // Unknown names keep the ordinary parse path, which reports the
                         // structured unknown-name diagnostic for the authored token.
                         None => ValueMode::ImmutableOwned,
@@ -574,7 +578,7 @@ pub fn parse_template_head(
                 // body local, so a pending reference here is a broken invariant rather than an
                 // absent name.
                 let receiver_value_mode = context
-                    .get_reference(&this_id)
+                    .get_value_reference(&this_id, current_source_span(token_stream))?
                     .map(|reference| {
                         let declaration = reference.ready_declaration().ok_or_else(|| {
                             CompilerError::compiler_error(
@@ -1014,7 +1018,18 @@ fn parse_head_expression(
     )
     .with_numeric_deferral_owner();
 
-    create_expression_with_trailing_newline_policy(input)
+    let expression = create_expression_with_trailing_newline_policy(input)?;
+    // WHY: an explicit String `#` constant interpolated into a template reads as its value, like an
+    // operator operand does, so `[greeting]` folds to text instead of staying a runtime read.
+    let replacement = explicit_constant_operand(
+        expression,
+        ExplicitConstantPayload::Text,
+        context,
+        path_fork,
+        expression_builder,
+        const_values,
+    )?;
+    Ok(replacement.unwrap_or(expression))
 }
 
 /// Resolves the value mode for one template-head symbol reference.
@@ -1025,12 +1040,12 @@ fn parse_head_expression(
 ///      name or defaulted before body completion, so the construction row owns the mode.
 fn head_reference_value_mode(
     context: &ScopeContext,
-    reference: &ScopeDeclarationRef<'_>,
+    reference: &ValueDeclarationRef<'_>,
 ) -> Result<ValueMode, CompilerError> {
     match reference {
-        ScopeDeclarationRef::Local { declaration, .. } => Ok(declaration.value_mode.to_owned()),
-        ScopeDeclarationRef::Shared(declaration) => Ok(declaration.value_mode.to_owned()),
-        ScopeDeclarationRef::PendingNumeric { binding, .. } => {
+        ValueDeclarationRef::Local { declaration, .. } => Ok(declaration.value_mode.to_owned()),
+        ValueDeclarationRef::Shared(declaration) => Ok(declaration.value_mode.to_owned()),
+        ValueDeclarationRef::PendingNumeric { binding, .. } => {
             context.pending_numeric_value_mode(*binding).ok_or_else(|| {
                 CompilerError::compiler_error(
                     "pending numeric binding reference had no construction row value mode",

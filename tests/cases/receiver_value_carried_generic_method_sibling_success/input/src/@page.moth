@@ -1,0 +1,4 @@
+@shapes make_box
+
+value = make_box()
+[:receiver_value_carried_generic_method_sibling_success label=[value.label()]]

@@ -13,15 +13,20 @@
 
 use crate::compiler_frontend::ast::expressions::call_argument::ParameterSlot;
 use crate::compiler_frontend::ast::expressions::call_arguments::expected_type_for_resolved_parameter;
+use crate::compiler_frontend::ast::expressions::call_validation::CallDiagnosticName;
 use crate::compiler_frontend::ast::expressions::constructor_views::ConstructorField;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
+use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionOperationView,
+};
+use crate::compiler_frontend::ast::expressions::generic_nominal_retention::GenericNominalConstructor;
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::generic_functions::calls::GenericCallExpectedContext;
 use crate::compiler_frontend::ast::generic_functions::diagnostics::cannot_infer_generic_function_arguments;
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::ast::numeric_construction::{
-    DeferredCallArgument, NumericConstructionState,
+    DeferredCall, DeferredCallArgument, NumericConstructionState,
 };
 use crate::compiler_frontend::ast::numeric_known_shape::{
     KnownShape, KnownShapeBinding, KnownShapeBindingRange, KnownShapeId, declared_projection,
@@ -154,14 +159,43 @@ pub(crate) fn link_generic_numeric_signature(
                     continue;
                 };
                 let declared = declared_parameter_type(template, slot, receiver_slot_offset)?;
-                let type_id = expression_builder
-                    .view(call.value)?
-                    .require_single(ValueReceiverContext::FunctionArgument)?;
+                let view = expression_builder.view(call.value)?;
+                let type_id = view.require_single(ValueReceiverContext::FunctionArgument)?;
                 linker.bind_type(declared, type_id);
+
+                if let Some(declared_input_type) =
+                    declared_route_input_type(template, slot, receiver_slot_offset)?
+                {
+                    let evidence = route_argument_future_input_evidence(
+                        RouteArgumentInputEvidence::Ready {
+                            forwarded_input_type: call.route_future_input_type,
+                            value_type_id: type_id,
+                            operation: view.operation(),
+                        },
+                        linker.environment,
+                    )?;
+                    linker.bind_route_input_evidence(declared_input_type, evidence)?;
+                }
             }
-            DeferredCallArgument::Retained { shape, .. }
-            | DeferredCallArgument::Forward { shape, .. } => {
-                // A retained argument without a generic-linked origin carries no shape evidence.
+            DeferredCallArgument::Retained { shape, .. } => {
+                let Some(slot) = shape.parameter_slot else {
+                    continue;
+                };
+                if let Some(origin) = shape.origin_shape {
+                    let declared = declared_parameter_type(template, slot, receiver_slot_offset)?;
+                    linker.bind_shape(declared, origin)?;
+                }
+                if let Some(declared_input_type) =
+                    declared_route_input_type(template, slot, receiver_slot_offset)?
+                {
+                    let evidence = route_argument_future_input_evidence(
+                        RouteArgumentInputEvidence::Retained(argument),
+                        linker.environment,
+                    )?;
+                    linker.bind_route_input_evidence(declared_input_type, evidence)?;
+                }
+            }
+            DeferredCallArgument::Forward { shape, .. } => {
                 let (Some(slot), Some(origin)) = (shape.parameter_slot, shape.origin_shape) else {
                     continue;
                 };
@@ -201,6 +235,137 @@ pub(crate) fn link_generic_numeric_signature(
     })
 }
 
+/// The completed or retained Route facts from which generic input evidence can be read.
+pub(crate) enum RouteArgumentInputEvidence<'a> {
+    Ready {
+        forwarded_input_type: Option<TypeId>,
+        value_type_id: TypeId,
+        operation: ExpressionOperationView<'a>,
+    },
+    Retained(&'a DeferredCallArgument),
+}
+
+/// The future input evidence available for one route argument.
+///
+/// WHAT: carries either a completed input `TypeId` or the declared field and result shape that
+///      preserve an unresolved generic nominal input's numeric origin.
+/// WHY: unresolved nominal parameters are not concrete type evidence; retained inputs must stay
+///      in the shared numeric shape system until their origin is resolved.
+pub(crate) enum RouteFutureInputEvidence {
+    Type(TypeId),
+    GenericNominalField {
+        field_type_id: TypeId,
+        result_shape: KnownShapeId,
+        variant_index: usize,
+    },
+}
+
+/// Reads one Route argument's future input without inspecting its callable body.
+///
+/// Direct constructors read the trailing field of their selected variant. Forwarded Routes keep
+/// their input contract on the ready argument. A retained generic choice returns its declared
+/// trailing field and result shape so the linker can preserve numeric-origin evidence.
+pub(crate) fn route_argument_future_input_evidence(
+    evidence: RouteArgumentInputEvidence<'_>,
+    type_environment: &mut TypeEnvironment,
+) -> Result<Option<RouteFutureInputEvidence>, ExpressionParseError> {
+    match evidence {
+        RouteArgumentInputEvidence::Ready {
+            forwarded_input_type: Some(input_type),
+            ..
+        } => Ok(Some(RouteFutureInputEvidence::Type(input_type))),
+        RouteArgumentInputEvidence::Ready {
+            value_type_id,
+            operation,
+            ..
+        } => {
+            let ExpressionOperationView::RouteConstruct {
+                tag,
+                future_input: true,
+                ..
+            } = operation
+            else {
+                return Ok(None);
+            };
+            let variant_index = usize::try_from(tag)
+                .map_err(|_| infrastructure("Route constructor tag exceeds the host index type"))?;
+            Ok(
+                choice_future_input_type(value_type_id, variant_index, type_environment)?
+                    .map(RouteFutureInputEvidence::Type),
+            )
+        }
+        RouteArgumentInputEvidence::Retained(argument) => {
+            let DeferredCallArgument::Retained { expression, .. } = argument else {
+                return Ok(None);
+            };
+            let [ExpressionRpnItem::PendingNumericCall { call, .. }] = expression.items.as_slice()
+            else {
+                return Ok(None);
+            };
+            match call.as_ref() {
+                DeferredCall::Choice(choice) if choice.is_route && choice.future_input => {
+                    Ok(choice_future_input_type(
+                        choice.choice_type_id,
+                        choice.variant_index,
+                        type_environment,
+                    )?
+                    .map(RouteFutureInputEvidence::Type))
+                }
+                DeferredCall::GenericNominal(nominal) => {
+                    let GenericNominalConstructor::Choice {
+                        payload_field_views,
+                        variant_index,
+                        route_future_input: Some(true),
+                        ..
+                    } = &nominal.constructor
+                    else {
+                        return Ok(None);
+                    };
+                    let Some(trailing_field) = payload_field_views.last() else {
+                        return Err(infrastructure(
+                            "retained generic route constructor has no future-input payload field",
+                        ));
+                    };
+                    Ok(Some(RouteFutureInputEvidence::GenericNominalField {
+                        field_type_id: trailing_field.type_id,
+                        result_shape: nominal.result_shape,
+                        variant_index: *variant_index,
+                    }))
+                }
+                _ => Ok(None),
+            }
+        }
+    }
+}
+
+fn choice_future_input_type(
+    choice_type_id: TypeId,
+    variant_index: usize,
+    type_environment: &TypeEnvironment,
+) -> Result<Option<TypeId>, ExpressionParseError> {
+    let Some(variants) = type_environment.variants_for(choice_type_id) else {
+        return Err(infrastructure(
+            "Route constructor result is not a choice type",
+        ));
+    };
+    let Some(variant) = variants.get(variant_index) else {
+        return Err(infrastructure(
+            "Route constructor tag is outside its choice variants",
+        ));
+    };
+    let ChoiceVariantPayloadDefinition::Record { fields } = &variant.payload else {
+        return Err(infrastructure(
+            "Route constructor with a future input has no record payload",
+        ));
+    };
+    let Some(trailing_field) = fields.last() else {
+        return Err(infrastructure(
+            "Route constructor with a future input has an empty payload",
+        ));
+    };
+    Ok(Some(trailing_field.type_id))
+}
+
 /// Borrowed inputs for linking one retained generic nominal constructor's result shape.
 ///
 /// WHAT: the nominal identity, its declared field views, the ready and retained arguments, the
@@ -210,7 +375,7 @@ pub(crate) fn link_generic_numeric_signature(
 ///      the nominal's own parameters and field views rather than building a second template.
 pub(crate) struct GenericNominalShapeInput<'a, 'b> {
     pub(crate) nominal_path: &'a PathId,
-    pub(crate) display_name: &'a str,
+    pub(crate) diagnostic_name: CallDiagnosticName<'static>,
     pub(crate) declared_fields: &'a [ConstructorField],
     pub(crate) arguments: &'a [DeferredCallArgument],
     pub(crate) seeded_bindings: &'a GenericTypeBindings,
@@ -234,7 +399,7 @@ pub(crate) fn link_generic_nominal_result_shape(
 ) -> Result<KnownShapeId, ExpressionParseError> {
     let GenericNominalShapeInput {
         nominal_path,
-        display_name,
+        diagnostic_name,
         declared_fields,
         arguments,
         seeded_bindings,
@@ -250,7 +415,8 @@ pub(crate) fn link_generic_nominal_result_shape(
         .canonical_parameters_for_nominal(nominal_path)
     else {
         return Err(CompilerError::compiler_error(format!(
-            "Generic nominal '{display_name}' has no canonical parameter list after registration"
+            "Generic nominal '{}' has no canonical parameter list after registration",
+            diagnostic_name.rendered_callee_name(string_table)
         ))
         .into());
     };
@@ -328,7 +494,7 @@ pub(crate) fn link_generic_nominal_result_shape(
     let missing = linker.unbound_parameter_names();
     if !missing.is_empty() {
         return Err(CompilerDiagnostic::invalid_generic_instantiation(
-            Some(string_table.intern(display_name)),
+            diagnostic_name.diagnostic_callee_name(string_table),
             InvalidGenericInstantiationReason::CannotInferArguments {
                 missing_parameters: missing,
             },
@@ -382,6 +548,84 @@ impl NumericSignatureLinker<'_> {
             actual,
             &mut self.type_bindings,
         );
+    }
+
+    /// Bind a Route parameter's declared input against one argument's future-input evidence.
+    fn bind_route_input_evidence(
+        &mut self,
+        declared_input_type: TypeId,
+        evidence: Option<RouteFutureInputEvidence>,
+    ) -> Result<(), ExpressionParseError> {
+        match evidence {
+            Some(RouteFutureInputEvidence::Type(actual_input_type)) => {
+                self.bind_type(declared_input_type, actual_input_type);
+            }
+            Some(RouteFutureInputEvidence::GenericNominalField {
+                field_type_id,
+                result_shape,
+                variant_index,
+            }) => {
+                let shape = self.project_nominal_route_input_shape(
+                    field_type_id,
+                    result_shape,
+                    variant_index,
+                )?;
+                self.bind_shape(declared_input_type, shape)?;
+            }
+            None => {}
+        }
+        Ok(())
+    }
+
+    /// Resolve one retained generic choice's future-input field through its symbolic result.
+    ///
+    /// WHAT: projects the field template through a declared-substitution binding range, or reads
+    ///      its specialized field from a concrete choice instance.
+    /// WHY: a template parameter can still name an unresolved numeric origin; only the result
+    ///      shape preserves that origin for `bind_shape`.
+    fn project_nominal_route_input_shape(
+        &mut self,
+        field_type_id: TypeId,
+        result_shape: KnownShapeId,
+        variant_index: usize,
+    ) -> Result<KnownShapeId, ExpressionParseError> {
+        match self.state.shape(result_shape) {
+            KnownShape::DeclaredSubstitution { bindings, .. } => envelope_shape(
+                &mut *self.state,
+                &mut *self.environment,
+                field_type_id,
+                ParameterShapes::Range(bindings),
+                self.call_span,
+            ),
+            KnownShape::Concrete { type_id, span } => {
+                let Some(variant) = self
+                    .environment
+                    .variants_for(type_id)
+                    .and_then(|variants| variants.get(variant_index))
+                else {
+                    return Err(infrastructure(
+                        "retained generic route result has no selected choice variant",
+                    ));
+                };
+                let ChoiceVariantPayloadDefinition::Record { fields } = &variant.payload else {
+                    return Err(infrastructure(
+                        "retained generic route result has no record payload",
+                    ));
+                };
+                let Some(trailing_field_type_id) = fields.last().map(|field| field.type_id) else {
+                    return Err(infrastructure(
+                        "retained generic route result has no future-input field",
+                    ));
+                };
+                self.state.intern_shape(KnownShape::Concrete {
+                    type_id: trailing_field_type_id,
+                    span,
+                })
+            }
+            _ => Err(infrastructure(
+                "retained generic route result has no nominal substitution shape",
+            )),
+        }
     }
 
     /// Whether this origin's value fills one declared optional layer inside `bind_shape`.
@@ -1106,6 +1350,22 @@ fn declared_parameter_type(
         .ok_or_else(|| {
             infrastructure("generic call argument routed outside the template signature")
         })
+}
+
+/// Returns a generic Route parameter's declared future-input type, if it has one.
+fn declared_route_input_type(
+    template: &GenericFunctionTemplate,
+    slot: ParameterSlot,
+    receiver_slot_offset: usize,
+) -> Result<Option<TypeId>, ExpressionParseError> {
+    let parameter = slot
+        .index()
+        .checked_add(receiver_slot_offset)
+        .and_then(|index| template.signature.parameters.get(index))
+        .ok_or_else(|| {
+            infrastructure("generic call argument routed outside the template signature")
+        })?;
+    Ok(parameter.contract.extra_type_id())
 }
 
 fn infrastructure(message: &str) -> ExpressionParseError {

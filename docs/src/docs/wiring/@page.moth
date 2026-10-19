@@ -28,10 +28,10 @@ page_head #= language_theme_head
     Wiring describes parameter contracts for binding identity and choice
     constructors. It does not create callbacks, subscriptions or a UI runtime.
 
-    **Accepted design; not yet implemented.** Wire and Route source contracts
-    are unsupported by the current Alpha compiler until Phase 6 of the typed
-    semantic expressions plan. The examples teach the accepted direction and
-    do not claim to compile today. See @../progress (Progress) for current
+    Wire and Route parameter contracts compile and run on the JS/HTML target.
+    HTML-Wasm supports Wire arguments and rejects reachable route formation
+    with a target diagnostic. Route invocation, composition, observation,
+    channels and async remain outside this foundation. See @../progress (Progress) for current
     support and the complete @#wiring-introduction (Wiring reference) for exact
     rules.
 ]

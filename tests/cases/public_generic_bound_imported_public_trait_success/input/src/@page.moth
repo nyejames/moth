@@ -1,0 +1,10 @@
+@provider DISPLAY_TEXT, Label
+
+export:
+    identity type T is DISPLAY_TEXT |value T| -> String:
+        return value.display()
+    ;
+;
+
+result = identity(Label(text = "free"))
+[:result=[result]]

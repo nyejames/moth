@@ -3,14 +3,14 @@
 //! WHAT: describes the metadata for individual external symbols and the packages that group them.
 //! WHY: the registry stores these definitions so the frontend and backends can query signatures
 //! and lowering metadata without re-parsing binding files.
+use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 
 use super::abi::{ExternalAbiType, ExternalParameter, ExternalReturnAlias, ExternalSignatureType};
 use super::ids::{ExternalConstantId, ExternalFunctionId, ExternalPackageId, ExternalTypeId};
 use super::symbol_path::ExternalSymbolPath;
-use crate::compiler_frontend::datatypes::DataType;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 /// Backend-specific lowering metadata for an external function.
 #[derive(Debug, Clone, Default)]
@@ -37,6 +37,136 @@ pub enum ExternalWasmLowering {
     HostFunction(&'static str),
 }
 
+/// Compiler-owned Rust evaluation selected by trusted registration; it is not a source
+/// annotation, callback, name lookup, or lowering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExternalConstEvalOp {
+    Text(TextConstEvalOp),
+}
+
+/// Trusted compiler-owned operations for Core Text functions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextConstEvalOp {
+    Length,
+    IsEmpty,
+    Contains,
+    StartsWith,
+    EndsWith,
+}
+
+impl TextConstEvalOp {
+    /// Parameter leaves in call order. Every Core Text parameter is a `Text` leaf, so a
+    /// signature with any other parameter type cannot register.
+    pub fn parameter_types(self) -> &'static [ConstEvalLeafType] {
+        match self {
+            TextConstEvalOp::Length | TextConstEvalOp::IsEmpty => &[ConstEvalLeafType::Text],
+            TextConstEvalOp::Contains | TextConstEvalOp::StartsWith | TextConstEvalOp::EndsWith => {
+                &[ConstEvalLeafType::Text, ConstEvalLeafType::Text]
+            }
+        }
+    }
+
+    /// Success slots in result order. This table is the single source for the slot count and
+    /// each slot's type, so registration and the materialiser cannot disagree about them.
+    pub fn success_slot_types(self) -> &'static [ConstEvalSlotType] {
+        match self {
+            TextConstEvalOp::Length => &[ConstEvalSlotType {
+                leaf: ConstEvalLeafType::I32,
+                optional: false,
+            }],
+            TextConstEvalOp::IsEmpty
+            | TextConstEvalOp::Contains
+            | TextConstEvalOp::StartsWith
+            | TextConstEvalOp::EndsWith => &[ConstEvalSlotType {
+                leaf: ConstEvalLeafType::Bool,
+                optional: false,
+            }],
+        }
+    }
+}
+
+/// Builtin leaf types a trusted constant evaluation reads or produces. Builtin ids are fixed,
+/// so a registered signature maps to its `TypeId` without a type environment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConstEvalLeafType {
+    Text,
+    I32,
+    Bool,
+}
+
+impl ConstEvalLeafType {
+    pub(crate) fn type_id(self) -> TypeId {
+        match self {
+            ConstEvalLeafType::Text => builtin_type_ids::STRING,
+            ConstEvalLeafType::I32 => builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            ConstEvalLeafType::Bool => builtin_type_ids::BOOL,
+        }
+    }
+}
+
+/// One success slot of a trusted constant evaluation: a builtin leaf, optionally wrapped in a
+/// single optional layer. Nested optionals have no representation here, so they cannot register.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConstEvalSlotType {
+    pub leaf: ConstEvalLeafType,
+    pub optional: bool,
+}
+
+impl ExternalConstEvalOp {
+    /// Reports whether the parameter and success-slot types exactly match this operation's
+    /// table. A signature the materialiser cannot build from builtin leaves never registers.
+    pub fn matches_signature(
+        self,
+        parameters: &[ExternalParameter],
+        success_slots: &[ExternalReturnSlot],
+    ) -> bool {
+        let ExternalConstEvalOp::Text(operation) = self;
+        let parameter_types = operation.parameter_types();
+        let slot_types = operation.success_slot_types();
+
+        parameters.len() == parameter_types.len()
+            && parameters
+                .iter()
+                .zip(parameter_types)
+                .all(|(parameter, leaf)| {
+                    const_eval_leaf_type(&parameter.language_type) == Some(*leaf)
+                })
+            && success_slots.len() == slot_types.len()
+            && success_slots
+                .iter()
+                .zip(slot_types)
+                .all(|(slot, expected)| const_eval_slot_type(&slot.value_type) == Some(*expected))
+    }
+}
+
+/// Maps a signature to a builtin leaf. Every other signature, including `Char`, handles and
+/// nested optionals, yields `None`, so it cannot register.
+fn const_eval_leaf_type(signature: &ExternalSignatureType) -> Option<ConstEvalLeafType> {
+    match signature {
+        ExternalSignatureType::Abi(ExternalAbiType::Utf8Str) => Some(ConstEvalLeafType::Text),
+        ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::I32)) => {
+            Some(ConstEvalLeafType::I32)
+        }
+        ExternalSignatureType::Abi(ExternalAbiType::Bool) => Some(ConstEvalLeafType::Bool),
+        _ => None,
+    }
+}
+
+/// Maps a success signature to a slot. One optional layer may wrap a builtin leaf; a second
+/// layer reaches `const_eval_leaf_type` as `Optional` and is rejected there.
+fn const_eval_slot_type(signature: &ExternalSignatureType) -> Option<ConstEvalSlotType> {
+    match signature {
+        ExternalSignatureType::Optional(inner) => Some(ConstEvalSlotType {
+            leaf: const_eval_leaf_type(inner)?,
+            optional: true,
+        }),
+        leaf => Some(ConstEvalSlotType {
+            leaf: const_eval_leaf_type(leaf)?,
+            optional: false,
+        }),
+    }
+}
+
 /// Full definition of a single external function.
 #[derive(Debug)]
 pub struct ExternalFunctionDef {
@@ -57,6 +187,8 @@ pub struct ExternalFunctionDef {
     pub returns: Vec<ExternalReturnSlot>,
     /// Optional final error slot. This maps to `T!` on source functions.
     pub error_return_type: Option<ExternalSignatureType>,
+    /// Optional compiler-owned constant-evaluation operation.
+    pub const_eval: Option<ExternalConstEvalOp>,
     /// Backend-specific lowering metadata.
     pub lowerings: ExternalFunctionLowerings,
 }
@@ -69,19 +201,13 @@ impl Clone for ExternalFunctionDef {
             parameters: self.parameters.clone(),
             returns: self.returns.clone(),
             error_return_type: self.error_return_type.clone(),
+            const_eval: self.const_eval,
             lowerings: self.lowerings.clone(),
         }
     }
 }
 
 impl ExternalFunctionDef {
-    pub(crate) fn success_return_data_types(&self) -> Vec<DataType> {
-        self.returns
-            .iter()
-            .filter_map(|slot| slot.value_type.to_datatype())
-            .collect()
-    }
-
     pub(crate) fn success_return_type_ids(
         &self,
         type_environment: &mut crate::compiler_frontend::datatypes::environment::TypeEnvironment,
@@ -170,12 +296,13 @@ pub fn external_success_returns(
     success_alias: ExternalReturnAlias,
 ) -> Vec<ExternalReturnSlot> {
     let success_type = success_type.into();
-    match success_type.to_datatype() {
-        Some(_) => vec![ExternalReturnSlot {
+    if success_type.supports_success_return_type() {
+        vec![ExternalReturnSlot {
             value_type: success_type,
             alias: success_alias,
-        }],
-        None => Vec::new(),
+        }]
+    } else {
+        Vec::new()
     }
 }
 
@@ -277,11 +404,11 @@ pub struct ExternalPackage {
     /// WHAT: maps the full symbol path inside this package to its stable function ID.
     /// WHY: this is the canonical package surface; full definitions live in the registry's
     /// `functions_by_id` map so the package does not store duplicate clones.
-    pub function_ids: HashMap<ExternalSymbolPath, ExternalFunctionId>,
+    pub function_ids: FxHashMap<ExternalSymbolPath, ExternalFunctionId>,
     /// Path-to-ID surface map for registered types.
-    pub type_ids: HashMap<ExternalSymbolPath, ExternalTypeId>,
+    pub type_ids: FxHashMap<ExternalSymbolPath, ExternalTypeId>,
     /// Path-to-ID surface map for registered constants.
-    pub constant_ids: HashMap<ExternalSymbolPath, ExternalConstantId>,
+    pub constant_ids: FxHashMap<ExternalSymbolPath, ExternalConstantId>,
 }
 
 impl Clone for ExternalPackage {
@@ -308,9 +435,9 @@ impl ExternalPackage {
             id,
             path: path.into(),
             metadata,
-            function_ids: HashMap::new(),
-            type_ids: HashMap::new(),
-            constant_ids: HashMap::new(),
+            function_ids: FxHashMap::default(),
+            type_ids: FxHashMap::default(),
+            constant_ids: FxHashMap::default(),
         }
     }
 
@@ -349,6 +476,8 @@ pub struct ExternalFunctionSpec {
     pub parameters: Vec<ExternalParameter>,
     pub returns: Vec<ExternalReturnSlot>,
     pub error_return_type: Option<ExternalSignatureType>,
+    /// Optional compiler-owned constant-evaluation operation.
+    pub const_eval: Option<ExternalConstEvalOp>,
     pub lowerings: ExternalFunctionLowerings,
 }
 
@@ -359,6 +488,7 @@ impl From<ExternalFunctionSpec> for ExternalFunctionDef {
             parameters: spec.parameters,
             returns: spec.returns,
             error_return_type: spec.error_return_type,
+            const_eval: spec.const_eval,
             lowerings: spec.lowerings,
         }
     }

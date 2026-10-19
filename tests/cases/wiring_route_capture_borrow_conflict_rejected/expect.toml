@@ -1,0 +1,12 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-BORROW-0003"]
+message_contains = ["Cannot mutably access `source` while shared alias `source` is still needed later."]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-BORROW-0003"
+path = "input/@page.moth"
+line = 10

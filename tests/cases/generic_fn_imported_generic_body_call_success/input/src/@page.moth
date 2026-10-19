@@ -1,0 +1,6 @@
+@utils identity as same, wrap as render
+
+first = same("a")
+second = render(42)
+third = render("b")
+[:[first] [second] [third]]

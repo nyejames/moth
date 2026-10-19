@@ -216,6 +216,7 @@ fn fold_template_with_fold_context(
         &*fold_context.expression_builder,
         &*fold_context.const_values,
         preparation_mode,
+        fold_context.external_package_registry,
     )?;
     if !matches!(prepared.outcome, TemplatePreparationOutcome::Foldable) {
         panic!("test template expected to be foldable")

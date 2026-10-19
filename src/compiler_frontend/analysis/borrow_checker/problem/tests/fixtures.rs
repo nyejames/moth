@@ -1,4 +1,4 @@
-//! Small deterministic problem constructors used only by the Phase 2 tests.
+//! Small deterministic problem constructors used only by the problem tests.
 
 use super::super::{Binding, BindingDestination, BindingId, BlockId, EventId};
 use super::super::{

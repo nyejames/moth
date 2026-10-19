@@ -16,6 +16,7 @@
 
 use crate::ast_log;
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
@@ -23,12 +24,14 @@ use crate::compiler_frontend::ast::expressions::call_argument::{
     CallAccessMode, CallArgument, ParameterSlot,
 };
 use crate::compiler_frontend::ast::expressions::call_validation::{
-    ExpectedParameterType, ParameterExpectation,
+    CallDiagnosticName, ExpectedParameterType, ParameterExpectation,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView, OwnedExpr,
 };
+use crate::compiler_frontend::ast::expressions::generic_nominal_retention::GenericNominalConstructor;
 use crate::compiler_frontend::ast::expressions::parse_expression::{
     create_expression_with_trailing_newline_policy, fragment_typed_error_summary,
     register_direct_receiver_witness,
@@ -36,14 +39,20 @@ use crate::compiler_frontend::ast::expressions::parse_expression::{
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
+use crate::compiler_frontend::ast::field_access::reference_expression_from_declaration;
 use crate::compiler_frontend::ast::generic_functions::numeric_origins::set_forward_destinations;
+use crate::compiler_frontend::ast::module_ast::scope_context::{
+    RouteParameterReference, ScopeDeclarationRef,
+};
 use crate::compiler_frontend::ast::numeric_construction::{
-    DeferredCallArgument, DeferredCallArgumentShape, deferred_numeric_expression,
+    DeferredCall, DeferredCallArgument, DeferredCallArgumentShape, deferred_numeric_expression,
 };
 use crate::compiler_frontend::ast::numeric_known_shape::{
     fragment_shape, register_shape_witness, union_shape_classes,
 };
+use crate::compiler_frontend::ast::statements::functions::ParameterContract;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticToken,
     InvalidBuiltinCallReason, InvalidCallShapeReason, InvalidExpressionReason,
@@ -136,7 +145,7 @@ pub(crate) enum CallArgumentSyntax {
         callee_name: Option<StringId>,
     },
     Constructor {
-        callee_name: Option<StringId>,
+        callee_name: CallDiagnosticName<'static>,
     },
     Assertion {
         callee_name: Option<StringId>,
@@ -161,7 +170,7 @@ pub(crate) enum CallArgumentSyntax {
 #[derive(Clone, Copy)]
 pub(crate) struct CallArgumentDiagnosticContext {
     pub(crate) syntax: CallArgumentSyntax,
-    pub(crate) const_operation: Option<StringId>,
+    pub(crate) const_operation: Option<CallDiagnosticName<'static>>,
     /// Opening-delimiter span retained for receiving-boundary diagnostics.
     ///
     /// WHAT: preserves the authored `(` span independently from each entry span.
@@ -174,10 +183,14 @@ impl CallArgumentDiagnosticContext {
     pub(crate) fn from_syntax(syntax: CallArgumentSyntax) -> Self {
         let const_operation = match syntax {
             CallArgumentSyntax::Supported { callee_name }
-            | CallArgumentSyntax::Constructor { callee_name }
             | CallArgumentSyntax::Assertion { callee_name }
-            | CallArgumentSyntax::UnsupportedCall { callee_name } => callee_name,
-            CallArgumentSyntax::UnsupportedBuiltinMember { member_name, .. } => member_name,
+            | CallArgumentSyntax::UnsupportedCall { callee_name } => {
+                callee_name.map(CallDiagnosticName::Interned)
+            }
+            CallArgumentSyntax::Constructor { callee_name } => Some(callee_name),
+            CallArgumentSyntax::UnsupportedBuiltinMember { member_name, .. } => {
+                member_name.map(CallDiagnosticName::Interned)
+            }
             CallArgumentSyntax::AnonymousConstRecord => None,
         };
 
@@ -261,6 +274,11 @@ impl CallArgumentReceivingContext {
         numeric_retention: CallArgumentNumericRetention,
     ) -> Self {
         self.numeric_retention = numeric_retention;
+        self
+    }
+
+    pub(crate) fn with_naming_policy(mut self, naming_policy: CallArgumentNamingPolicy) -> Self {
+        self.naming_policy = naming_policy;
         self
     }
 }
@@ -369,6 +387,39 @@ pub(crate) fn parse_call_arguments_typed_with_numeric_retention(
         CallArgumentSyntaxContext::Ordinary,
         CallArgumentReceivingContext::existing_call(argument_syntax)
             .with_numeric_retention(CallArgumentNumericRetention::Retain),
+        Some(expectations),
+        path_fork,
+    )
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "route capture parsing reuses the shared list owner while selecting its positional-prefix naming policy"
+)]
+pub(crate) fn parse_route_capture_arguments(
+    token_stream: &mut AstCursor,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    string_table: &mut StringTable,
+    expectations: &[ParameterExpectation],
+    callee_name: CallDiagnosticName<'static>,
+    path_fork: &mut PathInternerFork,
+) -> Result<ParsedCallArguments<OwnedExpr>, ExpressionParseError> {
+    parse_call_arguments_inner(
+        token_stream,
+        context,
+        type_interner,
+        expression_builder,
+        const_values,
+        string_table,
+        CallArgumentSyntaxContext::Ordinary,
+        CallArgumentReceivingContext::existing_call(CallArgumentSyntax::Constructor {
+            callee_name,
+        })
+        .with_naming_policy(CallArgumentNamingPolicy::PositionalOnly)
+        .with_numeric_retention(CallArgumentNumericRetention::Retain),
         Some(expectations),
         path_fork,
     )
@@ -758,7 +809,8 @@ fn parse_call_arguments_inner(
             return Err(diagnostic.into());
         }
 
-        let parameter_slot = slot_router.route(named_target.as_ref(), argument_span)?;
+        let parameter_slot =
+            slot_router.route(named_target.as_ref(), argument_span, string_table)?;
 
         let (access_mode, marker_span) = if token_stream.current_tag() == TokenTag::MUTABLE {
             let marker_span = current_span(token_stream);
@@ -796,6 +848,52 @@ fn parse_call_arguments_inner(
         let parameter_expectation = parameter_slot
             .and_then(|slot| routed_expectations.and_then(|items| items.get(slot.index())));
 
+        let route_argument_context = match parameter_expectation {
+            Some(expectation) => match expectation.contract {
+                ParameterContract::Route { input } => {
+                    let output_type = match expectation.expected_type {
+                        ExpectedParameterType::Known(type_id)
+                        | ExpectedParameterType::GenericParameter(type_id) => type_id,
+                        ExpectedParameterType::ConstructionShape(_)
+                        | ExpectedParameterType::UnknownExternal => {
+                            return Err(CompilerDiagnostic::invalid_call_shape(
+                                InvalidCallShapeReason::RouteArgumentNotDirect,
+                                None,
+                                current_span(token_stream),
+                            )
+                            .into());
+                        }
+                    };
+                    if access_mode == CallAccessMode::Mutable
+                        || token_stream.current_tag() != TokenTag::SYMBOL
+                    {
+                        return Err(CompilerDiagnostic::invalid_call_shape(
+                            InvalidCallShapeReason::RouteArgumentNotDirect,
+                            None,
+                            current_span(token_stream),
+                        )
+                        .into());
+                    }
+                    Some(crate::compiler_frontend::ast::expressions::parse_expression_input::RouteArgumentContext {
+                        output_type,
+                        input_type: input,
+                    })
+                }
+                ParameterContract::Value | ParameterContract::Wire => None,
+            },
+            None => None,
+        };
+        if parameter_expectation
+            .is_some_and(|expectation| expectation.contract == ParameterContract::Wire)
+            && access_mode == CallAccessMode::Mutable
+        {
+            return Err(CompilerDiagnostic::invalid_call_shape(
+                InvalidCallShapeReason::WireArgumentMutableMarker,
+                None,
+                marker_span,
+            )
+            .into());
+        }
         // A construction-shape slot keeps its literal unresolved until completion, and its ready
         // and retained arguments join the slot's numeric class.
         let construction_shape =
@@ -852,46 +950,178 @@ fn parse_call_arguments_inner(
                 ExpectedParameterType::GenericParameter(_)
             )
         });
+        // The argument's authored extent is needed by the Wire-origin check below. The expression
+        // parse consumes the argument's trailing newlines, so the token position cannot describe
+        // the argument: capture the first token's span and compare the parsed expression's span
+        // against it instead.
+        let argument_source_span = token_stream.current_span();
+        let argument_is_bare_symbol = token_stream.current_tag() == TokenTag::SYMBOL;
+        let mut route_future_input_type = None;
+        let route_forwarding_value = if route_argument_context.is_some() && argument_is_bare_symbol
+        {
+            let name = token_stream
+                .current_string_id_in(string_table)?
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "route argument symbol token had no string payload",
+                    )
+                })?;
+            let route_reference: Option<RouteParameterReference<'_>> =
+                context.get_route_argument_reference(&name);
+            match route_reference {
+                Some(route_reference) => {
+                    let route_context = route_argument_context.ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Route parameter lookup escaped its route argument context",
+                        )
+                    })?;
+                    let declaration = route_reference.declaration();
+                    let route_input_type = route_reference.input_type();
+                    if !route_context.matches_contract(
+                        declaration.type_id,
+                        route_input_type,
+                        type_interner.environment(),
+                    ) {
+                        return Err(CompilerDiagnostic::invalid_call_shape(
+                            InvalidCallShapeReason::RouteForwardingContractMismatch,
+                            None,
+                            Some(argument_source_span),
+                        )
+                        .into());
+                    }
+                    route_future_input_type = route_input_type;
+
+                    token_stream.advance();
+                    token_stream.skip_newlines();
+                    if !matches!(
+                        token_stream.current_tag(),
+                        TokenTag::COMMA | TokenTag::CLOSE_PARENTHESIS
+                    ) {
+                        return Err(CompilerDiagnostic::invalid_call_shape(
+                            InvalidCallShapeReason::RouteArgumentNotDirect,
+                            None,
+                            Some(argument_source_span),
+                        )
+                        .into());
+                    }
+
+                    Some(reference_expression_from_declaration(
+                        declaration,
+                        context,
+                        type_interner,
+                        expression_builder,
+                        const_values,
+                        string_table,
+                        Some(argument_source_span),
+                    )?)
+                }
+                None => {
+                    match context.get_reference(&name) {
+                        Some(ScopeDeclarationRef::PendingNumeric { .. }) => {
+                            return Err(CompilerDiagnostic::invalid_call_shape(
+                                InvalidCallShapeReason::RouteArgumentNotDirect,
+                                None,
+                                Some(argument_source_span),
+                            )
+                            .into());
+                        }
+                        Some(ScopeDeclarationRef::Local { .. })
+                        | Some(ScopeDeclarationRef::Shared(_))
+                        | Some(ScopeDeclarationRef::RouteParameter(_))
+                        | None => {}
+                    }
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let is_route_forwarding_argument = route_forwarding_value.is_some();
         // Only an argument list that can retain a deferral treats its arguments as owners of their
         // own complete fragment. Every other surface keeps raising non-owning deferrals, so a
         // nested parse that swallowed enclosing structure can never be consumed as a whole
         // argument by an outer retention site.
-        let mut input = ExpressionParseInput::call_argument(
-            ExpressionParseResources {
-                token_stream,
-                scope_context: context,
-                type_interner,
-                expression_builder,
-                const_values,
-                expected_type: &mut inferred,
-                cast_target_context: &mut cast_target_context,
-                value_mode: &ValueMode::ImmutableOwned,
-                string_table,
-                path_fork,
-            },
-            matches!(
-                receiving_context.numeric_retention,
-                CallArgumentNumericRetention::Retain
-            ),
-        );
-        if construction_shape.is_some() || retains_known_aggregate || generic_slot {
-            input = input.with_retained_pending_numeric_fragment();
-        }
-
-        if matches!(
-            receiving_context.naming_policy,
-            CallArgumentNamingPolicy::NamedOnly
-        ) {
-            input.stop_at_named_entry = true;
-        }
-
-        // Forward producers this argument registers belong to its own position alone, so only they
-        // may take the parameter receiver below.
         let producer_start = context.numeric_state().forward_producer_checkpoint();
-        let argument = match create_expression_with_trailing_newline_policy(input) {
+        let argument_result = if let Some(value) = route_forwarding_value {
+            Ok(value)
+        } else {
+            let mut input = ExpressionParseInput::call_argument(
+                ExpressionParseResources {
+                    token_stream,
+                    scope_context: context,
+                    type_interner,
+                    expression_builder,
+                    const_values,
+                    expected_type: &mut inferred,
+                    cast_target_context: &mut cast_target_context,
+                    value_mode: &ValueMode::ImmutableOwned,
+                    string_table,
+                    path_fork,
+                },
+                matches!(
+                    receiving_context.numeric_retention,
+                    CallArgumentNumericRetention::Retain
+                ),
+            );
+            if let Some(route_argument_context) = route_argument_context {
+                input = input.with_route_argument_context(route_argument_context);
+            }
+            if construction_shape.is_some() || retains_known_aggregate || generic_slot {
+                input = input.with_retained_pending_numeric_fragment();
+            }
+
+            if matches!(
+                receiving_context.naming_policy,
+                CallArgumentNamingPolicy::NamedOnly
+            ) {
+                input.stop_at_named_entry = true;
+            }
+
+            create_expression_with_trailing_newline_policy(input)
+        };
+        let argument = match argument_result {
             Ok(value) => {
+                if route_argument_context.is_some() {
+                    let argument_view = expression_builder.view_owned(value)?;
+                    let direct_route_root = match argument_view.operation() {
+                        ExpressionOperationView::RouteConstruct { .. } => true,
+                        ExpressionOperationView::Reference(_) => {
+                            is_route_forwarding_argument
+                                && argument_view.span() == Some(argument_source_span)
+                        }
+                        _ => false,
+                    };
+                    if !direct_route_root {
+                        return Err(CompilerDiagnostic::invalid_call_shape(
+                            InvalidCallShapeReason::RouteArgumentNotDirect,
+                            None,
+                            argument_view.span(),
+                        )
+                        .into());
+                    }
+                }
+                if parameter_expectation
+                    .is_some_and(|expectation| expectation.contract == ParameterContract::Wire)
+                {
+                    let argument_view = expression_builder.view_owned(value)?;
+                    if !wire_argument_origin_is_eligible(
+                        argument_view,
+                        argument_is_bare_symbol,
+                        argument_source_span,
+                        context,
+                        path_fork,
+                    ) {
+                        return Err(CompilerDiagnostic::invalid_call_shape(
+                            InvalidCallShapeReason::WireArgumentOrigin,
+                            None,
+                            argument_view.span(),
+                        )
+                        .into());
+                    }
+                }
                 validate_argument_value_policy(
                     const_values,
+                    string_table,
                     expression_builder,
                     expression_builder.view_owned(value)?,
                     context,
@@ -906,6 +1136,10 @@ fn parse_call_arguments_inner(
                     CallArgument::named(value, name, access_mode, value_span, target_span)
                 } else {
                     CallArgument::positional(value, access_mode, value_span)
+                };
+                let argument = match route_future_input_type {
+                    Some(input_type) => argument.with_route_future_input_type(input_type),
+                    None => argument,
                 };
                 let argument = argument.with_marker_span(marker_span);
                 let argument = if let Some(parameter_slot) = parameter_slot {
@@ -940,6 +1174,33 @@ fn parse_call_arguments_inner(
                 // Only the argument's own complete fragment may be retained: a nested parse that
                 // swallowed enclosing argument structure would otherwise lose that structure.
                 let deferral = error.take_numeric_deferral("a call argument")?;
+                if route_argument_context.is_some()
+                    && !retained_route_argument_is_constructor_root(&deferral.items)
+                {
+                    return Err(CompilerDiagnostic::invalid_call_shape(
+                        InvalidCallShapeReason::RouteArgumentNotDirect,
+                        None,
+                        deferral.span,
+                    )
+                    .into());
+                }
+                // Deferred expressions have no completed operation view; only one pending
+                // authored binding can still be the direct Wire source.
+                if parameter_expectation
+                    .is_some_and(|expectation| expectation.contract == ParameterContract::Wire)
+                    && !(argument_is_bare_symbol
+                        && matches!(
+                            deferral.items.as_slice(),
+                            [ExpressionRpnItem::PendingNumericBinding { is_copy: false, .. }]
+                        ))
+                {
+                    return Err(CompilerDiagnostic::invalid_call_shape(
+                        InvalidCallShapeReason::WireArgumentOrigin,
+                        None,
+                        deferral.span,
+                    )
+                    .into());
+                }
                 // A known non-numeric parameter is the exact receiver of its argument's direct origin,
                 // so its shape constrains the origin's numeric leaves before body-root defaults. A
                 // numeric parameter already registers through its literal destination.
@@ -1174,6 +1435,87 @@ fn with_following_separator_span<E>(
     }
 }
 
+/// Preserve the direct-constructor obligation when a route constructor waits for numeric completion.
+fn retained_route_argument_is_constructor_root(items: &[ExpressionRpnItem]) -> bool {
+    matches!(
+        items,
+        [ExpressionRpnItem::PendingNumericCall { call, .. }]
+            if match call.as_ref() {
+                DeferredCall::Choice(choice) => choice.is_route,
+                DeferredCall::GenericNominal(nominal) => matches!(
+                    &nominal.constructor,
+                    GenericNominalConstructor::Choice {
+                        route_future_input: Some(_),
+                        ..
+                    }
+                ),
+                _ => false,
+            }
+    )
+}
+
+/// Whether one parsed `Wire` argument names an eligible authored binding.
+///
+/// WHAT: accepts exactly one authored symbol whose parsed value is a single `Reference` naming
+///       either a `Wire` parameter of the enclosing callable or a runtime body-local binding that
+///       is not a compile-time constant.
+/// WHY: a `Wire` argument transmits an existing value binding, so its source must be a binding
+///      rather than a computed value, must be runtime state rather than compile-time content, and
+///      must not be an ordinary parameter (which carries no transmitted binding). The argument's
+///      authored extent is its first token's span compared against the parsed expression's span,
+///      because the expression parse consumes trailing newlines and a token-position count would
+///      reject a call whose argument list spans lines.
+fn wire_argument_origin_is_eligible(
+    argument_view: ExpressionView<'_>,
+    argument_is_bare_symbol: bool,
+    argument_source_span: SourceSpan,
+    context: &ScopeContext,
+    path_fork: &PathInternerFork,
+) -> bool {
+    if !argument_is_bare_symbol || argument_view.span() != Some(argument_source_span) {
+        return false;
+    }
+
+    let ExpressionOperationView::Reference(path) = argument_view.operation() else {
+        return false;
+    };
+
+    if let Some(contract) = context
+        .enclosing_callable
+        .as_ref()
+        .and_then(|callable| callable.parameter_contract(path))
+    {
+        // A parameter of the callable being parsed is not an authored body binding: only the
+        // callable's own `Wire` parameter forwards the capability. Ordinary and `Route`
+        // parameters stop here instead of reaching the local-binding arm through their
+        // default-less `Absent` value.
+        return contract == ParameterContract::Wire;
+    }
+
+    path_fork.component(path).is_some_and(|name| {
+        context
+            .get_reference(&name)
+            .is_some_and(|reference| match reference {
+                ScopeDeclarationRef::Local {
+                    declaration,
+                    binding_span,
+                } => {
+                    declaration.id == path
+                        && binding_span.is_some()
+                        && declaration.binding_span.is_some()
+                        && matches!(
+                            &declaration.value,
+                            DeclarationValue::Initializer(_) | DeclarationValue::Absent
+                        )
+                        && !context.is_explicit_compile_time_constant(&declaration)
+                }
+                ScopeDeclarationRef::Shared(_)
+                | ScopeDeclarationRef::PendingNumeric { .. }
+                | ScopeDeclarationRef::RouteParameter(_) => false,
+            })
+    })
+}
+
 /// Returns whether the current argument is exactly `none` before its call delimiter.
 ///
 fn argument_is_bare_none(token_stream: &AstCursor) -> bool {
@@ -1198,6 +1540,7 @@ fn argument_is_bare_none(token_stream: &AstCursor) -> bool {
 /// this check only decides whether the completed value satisfies the receiving boundary.
 fn validate_argument_value_policy(
     const_values: &ConstValueStore,
+    string_table: &mut StringTable,
     expression_builder: &AstExpressionBuilder,
     value: ExpressionView<'_>,
     context: &ScopeContext,
@@ -1221,13 +1564,17 @@ fn validate_argument_value_policy(
 
     let is_placeholder_reference =
         if let ExpressionOperationView::Reference(path) = value.operation() {
-            path_fork.component(path).is_some_and(|name| {
-                context.get_reference(&name).is_some_and(|reference| {
-                    reference.ready_declaration().is_some_and(|declaration| {
-                        context.is_unresolved_constant_placeholder(declaration)
-                    })
+            path_fork
+                .component(path)
+                .map(|name| context.get_value_reference(&name, value.span()))
+                .transpose()?
+                .flatten()
+                .and_then(|reference| {
+                    reference
+                        .ready_declaration()
+                        .map(|declaration| context.is_unresolved_constant_placeholder(declaration))
                 })
-            })
+                .unwrap_or(false)
         } else {
             false
         };
@@ -1240,6 +1587,7 @@ fn validate_argument_value_policy(
                     &context.template_ir_store,
                     expression_builder,
                     const_values,
+                    Some(context.external_package_registry.as_ref()),
                 )
             })?
             .is_compile_time_value();
@@ -1250,7 +1598,10 @@ fn validate_argument_value_policy(
 
     Err(CompilerDiagnostic::compile_time_evaluation_error(
         CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
-        receiving_context.diagnostics.const_operation,
+        receiving_context
+            .diagnostics
+            .const_operation
+            .and_then(|operation| operation.diagnostic_callee_name(string_table)),
         value.span(),
     )
     .into())
@@ -1301,6 +1652,7 @@ impl<'a> ParameterSlotRouter<'a> {
         &mut self,
         named_target: Option<&(StringId, Option<SourceSpan>)>,
         argument_span: Option<SourceSpan>,
+        string_table: &mut StringTable,
     ) -> Result<Option<ParameterSlot>, ExpressionParseError> {
         if let Some(named_target_spans) = self.named_target_spans.as_mut()
             && let Some((target_name, target_span)) = named_target
@@ -1344,7 +1696,7 @@ impl<'a> ParameterSlotRouter<'a> {
                 | CallArgumentSyntax::Assertion { .. } => {
                     return Err(CompilerDiagnostic::invalid_call_shape(
                         InvalidCallShapeReason::NamedArgumentsNotSupported,
-                        self.callee_name(),
+                        self.callee_name(string_table),
                         *target_span,
                     )
                     .into());
@@ -1374,7 +1726,6 @@ impl<'a> ParameterSlotRouter<'a> {
                     )
                     .into());
                 }
-
                 CallArgumentSyntax::UnsupportedBuiltinMember { member_name, .. } => {
                     return Err(CompilerDiagnostic::invalid_builtin_call(
                         InvalidBuiltinCallReason::NamedArgumentsNotSupported,
@@ -1383,26 +1734,24 @@ impl<'a> ParameterSlotRouter<'a> {
                     )
                     .into());
                 }
-
-                CallArgumentSyntax::Supported { callee_name }
-                | CallArgumentSyntax::Constructor { callee_name }
-                | CallArgumentSyntax::Assertion { callee_name } => {
+                CallArgumentSyntax::Supported { .. }
+                | CallArgumentSyntax::Constructor { .. }
+                | CallArgumentSyntax::Assertion { .. } => {
                     let Some(slot) = self.parameter_name_to_slot.get(target_name).copied() else {
                         return Err(CompilerDiagnostic::invalid_call_shape(
                             InvalidCallShapeReason::NamedArgumentNotFound {
                                 name: *target_name,
                                 known_parameters: known_parameter_names(expectations),
                             },
-                            callee_name,
+                            self.callee_name(string_table),
                             *target_span,
                         )
                         .into());
                     };
 
-                    self.mark_slot_occupied(slot, *target_span)?;
+                    self.mark_slot_occupied(slot, *target_span, string_table)?;
                     return Ok(Some(ParameterSlot::new(slot)));
                 }
-
                 CallArgumentSyntax::AnonymousConstRecord => return Ok(None),
             }
         }
@@ -1410,38 +1759,35 @@ impl<'a> ParameterSlotRouter<'a> {
         if self.saw_named_argument {
             return Err(CompilerDiagnostic::invalid_call_shape(
                 InvalidCallShapeReason::PositionalAfterNamed,
-                self.callee_name(),
+                self.callee_name(string_table),
                 argument_span,
             )
             .into());
         }
 
-        let callee_name = self.callee_name();
-        let Some(occupied_slots) = &mut self.occupied_parameter_slots else {
+        let Some(slot_count) = self.declared_slot_count() else {
             let slot = self.positional_cursor;
             self.positional_cursor += 1;
             return Ok(Some(ParameterSlot::new(slot)));
         };
 
-        while self.positional_cursor < occupied_slots.len()
-            && occupied_slots[self.positional_cursor]
-        {
+        while self.positional_cursor < slot_count && self.slot_is_occupied(self.positional_cursor) {
             self.positional_cursor += 1;
         }
 
-        if self.positional_cursor >= occupied_slots.len() {
+        if self.positional_cursor >= slot_count {
             return Err(CompilerDiagnostic::invalid_call_shape(
                 InvalidCallShapeReason::ExtraPositionalArgument {
                     expected_count: expectations.len(),
                 },
-                callee_name,
+                self.callee_name(string_table),
                 argument_span,
             )
             .into());
         }
 
         let slot = self.positional_cursor;
-        occupied_slots[slot] = true;
+        self.occupy_slot(slot);
         self.positional_cursor += 1;
         Ok(Some(ParameterSlot::new(slot)))
     }
@@ -1450,38 +1796,59 @@ impl<'a> ParameterSlotRouter<'a> {
         &mut self,
         slot: usize,
         span: Option<SourceSpan>,
+        string_table: &mut StringTable,
     ) -> Result<(), ExpressionParseError> {
         let parameter_name = self
             .expectations
             .and_then(|items| items.get(slot))
             .and_then(|expectation| expectation.name);
-        let callee_name = self.callee_name();
-        let Some(occupied_slots) = &mut self.occupied_parameter_slots else {
-            return Ok(());
-        };
 
-        if occupied_slots[slot] {
+        if self.slot_is_occupied(slot) {
             let diagnostic = CompilerDiagnostic::invalid_call_shape(
                 InvalidCallShapeReason::DuplicateArgument {
                     parameter_name,
                     parameter_index: slot,
                 },
-                callee_name,
+                self.callee_name(string_table),
                 span,
             );
             return Err(diagnostic.into());
         }
 
-        occupied_slots[slot] = true;
+        self.occupy_slot(slot);
         Ok(())
     }
 
-    fn callee_name(&self) -> Option<StringId> {
+    /// The parameter slots this list routes, when the receiving surface declares them.
+    ///
+    /// WHAT: `None` marks a surface with no declaration-order slots, whose positional arguments
+    ///       carry no routing decision.
+    fn declared_slot_count(&self) -> Option<usize> {
+        self.occupied_parameter_slots.as_ref().map(Vec::len)
+    }
+
+    /// Whether a declared slot already holds an argument.
+    fn slot_is_occupied(&self, slot: usize) -> bool {
+        self.occupied_parameter_slots
+            .as_ref()
+            .is_some_and(|occupied_slots| occupied_slots[slot])
+    }
+
+    /// Marks a declared slot occupied after this list accepted an argument for it.
+    fn occupy_slot(&mut self, slot: usize) {
+        if let Some(occupied_slots) = self.occupied_parameter_slots.as_mut() {
+            occupied_slots[slot] = true;
+        }
+    }
+
+    fn callee_name(&self, string_table: &mut StringTable) -> Option<StringId> {
         match self.receiving_context.diagnostics.syntax {
             CallArgumentSyntax::Supported { callee_name }
-            | CallArgumentSyntax::Constructor { callee_name }
             | CallArgumentSyntax::Assertion { callee_name }
             | CallArgumentSyntax::UnsupportedCall { callee_name } => callee_name,
+            CallArgumentSyntax::Constructor { callee_name } => {
+                callee_name.diagnostic_callee_name(string_table)
+            }
             CallArgumentSyntax::UnsupportedBuiltinMember { .. }
             | CallArgumentSyntax::AnonymousConstRecord => None,
         }

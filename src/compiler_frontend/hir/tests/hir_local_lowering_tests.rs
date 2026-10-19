@@ -12,7 +12,6 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, CallArgument};
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirProjection};
@@ -329,7 +328,7 @@ fn absent_local_declaration_allocates_metadata_without_initializer_work() {
     let declaration = Declaration {
         id: name,
         type_id,
-        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        type_syntax: None,
         value_mode: ValueMode::MutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
@@ -583,7 +582,6 @@ fn assignment_lowers_value_prelude_before_assign() {
     let target = assignment_target(
         &mut expressions,
         x,
-        DataType::FixedScalar(FixedScalar::I32),
         builtin_type_ids::fixed_scalar(FixedScalar::I32),
         None,
     );

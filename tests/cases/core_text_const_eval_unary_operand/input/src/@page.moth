@@ -1,0 +1,6 @@
+@core/text length, is_empty
+
+negated #= -length("a😊b")
+inverted #= not is_empty("")
+
+[:negated=[negated] inverted=[inverted]]

@@ -288,8 +288,10 @@ fn active_alias_count_for_root(
             continue;
         }
 
-        let roots = activity.state.effective_roots(candidate_index);
-        if !roots.contains(root_index) {
+        if !activity
+            .state
+            .effective_root_contains(candidate_index, root_index)
+        {
             continue;
         }
 
@@ -327,6 +329,22 @@ fn active_mutable_alias_for_root(
             continue;
         }
 
+        // Pure filters, so their order does not change which candidate is found. The bit tests
+        // run first: the diagnostics lookup and the liveness check cost more, and this scan
+        // visits every local on every mutable access.
+        let candidate_state = activity.state.local_state(candidate_index);
+        if !candidate_state.mode.contains(LocalMode::ALIAS) || !candidate_state.has_value_aliases()
+        {
+            continue;
+        }
+
+        if !activity
+            .state
+            .effective_root_contains(candidate_index, root_index)
+        {
+            continue;
+        }
+
         if matches!(
             activity.context
                 .diagnostics
@@ -336,22 +354,13 @@ fn active_mutable_alias_for_root(
             continue;
         }
 
-        let candidate_state = activity.state.local_state(candidate_index);
-        if !candidate_state.mode.contains(LocalMode::ALIAS) || !candidate_state.has_value_aliases()
-        {
-            continue;
-        }
-
         if !is_local_active_for_alias_conflict(activity, root_index, candidate_index, false)
             && !local_alias_never_read(activity.layout, activity.state, candidate_index)
         {
             continue;
         }
 
-        let roots = activity.state.effective_roots(candidate_index);
-        if roots.contains(root_index) {
-            return Some(candidate_index);
-        }
+        return Some(candidate_index);
     }
 
     None
@@ -377,6 +386,16 @@ fn conflicting_active_local_for_root(
             continue;
         }
 
+        // Membership is a bit test; the liveness check does several layout and diagnostics
+        // lookups per candidate. Both are pure filters, so testing membership first saves work
+        // without changing which candidate is found.
+        if !activity
+            .state
+            .effective_root_contains(candidate_index, root_index)
+        {
+            continue;
+        }
+
         if !is_local_active_for_alias_conflict(
             activity,
             root_index,
@@ -386,10 +405,7 @@ fn conflicting_active_local_for_root(
             continue;
         }
 
-        let roots = activity.state.effective_roots(candidate_index);
-        if roots.contains(root_index) {
-            return Some(candidate_index);
-        }
+        return Some(candidate_index);
     }
 
     None

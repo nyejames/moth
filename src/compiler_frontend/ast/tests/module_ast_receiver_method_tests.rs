@@ -13,10 +13,12 @@ use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_resolution::validate_no_recursive_runtime_structs;
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidDeclarationReason};
-use crate::compiler_frontend::datatypes::{
-    BuiltinScalarReceiver, DataType, ReceiverKey, builtin_type_ids,
-};
+use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::NominalTypeId;
+use crate::compiler_frontend::datatypes::{BuiltinScalarReceiver, ReceiverKey, builtin_type_ids};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -46,6 +48,7 @@ fn empty_receiver_entry(
         receiver,
         source_file,
         receiver_mutable: false,
+        value_carried: true,
         signature: FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -110,6 +113,51 @@ fn lookup_receiver_method_prefers_exact_source_file_before_catalog_fallback() {
     assert_eq!(
         resolved.function_path, local_entry.function_path,
         "same-file receiver methods should be preferred when file visibility is omitted"
+    );
+}
+
+#[test]
+fn production_lookup_rejects_provider_private_entry_through_value_carried_fallback() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let method_name = string_table.intern("reset");
+    let receiver = ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Char);
+    let key = (receiver.to_owned(), method_name);
+    let source_file = interned_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let function_path = interned_path(&["src", "reset"], &mut string_table, &mut path_fork);
+
+    let public_entry = empty_receiver_entry(function_path, source_file, receiver.to_owned());
+    let mut private_entry = empty_receiver_entry(function_path, source_file, receiver.to_owned());
+    private_entry.value_carried = false;
+
+    // Production always attaches file visibility, so lookup takes the name-visible walk and then
+    // the value-carried fallback. The name-visible set is empty here, so only the value-carried
+    // filter decides whether an entry dispatches.
+    let mut public_catalog = ReceiverMethodCatalog::default();
+    public_catalog
+        .by_receiver_and_name
+        .insert(key.to_owned(), vec![public_entry]);
+    let public_context = context_for_source_file(source_file, public_catalog, &path_fork)
+        .with_file_visibility(Arc::new(FileVisibility::default()));
+    let resolved = public_context
+        .lookup_receiver_method(&receiver, method_name)
+        .expect("value-carried receiver method should dispatch through the fallback");
+    assert_eq!(
+        resolved.function_path, function_path,
+        "the value-carried entry should be the one that dispatches"
+    );
+
+    let mut private_catalog = ReceiverMethodCatalog::default();
+    private_catalog
+        .by_receiver_and_name
+        .insert(key, vec![private_entry]);
+    let private_context = context_for_source_file(source_file, private_catalog, &path_fork)
+        .with_file_visibility(Arc::new(FileVisibility::default()));
+    assert!(
+        private_context
+            .lookup_receiver_method(&receiver, method_name)
+            .is_none(),
+        "provider-private receiver methods must not dispatch through the value-carried fallback"
     );
 }
 
@@ -221,13 +269,29 @@ fn recursive_runtime_struct_cycles_are_rejected() {
             "every struct path must belong to the caller-owned fork"
         );
     }
+    let mut type_environment = TypeEnvironment::new();
+    let (_, struct_a_type) = type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: struct_a,
+        fields: Box::new([]),
+        generic_parameters: None,
+        const_record: false,
+    });
+    let (_, struct_b_type) = type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: struct_b,
+        fields: Box::new([]),
+        generic_parameters: None,
+        const_record: false,
+    });
+
     let mut struct_fields = FxHashMap::default();
     struct_fields.insert(
-        struct_a.to_owned(),
+        struct_a,
         vec![Declaration {
             id: struct_a_field_b,
-            type_id: builtin_type_ids::NONE,
-            diagnostic_type: DataType::runtime_struct(struct_b.to_owned(), builtin_type_ids::NONE),
+            type_id: struct_b_type,
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -235,11 +299,11 @@ fn recursive_runtime_struct_cycles_are_rejected() {
         }],
     );
     struct_fields.insert(
-        struct_b.to_owned(),
+        struct_b,
         vec![Declaration {
             id: struct_b_field_a,
-            type_id: builtin_type_ids::NONE,
-            diagnostic_type: DataType::runtime_struct(struct_a, builtin_type_ids::NONE),
+            type_id: struct_a_type,
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -247,7 +311,7 @@ fn recursive_runtime_struct_cycles_are_rejected() {
         }],
     );
 
-    let diagnostic = validate_no_recursive_runtime_structs(&struct_fields)
+    let diagnostic = validate_no_recursive_runtime_structs(&struct_fields, &type_environment)
         .expect_err("recursive runtime struct cycle should be rejected");
     assert!(matches!(
         &diagnostic.payload,
@@ -273,13 +337,22 @@ fn non_recursive_runtime_structs_are_allowed() {
         "struct and field paths must belong to the caller-owned fork"
     );
 
+    let mut type_environment = TypeEnvironment::new();
+    type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: struct_a,
+        fields: Box::new([]),
+        generic_parameters: None,
+        const_record: false,
+    });
+
     let mut struct_fields = FxHashMap::default();
     struct_fields.insert(
         struct_a,
         vec![Declaration {
             id: field_ax,
             type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -287,6 +360,6 @@ fn non_recursive_runtime_structs_are_allowed() {
         }],
     );
 
-    validate_no_recursive_runtime_structs(&struct_fields)
+    validate_no_recursive_runtime_structs(&struct_fields, &type_environment)
         .expect("non-recursive runtime structs should pass validation");
 }

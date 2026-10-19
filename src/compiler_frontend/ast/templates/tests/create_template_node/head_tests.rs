@@ -1,5 +1,4 @@
 use super::*;
-use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     ExprId, ExpressionOperationView,
@@ -42,7 +41,6 @@ use crate::compiler_frontend::ast::{
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidExpressionReason, InvalidTemplateStructureReason, NameNamespace,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
@@ -514,6 +512,7 @@ fn prepare_const_required_view_directly(
         expressions,
         const_values,
         TemplatePreparationMode::ConstRequired,
+        None,
     )
 }
 

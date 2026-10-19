@@ -1,0 +1,21 @@
+FormMessage ::
+    NameChanged | value String |,
+;
+
+SettingsMessage ::
+    Saved | value String |,
+;
+
+notify type M |event Route of String -> M| -> String:
+    return "notified"
+;
+
+forward type M |event Route of String -> M| -> String:
+    return notify(event)
+;
+
+first = notify(FormMessage::NameChanged)
+second = notify(SettingsMessage::Saved)
+forwarded = forward(FormMessage::NameChanged)
+
+[:generic-output first=[first] second=[second] forwarded=[forwarded]]

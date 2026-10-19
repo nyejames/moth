@@ -669,7 +669,7 @@ impl TemplateConstructionContext {
     ) -> Result<TemplateTirReference, CompilerError> {
         let TemplateConstructionContext {
             store,
-            children,
+            mut children,
             mut head_node_count,
             control_flow_node_id,
             span,
@@ -694,7 +694,8 @@ impl TemplateConstructionContext {
                 match first_control_flow_index {
                     Some(index) if index > 0 => {
                         head_node_count = 0;
-                        children[index..].to_vec()
+                        drop(children.drain(..index));
+                        children
                     }
                     _ => children,
                 }

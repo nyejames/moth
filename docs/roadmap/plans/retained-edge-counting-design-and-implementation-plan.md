@@ -32,7 +32,7 @@ Physical layout refinement may later consume validated `$layout` representation 
 ## Compiler foundation prerequisite
 
 Consume the merged dense HIR and native result-channel capabilities before implementation. The
-typed semantic expression foundation owns that representation cutover and the mechanical borrow
+compact typed-expression foundation owns that representation change and the mechanical borrow
 and lifetime consumer migration. REC does not repeat it or retain tuple/fallible wrapper adapters.
 These capabilities do not activate REC: complete lifetime topology, retained-edge effects,
 target-aware physical planning and explicit roadmap activation remain prerequisites.

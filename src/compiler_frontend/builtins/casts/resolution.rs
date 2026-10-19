@@ -423,8 +423,8 @@ fn generic_bound_evidence_for(
     }
 
     let bounds = type_environment.trait_bounds_for_generic_parameter(parameter_id)?;
-    let mut infallible_trait_id: Option<TraitId> = None;
-    let mut fallible_trait_id: Option<TraitId> = None;
+    let mut has_infallible_bound = false;
+    let mut has_fallible_bound = false;
 
     for trait_id in bounds {
         let Some((bound_target, bound_fallibility)) =
@@ -438,20 +438,14 @@ fn generic_bound_evidence_for(
         }
 
         match bound_fallibility {
-            BuiltinCastFallibility::Infallible => infallible_trait_id = Some(*trait_id),
-            BuiltinCastFallibility::Fallible => fallible_trait_id = Some(*trait_id),
+            BuiltinCastFallibility::Infallible => has_infallible_bound = true,
+            BuiltinCastFallibility::Fallible => has_fallible_bound = true,
         }
     }
 
     Some(CastEvidenceSelection {
-        infallible: infallible_trait_id.map(|trait_id| ResolvedCastEvidence::GenericBound {
-            trait_id,
-            parameter_id,
-        }),
-        fallible: fallible_trait_id.map(|trait_id| ResolvedCastEvidence::GenericBound {
-            trait_id,
-            parameter_id,
-        }),
+        infallible: has_infallible_bound.then_some(ResolvedCastEvidence::GenericBound),
+        fallible: has_fallible_bound.then_some(ResolvedCastEvidence::GenericBound),
     })
 }
 

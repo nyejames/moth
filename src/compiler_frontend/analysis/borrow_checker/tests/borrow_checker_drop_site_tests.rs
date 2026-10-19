@@ -8,8 +8,8 @@ use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::hir::expression_store::HirProjection;
 use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatementKind, HirWriteTarget,
@@ -17,8 +17,8 @@ use crate::compiler_frontend::hir::statements::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, function_node, make_test_variable, node, reference_expr_with_datatype,
-    symbol, test_if_branch_metadata, test_source_location,
+    assignment_target, function_node, immutable_reference_expr, make_test_variable, node, symbol,
+    test_if_branch_metadata, test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
@@ -167,10 +167,9 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
             ),
             node(
                 NodeKind::If(
-                    reference_expr_with_datatype(
+                    immutable_reference_expr(
                         &mut builder,
                         flag,
-                        DataType::Bool,
                         builtin_type_ids::BOOL,
                         test_source_location(2),
                     ),
@@ -179,7 +178,6 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
                             target: assignment_target(
                                 &mut builder,
                                 x,
-                                DataType::FixedScalar(FixedScalar::I32),
                                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(3),
                             ),
@@ -198,7 +196,6 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
                             target: assignment_target(
                                 &mut builder,
                                 x,
-                                DataType::FixedScalar(FixedScalar::I32),
                                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(4),
                             ),

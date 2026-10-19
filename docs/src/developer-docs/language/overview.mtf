@@ -205,8 +205,8 @@ its explicit parameter-context rules.
 - `docs/src/docs/markdown/choosing-a-content-format.mtf`
 
 The public Wiring route pairs Basic teaching with the canonical unsuffixed
-reference at `docs/src/docs/wiring/wiring.mtf`. Wire and Route implementation
-remains deferred until Phase 6; the reference owns accepted semantics.
+reference at `docs/src/docs/wiring/wiring.mtf`. The reference owns Wire and Route
+semantics; the progress matrix owns their target support.
 
 ## Public documentation
 

@@ -278,26 +278,20 @@ fn project_target_type_identity(
 /// Project the evidence trait identity to a canonical identity, or return `Private` when the
 /// trait is not consumer-visible.
 ///
-/// WHAT: projects the evidence `TraitId` directly from the `TraitEnvironment`. A core trait
-/// (identified by `core_trait_kind`) projects to `CanonicalTraitIdentity::Core` and is always
-/// consumer-visible. A source trait resolves its canonical declaration path from the trait
-/// definition and projects to `CanonicalTraitIdentity::Source` when that path is retained in
-/// the public source-trait origin index. A source trait without a public origin is private and
-/// excluded from the draft.
-/// WHY: the `trait_source_facts` map on `ResolvedPublicTypeRootTable` intentionally retains
-/// only traits needed by exported generic bounds and public incompatibility relations. A
-/// public nominal target may have canonical evidence for a private source trait or a core
-/// trait that appears in neither set, so the evidence projection must classify the trait from
-/// the complete `TraitEnvironment` rather than from the partial `trait_source_facts` map.
+/// WHAT: classifies the evidence `TraitId` with `ResolvedTraitSourceFact::classify`, the owner
+/// that generic-bound projection also uses. A core or imported trait is always consumer-visible.
+/// A local source trait is visible only when its canonical path has a retained public
+/// source-trait origin; otherwise it is private and excluded from the draft.
+/// WHY: an imported trait's canonical path is synthesised in the consumer and never appears in
+/// the origin index, so classifying it by path would silently drop its evidence as private.
+/// Classifying from the complete `TraitEnvironment` rather than the partial `trait_source_facts`
+/// map keeps evidence for traits that appear in neither the bound nor the incompatibility sets.
 fn project_evidence_trait_identity(
     evidence: &TraitEvidenceDefinition,
     context: &EvidenceProjectionContext,
 ) -> Result<ProjectedTrait, CompilerError> {
-    // Classify the trait as core or source from the complete trait environment. A core trait
-    // is always consumer-visible. A source trait is visible only when its canonical path has
-    // a retained public source-trait origin. A definition whose visibility is `Core` but
-    // which has no recorded `core_trait_kind` is malformed compiler metadata and must not
-    // silently fall through to source-path visibility, so it is rejected.
+    // A definition whose visibility is `Core` but which has no recorded `core_trait_kind` is
+    // malformed compiler metadata and must not silently fall through to source classification.
     let definition = context.trait_environment.get(evidence.trait_id);
     if let Some(definition) = definition
         && matches!(definition.visibility, TraitVisibility::Core)
@@ -316,23 +310,12 @@ fn project_evidence_trait_identity(
     }
 
     let source_fact =
-        if let Some(kind) = context.trait_environment.core_trait_kind(evidence.trait_id) {
-            ResolvedTraitSourceFact::Core(kind)
-        } else {
-            let Some(definition) = context.trait_environment.get(evidence.trait_id) else {
-                return Err(CompilerError::compiler_error(format!(
-                    "public-interface draft evidence projection: the evidence TraitId({}) has no \
-                     resolved definition in the TraitEnvironment and is not a registered core \
-                     trait; a missing definition is an internal invariant violation",
-                    evidence.trait_id.0
-                )));
-            };
-            let path = &definition.canonical_path;
-            if !context.public_source_trait_origins.contains_key(path) {
-                return Ok(ProjectedTrait::Private);
-            }
-            ResolvedTraitSourceFact::Source(definition.canonical_path)
-        };
+        ResolvedTraitSourceFact::classify(evidence.trait_id, context.trait_environment)?;
+    if let ResolvedTraitSourceFact::Source(path) = &source_fact
+        && !context.public_source_trait_origins.contains_key(path)
+    {
+        return Ok(ProjectedTrait::Private);
+    }
 
     let identity = project_trait_source_fact_to_canonical_identity(
         &source_fact,

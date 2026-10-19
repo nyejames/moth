@@ -1,0 +1,3 @@
+render || -> Wire of String:
+    return "value"
+;

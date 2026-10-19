@@ -1,0 +1,25 @@
+@provider LEFT_TEXT, RIGHT_TEXT, FIRST_TEXT, SECOND_TEXT, combine
+
+export:
+    Label = |text String|
+    Box type T = |value T|
+;
+
+left_text |this Label| -> String:
+    return [:left=[this.text]]
+;
+right_text |this Label| -> String:
+    return [:right=[this.text]]
+;
+Label must LEFT_TEXT, RIGHT_TEXT
+
+first_text type T is LEFT_TEXT |this Box of T| -> String:
+    return this.value.left_text()
+;
+second_text type T is RIGHT_TEXT |this Box of T| -> String:
+    return this.value.right_text()
+;
+Box must FIRST_TEXT, SECOND_TEXT
+
+result = combine(Box(Label("payload")))
+[:result=[result]]

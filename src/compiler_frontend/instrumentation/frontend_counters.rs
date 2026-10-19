@@ -178,7 +178,7 @@ pub(crate) enum FrontendCounter {
     StringTableDeltaNonIdentityRemaps,
     #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     StringTableDeltaNonIdentityEntries,
-    // Path-table fork/merge volume (Phase 2 Slice 2B). Node count totals interned nodes
+    // Path-table fork/merge volume. Node count totals interned nodes
     // including ROOT; max depth is a gauge updated on intern via fetch_max.
     PathNodeCount,
     #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
@@ -202,7 +202,7 @@ pub(crate) enum FrontendCounter {
     #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     FilePrepareNonIdentityPayloadRemaps,
 
-    // Arena capacity-estimate counters (Phase 1).
+    // Arena capacity-estimate counters.
     EstimatedScopeFrames,
     ActualScopeFrames,
     ScopeArenaCapacity,
@@ -216,7 +216,7 @@ pub(crate) enum FrontendCounter {
     ScopeFrameOverEstimateCount,
     CappedCapacityEstimates,
 
-    // External package metadata clone-pressure counters (Phase 3).
+    // External package metadata clone-pressure counters.
     ExternalPackageRegistryCloneCount,
     ExternalPackageDefinitionCloneCount,
     ExternalFunctionDefinitionCloneCount,
@@ -228,8 +228,6 @@ pub(crate) enum FrontendCounter {
     CensusAstValidationExpressionExpansions,
     #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     CensusHirLowerExpressionEntries,
-    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
-    CensusFoldCompileTimeExpressionEntries,
     #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     CensusConstantFoldEntries,
     #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
@@ -447,7 +445,6 @@ mod detailed {
     static FILE_PREPARE_NON_IDENTITY_PAYLOAD_REMAPS: AtomicUsize = AtomicUsize::new(0);
     static CENSUS_AST_VALIDATION_EXPRESSION_EXPANSIONS: AtomicUsize = AtomicUsize::new(0);
     static CENSUS_HIR_LOWER_EXPRESSION_ENTRIES: AtomicUsize = AtomicUsize::new(0);
-    static CENSUS_FOLD_COMPILE_TIME_EXPRESSION_ENTRIES: AtomicUsize = AtomicUsize::new(0);
     static CENSUS_CONSTANT_FOLD_ENTRIES: AtomicUsize = AtomicUsize::new(0);
     static CENSUS_FOLD_OUTCOME_FOLDED: AtomicUsize = AtomicUsize::new(0);
     static CENSUS_FOLD_OUTCOME_RUNTIME: AtomicUsize = AtomicUsize::new(0);
@@ -737,7 +734,6 @@ mod detailed {
             FrontendCounter::ExternalAbiParameterCloneCount,
             FrontendCounter::CensusAstValidationExpressionExpansions,
             FrontendCounter::CensusHirLowerExpressionEntries,
-            FrontendCounter::CensusFoldCompileTimeExpressionEntries,
             FrontendCounter::CensusConstantFoldEntries,
             FrontendCounter::CensusFoldOutcomeFolded,
             FrontendCounter::CensusFoldOutcomeRuntime,
@@ -1122,9 +1118,6 @@ mod detailed {
             }
             FrontendCounter::CensusHirLowerExpressionEntries => {
                 &CENSUS_HIR_LOWER_EXPRESSION_ENTRIES
-            }
-            FrontendCounter::CensusFoldCompileTimeExpressionEntries => {
-                &CENSUS_FOLD_COMPILE_TIME_EXPRESSION_ENTRIES
             }
             FrontendCounter::CensusConstantFoldEntries => &CENSUS_CONSTANT_FOLD_ENTRIES,
             FrontendCounter::CensusFoldOutcomeFolded => &CENSUS_FOLD_OUTCOME_FOLDED,
@@ -1541,9 +1534,6 @@ mod detailed {
             }
             FrontendCounter::CensusHirLowerExpressionEntries => {
                 "frontend_census_hir_lower_expression_entries"
-            }
-            FrontendCounter::CensusFoldCompileTimeExpressionEntries => {
-                "frontend_census_fold_compile_time_expression_entries"
             }
             FrontendCounter::CensusConstantFoldEntries => "frontend_census_constant_fold_entries",
             FrontendCounter::CensusFoldOutcomeFolded => "frontend_census_fold_outcome_folded",

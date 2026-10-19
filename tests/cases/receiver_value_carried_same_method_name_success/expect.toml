@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "receiver_value_carried_same_method_name_success circle=2 square=3"

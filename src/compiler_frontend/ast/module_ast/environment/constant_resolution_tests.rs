@@ -7,7 +7,8 @@
 
 use super::non_constant_initializer_fold_refusal;
 use crate::compiler_frontend::ast::const_eval::{
-    ConstantFoldError, ConstantFoldOutcome, constant_fold,
+    ConstantFoldError, ConstantFoldOutcome, ConstantFoldRefusalReason, FoldRequirement,
+    FoldServices, constant_fold,
 };
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
@@ -52,8 +53,8 @@ fn foreign_constant_content_stays_on_the_infrastructure_lane() {
         root,
         &mut expression_builder,
         &mut foreign_values,
-        &mut string_table,
-        None,
+        FoldServices::new(&mut string_table, None, None),
+        FoldRequirement::Opportunistic,
     );
 
     match non_constant_initializer_fold_refusal(fold) {
@@ -70,11 +71,11 @@ fn text_unavailable_fold_keeps_its_precise_diagnostic() {
     None,
     ValueMode::ImmutableOwned,
     crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,).expect("reference fits").id();
-    let fold = Ok(ConstantFoldOutcome::TextUnavailable {
+    let fold = Ok(ConstantFoldOutcome::Refused {
         root,
-        diagnostic: evaluation_diagnostic(
+        reason: ConstantFoldRefusalReason::StructuralTextUnavailable(evaluation_diagnostic(
             CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText,
-        ),
+        )),
     });
 
     let error = non_constant_initializer_fold_refusal(fold)

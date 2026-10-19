@@ -1,19 +1,25 @@
 //! Function signature resolution for AST type resolution.
 
-use super::{ResolvedFunctionSignature, resolve_named_signature_type};
+use super::ResolvedFunctionSignature;
+use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionSignature, ReturnChannel, ReturnSlot,
+    FunctionParameter, FunctionSignature, ParameterContract, ReturnChannel, ReturnSlot,
+    UnresolvedFunctionSignature,
 };
 use crate::compiler_frontend::ast::type_resolution::{
-    TypeResolutionContext, TypeResolutionResult, resolve_diagnostic_type_to_type_id_checked,
+    TypeResolutionContext, TypeResolutionResult, resolve_parsed_type_annotation,
+    reusable_type_id_for_parsed_ref,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidReceiverDeclarationReason, InvalidThisUsageReason,
+    CompilerDiagnostic, InvalidReceiverDeclarationReason, InvalidRouteOutputReason,
+    InvalidThisUsageReason, InvalidTypeAnnotationReason, TypeAnnotationContext,
 };
+use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::ids::{FunctionTypeKey, GenericParameterListId, TypeId};
-use crate::compiler_frontend::datatypes::{ReceiverKey, diagnostic_type_spelling};
+use crate::compiler_frontend::declaration_syntax::type_syntax::ParsedParameterContractSyntax;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -54,11 +60,12 @@ pub(crate) fn intern_resolved_function_signature(
 /// Resolve a function signature and extract receiver metadata for method cataloging.
 pub(crate) fn resolve_function_signature(
     function_path: &PathId,
-    signature: &FunctionSignature,
+    signature: &UnresolvedFunctionSignature,
     generic_parameter_list_id: Option<GenericParameterListId>,
     type_resolution_context: &mut TypeResolutionContext<'_>,
     path_fork: &PathInternerFork,
     string_table: &mut StringTable,
+    scope_context: Option<&ScopeContext>,
 ) -> TypeResolutionResult<ResolvedFunctionSignature> {
     let this_name = string_table.intern("this");
     let function_name_id = path_fork
@@ -78,21 +85,85 @@ pub(crate) fn resolve_function_signature(
     // --------------------
 
     for (parameter_index, parameter) in signature.parameters.iter().enumerate() {
-        let mut resolved_parameter = parameter.to_owned();
-
-        resolved_parameter.diagnostic_type = resolve_named_signature_type(
-            &parameter.diagnostic_type,
-            parameter.binding_span,
-            type_resolution_context,
-            string_table,
-        )?;
-
-        // Callable contracts own parameter types independently of folded default content.
-        resolved_parameter.type_id = resolve_diagnostic_type_to_type_id_checked(
-            &resolved_parameter.diagnostic_type,
-            type_resolution_context.type_environment,
-            resolved_parameter.binding_span,
-        )?;
+        let type_id = if let Some(type_syntax) = &parameter.type_syntax {
+            let type_id = if let Some(type_id) = reusable_type_id_for_parsed_ref(
+                type_syntax,
+                Some(parameter.type_id),
+                type_resolution_context,
+            ) {
+                Some(type_id)
+            } else {
+                resolve_parsed_type_annotation(
+                    type_syntax,
+                    parameter.binding_span,
+                    type_resolution_context,
+                    string_table,
+                    scope_context,
+                )?
+                .type_id
+            };
+            type_id
+                .filter(|type_id| *type_id != builtin_type_ids::NONE)
+                .ok_or_else(|| {
+                    CompilerDiagnostic::invalid_type_annotation(
+                        TypeAnnotationContext::SignatureParameter,
+                        InvalidTypeAnnotationReason::NoneNotAllowed,
+                        parameter.binding_span,
+                    )
+                })?
+        } else if parameter.type_id != builtin_type_ids::NONE
+            && type_resolution_context
+                .type_environment
+                .get(parameter.type_id)
+                .is_some()
+        {
+            parameter.type_id
+        } else {
+            return Err(CompilerDiagnostic::invalid_type_annotation(
+                TypeAnnotationContext::SignatureParameter,
+                InvalidTypeAnnotationReason::NoneNotAllowed,
+                parameter.binding_span,
+            ));
+        };
+        let contract = match &parameter.contract_syntax {
+            ParsedParameterContractSyntax::Value => ParameterContract::Value,
+            ParsedParameterContractSyntax::Wire => ParameterContract::Wire,
+            ParsedParameterContractSyntax::Route { input, output_span } => {
+                if !route_output_is_choice_or_generic(
+                    type_id,
+                    type_resolution_context.type_environment,
+                ) {
+                    return Err(CompilerDiagnostic::invalid_route_output(
+                        InvalidRouteOutputReason::NotChoiceOrGeneric,
+                        type_id,
+                        output_span.or(parameter.binding_span),
+                    ));
+                }
+                let input = input
+                    .as_ref()
+                    .map(|input_syntax| {
+                        resolve_parsed_type_annotation(
+                            input_syntax,
+                            parameter.binding_span,
+                            type_resolution_context,
+                            string_table,
+                            scope_context,
+                        )
+                        .map(|input| input.type_id)
+                    })
+                    .transpose()?
+                    .flatten();
+                ParameterContract::Route { input }
+            }
+        };
+        let resolved_parameter = FunctionParameter {
+            id: parameter.id,
+            type_id,
+            value_mode: parameter.value_mode,
+            default: parameter.default,
+            binding_span: parameter.binding_span,
+            contract,
+        };
         if path_fork.component(resolved_parameter.id) == Some(this_name) {
             if receiver.is_some() {
                 return Err(CompilerDiagnostic::invalid_this_usage(
@@ -118,8 +189,6 @@ pub(crate) fn resolve_function_signature(
                 generic_parameter_list_id,
                 type_resolution_context.type_environment,
                 parameter.binding_span,
-                path_fork,
-                string_table,
             )?;
 
             receiver = Some(receiver_key);
@@ -133,23 +202,43 @@ pub(crate) fn resolve_function_signature(
     // -----------------
 
     let mut resolved_returns = Vec::with_capacity(signature.returns.len());
-
     for return_slot in &signature.returns {
-        let resolved_value = resolve_named_signature_type(
-            &return_slot.value,
-            function_span,
-            type_resolution_context,
-            string_table,
-        )?;
-
-        let type_id = resolve_diagnostic_type_to_type_id_checked(
-            &resolved_value,
-            type_resolution_context.type_environment,
-            function_span,
-        )?;
+        let type_id = if let Some(type_syntax) = &return_slot.type_syntax {
+            if let Some(type_id) = reusable_type_id_for_parsed_ref(
+                type_syntax,
+                return_slot.type_id,
+                type_resolution_context,
+            ) {
+                Some(type_id)
+            } else {
+                resolve_parsed_type_annotation(
+                    type_syntax,
+                    function_span,
+                    type_resolution_context,
+                    string_table,
+                    scope_context,
+                )?
+                .type_id
+            }
+        } else {
+            return_slot.type_id
+        }
+        .filter(|type_id| {
+            *type_id != builtin_type_ids::NONE
+                && type_resolution_context
+                    .type_environment
+                    .get(*type_id)
+                    .is_some()
+        })
+        .ok_or_else(|| {
+            CompilerDiagnostic::invalid_type_annotation(
+                TypeAnnotationContext::SignatureReturn,
+                InvalidTypeAnnotationReason::NoneNotAllowed,
+                function_span,
+            )
+        })?;
 
         resolved_returns.push(ReturnSlot {
-            value: resolved_value,
             type_id: Some(type_id),
             channel: return_slot.channel,
         });
@@ -170,8 +259,6 @@ fn receiver_key_for_resolved_parameter(
     generic_parameter_list_id: Option<GenericParameterListId>,
     type_environment: &TypeEnvironment,
     span: Option<SourceSpan>,
-    path_fork: &PathInternerFork,
-    string_table: &mut StringTable,
 ) -> TypeResolutionResult<ReceiverKey> {
     if let Some(TypeDefinition::GenericInstance(instance)) = type_environment.get(receiver_type_id)
     {
@@ -182,24 +269,14 @@ fn receiver_key_for_resolved_parameter(
         ) {
             return receiver_key_for_generic_instance_base(receiver_type_id, type_environment)
                 .ok_or_else(|| {
-                    unsupported_receiver_type_diagnostic(
-                        function_name_id,
-                        receiver_type_id,
-                        type_environment,
-                        span,
-                        path_fork,
-                        string_table,
-                    )
+                    unsupported_receiver_type_diagnostic(function_name_id, receiver_type_id, span)
                 });
         }
 
         return Err(generic_receiver_type_diagnostic(
             function_name_id,
             receiver_type_id,
-            type_environment,
             span,
-            path_fork,
-            string_table,
         ));
     }
 
@@ -215,14 +292,7 @@ fn receiver_key_for_resolved_parameter(
     type_environment
         .receiver_key_for_type_id(receiver_type_id)
         .ok_or_else(|| {
-            unsupported_receiver_type_diagnostic(
-                function_name_id,
-                receiver_type_id,
-                type_environment,
-                span,
-                path_fork,
-                string_table,
-            )
+            unsupported_receiver_type_diagnostic(function_name_id, receiver_type_id, span)
         })
 }
 
@@ -277,16 +347,12 @@ fn receiver_key_for_generic_instance_base(
 fn generic_receiver_type_diagnostic(
     function_name_id: StringId,
     receiver_type_id: TypeId,
-    type_environment: &TypeEnvironment,
     span: Option<SourceSpan>,
-    path_fork: &PathInternerFork,
-    string_table: &mut StringTable,
 ) -> CompilerDiagnostic {
-    let type_name = receiver_type_name(receiver_type_id, type_environment, path_fork, string_table);
     CompilerDiagnostic::invalid_receiver_declaration(
         InvalidReceiverDeclarationReason::GenericReceiverType {
             function_name: function_name_id,
-            type_name,
+            type_id: receiver_type_id,
         },
         span,
     )
@@ -295,28 +361,23 @@ fn generic_receiver_type_diagnostic(
 fn unsupported_receiver_type_diagnostic(
     function_name_id: StringId,
     receiver_type_id: TypeId,
-    type_environment: &TypeEnvironment,
     span: Option<SourceSpan>,
-    path_fork: &PathInternerFork,
-    string_table: &mut StringTable,
 ) -> CompilerDiagnostic {
-    let type_name = receiver_type_name(receiver_type_id, type_environment, path_fork, string_table);
     CompilerDiagnostic::invalid_receiver_declaration(
         InvalidReceiverDeclarationReason::UnsupportedType {
             function_name: function_name_id,
-            type_name,
+            type_id: receiver_type_id,
         },
         span,
     )
 }
-
-fn receiver_type_name(
-    receiver_type_id: TypeId,
-    type_environment: &TypeEnvironment,
-    path_fork: &PathInternerFork,
-    string_table: &mut StringTable,
-) -> StringId {
-    let spelling = diagnostic_type_spelling(receiver_type_id, type_environment);
-    let path_table = path_fork.snapshot_table();
-    string_table.intern(&spelling.display_with_table(string_table, &path_table))
+fn route_output_is_choice_or_generic(type_id: TypeId, type_environment: &TypeEnvironment) -> bool {
+    match type_environment.get(type_id) {
+        Some(TypeDefinition::Choice(_)) | Some(TypeDefinition::GenericParameter(_)) => true,
+        Some(TypeDefinition::GenericInstance(instance)) => type_environment
+            .type_id_for_nominal_id(instance.base)
+            .and_then(|base_type_id| type_environment.get(base_type_id))
+            .is_some_and(|definition| matches!(definition, TypeDefinition::Choice(_))),
+        _ => false,
+    }
 }

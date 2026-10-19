@@ -9,10 +9,7 @@ fn collect_semantic_type_origins(
     match semantics {
         PublicDeclarationSemantics::Function(function) => {
             for parameter in &function.parameters {
-                collect_canonical_type_origins(&parameter.type_identity, origins);
-                if let Some(default) = &parameter.folded_default {
-                    collect_folded_type_origins(default, origins);
-                }
+                collect_parameter_type_origins(parameter, origins);
             }
             for returned in &function.returns {
                 collect_canonical_type_origins(&returned.type_identity, origins);
@@ -49,6 +46,8 @@ fn collect_semantic_type_origins(
             collect_canonical_type_origins(&constant.type_identity, origins);
             collect_folded_type_origins(&constant.folded_value, origins);
         }
+        // Trait requirements are not walked here. `reachable_imported_type_origins` seeds them
+        // for every retained trait, because trait projection covers the whole closure.
         PublicDeclarationSemantics::Trait(_) => {}
     }
 }
@@ -58,10 +57,7 @@ fn collect_receiver_method_type_origins(
     origins: &mut FxHashSet<OriginTypeId>,
 ) {
     for parameter in &method.parameters {
-        collect_canonical_type_origins(&parameter.type_identity, origins);
-        if let Some(default) = &parameter.folded_default {
-            collect_folded_type_origins(default, origins);
-        }
+        collect_parameter_type_origins(parameter, origins);
     }
     for returned in &method.returns {
         collect_canonical_type_origins(&returned.type_identity, origins);
@@ -71,75 +67,64 @@ fn collect_receiver_method_type_origins(
     }
 }
 
+/// Collect the origins of one public parameter slot, including its contract-owned type.
+///
+/// WHAT: walks the slot's own identity and any `Route` input through the slot's traversal owner,
+///       then its folded default.
+/// WHY: a projected imported callable must declare a consumer-local nominal for every type its
+///      signature names, and the Route input is part of that signature.
+fn collect_parameter_type_origins(
+    parameter: &crate::compiler_frontend::public_interface::PublicParameterTypeSlot,
+    origins: &mut FxHashSet<OriginTypeId>,
+) {
+    for identity in parameter.semantic_type_identities() {
+        collect_canonical_type_origins(identity, origins);
+    }
+    if let Some(default) = &parameter.folded_default {
+        collect_folded_type_origins(default, origins);
+    }
+}
+
+/// Collect the source nominal origins named by one canonical identity and everything it contains.
+///
+/// WHY: the recursion over option, collection, map and generic-instance arguments belongs to
+///      `CanonicalTypeIdentity::visit`, so this module only decides which visited identities name
+///      an imported nominal.
 fn collect_canonical_type_origins(
     identity: &CanonicalTypeIdentity,
     origins: &mut FxHashSet<OriginTypeId>,
 ) {
+    identity.visit(&mut |visited| insert_nominal_origin(visited, origins));
+}
+
+/// Collect the source nominal origins retained by one folded value.
+///
+/// WHY: `PublicFoldedValue::visit_type_identities` owns the walk through records, choices, ranges
+///      and options, so folded and canonical collection share one origin filter.
+fn collect_folded_type_origins(value: &PublicFoldedValue, origins: &mut FxHashSet<OriginTypeId>) {
+    value.visit_type_identities(&mut |visited| insert_nominal_origin(visited, origins));
+}
+
+/// Insert the origin of one visited identity when it names an imported nominal.
+///
+/// WHY: only source nominals and generic-instance bases need a consumer-local declaration.
+///      Builtins, private nominals, opaque externals, generic parameters and anonymous const
+///      records never do, so every variant is listed rather than hidden behind a wildcard.
+fn insert_nominal_origin(identity: &CanonicalTypeIdentity, origins: &mut FxHashSet<OriginTypeId>) {
     match identity {
+        CanonicalTypeIdentity::SourceNominal(origin)
+        | CanonicalTypeIdentity::GenericInstance { base: origin, .. } => {
+            origins.insert(origin.clone());
+        }
         CanonicalTypeIdentity::Builtin(_)
         | CanonicalTypeIdentity::ModulePrivateNominal(_)
         | CanonicalTypeIdentity::ModulePrivateGenericInstance { .. }
         | CanonicalTypeIdentity::ExternalOpaque(_)
         | CanonicalTypeIdentity::GenericParameter(_)
-        | CanonicalTypeIdentity::AnonymousConstRecord => {}
-        CanonicalTypeIdentity::SourceNominal(origin) => {
-            origins.insert(origin.clone());
-        }
-        CanonicalTypeIdentity::Collection { element, .. } => {
-            collect_canonical_type_origins(element, origins);
-        }
-        CanonicalTypeIdentity::OrderedMap { key, value } => {
-            collect_canonical_type_origins(key, origins);
-            collect_canonical_type_origins(value, origins);
-        }
-        CanonicalTypeIdentity::Option(inner) => {
-            collect_canonical_type_origins(inner, origins);
-        }
-        CanonicalTypeIdentity::GenericInstance { base, arguments } => {
-            origins.insert(base.clone());
-            for argument in arguments.iter() {
-                collect_canonical_type_origins(argument, origins);
-            }
-        }
-    }
-}
-
-fn collect_folded_type_origins(value: &PublicFoldedValue, origins: &mut FxHashSet<OriginTypeId>) {
-    match value {
-        PublicFoldedValue::Collection(values) => {
-            for value in values {
-                collect_folded_type_origins(value, origins);
-            }
-        }
-        PublicFoldedValue::Record(fields) => {
-            for field in fields {
-                collect_canonical_type_origins(&field.type_identity, origins);
-                collect_folded_type_origins(&field.value, origins);
-            }
-        }
-        PublicFoldedValue::Choice {
-            type_identity,
-            fields,
-            ..
-        } => {
-            collect_canonical_type_origins(type_identity, origins);
-            for field in fields {
-                collect_canonical_type_origins(&field.type_identity, origins);
-                collect_folded_type_origins(&field.value, origins);
-            }
-        }
-        PublicFoldedValue::Range { start, end } => {
-            collect_folded_type_origins(start, origins);
-            collect_folded_type_origins(end, origins);
-        }
-        PublicFoldedValue::OptionSome(value) => collect_folded_type_origins(value, origins),
-        PublicFoldedValue::Number(_)
-        | PublicFoldedValue::FixedScalar(_)
-        | PublicFoldedValue::Bool(_)
-        | PublicFoldedValue::Char(_)
-        | PublicFoldedValue::String(_)
-        | PublicFoldedValue::ConstTemplate { .. }
-        | PublicFoldedValue::OptionNone => {}
+        | CanonicalTypeIdentity::AnonymousConstRecord
+        | CanonicalTypeIdentity::Collection { .. }
+        | CanonicalTypeIdentity::OrderedMap { .. }
+        | CanonicalTypeIdentity::Option(_) => {}
     }
 }
 
@@ -257,7 +242,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let Some(type_id) = self.imported_type_ids_by_origin.get(origin_type).copied() else {
                 continue;
             };
-            let diagnostic_type = diagnostic_type_spelling(type_id, &self.type_environment);
 
             Rc::make_mut(&mut self.nominal_type_ids_by_path).insert(local_path, type_id);
             self.type_environment
@@ -308,7 +292,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     Declaration {
                         id: local_path,
                         type_id,
-                        diagnostic_type,
+                        type_syntax: None,
                         value_mode: ValueMode::ImmutableReference,
                         value: DeclarationValue::Shell(match &record.semantics {
                             PublicDeclarationSemantics::Struct(_) => DeclarationShell::Struct,
@@ -330,7 +314,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Ok(())
     }
 
-    /// Computes the nominal declaration closure required by directly imported declarations.
+    /// Computes the nominal declaration closure required by directly imported declarations and by
+    /// every retained trait's requirement signatures.
     fn reachable_imported_type_origins(&self) -> FxHashSet<OriginTypeId> {
         let mut reachable = FxHashSet::default();
         for evidence in self
@@ -361,6 +346,20 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .get(origin)
             {
                 collect_semantic_type_origins(&record.semantics, &mut reachable);
+            }
+        }
+        // Trait projection covers every retained trait, not only the traits the consumer imports
+        // directly. The nominals their requirements name must be declared before traits resolve,
+        // otherwise trait projection cannot intern those requirement types.
+        for record in self
+            .binding_environment
+            .imported_declarations_by_origin
+            .values()
+        {
+            if let PublicDeclarationSemantics::Trait(semantics) = &record.semantics {
+                for identity in semantics.concrete_type_identities() {
+                    collect_canonical_type_origins(identity, &mut reachable);
+                }
             }
         }
 
@@ -489,7 +488,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             field_declarations.push(Declaration {
                 id: field_path,
                 type_id: field_type_id,
-                diagnostic_type: diagnostic_type_spelling(field_type_id, &self.type_environment),
+                type_syntax: None,
                 value_mode: ValueMode::ImmutableReference,
                 value: default_value,
                 binding_span: None,

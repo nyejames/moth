@@ -1,0 +1,15 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0053"]
+message_contains = ["string equality comparison"]
+
+# A resource-bearing string has no final text at compile time, so a compile-time comparison
+# cannot fold it. The same comparison as a runtime binding is accepted by
+# html_resource_site_root_structural_equality_success.
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+reason = "compile_time_evaluation_error.structural_string_requires_final_text"
+path = "input/@page.moth"
+line = 2
+column = 14

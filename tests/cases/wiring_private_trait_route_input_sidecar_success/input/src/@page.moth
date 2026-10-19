@@ -1,0 +1,4 @@
+@helper show
+
+result = show("sidecar")
+[:private-sidecar [result]]

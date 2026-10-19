@@ -6,6 +6,7 @@
 
 use crate::compiler_frontend::ast::expressions::expression_store::ExprId;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
@@ -87,6 +88,14 @@ pub(crate) struct CallArgument<E = ExprId> {
     /// WHAT: retains the parser's named/positional routing decision through AST validation.
     /// WHY: final validation must not reconstruct call syntax or produce a second routing policy.
     pub(crate) parameter_slot: Option<ParameterSlot>,
+
+    /// Future input carried by a forwarded Route argument for immediate generic inference.
+    ///
+    /// WHAT: retains the input side of a Route reference, whose ordinary expression type only
+    ///       carries the output choice.
+    /// WHY: a nested generic call can infer its route input from the enclosing Route contract
+    ///      without inspecting either callable body.
+    pub(crate) route_future_input_type: Option<TypeId>,
 }
 
 impl<E> CallArgument<E> {
@@ -114,6 +123,7 @@ impl<E> CallArgument<E> {
             marker_span: None,
             following_separator_span: None,
             parameter_slot: None,
+            route_future_input_type: None,
         }
     }
     /// Build a named call argument with the default passing mode derived from `access_mode`.
@@ -134,6 +144,7 @@ impl<E> CallArgument<E> {
             marker_span: None,
             following_separator_span: None,
             parameter_slot: None,
+            route_future_input_type: None,
         }
     }
 
@@ -167,6 +178,15 @@ impl<E> CallArgument<E> {
         self
     }
 
+    /// Retain the future input selected by Route forwarding.
+    ///
+    /// WHY: the expression's ordinary type carries only the output choice, so generic inference
+    ///      needs this parse-time contract fact to recover the forwarded input.
+    pub(crate) fn with_route_future_input_type(mut self, input_type: TypeId) -> Self {
+        self.route_future_input_type = Some(input_type);
+        self
+    }
+
     /// Change only the expression edge when entering or leaving construction.
     pub(crate) fn map_value<T>(self, map: impl FnOnce(E) -> T) -> CallArgument<T> {
         CallArgument {
@@ -179,22 +199,25 @@ impl<E> CallArgument<E> {
             marker_span: self.marker_span,
             following_separator_span: self.following_separator_span,
             parameter_slot: self.parameter_slot,
+            route_future_input_type: self.route_future_input_type,
         }
     }
 }
 
-/// Arrange parsed arguments by their retained declaration-order slots.
+/// Arrange owned parsed arguments by their retained declaration-order slots.
 ///
-/// WHAT: consumes parser-owned slot metadata without inspecting named targets or positional order.
-/// WHY: a missing, duplicate or out-of-range slot is an internal compiler invariant failure after the shared router has assigned every slot, so ordering must fail loudly instead of silently misrouting arguments.
-pub(crate) fn order_call_arguments_by_retained_slot<E: Clone>(
-    arguments: &[CallArgument<E>],
+/// WHAT: consumes each argument into its assigned slot without cloning expression handles.
+/// WHY: final call validation takes ownership of the parsed list, so slot ordering can move each
+///      argument directly into the validated result path.
+pub(crate) fn order_owned_call_arguments_by_retained_slot<E>(
+    arguments: Vec<CallArgument<E>>,
     expected_slot_count: usize,
 ) -> Result<Vec<Option<CallArgument<E>>>, CompilerError> {
-    let mut ordered = vec![None; expected_slot_count];
+    let mut ordered = Vec::with_capacity(expected_slot_count);
+    ordered.resize_with(expected_slot_count, || None);
 
     for argument in arguments {
-        let slot_index = retained_call_argument_slot_index(argument, 0, expected_slot_count)?;
+        let slot_index = retained_call_argument_slot_index(&argument, 0, expected_slot_count)?;
         let slot = &mut ordered[slot_index];
         if slot.is_some() {
             return Err(CompilerError::compiler_error(format!(
@@ -203,7 +226,7 @@ pub(crate) fn order_call_arguments_by_retained_slot<E: Clone>(
             )));
         }
 
-        *slot = Some(argument.clone());
+        *slot = Some(argument);
     }
 
     Ok(ordered)
@@ -246,14 +269,15 @@ fn retained_call_argument_slot_index<E>(
 /// WHAT: validates parser-owned named-target and parameter-slot facts, then stores only references
 ///       in routed slots. `slot_offset` maps authored slots past hidden parameters such as a
 ///       receiver without cloning their expressions.
-/// WHY: generic receiver inference needs declaration-order evidence while the original arguments
-///      remain owned by the call site for validation and emission.
+/// WHY: generic receiver and nominal inference need slot-order evidence while final validation
+///      consumes the original arguments without cloning them.
 pub(crate) fn order_call_argument_refs_by_retained_slot<E>(
     arguments: &[CallArgument<E>],
     expected_slot_count: usize,
     slot_offset: usize,
 ) -> Result<Vec<Option<&CallArgument<E>>>, CompilerError> {
-    let mut ordered = vec![None; expected_slot_count];
+    let mut ordered = Vec::with_capacity(expected_slot_count);
+    ordered.resize_with(expected_slot_count, || None);
 
     for argument in arguments {
         let slot_index =

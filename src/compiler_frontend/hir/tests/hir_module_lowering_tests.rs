@@ -19,7 +19,6 @@ use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff,
 };
 use crate::compiler_frontend::ast::{AstDocFragment, AstDocFragmentKind};
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -184,7 +183,7 @@ fn struct_field_declaration(
     Declaration {
         id: name,
         type_id,
-        diagnostic_type: DataType::Inferred,
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span,

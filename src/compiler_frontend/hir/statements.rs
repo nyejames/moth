@@ -111,10 +111,6 @@ pub enum HirStatementKind {
         value: HirValueId,
     },
 
-    /// Explicit deterministic drop.
-    #[allow(dead_code)] // Planned: explicit drop statements after ownership lowering matures.
-    Drop(LocalId),
-
     // -------------------------
     //  Map Builtins
     // -------------------------

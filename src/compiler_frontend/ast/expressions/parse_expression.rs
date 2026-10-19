@@ -80,8 +80,9 @@ pub(crate) fn create_expression_with_trailing_newline_policy(
             input.trailing_policy,
         );
         deferred_input.stop_at_named_entry = input.stop_at_named_entry;
-        deferred_input.numeric_deferral_owner = input.numeric_deferral_owner;
         deferred_input.retain_pending_numeric_fragment = input.retain_pending_numeric_fragment;
+        deferred_input.numeric_deferral_owner = input.numeric_deferral_owner;
+        deferred_input.route_argument_context = input.route_argument_context;
         let expression = create_expression_with_trailing_newline_policy(deferred_input)?;
         validate_completed_typed_errors(input.expression_builder.view_owned(expression)?)?;
         return Ok(expression);
@@ -258,6 +259,7 @@ fn create_expression_until_with_seeded_items(
         deferred_input.stop_at_named_entry = input.stop_at_named_entry;
         deferred_input.numeric_deferral_owner = input.numeric_deferral_owner;
         deferred_input.retain_pending_numeric_fragment = input.retain_pending_numeric_fragment;
+        deferred_input.route_argument_context = input.route_argument_context;
         let expression = create_expression_until_with_seeded_items_inner(
             deferred_input,
             stop_tokens,
@@ -364,6 +366,7 @@ fn create_expression_until_with_seeded_items_inner(
     );
     inner_input.numeric_deferral_owner = input.numeric_deferral_owner;
     inner_input.retain_pending_numeric_fragment = input.retain_pending_numeric_fragment;
+    inner_input.route_argument_context = input.route_argument_context;
     inner_input.stop_at_named_entry = input.stop_at_named_entry;
     let mut collected = seed_items;
     let early = collect_expression_fragment_into(&mut inner_input, &mut collected)?;
@@ -1158,11 +1161,12 @@ fn collect_expression_fragment_into(
             expression,
             next_number_negative: &mut next_number_negative,
             retain_pending_numeric_fragment: input.retain_pending_numeric_fragment,
+            route_argument_context: input.route_argument_context,
             group_frames: &mut group_frames,
             expression_builder: &mut *input.expression_builder,
             const_values: &mut *input.const_values,
         };
-        let (close_group, early_value) = match dispatch_expression_token(
+        let dispatch_step = dispatch_expression_token(
             token,
             input.token_stream,
             input.scope_context,
@@ -1170,7 +1174,9 @@ fn collect_expression_fragment_into(
             &mut dispatch_state,
             input.string_table,
             input.path_fork,
-        )? {
+        )?;
+        input.route_argument_context = None;
+        let (close_group, early_value) = match dispatch_step {
             ExpressionTokenStep::Continue => (false, None),
             ExpressionTokenStep::Advance => {
                 input.token_stream.advance();
@@ -1360,6 +1366,7 @@ fn create_expression_until_with_policy(
     // its consumer could never retain the complete position.
     inner_input.numeric_deferral_owner = input.numeric_deferral_owner;
     inner_input.retain_pending_numeric_fragment = input.retain_pending_numeric_fragment;
+    inner_input.route_argument_context = input.route_argument_context;
 
     let result = create_expression_with_trailing_newline_policy(inner_input);
 

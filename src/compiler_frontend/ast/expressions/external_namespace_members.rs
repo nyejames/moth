@@ -54,10 +54,8 @@ pub(super) struct ExternalNamespaceFunctionMemberInput<'a, 'env, 'tokens> {
 
 /// Parse a call to an external package function accessed through a namespace record.
 ///
-/// WHAT: validates the call is not in a constant context, locates the external function
-/// metadata, parses the call arguments, and pushes the resulting expression node.
-/// WHY: external namespace function calls share backend metadata with bare external calls
-/// but are reached through a different syntactic path (namespace.member).
+/// WHAT: locates registered function metadata, parses the arguments and pushes the resulting call.
+/// WHY: namespace and bare calls share metadata validation but have distinct syntactic entry paths.
 pub(super) fn parse_external_namespace_function_member(
     input: ExternalNamespaceFunctionMemberInput<'_, '_, '_>,
 ) -> Result<(), ExpressionParseError> {
@@ -75,16 +73,6 @@ pub(super) fn parse_external_namespace_function_member(
         string_table,
         path_fork,
     } = input;
-
-    // External function calls are not permitted in constant evaluation contexts.
-    if context.kind.is_constant_context() {
-        return Err(CompilerDiagnostic::compile_time_evaluation_error(
-            CompileTimeEvaluationErrorReason::ExternalFunctionCallInConstantContext,
-            Some(member_name),
-            member_span,
-        )
-        .into());
-    }
 
     // Namespace function members must be followed by an argument list.
     if token_stream.peek_next_tag() != Some(TokenTag::OPEN_PARENTHESIS) {
@@ -286,7 +274,7 @@ pub(super) fn project_external_constant(
         ) => {
             // Keep all host u64 bits at registration, but only materialise valid U32 values.
             let Some(materialised) = FixedScalarValue::unsigned(FixedScalar::U32, value) else {
-                let literal_text = string_table.intern(&value.to_string());
+                let literal_text = string_table.get_or_intern(value.to_string());
                 return Err(CompilerDiagnostic::invalid_number_literal(
                     literal_text,
                     NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::U32),

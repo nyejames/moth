@@ -9,6 +9,7 @@ use crate::compiler_frontend::ast::ast_nodes::{
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
@@ -35,17 +36,42 @@ use crate::compiler_frontend::tests::type_id_fixture_support::loop_binding_with_
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
+/// Builds one range-loop spec for fixtures with exact `I32` operands.
+///
+/// WHY: the loop header's selected iteration domain is part of the spec, and these fixtures
+///      author exact `I32` bounds and steps, so their selected domain is `I32`.
 fn range_loop_spec(
     start: ExprId,
     end: ExprId,
     end_kind: RangeEndKind,
     step: Option<ExprId>,
 ) -> Box<RangeLoopSpec> {
+    range_loop_spec_with_domain(
+        start,
+        end,
+        end_kind,
+        step,
+        NumericScalar::Fixed(FixedScalar::I32),
+    )
+}
+
+/// Builds one range-loop spec with an explicit header-selected iteration domain.
+///
+/// WHY: the domain is a header fact, so a fixture can pin it independently of the operand
+///      result types that originally selected it.
+fn range_loop_spec_with_domain(
+    start: ExprId,
+    end: ExprId,
+    end_kind: RangeEndKind,
+    step: Option<ExprId>,
+    domain: NumericScalar,
+) -> Box<RangeLoopSpec> {
     Box::new(RangeLoopSpec {
         start,
         end,
         end_kind,
         step,
+        domain,
     })
 }
 
@@ -215,6 +241,155 @@ fn lowers_range_loop_with_new_syntax() {
         HirTerminator::Return(_)
     ));
     assert_no_placeholder_terminators(&module);
+}
+
+/// A range header's selected iteration domain drives lowering, not the operand result types.
+///
+/// WHAT: pins an `I64` header domain over exact `I32` operands on a header with no item binding,
+///       so `range.domain` is the only source of `I64`, and asserts lowering converts the bounds
+///       to `I64`, initialises the counter state as `I64` and generates its checked arithmetic
+///       in `I64`.
+/// WHY: the header selected that domain when its operands still had canonical types. Re-deriving
+///      a domain from the operands during lowering would build `I32` state here and silently
+///      ignore the selected header fact.
+#[test]
+fn range_loop_lowering_uses_the_header_selected_domain() {
+    let mut path_fork = super::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) =
+        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let location = None;
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let selected_domain = NumericScalar::Fixed(FixedScalar::I64);
+    let range_loop = node(
+        NodeKind::RangeLoop {
+            bindings: Box::new(LoopBindings {
+                item: None,
+                index: None,
+            }),
+            range: range_loop_spec_with_domain(
+                i32_literal(
+                    &mut expressions,
+                    &mut const_values,
+                    0,
+                    location,
+                    ValueMode::ImmutableOwned,
+                ),
+                i32_literal(
+                    &mut expressions,
+                    &mut const_values,
+                    4,
+                    location,
+                    ValueMode::ImmutableOwned,
+                ),
+                RangeEndKind::Exclusive,
+                None,
+                selected_domain,
+            ),
+            body: vec![],
+        },
+        location,
+    );
+
+    let start_fn = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![range_loop],
+        None,
+    );
+
+    let (module, _type_environment) = lower_ast(
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            expressions,
+            const_values,
+            TypeEnvironment::new(),
+        ),
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("range loop lowering should succeed");
+
+    let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let i64_type = builtin_type_ids::fixed_scalar(FixedScalar::I64);
+    let local_type = |local| {
+        module
+            .blocks
+            .iter()
+            .flat_map(|block| block.locals.iter())
+            .find_map(|candidate| (candidate.id == local).then_some(candidate.ty))
+    };
+
+    // The exact-width bound operands must be converted to the header's selected domain, and the
+    // counter state locals that conversion initialises must carry that same domain.
+    let bound_state_locals: Vec<_> = module
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .filter_map(|statement| {
+            let HirStatementKind::Write { value, target } = &statement.kind else {
+                return None;
+            };
+            let HirWriteTarget::DefineLocal(local) = target else {
+                return None;
+            };
+            matches!(
+                &module.expressions.expression(*value).kind,
+                HirExpressionKind::Cast {
+                    policy: BuiltinCastPolicyId::NumericConversion {
+                        source: NumericScalar::Fixed(FixedScalar::I32),
+                        target: NumericScalar::Fixed(FixedScalar::I64),
+                    },
+                    ..
+                }
+            )
+            .then_some(*local)
+        })
+        .collect();
+    assert!(
+        !bound_state_locals.is_empty(),
+        "range bounds must convert from their own I32 type to the header's I64 domain"
+    );
+    assert!(
+        bound_state_locals
+            .iter()
+            .all(|local| local_type(*local) == Some(i64_type)),
+        "counter state initialised from a converted bound must use the header's I64 domain"
+    );
+
+    // Every generated checked operation on the counter belongs to the header's selected domain.
+    // The automatically supplied iteration index is the one exception: it always increments in the
+    // language's exact `I32` positional-index identity, never in the counter's domain.
+    let counter_domains: Vec<NumericScalar> = module
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .filter_map(|statement| {
+            let HirStatementKind::NumericOp { op, result, .. } = &statement.kind else {
+                return None;
+            };
+            let destination = match result {
+                HirLocalDestination::Define(local) | HirLocalDestination::Update(local) => *local,
+            };
+            (local_type(destination) != Some(i32_type)).then_some(op.domain)
+        })
+        .collect();
+    assert!(
+        !counter_domains.is_empty(),
+        "range loop lowering should generate checked counter arithmetic"
+    );
+    assert!(
+        counter_domains
+            .iter()
+            .all(|domain| *domain == selected_domain),
+        "generated range-loop counter arithmetic must use the header domain, got {counter_domains:?}"
+    );
 }
 
 #[test]

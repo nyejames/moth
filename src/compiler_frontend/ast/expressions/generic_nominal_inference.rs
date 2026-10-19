@@ -8,11 +8,11 @@
 //! conflicts.
 
 use crate::compiler_frontend::ast::ScopeContext;
-use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
-use crate::compiler_frontend::ast::expressions::call_argument::order_call_arguments_by_retained_slot;
+use crate::compiler_frontend::ast::expressions::call_argument::{
+    CallArgument, order_call_argument_refs_by_retained_slot,
+};
 use crate::compiler_frontend::ast::expressions::call_validation::{
-    CallValidationError, ExpectedParameterType, ParameterExpectation,
-    expectations_from_constructor_fields,
+    CallDiagnosticName, CallValidationError, ExpectedParameterType, ParameterExpectation,
 };
 use crate::compiler_frontend::ast::expressions::constructor_views::ConstructorField;
 use crate::compiler_frontend::ast::expressions::expression_store::{
@@ -24,8 +24,8 @@ use crate::compiler_frontend::ast::generic_bounds::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, GenericInferenceSubject, InvalidGenericInstantiationReason,
-    ValueReceiverContext,
+    CompilerDiagnostic, GenericInferenceSubject, InvalidCallShapeReason,
+    InvalidGenericInstantiationReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, TypeDefinition,
@@ -36,7 +36,7 @@ use crate::compiler_frontend::datatypes::environment::{
 use crate::compiler_frontend::datatypes::generic_bindings::{BindingConflict, GenericTypeBindings};
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashMap;
 
@@ -54,9 +54,10 @@ pub(crate) enum GenericNominalTemplate<'a> {
 #[derive(Clone, Copy)]
 pub(crate) struct GenericNominalConstructorContext<'a> {
     pub nominal_path: &'a PathId,
-    pub display_name: &'a str,
+    pub diagnostic_name: CallDiagnosticName<'static>,
     pub template: GenericNominalTemplate<'a>,
     pub span: Option<SourceSpan>,
+    pub route_input_evidence: Option<(TypeId, TypeId)>,
 }
 
 /// Contextual bindings and source evidence collected before argument parsing.
@@ -123,7 +124,6 @@ pub(crate) struct GenericNominalConstructorInput<'a> {
     pub context: GenericNominalConstructorContext<'a>,
     pub constructor_fields: Option<&'a [ConstructorField]>,
     pub raw_args: Option<&'a [CallArgument<OwnedExpr>]>,
-    pub path_fork: &'a PathInternerFork,
     pub expression_builder: &'a AstExpressionBuilder,
 }
 
@@ -150,6 +150,23 @@ pub(crate) fn seed_generic_nominal_constructor(
         &mut evidence_locations,
         string_table,
     )?;
+
+    if let Some((template_type_id, concrete_type_id)) = constructor_context.route_input_evidence {
+        let mut evidence_context = NominalBindingEvidenceContext {
+            nominal_path: constructor_context.nominal_path,
+            diagnostic_name: constructor_context.diagnostic_name,
+            bindings: &mut bindings,
+            evidence_locations: &mut evidence_locations,
+            type_environment,
+            string_table,
+        };
+        collect_route_input_binding_evidence(
+            &mut evidence_context,
+            template_type_id,
+            concrete_type_id,
+            constructor_context.span,
+        )?;
+    }
 
     Ok(GenericNominalConstructorSeed {
         bindings,
@@ -193,7 +210,10 @@ pub(crate) fn infer_generic_nominal_constructor(
         .ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "Generic nominal '{}' has no canonical parameter list after registration",
-                input.context.display_name
+                input
+                    .context
+                    .diagnostic_name
+                    .rendered_callee_name(string_table)
             ))
         })?;
 
@@ -209,7 +229,10 @@ pub(crate) fn infer_generic_nominal_constructor(
 
     if !missing_parameters.is_empty() {
         let diagnostic = CompilerDiagnostic::invalid_generic_instantiation(
-            Some(string_table.intern(input.context.display_name)),
+            input
+                .context
+                .diagnostic_name
+                .diagnostic_callee_name(string_table),
             InvalidGenericInstantiationReason::CannotInferArguments { missing_parameters },
             input.context.span,
         );
@@ -225,7 +248,10 @@ pub(crate) fn infer_generic_nominal_constructor(
         let nominal_id = nominal_id.ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "Generic nominal '{}' has no canonical nominal identity after registration",
-                input.context.display_name
+                input
+                    .context
+                    .diagnostic_name
+                    .rendered_callee_name(string_table)
             ))
         })?;
 
@@ -236,28 +262,13 @@ pub(crate) fn infer_generic_nominal_constructor(
         type_environment: type_interner.environment(),
         trait_environment: Some(context.trait_environment()),
         trait_evidence_environment: Some(context.trait_evidence_environment()),
-        generated_evidence_pairs: Some(context.shared.generated_evidence_pairs.as_ref()),
-        visible_trait_names: context
-            .file_visibility
-            .as_ref()
-            .map(|visibility| &visibility.visible_trait_names),
-        visible_source_names: context
-            .file_visibility
-            .as_ref()
-            .map(|visibility| &visibility.visible_source_names),
-        visible_type_alias_names: context
-            .file_visibility
-            .as_ref()
-            .map(|visibility| &visibility.visible_type_alias_names),
-        visible_namespace_records: context
-            .file_visibility
-            .as_ref()
-            .map(|visibility| &visibility.visible_namespace_records),
-        resolved_type_aliases: context.shared.resolved_type_aliases.as_deref(),
     };
     if let Err(mut diagnostic) = validate_nominal_generic_bound_evidence(
         instance_type_id,
-        Some(string_table.intern(input.context.display_name)),
+        input
+            .context
+            .diagnostic_name
+            .diagnostic_callee_name(string_table),
         input.context.span,
         &evidence_context,
     ) {
@@ -311,7 +322,7 @@ impl NominalBindingEvidenceLocations {
 /// Shared state for fallible nominal binding collection with evidence tracking.
 struct NominalBindingEvidenceContext<'a> {
     nominal_path: &'a PathId,
-    display_name: &'a str,
+    diagnostic_name: CallDiagnosticName<'static>,
     bindings: &'a mut GenericTypeBindings,
     evidence_locations: &'a mut NominalBindingEvidenceLocations,
     type_environment: &'a TypeEnvironment,
@@ -335,7 +346,7 @@ fn collect_expected_type_bindings(
 ) -> Result<(), CallValidationError> {
     let mut evidence_context = NominalBindingEvidenceContext {
         nominal_path: constructor_context.nominal_path,
-        display_name: constructor_context.display_name,
+        diagnostic_name: constructor_context.diagnostic_name,
         bindings,
         evidence_locations,
         type_environment,
@@ -357,7 +368,9 @@ fn collect_expected_type_bindings(
                     .ok_or_else(|| {
                         CompilerError::compiler_error(format!(
                             "Generic nominal '{}' has no canonical parameter list after registration",
-                            constructor_context.display_name
+                            constructor_context
+                                .diagnostic_name
+                                .rendered_callee_name(evidence_context.string_table)
                         ))
                     })?;
 
@@ -445,12 +458,11 @@ fn collect_constructor_argument_bindings(
         return Ok(());
     };
 
-    let expectations = expectations_from_constructor_fields(fields, input.path_fork);
-    let resolved_slots = order_call_arguments_by_retained_slot(raw_args, expectations.len())?;
+    let resolved_slots = order_call_argument_refs_by_retained_slot(raw_args, fields.len(), 0)?;
 
     let mut evidence_context = NominalBindingEvidenceContext {
         nominal_path: input.context.nominal_path,
-        display_name: input.context.display_name,
+        diagnostic_name: input.context.diagnostic_name,
         bindings,
         evidence_locations,
         type_environment,
@@ -504,7 +516,9 @@ fn collect_nominal_binding_evidence(
         .ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "Generic nominal '{}' has no canonical parameter list after registration",
-                context.display_name
+                context
+                    .diagnostic_name
+                    .rendered_callee_name(context.string_table)
             ))
         })?;
 
@@ -534,7 +548,7 @@ fn collect_nominal_binding_evidence(
                 .evidence_locations
                 .previous_span(conflict.parameter_id);
             Err(nominal_binding_conflict_diagnostic(
-                context.display_name,
+                context.diagnostic_name,
                 conflict,
                 canonical_parameters,
                 context.string_table,
@@ -543,6 +557,54 @@ fn collect_nominal_binding_evidence(
             )
             .into())
         }
+    }
+}
+
+/// Collect concrete Route input evidence for a generic choice's trailing field.
+///
+/// WHAT: unifies the selected payload field with the concrete input and records bindings only
+///      when the complete structural walk matches.
+/// WHY: Route contracts require exact semantic types, so structural mismatches and repeated
+///      generic conflicts are input mismatches rather than ordinary missing inference evidence.
+fn collect_route_input_binding_evidence(
+    context: &mut NominalBindingEvidenceContext<'_>,
+    template_type_id: TypeId,
+    concrete_type_id: TypeId,
+    span: Option<SourceSpan>,
+) -> Result<(), CallValidationError> {
+    let canonical_parameters = context
+        .type_environment
+        .canonical_parameters_for_nominal(context.nominal_path)
+        .ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "Generic nominal '{}' has no canonical parameter list after registration",
+                context
+                    .diagnostic_name
+                    .rendered_callee_name(context.string_table)
+            ))
+        })?;
+
+    match context
+        .type_environment
+        .try_collect_type_parameter_bindings_typeid(
+            template_type_id,
+            concrete_type_id,
+            &mut *context.bindings,
+        ) {
+        Ok(true) => {
+            context.evidence_locations.record_first_bindings(
+                canonical_parameters,
+                &*context.bindings,
+                span,
+            );
+            Ok(())
+        }
+        Ok(false) | Err(_) => Err(CompilerDiagnostic::invalid_call_shape(
+            InvalidCallShapeReason::RouteInputFieldMismatch,
+            None,
+            span,
+        )
+        .into()),
     }
 }
 
@@ -614,13 +676,14 @@ fn collect_choice_variant_bindings(
 /// WHY: type names are rendered later through `DiagnosticRenderContext`; the diagnostic
 /// payload carries only semantic `TypeId`s and structured facts.
 fn nominal_binding_conflict_diagnostic(
-    display_name: &str,
+    diagnostic_name: CallDiagnosticName<'static>,
     conflict: BindingConflict,
     canonical_parameters: &[EnvironmentGenericParameter],
     string_table: &mut StringTable,
     current_evidence_span: Option<SourceSpan>,
     previous_evidence_span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
+    // Pairwise nominal inference only records conflicts for the canonical parameters in this list.
     let parameter_name = canonical_parameters
         .iter()
         .find(|parameter| parameter.id == conflict.parameter_id)
@@ -628,7 +691,7 @@ fn nominal_binding_conflict_diagnostic(
         .expect("generic binding conflicts must identify a canonical parameter");
 
     CompilerDiagnostic::conflicting_generic_inference(
-        Some(string_table.intern(display_name)),
+        diagnostic_name.diagnostic_callee_name(string_table),
         GenericInferenceSubject::NominalType,
         conflict,
         parameter_name,

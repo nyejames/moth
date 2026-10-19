@@ -8,13 +8,11 @@
 //!
 //! Callers build a [`TypeResolutionContext`] from [`TypeResolutionContextInputs`] and then pass it
 //! through the resolution functions in [`super::resolve_type`]. The resolved result is returned as
-//! a [`ResolvedTypeAnnotation`] that carries both the semantic `TypeId` and the diagnostic
-//! spelling, so later stages do not need to re-derive either from the other.
+//! a [`ResolvedTypeAnnotation`] carrying only canonical `TypeId` identity when available.
 
 use crate::compiler_frontend::ast::TopLevelDeclarationTable;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::{
     ActiveGenericTypeContext, GenericParameterScope,
@@ -48,8 +46,8 @@ pub(crate) struct TypeResolutionContext<'a> {
     pub visible_type_aliases: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
     /// Completed type alias metadata. Every entry has a canonical target `TypeId`.
     ///
-    /// Alias consumers use the required target identity directly. The diagnostic spelling and
-    /// declaration location remain attached for use-site type text and declaration diagnostics.
+    /// Alias consumers use the required target identity directly. Authored syntax remains with
+    /// the retained declaration, and declaration location stays attached for diagnostics.
     pub resolved_type_aliases: Option<&'a FxHashMap<PathId, ResolvedTypeAlias>>,
     pub generic_declarations_by_path: Option<&'a FxHashMap<PathId, GenericDeclarationKind>>,
     pub generic_parameters: Option<&'a GenericParameterScope>,
@@ -58,8 +56,7 @@ pub(crate) struct TypeResolutionContext<'a> {
     /// Required for lazy generic struct instantiation.
     pub resolved_struct_fields_by_path: Option<&'a FxHashMap<PathId, Vec<Declaration>>>,
     /// Frontend type environment for canonical type identity.
-    /// WHY: enables resolution directly to TypeId instead of going through DataType.
-    ///      All production type resolution must have access to the canonical environment.
+    /// WHY: supplies the interning authority that resolves authored syntax to canonical `TypeId`s.
     pub type_environment: &'a mut TypeEnvironment,
     pub const_values: &'a ConstValueStore,
     /// Visible namespace records for resolving namespace-qualified type names.
@@ -165,28 +162,22 @@ impl<'a> TypeResolutionContext<'a> {
 
 /// A completed top-level type alias after semantic resolution.
 ///
-/// WHAT: carries the diagnostic spelling, canonical target identity and declaration span
-/// for one alias.
+/// WHAT: carries the canonical target identity and declaration span for one alias.
 /// WHY: a completed alias cannot represent an unresolved target. Keeping the required `TypeId`
 /// separate from the general annotation result prevents later consumers from mistaking an
 /// unresolved annotation placeholder for the builtin `None` type.
 #[derive(Clone, Debug)]
 pub(crate) struct ResolvedTypeAlias {
-    pub(crate) diagnostic_type: DataType,
     pub(crate) target_type_id: TypeId,
     pub(crate) declaration_span: Option<SourceSpan>,
 }
 
 /// A parsed type annotation after semantic resolution.
 ///
-/// WHAT: carries the resolved diagnostic spelling and the canonical `TypeId` when the source
-/// actually declared a type.
-/// WHY: new AST paths should not re-derive semantic identity from `DataType` after resolution.
-/// Keeping both values together makes `DataType` a diagnostic companion instead of the semantic
-/// source of truth.
+/// WHAT: carries the canonical `TypeId` when the source declared a type.
+/// WHY: semantic identity is owned directly by `TypeId`; authored syntax remains with its syntax
+/// owner for diagnostics and source-oriented consumers.
 #[derive(Clone, Debug)]
 pub(crate) struct ResolvedTypeAnnotation {
-    /// Diagnostic spelling stays attached to the `TypeId` for user-facing type text.
-    pub(crate) diagnostic_type: DataType,
     pub(crate) type_id: Option<TypeId>,
 }

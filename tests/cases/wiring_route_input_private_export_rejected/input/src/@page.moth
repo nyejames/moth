@@ -1,0 +1,13 @@
+Request ::
+    Query,
+;
+
+export:
+    Message ::
+        Done,
+    ;
+
+    accept |route Route of Request -> Message| -> String:
+        return "route private"
+    ;
+;

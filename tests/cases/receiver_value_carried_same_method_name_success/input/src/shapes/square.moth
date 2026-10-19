@@ -1,0 +1,7 @@
+Square = |
+    side I32,
+|
+
+area |this Square| -> I32:
+    return this.side
+;

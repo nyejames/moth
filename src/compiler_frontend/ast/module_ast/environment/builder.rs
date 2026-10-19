@@ -13,29 +13,29 @@ use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
 use crate::compiler_frontend::ast::module_ast::environment::{
     AstEnvironmentInput, AstModuleEnvironment, AstModuleLookups, BuildResolvedPublicTypeRootsInput,
-    DeclarationId, DeclarationSemanticTable, ResolvedConstantSet, ResolvedPublicTraitRoot,
-    ResolvedPublicTypeRootKind, ResolvedPublicTypeRootTable, TopLevelDeclarationTable,
-    build_resolved_public_trait_roots, build_resolved_public_type_roots,
+    DeclarationId, DeclarationSemanticInputs, DeclarationSemanticTable, ResolvedConstantSet,
+    ResolvedPublicTraitRoot, ResolvedPublicTypeRootKind, ResolvedPublicTypeRootTable,
+    TopLevelDeclarationTable, build_resolved_public_trait_roots, build_resolved_public_type_roots,
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodCatalog;
 use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
+use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::type_resolution::{
     GenericParameterScopeBuildInput, ResolvedFunctionSignature, ResolvedTypeAlias,
     TypeResolutionContext, TypeResolutionContextInputs, build_generic_parameter_scope,
-    resolve_diagnostic_type_to_type_id_checked,
 };
 use crate::compiler_frontend::ast::{
     AstChoiceDefinition, AstImportedFunctionContract, AstImportedStructDefinition,
 };
 use crate::compiler_frontend::builtins::error_type::builtin_error_type_path;
 use crate::compiler_frontend::canonical_type_identity::{
-    CanonicalBuiltinType, CanonicalTypeIdentity, intern_canonical_builtin,
+    CanonicalBuiltinType, CanonicalTypeIdentity, GenericDeclarationOrigin, intern_canonical_builtin,
 };
 use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerMessages, InfrastructureErrors,
 };
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PublicGenericOwnerKind};
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
     StructTypeDefinition,
@@ -46,8 +46,9 @@ use crate::compiler_frontend::datatypes::environment::{
 use crate::compiler_frontend::datatypes::generic_parameters::{
     GenericParameterList, GenericParameterScope, TypeParameterId,
 };
-use crate::compiler_frontend::datatypes::ids::{GenericParameterId, NominalTypeId, TypeId};
-use crate::compiler_frontend::datatypes::{DataType, diagnostic_type_spelling};
+use crate::compiler_frontend::datatypes::ids::{
+    GenericParameterId, GenericParameterListId, NominalTypeId, TypeId,
+};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::headers::binding_environment::{
@@ -64,7 +65,9 @@ use crate::compiler_frontend::public_interface::{
     PublicFunctionCategory, PublicGenericParameterSurface, PublicParameterTypeSlot,
     PublicReceiverMethodCategory, PublicReturnTypeSlot, PublicStructSemantics,
 };
-use crate::compiler_frontend::semantic_identity::{OriginDeclarationId, OriginTypeId};
+use crate::compiler_frontend::semantic_identity::{
+    GeneratedDeclarationIdentity, OriginDeclarationId, OriginTypeId,
+};
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -281,12 +284,26 @@ fn missing_declaration_id() -> CompilerError {
     )
 }
 
-/// One imported generic list registered before provider trait identities receive local handles.
+/// One imported generic list, registered before provider trait identities receive local handles.
 #[derive(Clone)]
 struct ImportedGenericParameterRegistration {
     surfaces: Vec<PublicGenericParameterSurface>,
     list_id: crate::compiler_frontend::datatypes::ids::GenericParameterListId,
     canonical_by_local: FxHashMap<TypeParameterId, GenericParameterId>,
+}
+
+/// One imported generic receiver method, whose contract registers once its bounds resolve.
+///
+/// WHY: its bounds name provider traits, which only resolve to trait ids in
+/// `resolve_dependencyed_generic_parameter_bounds`.
+struct PendingImportedGenericMethod {
+    method_path: PathId,
+    declaration_identity: GeneratedDeclarationIdentity,
+    generic_parameter_owner: GenericDeclarationOrigin,
+    signature: FunctionSignature,
+    owner_list_id: GenericParameterListId,
+    parameter_names: Vec<(TypeParameterId, StringId)>,
+    surfaces: Vec<PublicGenericParameterSurface>,
 }
 
 pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
@@ -346,6 +363,9 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
         TypeId,
     >,
     imported_generic_parameter_registrations: Vec<ImportedGenericParameterRegistration>,
+    // Imported receiver methods register their contracts in the bounds drain, where their
+    // bounds resolve to trait ids.
+    pending_imported_generic_methods: Vec<PendingImportedGenericMethod>,
     pub(super) projected_imported_functions_by_local_path:
         FxHashMap<PathId, AstImportedFunctionContract>,
     /// Every imported receiver-method path, including generic methods without a concrete
@@ -388,6 +408,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             imported_type_ids_by_origin: FxHashMap::default(),
             imported_generic_parameter_type_ids: FxHashMap::default(),
             imported_generic_parameter_registrations: Vec::new(),
+            pending_imported_generic_methods: Vec::new(),
             projected_imported_functions_by_local_path: FxHashMap::default(),
             projected_imported_receiver_methods_by_local_path: FxHashMap::default(),
             imported_receiver_method_paths_by_origin: FxHashMap::default(),
@@ -716,12 +737,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .collect();
         let declaration_semantics = DeclarationSemanticTable::from_environment(
             self.declaration_table.as_ref(),
-            &self.resolved_function_signatures_by_path,
-            &self.nominal_type_ids_by_path,
-            &self.type_environment,
-            &self.context.template_ir_store,
-            &self.context.expression_builder,
-            &self.context.const_values,
+            DeclarationSemanticInputs {
+                resolved_function_signatures_by_path: &self.resolved_function_signatures_by_path,
+                nominal_type_ids_by_path: &self.nominal_type_ids_by_path,
+                type_environment: &self.type_environment,
+                template_ir_store: &self.context.template_ir_store,
+                expression_builder: &self.context.expression_builder,
+                const_values: &self.context.const_values,
+                external_package_registry: Some(self.context.external_package_registry.as_ref()),
+            },
         )
         .map_err(|error| match error {
             TemplateError::Diagnostic(diagnostic) => {
@@ -776,7 +800,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 style_directives: self.context.style_directives.clone(),
                 build_profile: self.context.build_profile,
             }),
-            generated_evidence_pairs: Rc::new(FxHashSet::default()),
             resolved_public_type_roots: resolved_public_surface_outputs.type_roots,
             resolved_public_trait_roots: resolved_public_surface_outputs.trait_roots,
 
@@ -849,6 +872,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             visible_external_symbols: &visibility.visible_external_symbols,
             declaration_table: self.declaration_table.as_ref(),
             generic_declarations_by_path: &self.generic_declarations_by_path,
+            type_environment: &self.type_environment,
             string_table,
         })
         .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))
@@ -984,8 +1008,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 }
             }
 
-            let field_definitions =
-                self.field_definitions_from_declarations(&fields, string_table)?;
+            let field_definitions = field_definitions_from_declarations(&fields);
             Rc::make_mut(&mut self.resolved_struct_fields_by_path).insert(*path, fields);
 
             let struct_def = StructTypeDefinition {
@@ -1023,7 +1046,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 Declaration {
                     id: *path,
                     type_id: struct_type_id,
-                    diagnostic_type: DataType::runtime_struct(*path, struct_type_id),
+                    type_syntax: None,
                     value_mode: ValueMode::ImmutableReference,
                     value: DeclarationValue::Shell(DeclarationShell::Struct),
                     binding_span: None,
@@ -1109,15 +1132,37 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Ok(resolved_bounds_by_local)
     }
 
+    /// Names a public generic declaration by its source-path component, for bound diagnostics.
+    ///
+    /// WHY: every public generic owner (function, receiver method, struct, choice) reports an
+    /// unnameable bound under this name, so all of them resolve it the same way.
+    fn public_generic_declaration_name(
+        &self,
+        header: &Header,
+        string_table: &StringTable,
+    ) -> Result<StringId, CompilerMessages> {
+        self.path_fork
+            .component(header.declaration_path)
+            .ok_or_else(|| {
+                self.error_messages(
+                    CompilerError::compiler_error(
+                        "Public generic declaration header had no source-path name.",
+                    ),
+                    string_table,
+                )
+            })
+    }
+
     pub(in crate::compiler_frontend::ast) fn validate_public_generic_bounds(
         &self,
-        owner_name: StringId,
+        header: &Header,
+        owner_kind: PublicGenericOwnerKind,
         generic_parameters: &GenericParameterList,
         resolved_bounds_by_local: &FxHashMap<TypeParameterId, Vec<TraitId>>,
-        public_root_file: &PathId,
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
+        let public_root_file = self.header_source_path(header);
         for parameter in &generic_parameters.parameters {
             let Some(resolved_bounds) = resolved_bounds_by_local.get(&parameter.id) else {
                 continue;
@@ -1133,18 +1178,22 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     ));
                 };
 
-                // Public generic signatures are consumed through the public export surface alone,
-                // so every bound trait must be available from that same surface.
+                // WHY: consumers of a public generic must be able to satisfy its bounds, so each
+                // bound trait must be public at its owner. The trait need not be re-exported here.
                 if self.public_trait_definition_is_nameable(
                     trait_definition,
-                    public_root_file,
+                    &public_root_file,
                     trait_environment,
                 ) {
                     continue;
                 }
 
+                // The owner name is only rendered on this failure path, so resolve it here
+                // instead of on every call.
+                let owner_name = self.public_generic_declaration_name(header, string_table)?;
                 return Err(self.diagnostic_messages(
                     CompilerDiagnostic::generic_bound_private_surface_leak(
+                        owner_kind,
                         owner_name,
                         trait_definition.name,
                         trait_bound.span,
@@ -1155,41 +1204,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         }
 
         Ok(())
-    }
-
-    /// Convert resolved AST member declarations into canonical type-environment fields.
-    ///
-    /// WHAT: struct fields and choice payload fields are resolved as AST `Declaration`s first,
-    /// then written into `TypeEnvironment` as compact semantic member definitions.
-    /// WHY: keeping the conversion on the environment builder centralizes diagnostic mapping
-    /// at the AST environment boundary without closure-specific error conversions.
-    pub(crate) fn field_definitions_from_declarations(
-        &mut self,
-        fields: &[Declaration],
-        string_table: &StringTable,
-    ) -> Result<Box<[FieldDefinition]>, CompilerMessages> {
-        let mut definitions = Vec::with_capacity(fields.len());
-
-        for field in fields {
-            let type_id = match resolve_diagnostic_type_to_type_id_checked(
-                &field.diagnostic_type,
-                &mut self.type_environment,
-                field.binding_span,
-            ) {
-                Ok(type_id) => type_id,
-                Err(diagnostic) => {
-                    return Err(self.diagnostic_messages(diagnostic, string_table));
-                }
-            };
-
-            definitions.push(FieldDefinition {
-                name: field.id,
-                type_id,
-                span: field.binding_span,
-            });
-        }
-
-        Ok(definitions.into_boxed_slice())
     }
 
     pub(crate) fn error_messages(
@@ -1227,4 +1241,27 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             Err(error) => self.error_messages(error, string_table),
         }
     }
+}
+
+/// Convert resolved AST member declarations into canonical type-environment fields.
+///
+/// WHAT: struct fields and choice payload fields are resolved as AST `Declaration`s first,
+///       then converted into the compact semantic member definitions the `TypeEnvironment`
+///       stores.
+/// WHY: member resolution already interned every field's canonical type, so this conversion
+///      is a plain read of that identity that cannot fail.
+pub(crate) fn field_definitions_from_declarations(
+    fields: &[Declaration],
+) -> Box<[FieldDefinition]> {
+    let mut definitions = Vec::with_capacity(fields.len());
+
+    for field in fields {
+        definitions.push(FieldDefinition {
+            name: field.id,
+            type_id: field.type_id,
+            span: field.binding_span,
+        });
+    }
+
+    definitions.into_boxed_slice()
 }

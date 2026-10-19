@@ -47,8 +47,9 @@ page_head #= language_theme_head
     conformance, so a type must declare the promise explicitly.
 
     Unlike object-oriented interfaces or Rust trait objects, Moth traits don't
-    create runtime values or dynamic dispatch. Generic bounds use visible
-    conformance evidence during compilation.
+    create runtime values or dynamic dispatch. Generic bounds require conformance
+    evidence for each concrete argument type during compilation. See
+    @#evidence-travels-with-values (Evidence travels with values).
 ]
 
 #[section:

@@ -1,0 +1,7 @@
+Message ::
+    Done,
+;
+
+read |value Route of Message = Message::Done|:
+    return
+;

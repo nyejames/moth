@@ -1,0 +1,13 @@
+export:
+    Helper = |
+        label String,
+    |
+
+    make_helper |label String| -> Helper:
+        return Helper(label)
+    ;
+;
+
+text |this Helper| -> String:
+    return this.label
+;

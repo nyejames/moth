@@ -11,7 +11,7 @@ use super::sidecar_build::{GeneratedSidecarRequest, emit_materialised_sidecar};
 use super::stable_types::{
     GeneratedFoldedValueMaterialiser, GeneratedValueMaterialisationServices,
     GenericTemplateArtefact, MaterialisationNominalSource, StableFunctionSignature,
-    StableFunctionTarget, const_store_error_into_compiler_error,
+    StableFunctionTarget, StableParameterContract, const_store_error_into_compiler_error,
     generated_file_value_resolution_services, import_canonical_folded_value,
 };
 use super::{MaterialisedGenericAst, ModuleMaterialisationInput};
@@ -27,7 +27,8 @@ use crate::compiler_frontend::ast::module_ast::environment::{
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodEntry;
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionParameter, FunctionSignature, MaterialisedFunctionSignature, ReturnChannel, ReturnSlot,
+    FunctionParameter, FunctionSignature, MaterialisedFunctionSignature, ParameterContract,
+    ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, intern_resolved_function_signature,
@@ -38,11 +39,11 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerMessages, InfrastructureErrors,
 };
+use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::{DataType, ReceiverKey, diagnostic_type_spelling};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::binding_environment::{
     HeaderBindingEnvironment, ImportedFunctionContract, SourceFunctionTarget,
@@ -346,7 +347,7 @@ impl GenericTemplateArtefact {
             Arc::clone(&materialised_body.resolution_facts),
         );
         let build_context = AstBuildContext {
-            external_package_registry: Arc::new(external_package_registry.clone()),
+            external_package_registry: Arc::clone(external_package_registry),
             style_directives,
             string_table,
             path_fork,
@@ -604,11 +605,12 @@ impl GenericTemplateArtefact {
         // Private traits are part of the declaration environment needed to resolve bounds on
         // nested retained templates. Install them after nominal shells exist, but before any
         // nested signature or bound reconstruction consumes the generated trait table.
+        // Evidence rows also install the methods they name, so calls through them resolve.
         install_private_semantic_closure(
             self,
             context,
             environment,
-            external_package_registry,
+            services,
             template_ir_store,
             string_table,
             path_fork,
@@ -622,18 +624,13 @@ impl GenericTemplateArtefact {
             {
                 continue;
             }
-            let local_path = callable.local_path;
-            let contract = callable.materialise_requester_contract(
-                local_path,
+            callable.install_requester_callable(
                 environment,
                 services,
                 self,
                 string_table,
                 path_fork,
             )?;
-            Rc::make_mut(&mut environment.lookups)
-                .imported_functions_by_local_path
-                .insert(local_path, contract);
         }
 
         for local_path_components in &self.local_declarations {
@@ -680,10 +677,7 @@ impl GenericTemplateArtefact {
                 let declaration = Declaration {
                     id: local_path,
                     type_id,
-                    diagnostic_type: diagnostic_type_spelling(
-                        type_id,
-                        &environment.type_environment,
-                    ),
+                    type_syntax: None,
                     value_mode: ValueMode::ImmutableReference,
                     value: DeclarationValue::Initializer(value.id()),
                     binding_span: span,
@@ -764,7 +758,7 @@ impl GenericTemplateArtefact {
             let declaration = Declaration {
                 id: method_path,
                 type_id: function_type_id,
-                diagnostic_type: DataType::Inferred,
+                type_syntax: None,
                 value_mode: ValueMode::ImmutableReference,
                 value: DeclarationValue::Shell(DeclarationShell::Function {
                     receiver: Some(receiver.clone()),
@@ -787,13 +781,25 @@ impl GenericTemplateArtefact {
                     signature: signature.clone(),
                 },
             );
-            register_materialised_receiver_method(
-                lookups,
-                method_path,
-                receiver,
-                signature.clone(),
-                path_fork,
-            )?;
+            // WHY: the import projection can already hold this imported concrete method by path,
+            // and the catalog rejects a second entry for one path. The declaration, signature,
+            // and contract installs around this call are idempotent, so only the catalog entry is
+            // skipped.
+            let projected = matches!(method.target, StableFunctionTarget::Imported(_))
+                && lookups
+                    .receiver_methods
+                    .by_function_path
+                    .contains_key(&method_path);
+            if !projected {
+                register_materialised_receiver_method(
+                    lookups,
+                    method_path,
+                    receiver,
+                    signature.clone(),
+                    path_fork,
+                    true,
+                )?;
+            }
             Rc::make_mut(&mut lookups.declaration_semantics)
                 .register_materialised_function(method_path);
             lookups.imported_functions_by_local_path.insert(
@@ -838,15 +844,14 @@ impl GenericTemplateArtefact {
                     .collect::<Result<Vec<_>, CompilerError>>()?;
                 resolved_bounds_by_local.insert(TypeParameterId(slot as u32), bounds);
             }
-            let (generic_parameter_list_id, generic_parameter_type_ids) = if let Some(
-                nominal_origin,
-            ) = nested
+            // Public receiver methods and public free functions share the parameter identities
+            // their declaration already interned in this environment. The materialised contract
+            // keeps this template's own names and bounds in a separate list over those parameters.
+            let shared_parameter_owner = if let Some(nominal_origin) = nested
                 .generic_parameter_owner
                 .as_ref()
                 .and_then(GenericDeclarationOrigin::nominal_type_origin)
             {
-                // Public methods share the nominal's exported parameter identities, but each
-                // callable retains its own names and bounds in a separate contract list.
                 let nominal_identity = CanonicalTypeIdentity::SourceNominal(nominal_origin.clone());
                 let nominal_type_id = intern_generated_canonical_type(
                     &nominal_identity,
@@ -856,7 +861,7 @@ impl GenericTemplateArtefact {
                     string_table,
                     path_fork,
                 )?;
-                let generic_parameter_list_id =
+                let nominal_parameter_list_id =
                     match environment.type_environment.get(nominal_type_id) {
                         Some(TypeDefinition::Struct(definition)) => definition.generic_parameters,
                         Some(TypeDefinition::Choice(definition)) => definition.generic_parameters,
@@ -872,50 +877,66 @@ impl GenericTemplateArtefact {
                             "Generic receiver template owner has no generic parameter list",
                         )
                     })?;
-                let generic_parameter_type_ids = environment
-                    .type_environment
-                    .generic_parameters(generic_parameter_list_id)
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(
-                            "Generic receiver template owner has a missing parameter list",
-                        )
-                    })?
-                    .parameters
-                    .iter()
-                    .map(|parameter| {
-                        environment
+                Some(nominal_parameter_list_id)
+            } else {
+                // WHY: the import projection registers a public free function's parameter list and
+                // exported identities before the closure reinstalls its body. A fresh list here
+                // would give those canonical identities a second TypeId in this environment.
+                environment
+                    .lookups
+                    .generic_function_templates_by_path
+                    .get(&nested_path)
+                    .filter(|template| {
+                        template.declaration_identity.as_ref() == Some(&nested.declaration_identity)
+                    })
+                    .map(|template| template.generic_parameter_list_id)
+            };
+            let (generic_parameter_list_id, generic_parameter_type_ids) =
+                if let Some(owner_list_id) = shared_parameter_owner {
+                    let generic_parameter_type_ids = environment
+                        .type_environment
+                        .generic_parameters(owner_list_id)
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "Shared generic parameter owner has a missing parameter list",
+                            )
+                        })?
+                        .parameters
+                        .iter()
+                        .map(|parameter| {
+                            environment
                             .type_environment
                             .type_id_for_generic_parameter(parameter.id)
                             .ok_or_else(|| {
                                 CompilerError::compiler_error(
-                                    "Generic receiver template owner parameter has no type handle",
+                                    "Shared generic parameter owner parameter has no type handle",
                                 )
                             })
-                    })
-                    .collect::<Result<Vec<_>, CompilerError>>()?;
-                if generic_parameter_type_ids.len() != nested.generic_parameters.len() {
-                    return Err(CompilerError::compiler_error(
-                        "Generic receiver template parameter count disagrees with its nominal owner",
-                    ).into());
-                }
-                for (parameter, type_id) in nested
-                    .generic_parameters
-                    .iter()
-                    .zip(&generic_parameter_type_ids)
-                {
-                    if let Some(exported_identity) = parameter.exported_identity.as_ref() {
-                        let expected_identity =
-                            CanonicalTypeIdentity::GenericParameter(exported_identity.clone());
-                        environment
-                            .type_environment
-                            .register_canonical_identity(expected_identity, *type_id)?;
+                        })
+                        .collect::<Result<Vec<_>, CompilerError>>()?;
+                    if generic_parameter_type_ids.len() != nested.generic_parameters.len() {
+                        return Err(CompilerError::compiler_error(
+                            "Generic template parameter count disagrees with its shared owner",
+                        )
+                        .into());
                     }
-                }
-                let registration =
-                    environment
+                    for (parameter, type_id) in nested
+                        .generic_parameters
+                        .iter()
+                        .zip(&generic_parameter_type_ids)
+                    {
+                        if let Some(exported_identity) = parameter.exported_identity.as_ref() {
+                            let expected_identity =
+                                CanonicalTypeIdentity::GenericParameter(exported_identity.clone());
+                            environment
+                                .type_environment
+                                .register_canonical_identity(expected_identity, *type_id)?;
+                        }
+                    }
+                    let registration = environment
                         .type_environment
                         .register_generic_parameter_contract(
-                            generic_parameter_list_id,
+                            owner_list_id,
                             nested.generic_parameters.iter().enumerate().map(
                                 |(slot, parameter)| {
                                     (
@@ -928,16 +949,15 @@ impl GenericTemplateArtefact {
                         )
                         .ok_or_else(|| {
                             CompilerError::compiler_error(
-                                "Materialised receiver contract disagrees with its parameter owner",
+                                "Materialised generic contract disagrees with its parameter owner",
                             )
                         })?;
-                (registration.list_id, generic_parameter_type_ids)
-            } else {
-                // Private methods retain their own declaration-local parameters, even when
-                // their receiver aligns with a nominal's slots. Reusing the nominal list would
-                // lose method parameter names and overwrite another declaration's bounds.
-                let registration =
-                    environment
+                    (registration.list_id, generic_parameter_type_ids)
+                } else {
+                    // Declarations without a shared owner keep their own declaration-local parameters,
+                    // even when a receiver aligns with a nominal's slots. Reusing the nominal list would
+                    // lose method parameter names and overwrite another declaration's bounds.
+                    let registration = environment
                         .type_environment
                         .register_generic_parameter_list(
                             nested.generic_parameters.iter().enumerate().map(
@@ -950,18 +970,18 @@ impl GenericTemplateArtefact {
                             ),
                             &resolved_bounds_by_local,
                         );
-                let generic_parameter_type_ids = (0..nested.generic_parameters.len())
-                    .map(|slot| {
-                        let parameter_id = registration
-                            .canonical_by_local
-                            .get(&TypeParameterId(slot as u32))
-                            .copied()
-                            .ok_or_else(|| {
-                                CompilerError::compiler_error(
-                                    "Materialised generic template omitted a parameter slot",
-                                )
-                            })?;
-                        environment
+                    let generic_parameter_type_ids = (0..nested.generic_parameters.len())
+                        .map(|slot| {
+                            let parameter_id = registration
+                                .canonical_by_local
+                                .get(&TypeParameterId(slot as u32))
+                                .copied()
+                                .ok_or_else(|| {
+                                    CompilerError::compiler_error(
+                                        "Materialised generic template omitted a parameter slot",
+                                    )
+                                })?;
+                            environment
                             .type_environment
                             .type_id_for_generic_parameter(parameter_id)
                             .ok_or_else(|| {
@@ -969,36 +989,36 @@ impl GenericTemplateArtefact {
                                     "Materialised generic template parameter has no type handle",
                                 )
                             })
-                    })
-                    .collect::<Result<Vec<_>, CompilerError>>()?;
-                for (slot, parameter) in nested.generic_parameters.iter().enumerate() {
-                    let local_id = TypeParameterId(slot as u32);
-                    let parameter_id = registration
-                        .canonical_by_local
-                        .get(&local_id)
-                        .copied()
-                        .ok_or_else(|| {
-                            CompilerError::compiler_error(
-                                "Materialised generic template omitted a stable parameter slot",
-                            )
-                        })?;
-                    let parameter_type_id = environment
-                        .type_environment
-                        .type_id_for_generic_parameter(parameter_id)
-                        .ok_or_else(|| {
-                            CompilerError::compiler_error(
-                                "Materialised generic template parameter has no type identity",
-                            )
-                        })?;
-                    if let Some(exported_identity) = &parameter.exported_identity {
-                        environment.type_environment.register_canonical_identity(
-                            CanonicalTypeIdentity::GenericParameter(exported_identity.clone()),
-                            parameter_type_id,
-                        )?;
+                        })
+                        .collect::<Result<Vec<_>, CompilerError>>()?;
+                    for (slot, parameter) in nested.generic_parameters.iter().enumerate() {
+                        let local_id = TypeParameterId(slot as u32);
+                        let parameter_id = registration
+                            .canonical_by_local
+                            .get(&local_id)
+                            .copied()
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(
+                                    "Materialised generic template omitted a stable parameter slot",
+                                )
+                            })?;
+                        let parameter_type_id = environment
+                            .type_environment
+                            .type_id_for_generic_parameter(parameter_id)
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(
+                                    "Materialised generic template parameter has no type identity",
+                                )
+                            })?;
+                        if let Some(exported_identity) = &parameter.exported_identity {
+                            environment.type_environment.register_canonical_identity(
+                                CanonicalTypeIdentity::GenericParameter(exported_identity.clone()),
+                                parameter_type_id,
+                            )?;
+                        }
                     }
-                }
-                (registration.list_id, generic_parameter_type_ids)
-            };
+                    (registration.list_id, generic_parameter_type_ids)
+                };
             let MaterialisedFunctionSignature {
                 signature,
                 function_type_id,
@@ -1062,12 +1082,21 @@ impl GenericTemplateArtefact {
                 },
             );
             if let Some(receiver) = receiver.clone() {
+                // WHY: a nested method is value-carried only when this materialisation captured it
+                // through a receiver value. Every other nested method stays reachable by path alone,
+                // so a provider-private method cannot widen value lookup in the consumer.
+                let value_carried = self
+                    .visibility
+                    .receiver_methods
+                    .iter()
+                    .any(|method| method.local_path == nested_path);
                 register_materialised_receiver_method(
                     lookups,
                     nested_path,
                     receiver,
                     signature.clone(),
                     path_fork,
+                    value_carried,
                 )?;
             }
             if lookups
@@ -1080,7 +1109,7 @@ impl GenericTemplateArtefact {
                     Declaration {
                         id: nested_path,
                         type_id: function_type_id,
-                        diagnostic_type: DataType::Inferred,
+                        type_syntax: None,
                         value_mode: ValueMode::ImmutableReference,
                         value: DeclarationValue::Shell(DeclarationShell::Function { receiver }),
                         binding_span: None,
@@ -1230,12 +1259,21 @@ pub(super) fn materialised_receiver_key(
         })
 }
 
+/// Installs a materialised receiver method so generic bodies can dispatch it by function path.
+///
+/// WHAT: `value_carried` decides whether a value of `receiver` also reaches the method. Callers
+/// pass true only for a method the materialised body captured, by name or through a value; every
+/// captured method was value-carried where the body was declared.
+/// WHY: a materialised body may call provider-private methods that no receiver value carries.
+/// Admitting those to value-carried lookup would make them callable from any file holding such
+/// a value.
 fn register_materialised_receiver_method(
     lookups: &mut AstModuleLookups,
     function_path: PathId,
     receiver: ReceiverKey,
     signature: FunctionSignature,
     path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
+    value_carried: bool,
 ) -> Result<(), CompilerError> {
     let method_name = path_fork.component(function_path).ok_or_else(|| {
         CompilerError::compiler_error(
@@ -1250,6 +1288,7 @@ fn register_materialised_receiver_method(
             .parameters
             .first()
             .is_some_and(|parameter| parameter.value_mode.is_mutable()),
+        value_carried,
         signature,
     };
     let receiver_methods = Rc::make_mut(&mut lookups.receiver_methods);
@@ -1320,6 +1359,26 @@ impl StableFunctionSignature {
                 context.string_table,
                 context.path_fork,
             )?;
+            let contract = match &parameter.contract {
+                StableParameterContract::Value => ParameterContract::Value,
+                StableParameterContract::Wire => ParameterContract::Wire,
+                StableParameterContract::Route { input } => ParameterContract::Route {
+                    input: input
+                        .as_ref()
+                        .map(|input| {
+                            intern_materialisation_type_blueprint(
+                                input,
+                                context.generic_parameter_type_ids,
+                                context.nominal_source,
+                                context.type_environment,
+                                context.external_package_registry,
+                                context.string_table,
+                                context.path_fork,
+                            )
+                        })
+                        .transpose()?,
+                },
+            };
             let name = context.string_table.intern(&parameter.name);
             let parameter_path = context
                 .path_fork
@@ -1354,10 +1413,10 @@ impl StableFunctionSignature {
             parameters.push(FunctionParameter {
                 id: parameter_path,
                 type_id,
-                diagnostic_type: diagnostic_type_spelling(type_id, context.type_environment),
                 value_mode: parameter.value_mode,
                 default,
                 binding_span: parameter_span,
+                contract,
             });
         }
         let mut returns =
@@ -1373,9 +1432,7 @@ impl StableFunctionSignature {
                 context.string_table,
                 context.path_fork,
             )?;
-            let diagnostic_type = diagnostic_type_spelling(type_id, context.type_environment);
             returns.push(ReturnSlot {
-                value: diagnostic_type,
                 type_id: Some(type_id),
                 channel: ReturnChannel::Success,
             });
@@ -1392,7 +1449,6 @@ impl StableFunctionSignature {
                 context.path_fork,
             )?;
             returns.push(ReturnSlot {
-                value: diagnostic_type_spelling(type_id, context.type_environment),
                 type_id: Some(type_id),
                 channel: ReturnChannel::Error,
             });
@@ -1451,7 +1507,7 @@ impl super::stable_types::StableCallableBinding {
                 Declaration {
                     id: local_path,
                     type_id: function_type_id,
-                    diagnostic_type: DataType::Inferred,
+                    type_syntax: None,
                     value_mode: ValueMode::ImmutableReference,
                     value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
                     binding_span: None,
@@ -1474,5 +1530,29 @@ impl super::stable_types::StableCallableBinding {
             returns,
             error_return,
         })
+    }
+
+    /// Materialise this callable into a generated environment and register its contract as
+    /// imported. The artefact callable loop and private evidence both install through here.
+    pub(super) fn install_requester_callable<N: MaterialisationNominalSource>(
+        &self,
+        environment: &mut AstModuleEnvironment,
+        services: &mut GeneratedValueMaterialisationServices<'_>,
+        nominal_source: &N,
+        string_table: &mut StringTable,
+        path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
+    ) -> Result<(), Box<InfrastructureErrors>> {
+        let contract = self.materialise_requester_contract(
+            self.local_path,
+            environment,
+            services,
+            nominal_source,
+            string_table,
+            path_fork,
+        )?;
+        Rc::make_mut(&mut environment.lookups)
+            .imported_functions_by_local_path
+            .insert(self.local_path, contract);
+        Ok(())
     }
 }

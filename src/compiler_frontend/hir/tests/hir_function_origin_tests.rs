@@ -3,9 +3,8 @@
 //! WHAT: verifies how HIR records entry and normal function origins.
 //! WHY: backends rely on stable function-origin metadata when deciding which functions to emit.
 //!
-//! The old FileStart and RuntimeTemplate origins are removed.
-//! Only EntryStart (for the entry-file implicit start) and Normal (for all other functions)
-//! remain after Phase 1.
+//! HIR produces only two origins: EntryStart (for the entry-file implicit start) and Normal
+//! (for all other functions).
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;

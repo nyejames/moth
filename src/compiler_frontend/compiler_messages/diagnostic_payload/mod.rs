@@ -264,7 +264,8 @@ macro_rules! emit_diagnostic_payload_enum {
                 surface_type: TypeId,
             },
             GenericBoundPrivateSurfaceLeak {
-                function_name: StringId,
+                owner_kind: PublicGenericOwnerKind,
+                owner_name: StringId,
                 trait_name: StringId,
             },
             UnsupportedTraitFeature {

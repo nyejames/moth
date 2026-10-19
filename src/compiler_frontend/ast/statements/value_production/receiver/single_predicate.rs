@@ -23,7 +23,6 @@ use crate::compiler_frontend::ast::statements::match_headers::{
 };
 use crate::compiler_frontend::ast::statements::match_patterns::MatchSubject;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason, ValueReceiverContext,
 };
@@ -228,7 +227,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn unsupport
     type_environment: &TypeEnvironment,
     string_table: &mut StringTable,
     classification: IfHeaderClassification,
-) -> Result<Option<InvalidControlFlowStatementReason>, CompilerError> {
+) -> Result<Option<InvalidControlFlowStatementReason>, ExpressionParseError> {
     let Some(is_index) = classification.is_index else {
         return Ok(None);
     };
@@ -246,7 +245,9 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn unsupport
         return Ok(None);
     }
 
-    let Some(scrutinee_reference) = context.get_reference(&scrutinee_name) else {
+    let Some(scrutinee_reference) =
+        context.get_value_reference(&scrutinee_name, Some(token_stream.current_span()))?
+    else {
         return Ok(None);
     };
     let Some(scrutinee_type_id) = scrutinee_reference

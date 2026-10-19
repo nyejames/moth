@@ -18,8 +18,8 @@ use crate::compiler_frontend::ast::expressions::expression_store::{AstExpression
 use crate::compiler_frontend::ast::statements::functions::{
     FunctionSignature, ReturnChannel, ReturnSlot,
 };
+use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalAbiType, ExternalFunctionDef, ExternalFunctionLowerings, ExternalParameter,
     ExternalReturnSlot, ExternalSignatureType,
@@ -43,8 +43,8 @@ use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, function_node, make_test_variable, node, param_with_datatype,
-    reference_expr_with_datatype, symbol, test_if_branch_metadata, test_source_location,
+    assignment_target, function_node, immutable_reference_expr, make_test_variable, node,
+    param_with_type_id, symbol, test_if_branch_metadata, test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::{
     assert_borrow_error_kind, assert_invalid_mutable_access_reason, run_borrow_checker,
@@ -426,10 +426,9 @@ fn statement_terminator_and_value_facts_are_populated() {
             ),
             node(
                 NodeKind::If(
-                    reference_expr_with_datatype(
+                    immutable_reference_expr(
                         &mut expression_builder,
                         flag,
-                        DataType::Bool,
                         builtin_type_ids::BOOL,
                         test_source_location(3),
                     ),
@@ -438,7 +437,6 @@ fn statement_terminator_and_value_facts_are_populated() {
                             target: assignment_target(
                                 &mut expression_builder,
                                 x,
-                                DataType::FixedScalar(FixedScalar::I32),
                                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(4),
                             ),
@@ -457,7 +455,6 @@ fn statement_terminator_and_value_facts_are_populated() {
                             target: assignment_target(
                                 &mut expression_builder,
                                 x,
-                                DataType::FixedScalar(FixedScalar::I32),
                                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(5),
                             ),
@@ -559,88 +556,6 @@ fn assertion_failure_message_is_collected_as_a_borrow_value_root() {
 }
 
 #[test]
-fn drop_statement_produces_statement_fact() {
-    let mut expression_builder = AstExpressionBuilder::new().unwrap();
-    let mut const_values = ConstValueStore::default();
-    let types = TypeEnvironment::new();
-    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-    let external_package_registry = default_external_package_registry(&mut string_table);
-
-    let value = symbol("value", &mut path_fork, &mut string_table);
-    let start_fn = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                value,
-                i32_expression(
-                    &mut expression_builder,
-                    &mut const_values,
-                    1,
-                    test_source_location(1),
-                    ValueMode::MutableOwned,
-                ),
-                &expression_builder,
-            )),
-            test_source_location(1),
-        )],
-        None,
-    );
-
-    let mut hir = lower_hir(
-        build_ast_with_registered_types(
-            vec![start_fn],
-            entry_path,
-            expression_builder,
-            const_values,
-            types,
-        ),
-        &mut string_table,
-        &mut path_fork,
-        &external_package_registry,
-    );
-    let start = &hir.functions[hir
-        .start_function
-        .expect("normal test module should have start")
-        .0 as usize];
-    let entry_block = &mut hir.blocks[start.entry.0 as usize];
-    let drop_local = entry_block
-        .locals
-        .first()
-        .expect("entry block should contain at least one local")
-        .id;
-
-    let next_statement_id = entry_block
-        .statements
-        .iter()
-        .map(|statement| statement.id.0)
-        .max()
-        .unwrap_or(0)
-        + 1;
-
-    entry_block.statements.push(HirStatement {
-        id: HirNodeId(next_statement_id),
-        kind: HirStatementKind::Drop(drop_local),
-        span: None,
-    });
-
-    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-        .expect("borrow checking should succeed");
-
-    let fact = report
-        .analysis
-        .statement_fact(HirNodeId(next_statement_id))
-        .expect("drop statement should have a statement fact");
-    assert!(fact.shared_roots.is_empty());
-    assert!(fact.mutable_roots.is_empty());
-}
-
-#[test]
 fn statement_entry_state_reflects_last_use_reborrow_window() {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -671,7 +586,16 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
             test_source_location(2),
         ),
         node(
-            NodeKind::VariableDeclaration(make_test_variable(sink, reference_expr_with_datatype(&mut expression_builder, first_ref, DataType::FixedScalar(FixedScalar::I32), builtin_type_ids::fixed_scalar(FixedScalar::I32), test_source_location(3)), &expression_builder)),
+            NodeKind::VariableDeclaration(make_test_variable(
+                sink,
+                immutable_reference_expr(
+                    &mut expression_builder,
+                    first_ref,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                    test_source_location(3),
+                ),
+                &expression_builder,
+            )),
             test_source_location(3),
         ),
         node(
@@ -1383,7 +1307,7 @@ fn check_unequal_path_alias_activity(
 }
 
 // WHAT: hidden map-operation transfer facts that integration output cannot inspect.
-// WHY: Phase 6 integration owns user-visible map borrow behavior; these narrow state
+// WHY: integration tests own user-visible map borrow behavior; these narrow state
 //      assertions protect the receiver-alias shape, MayConsume last-use classification,
 //      and nested aggregate-literal advisory transfer facts.
 
@@ -2646,6 +2570,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                 ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str),
             ],
             error_return_type: Some(ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)),
+            const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("unknown external fixture registration should succeed");
@@ -2662,10 +2587,9 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
             id: external_id,
             args: vec![CallArgument::positional(
                 {
-                    let value = reference_expr_with_datatype(
+                    let value = immutable_reference_expr(
                         &mut expression_builder,
                         input_name,
-                        DataType::StringSlice,
                         builtin_type_ids::STRING,
                         test_source_location(2),
                     );
@@ -2687,26 +2611,22 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
     let unknown = function_node(
         unknown_name,
         FunctionSignature {
-            parameters: vec![param_with_datatype(
+            parameters: vec![param_with_type_id(
                 input_name,
-                DataType::StringSlice,
                 builtin_type_ids::STRING,
                 false,
                 test_source_location(1),
             )],
             returns: vec![
                 ReturnSlot {
-                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     channel: ReturnChannel::Error,
                 },
@@ -2724,17 +2644,14 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
             parameters: vec![],
             returns: vec![
                 ReturnSlot {
-                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     channel: ReturnChannel::Error,
                 },
@@ -2778,10 +2695,9 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                     value: {
                         let arguments = vec![CallArgument::positional(
                             {
-                                let value = reference_expr_with_datatype(
+                                let value = immutable_reference_expr(
                                     &mut expression_builder,
                                     argument_name,
-                                    DataType::StringSlice,
                                     builtin_type_ids::STRING,
                                     test_source_location(6),
                                 );
@@ -3089,7 +3005,9 @@ fn collect_statement_values(
     match kind {
         HirStatementKind::Write { target, value } => {
             if let HirWriteTarget::AssignPlace(place) = target {
-                collect_place_index_values(expressions, *place, out);
+                for index in expressions.place_index_values(*place) {
+                    collect_expression_values(expressions, index, out);
+                }
             }
             collect_expression_values(expressions, *value, out);
         }
@@ -3132,7 +3050,7 @@ fn collect_statement_values(
             collect_expression_values(expressions, *end, out);
             collect_expression_values(expressions, *ascending, out);
         }
-        HirStatementKind::Drop(_) | HirStatementKind::RangeStepFailure { .. } => {}
+        HirStatementKind::RangeStepFailure { .. } => {}
         HirStatementKind::PushRuntimeFragment { value, .. } => {
             collect_expression_values(expressions, *value, out);
         }
@@ -3156,18 +3074,8 @@ fn collect_terminator_values(
         HirTerminator::Match { scrutinee, arms } => {
             collect_expression_values(expressions, *scrutinee, out);
             for arm in arms {
-                if let crate::compiler_frontend::hir::patterns::HirPattern::Literal(value)
-                | crate::compiler_frontend::hir::patterns::HirPattern::OptionValue { value }
-                | crate::compiler_frontend::hir::patterns::HirPattern::OptionRelational {
-                    value,
-                    ..
-                }
-                | crate::compiler_frontend::hir::patterns::HirPattern::Relational {
-                    value,
-                    ..
-                } = &arm.pattern
-                {
-                    collect_expression_values(expressions, *value, out);
+                if let Some(value) = arm.pattern.value() {
+                    collect_expression_values(expressions, value, out);
                 }
                 if let Some(guard) = arm.guard {
                     collect_expression_values(expressions, guard, out);
@@ -3193,20 +3101,6 @@ fn collect_terminator_values(
     }
 }
 
-fn collect_place_index_values(
-    expressions: &HirExpressionStore,
-    place: HirPlace,
-    out: &mut FxHashSet<HirValueId>,
-) {
-    for projection in expressions.projections(place.projections) {
-        if let crate::compiler_frontend::hir::expression_store::HirProjection::Index(index) =
-            projection
-        {
-            collect_expression_values(expressions, *index, out);
-        }
-    }
-}
-
 fn collect_expression_values(
     expressions: &HirExpressionStore,
     expression_id: HirValueId,
@@ -3216,54 +3110,8 @@ fn collect_expression_values(
         return;
     }
 
-    match &expressions.expression(expression_id).kind {
-        HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => {
-            collect_place_index_values(expressions, *place, out);
-        }
-        HirExpressionKind::BinOp { left, right, .. } => {
-            collect_expression_values(expressions, *left, out);
-            collect_expression_values(expressions, *right, out);
-        }
-        HirExpressionKind::UnaryOp { operand, .. } => {
-            collect_expression_values(expressions, *operand, out);
-        }
-        HirExpressionKind::StructConstruct { fields, .. } => {
-            for (_, value) in expressions.struct_fields(*fields) {
-                collect_expression_values(expressions, *value, out);
-            }
-        }
-        HirExpressionKind::Collection(elements) => {
-            for element in expressions.values(*elements) {
-                collect_expression_values(expressions, *element, out);
-            }
-        }
-        HirExpressionKind::MapLiteral(entries) => {
-            for entry in expressions.map_entries(*entries) {
-                collect_expression_values(expressions, entry.key, out);
-                collect_expression_values(expressions, entry.value, out);
-            }
-        }
-        HirExpressionKind::Range { start, end } => {
-            collect_expression_values(expressions, *start, out);
-            collect_expression_values(expressions, *end, out);
-        }
-        HirExpressionKind::VariantConstruct { fields, .. } => {
-            for field in expressions.variant_fields(*fields) {
-                collect_expression_values(expressions, field.value, out);
-            }
-        }
-        HirExpressionKind::Cast { source: result, .. } => {
-            collect_expression_values(expressions, *result, out);
-        }
-        HirExpressionKind::VariantPayloadGet { source, .. } => {
-            collect_expression_values(expressions, *source, out);
-        }
-        HirExpressionKind::Number(_)
-        | HirExpressionKind::FixedScalar(_)
-        | HirExpressionKind::Bool(_)
-        | HirExpressionKind::Char(_)
-        | HirExpressionKind::StringLiteral(_)
-        | HirExpressionKind::StructuralString { .. } => {}
+    for child in expressions.child_values(expression_id) {
+        collect_expression_values(expressions, child, out);
     }
 }
 

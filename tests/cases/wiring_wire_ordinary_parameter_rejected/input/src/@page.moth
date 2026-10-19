@@ -1,0 +1,7 @@
+needs_wire |value Wire of String| -> String:
+    return value
+;
+
+relay |value String| -> String:
+    return needs_wire(value)
+;

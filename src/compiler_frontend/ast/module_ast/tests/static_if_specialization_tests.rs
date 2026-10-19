@@ -171,6 +171,7 @@ fn inactive_static_branch_drops_nested_provenance() {
         Rc::new(RefCell::new(TemplateIrStore::new())),
         &mut string_table,
         &TypeEnvironment::new(),
+        None,
     )
     .expect("static literal conditions should specialize");
 
@@ -250,6 +251,7 @@ fn selected_value_root_keeps_authored_sibling_immutable() {
         Rc::new(RefCell::new(TemplateIrStore::new())),
         &mut strings,
         &TypeEnvironment::new(),
+        None,
     )
     .expect("selection");
     let NodeKind::Return(values) = &ast[0].kind else {

@@ -101,7 +101,7 @@ Stage 4 adds no config-value branch node. HIR never redoes the decision, and Mot
 A generic template lives in the declaring module as an immutable validated template. At a call site, AST:
 
 1. infers concrete arguments from immediate call arguments and immediate expected result context
-2. resolves required visible trait evidence
+2. resolves required trait evidence for each concrete argument type
 3. emits a **module-local request** keyed by stable generic identity, canonical concrete types and evidence identities
 
 The build system aggregates requests across a compilation boundary and lends the published set as an immutable view. The compiler deduplicates each request against that set, then materialises each accepted request as a **generated sidecar** beside the base module.
@@ -119,7 +119,7 @@ HIR.
 
 ## Static trait evidence
 
-Traits and conformances are compile-time frontend metadata. AST validates requirements, explicit conformances, evidence visibility and bound-provided receiver calls.
+Traits and conformances are compile-time frontend metadata. AST validates requirements, explicit conformances, evidence lookup by concrete type and bound-provided receiver calls.
 
 Static bound calls resolve to **concrete executable targets** before HIR. HIR carries no trait objects, erased dispatch or runtime trait evidence.
 

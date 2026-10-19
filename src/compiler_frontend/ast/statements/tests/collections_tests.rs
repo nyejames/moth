@@ -21,6 +21,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidBuiltinCallReason, InvalidFallibleHandlingReason, InvalidFieldAccessReason,
     InvalidMapLiteralReason, InvalidReceiverCallReason, TypeMismatchContext,
 };
+use crate::compiler_frontend::datatypes::display::display_type_with_resolver;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
 use crate::compiler_frontend::tests::ast_fixture_support::{
@@ -181,9 +182,12 @@ fn parses_multiline_inferred_collection_literal_with_constructor_items() {
 
     assert_eq!(items.len(), 2);
     assert_eq!(
-        entries_decl
-            .diagnostic_type
-            .display_with_table(&string_table, &path_fork.snapshot_table()),
+        display_type_with_resolver(
+            entries_decl.type_id,
+            &ast.type_environment,
+            &string_table,
+            &path_fork.snapshot_table(),
+        ),
         "{Entry}"
     );
 }
@@ -198,9 +202,12 @@ fn infers_collection_element_type_from_non_empty_literal() {
     };
 
     assert_eq!(
-        values_decl
-            .diagnostic_type
-            .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
+        display_type_with_resolver(
+            values_decl.type_id,
+            &ast.type_environment,
+            &string_table,
+            &PathInternerBuilder::new().freeze(),
+        ),
         "{I32}"
     );
 }
@@ -216,9 +223,12 @@ fn parses_empty_collection_with_explicit_element_type() {
     };
 
     assert_eq!(
-        readings_decl
-            .diagnostic_type
-            .display_with_table(&string_table, &path_fork.snapshot_table()),
+        display_type_with_resolver(
+            readings_decl.type_id,
+            &ast.type_environment,
+            &string_table,
+            &path_fork.snapshot_table(),
+        ),
         "{Reading}"
     );
 }
@@ -791,8 +801,12 @@ fn fixed_collection_literal_within_capacity_is_accepted() {
     };
 
     assert_eq!(
-        decl.diagnostic_type
-            .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
+        display_type_with_resolver(
+            decl.type_id,
+            &ast.type_environment,
+            &string_table,
+            &PathInternerBuilder::new().freeze(),
+        ),
         "{2 I32}"
     );
 }
@@ -825,9 +839,12 @@ fn parses_inferred_map_literal() {
         "expected map type id"
     );
     assert_eq!(
-        scores_decl
-            .diagnostic_type
-            .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
+        display_type_with_resolver(
+            scores_decl.type_id,
+            &ast.type_environment,
+            &string_table,
+            &PathInternerBuilder::new().freeze(),
+        ),
         "{String = I32}"
     );
 }
@@ -851,9 +868,12 @@ fn parses_explicit_empty_map_literal() {
 
     assert!(entries.is_empty());
     assert_eq!(
-        scores_decl
-            .diagnostic_type
-            .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
+        display_type_with_resolver(
+            scores_decl.type_id,
+            &ast.type_environment,
+            &string_table,
+            &PathInternerBuilder::new().freeze(),
+        ),
         "{String = I32}"
     );
 }
@@ -1019,9 +1039,12 @@ fn parses_map_type_alias_literal() {
 
     assert_eq!(entries.len(), 1);
     assert_eq!(
-        scores_decl
-            .diagnostic_type
-            .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
+        display_type_with_resolver(
+            scores_decl.type_id,
+            &ast.type_environment,
+            &string_table,
+            &PathInternerBuilder::new().freeze(),
+        ),
         "{String = I32}"
     );
 }

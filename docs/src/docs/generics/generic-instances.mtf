@@ -78,7 +78,7 @@ Receiver methods on one concrete generic instance remain rejected.
 
 ### Generic bounds and evidence
 
-Concrete instantiation with trait bounds requires visible reusable evidence. See @../traits/#generic-trait-bounds (Generic trait bounds).
+Concrete instantiation with trait bounds requires reusable evidence for each concrete argument. See @../traits/#generic-trait-bounds (Generic trait bounds).
 
 ### Deferred and rejected surfaces
 

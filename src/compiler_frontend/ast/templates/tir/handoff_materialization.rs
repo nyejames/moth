@@ -427,12 +427,13 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 selector_site_id,
                 body,
             } => {
-                let selector = effective_branch_selector_for_view(
+                let effective_selector = effective_branch_selector_for_view(
                     view,
                     self.expressions,
                     selector.as_ref(),
                     *selector_site_id,
                 )?;
+                let selector = effective_selector.unwrap_or_else(|| selector.as_ref().clone());
                 let body =
                     self.materialize_node_with_injection(view, *body, active_slot_plan, injection)?;
 
@@ -465,12 +466,15 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 };
 
                 Ok(OwnedRuntimeTemplateNode::Loop {
-                    header: effective_loop_header_for_view(
+                    header: match effective_loop_header_for_view(
                         view,
                         self.expressions,
                         header,
                         *header_sites,
-                    )?,
+                    )? {
+                        Some(effective_header) => effective_header,
+                        None => header.clone(),
+                    },
                     body: Box::new(body_node),
                     aggregate_wrapper,
                     span: node.span,

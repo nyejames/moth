@@ -1,0 +1,5 @@
+@core/text
+
+wrapper #= [:<b>[$slot]</b> lengths=[loop {"a", "abc"} |item|:[text.length(item)];]]
+
+[:core_text_const_eval_template_header_registry [wrapper:filled]]

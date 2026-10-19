@@ -439,17 +439,19 @@ impl TemplateIrStore {
 
     pub(crate) fn push_or_reuse_wrapper_set(
         &mut self,
-        wrappers: Vec<TemplateWrapperReference>,
+        wrappers: &[TemplateWrapperReference],
     ) -> TemplateWrapperSetId {
         for (index, existing) in self.wrapper_sets.iter().enumerate() {
-            if wrapper_sets_are_equivalent(&existing.wrappers, &wrappers) {
+            if wrapper_sets_are_equivalent(&existing.wrappers, wrappers) {
                 increment_ast_counter(AstCounter::TirWrapperSetReuseHits);
                 return TemplateWrapperSetId::new(index);
             }
         }
 
         increment_ast_counter(AstCounter::TirWrapperSetsCreated);
-        self.push_wrapper_set(TemplateWrapperSet { wrappers })
+        self.push_wrapper_set(TemplateWrapperSet {
+            wrappers: wrappers.to_vec(),
+        })
     }
 
     fn push_or_reuse_optional_wrapper_set(
@@ -460,7 +462,7 @@ impl TemplateIrStore {
             return None;
         }
 
-        Some(self.push_or_reuse_wrapper_set(wrappers.to_vec()))
+        Some(self.push_or_reuse_wrapper_set(wrappers))
     }
 
     pub(crate) fn tir_slot_placeholder_from_ast(

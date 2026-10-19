@@ -1,0 +1,3 @@
+@core/text length
+
+LIMIT #= length("a😊b")

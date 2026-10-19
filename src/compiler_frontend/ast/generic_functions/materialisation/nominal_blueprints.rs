@@ -15,12 +15,10 @@ use crate::compiler_frontend::canonical_type_identity::{
     canonical_builtin_for_key, intern_canonical_builtin, project_type_id_to_canonical_identity,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
     StructTypeDefinition, TypeDefinition,
 };
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::{
@@ -198,18 +196,9 @@ pub(super) fn materialised_nominal_declaration(
     type_id: TypeId,
     type_environment: &TypeEnvironment,
 ) -> Result<Declaration, CompilerError> {
-    let diagnostic_type = match type_environment.get(type_id) {
-        Some(TypeDefinition::Struct(definition)) => DataType::Struct {
-            nominal_path: local_path,
-            type_id,
-            const_record: definition.const_record,
-            generic_instance_key: None,
-        },
-        Some(TypeDefinition::Choice(_)) => DataType::Choices {
-            nominal_path: local_path,
-            type_id,
-            generic_instance_key: None,
-        },
+    let shell = match type_environment.get(type_id) {
+        Some(TypeDefinition::Struct(_)) => DeclarationShell::Struct,
+        Some(TypeDefinition::Choice(_)) => DeclarationShell::Choice,
         _ => {
             return Err(CompilerError::compiler_error(
                 "Materialised nominal binding has no struct or choice definition",
@@ -219,11 +208,8 @@ pub(super) fn materialised_nominal_declaration(
     Ok(Declaration {
         id: local_path,
         type_id,
-        value: DeclarationValue::Shell(match &diagnostic_type {
-            DataType::Struct { .. } => DeclarationShell::Struct,
-            _ => DeclarationShell::Choice,
-        }),
-        diagnostic_type,
+        type_syntax: None,
+        value: DeclarationValue::Shell(shell),
         value_mode: ValueMode::ImmutableReference,
         binding_span: None,
         config_qualifier: None,
@@ -300,7 +286,7 @@ pub(super) fn materialised_struct_fields(
         declarations.push(Declaration {
             id: field.name,
             type_id: field.type_id,
-            diagnostic_type: diagnostic_type_spelling(field.type_id, type_environment),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableReference,
             value,
             binding_span: field_span,
@@ -843,15 +829,20 @@ pub(super) fn intern_generated_canonical_type(
             )?;
             type_environment.intern_map(key, value)
         }
+        // Nominal shells register their identity inside `intern_materialisation_nominal`
+        // before fields are materialised, so recursive references resolve to the shell.
+        // The epilogue registration below would only repeat that write, so return early.
         CanonicalTypeIdentity::SourceNominal(_)
-        | CanonicalTypeIdentity::ModulePrivateNominal(_) => intern_materialisation_nominal(
-            identity,
-            nominal_source,
-            type_environment,
-            external_registry,
-            string_table,
-            path_fork,
-        )?,
+        | CanonicalTypeIdentity::ModulePrivateNominal(_) => {
+            return intern_materialisation_nominal(
+                identity,
+                nominal_source,
+                type_environment,
+                external_registry,
+                string_table,
+                path_fork,
+            );
+        }
         CanonicalTypeIdentity::ExternalOpaque(external) => {
             let (external_type_id, _) = external_registry
                 .resolve_canonical_package_type_by_path(external.package(), external.symbol_path())
@@ -1150,18 +1141,14 @@ fn intern_materialisation_nominal<N: MaterialisationNominalSource>(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<TypeId, CompilerError> {
-    if let Some(type_id) = type_environment.type_id_for_canonical_identity(identity) {
-        return Ok(type_id);
-    }
-    let blueprint = nominal_source
-        .nominal_blueprint(identity)
-        .cloned()
-        .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "Generated request nominal {identity:?} is absent from {}",
-                N::SOURCE_LABEL
-            ))
-        })?;
+    // Only `intern_generated_canonical_type` calls this, and it has already checked that
+    // the identity is unregistered; the registration below relies on that absence.
+    let blueprint = nominal_source.nominal_blueprint(identity).ok_or_else(|| {
+        CompilerError::compiler_error(format!(
+            "Generated request nominal {identity:?} is absent from {}",
+            N::SOURCE_LABEL
+        ))
+    })?;
 
     // Bounds remain exact stable facts on the immutable blueprint. Reconstructing a concrete
     // nominal for field/variant substitution does not re-run declaration-site evidence solving.

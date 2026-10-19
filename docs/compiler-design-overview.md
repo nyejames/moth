@@ -77,7 +77,7 @@ The typed expression store uses safe array-of-structures rows with an operation 
 
 The rule includes retained typed semantic expressions in the AST stage. Parsing and receiving-context resolution may use short-lived scratch forms, but completed expression graphs do not retain recursive owning trees or unresolved parse states. Stage 4 defines their semantic ownership and HIR's concrete contract is in Stage 5. Source/token/diagnostic sizes and exceptions remain under the data-layout authority.
 
-Completed-expression walkers keep depth-dependent traversal state on explicit heap stacks. Constant folding, failure classification, finalisation, HIR operator lowering and borrow extraction preserve authored evaluation and diagnostic order without a native frame for each expression level.
+Completed-expression walkers keep depth-dependent traversal state on explicit heap stacks. Constant folding, failure classification, finalisation, HIR operator lowering, HIR expression validation and borrow extraction preserve authored evaluation and diagnostic order without a native frame for each expression level.
 
 Each store names its issuing owner and the consumers that determine its lifetime. An index is meaningful only with that owner, not as a global identity or a persistent key. Typed ranges address entries in their owning side store, not an assumed contiguous run of child-node IDs. Range construction checks the `u32` start, length and end before allocation or mutation; empty ranges are valid, while multiple-result ranges contain at least two entries. Shared nodes are immutable. A transformation reuses an unchanged node or produces a replacement root and isolated changed data, without mutating another candidate's view.
 
@@ -237,7 +237,7 @@ Moving an exported declaration between ordinary files in one module preserves id
 
 Each compiled module owns one `TypeEnvironment`. Module-local semantic equality compares its `TypeId` handles. Interfaces instead carry canonical identities for builtins, nominal structs and choices, transparent aliases, constructed types such as options/collections/maps, concrete generic instances, exported generic parameters and binding-backed external types. Numeric identities retain exact width, signedness, precision or scale as applicable. Construction-only numeric unknowns never become `TypeId`s or canonical identities.
 
-A consumer interns dependency types into local handles with a canonical-origin map. Cross-module equality compares canonical identity, never rendered names or unrelated local handles. After resolution, `DataType` is parse/diagnostic vocabulary only. Mutability and shared/exclusive access remain classifications, not manufactured type shapes.
+A consumer interns dependency types into local handles with a canonical-origin map. Cross-module equality compares canonical identity, never rendered names or unrelated local handles. Authored type syntax resolves directly to `TypeId`s and stays with its retained declaration or signature syntax where deferred resolution or authored-name diagnostics need it. No owned type tree duplicates a resolved `TypeId`, and diagnostics render types from the `TypeId` through the diagnostic render context. Mutability and shared/exclusive access remain classifications, not manufactured type shapes.
 
 Growable `{T}` and fixed `{N T}` collections are distinct canonical shapes. Fixed capacity is semantic identity, not an allocation hint. Maps retain key and value identities directly. Later stages query semantic shapes instead of parse syntax or private duplicate tables.
 
@@ -512,11 +512,11 @@ Separate these responsibilities at their real owners:
 | Declarations and symbols | Declaration identity, visibility, binding mode, receiver identity and links to any real initialiser. A declaration without an initialiser does not manufacture a `NoValue` expression. |
 | Callable and constructor contracts | Resolved parameter types, access/capability requirements, defaults, receiver information and success/error signature. Parsing, inference and validation borrow the same contract and retain one argument-slot mapping. |
 | Semantic expression store | Resolved value-producing operations, compact graph edges and authoritative result shapes. Zero results remain a real shape, distinct from a missing default. |
-| Constant owner | Immutable value content and its resolved classification, including exact numeric values and structural strings. Repeated uses refer to content without expanding it into owned expression subtrees. |
+| Constant owner | Immutable value content and its resolved classification, including exact numeric values and structural strings. Repeated uses refer to content without expanding it into owned expression subtrees. `ConstValueStore` is the one module-local folded-value authority, and each dense `ConstValueId` names one node in its graph. |
 | Occurrence and cold facts | Authored locations, diagnostic evidence, failure contributors, catch eligibility, const-record classification and synthetic-interface provenance where required. Shared constant content does not absorb occurrence-specific evidence. |
 | TIR | Template structure and exact-view authority during AST semantics, under `Templates and TIR`. |
 
-The common expression record does not carry declaration-only fields, cloned diagnostic `DataType` trees, absent-default sentinels or rare feature payloads. Underlying semantic types remain `TypeId`s. Authored type syntax stays with retained declarations and source ranges. Diagnostic compaction captures needed display facts before their type owner can be released, under the data-layout authority. Shrinking or dropping the expression store does not release the paired diagnostic `TypeEnvironment` or `DiagnosticRenderContext`. Retain their current dependency through all existing render and report readers until the separate diagnostic snapshot migration establishes a new release boundary.
+The common expression record does not carry declaration-only fields, cloned type syntax, absent-default sentinels or rare feature payloads. Underlying semantic types remain `TypeId`s. Authored type syntax stays with retained declarations and source ranges. Diagnostic compaction captures needed display facts before their type owner can be released, under the data-layout authority. Shrinking or dropping the expression store does not release the paired diagnostic `TypeEnvironment` or `DiagnosticRenderContext`. Retain their current dependency through all existing render and report readers until the separate diagnostic snapshot migration establishes a new release boundary.
 
 Cold facts retain their semantic meaning through folding and replacement. An empty contributor list is not by itself proof that all facts are absent: catch eligibility, typed producer conflicts, explicit exits and deferred assertion/catch evidence can still matter. Failure summaries do not repeatedly rescan expression subtrees to reconstruct origin lists. Facts needed after expression storage ends move into the consuming HIR or diagnostic owner first.
 
@@ -527,6 +527,8 @@ Store domains follow actual lifetimes. TIR-referenced expressions stay available
 Generic-body validation roots remain available through finalizer specialisation, terminality, failure-boundary and any TIR readers, then leave completed AST roots. The immutable generic template retains canonical syntax and context separately, from which a concrete body gets a distinct local graph. Candidate specialisations share unchanged immutable data without leaking replacements between candidates.
 
 Module compilation, generated materialisation, config and direct-template services consume the same semantic builders and fold owners through their defined entry points. Each service releases its scratch and expression stores after producing the owned values, executable data and diagnostic context needed by its outcome. Public interfaces contain canonical value/type facts, never expression IDs. HIR receives a deliberate projection and retains no AST/TIR authority.
+
+Rejected representations include pointer tagging, a generic allocator framework, a lifetime-heavy arena library, node-level `Arc`s, global hash-consing and per-field maps. Also rejected are a recursive compatibility tree, a second constant-value language, an evaluator callback framework, a global semantic registry and unused future-only variants. Existing shared owners remain where their lifetime and semantics justify them. New indirection must remove work, establish an invariant or own a real lifetime.
 
 #### Result slots and receiving boundaries
 
@@ -596,7 +598,7 @@ Pending storage grows only with authored work under the existing resource policy
 
 A binding may advertise a compiler-owned typed constant-evaluation operation beside its backend lowerings. AST dispatches that operation through the resolved stable binding identity into compiler-owned Rust evaluation. Package spelling, helper names, arbitrary callbacks, JavaScript execution and source purity annotations are not dispatch mechanisms.
 
-V1 permits trusted Core-origin registrations only. Parameters use shared access, success slots have the accepted fresh-result classification, no error channel exists and the complete signature matches the operation's supported value contract. Ordered multiple results and supported optionals follow ordinary result-slot rules. Opaque handles, unresolved types and unsupported value representations are ineligible. An invalid trusted registration or evaluator result is a compiler bug, not a fold refusal.
+V1 permits trusted Core-origin registrations only. Parameters use shared access, success slots have the accepted fresh-result classification, no error channel exists and the complete signature matches the operation's supported value contract. Ordered multiple results and supported optionals follow ordinary result-slot rules. A V1 slot holds a builtin Text, I32 or Bool leaf with at most one optional layer, so the operation's own slot table and the call's registered success types fully determine each stored value's type. Zero or several folded results replace the call with one ordinary constant result block. Opaque handles, unresolved types and unsupported value representations are ineligible. An invalid trusted registration or evaluator result is a compiler bug, not a fold refusal.
 
 Required and opportunistic folding share one evaluator and ordinary constant owners. Normal visibility, argument order, access checks, arity and source handling syntax are validated first. Evaluation requires genuine compile-time inputs with the concrete data the operation observes. Shared access alone is not constness.
 
@@ -644,6 +646,8 @@ Bootstrap defaults fold within the config service. Source defaults remain self-c
 
 A module folds each ordinary constant and const template once. Exported facts are owned backend-neutral values. Consumers do not parse or fold provider templates again. Advisory private const facts change neither declaration semantics nor ordering/visibility.
 
+An explicit `#` constant read by a runtime expression folds through one owner, `explicit_constant_operand`. Numeric constants replace numeric operator operands. String constants replace `is` and `is not` operands and runtime template interpolations. Plain text then folds; resource-bearing and site-root strings stay structural until URL rendering, so their comparisons and interpolations still render the page-relative URL. String operands of other operators keep their runtime operands, and a mixed expression keeps the runtime operation for its non-constant operands.
+
 Fully folded structs and anonymous records may form const records. Anonymous const records use named-only `(name = value)` entries and permit an empty record. Fields may contain inline nested anonymous values, bound values and explicit nominal constructions. They declare no nested types and imply no conversion. Whole const records are field-access-only compile-time groups, not runtime objects that can be passed, returned, stored at runtime or used through runtime methods.
 
 #### Runtime anonymous records
@@ -666,7 +670,7 @@ Structural references were already graph-active before selection. Frontend error
 
 #### Generics
 
-The declaring module validates immutable generic templates. At a call, AST infers concrete arguments through the declared signature and eligible immediate receivers, resolves visible trait evidence and diagnoses failures at that call site. An existing numeric origin may remain linked through a signature parameter/result equality or a direct generic constructor until body-local receivers resolve it. This does not add result-only inference, callee-body inspection, trait search or outer expected-type forwarding into a nested generic call.
+The declaring module validates immutable generic templates. At a call, AST infers concrete arguments through the declared signature and eligible immediate receivers, resolves trait evidence for each concrete argument type and diagnoses failures at that call site. An existing numeric origin may remain linked through a signature parameter/result equality or a direct generic constructor until body-local receivers resolve it. This does not add result-only inference, callee-body inspection, trait search or outer expected-type forwarding into a nested generic call.
 
 `ModuleMaterialisationPreparation` is retained separately from the executable `Ast` and its expression store. Before HIR lowering consumes the `Ast` or that store is released, project the generic body to stable owned syntax and capture canonical owned callable signatures, receiver/type facts, folded defaults and module constants. The preparation contains no expression IDs, expression views or borrows into the completed expression store. Keep it through same-module generated requests and summary convergence. Freeze the stable generic context after those readers finish, then release preparation.
 
@@ -676,7 +680,7 @@ Active calls emit requests under `Generated concrete functions`. HIR and backend
 
 #### Traits, conformances and casts
 
-Headers retain trait/conformance shells. AST resolves requirement types, stable trait identity, explicit conformance, evidence visibility, bounds, bound-provided receiver calls and incompatibility diagnostics. Exported evidence uses stable identities rather than structural reconstruction.
+Headers retain trait/conformance shells. AST resolves requirement types, stable trait identity, explicit conformance, evidence lookup by concrete type, bounds, bound-provided receiver calls and incompatibility diagnostics. Exported evidence uses stable identities rather than structural reconstruction.
 
 Traits are compile-time contracts, not value types. Static bound calls become concrete executable targets before HIR. No trait object, erased dispatch or runtime evidence crosses that boundary.
 
@@ -704,7 +708,9 @@ Parsed -> Composed -> Formatted -> Finalized
 
 Folding requires `Composed` or later. AST-to-HIR handoff requires `Finalized`.
 
-An exact `TirView` is the structural read authority after parser emission. Its `TirViewIdentity` contains the module-local root, phase and complete value context. The context contains only the optional expression, slot-resolution and wrapper-context overlay IDs, whose payloads remain owned by the module store. This identity determines effective reads, preparation and fold-cache keys and cycle detection. Consumers do not carry parallel authority tokens, store identities, context tables or overlay stacks outside the view.
+An exact `TirView` is the structural read authority after parser emission. Its `TirViewIdentity` contains the module-local root, phase and complete value context. The context contains only the optional expression, slot-resolution and wrapper-context overlay IDs, whose payloads remain owned by the module store. This identity determines effective reads, preparation and cycle detection. Consumers do not carry parallel authority tokens, store identities, context tables or overlay stacks outside the view.
+
+Template folding keeps borrowed fold inputs and has no fold cache: each consumer folds the prepared view it holds. An owned-folder signature copied inputs and slowed matched timings, and fold-key normalisation cost more than the low reuse a cache would see. Reopen these choices only with a new causal hypothesis and complete lifetime and invalidation evidence.
 
 Recursive consumers use two explicit view transitions:
 
@@ -782,7 +788,7 @@ Direct content constants use retained local ordering edges. Actual content-depen
 
 A structural string is an ordinary `String` whose ordered pieces include Text, Resource or SiteRoot. The anchor pieces preserve identity until the builder supplies final characters. Such strings remain legal mutable values, parameters, returns, optionals, collection elements and exported constants. Their presence alone causes no rejection.
 
-One module-local folded-value owner supports the plain-text fast path and structural pieces. Its postorder visitor uses an explicit heap stack as the sole conversion route into public values, HIR constants and direct-template results. Public values retain independently owned outputs. Consumers never reconstruct the string from AST expressions or TIR.
+One module-local folded-value owner supports the plain-text fast path and structural pieces. Its postorder visitor uses an explicit heap stack as the sole conversion route into public values, HIR constants and direct-template results. Public values retain independently owned outputs. Projection uses no memoisation, which preserves authored field order, provenance and independently owned repeated-child outputs. Consumers never reconstruct the string from AST expressions or TIR.
 
 Composition preserves pieces through assignment, copying, storage, interpolation, concatenation, slots/wrappers, export/re-export and calls/returns. Observation needs concrete characters: equality, length, search/prefix/suffix tests, parsing, String casts, hashing, compile-time map keys/duplicate checks and character-inspecting formatters or host operations.
 
@@ -813,6 +819,8 @@ Wire/Route capabilities are not ordinary stored or returned values. V1 capabilit
 AST resolves parameter contracts, binding identity, constructor identity and capture semantics. HIR retains the minimal neutral facts and ordinary captured values. Public interfaces and generated materialisation preserve contract kinds and canonical underlying types. Target validation rejects a reachable contract it cannot realise rather than silently reducing it to value-only behaviour.
 
 The normal argument owner knows the immediate receiving parameter before validating constructor completeness. It never retries a failed ordinary constructor as a route. Capability arguments use the same typed expression, native result-slot and ordinary captured-value owners as other calls. Static expression IDs are not runtime binding-instance identities. Public signatures, fingerprints, imports and generic remapping preserve the distinction between an ordinary value parameter, a wire and a route without exporting local identities or capture storage.
+
+A resolved parameter carries its contract (value, wire, or route with an optional input type) beside its ordinary `TypeId`: the wire's underlying type, or the route's output choice. No capability type exists, so every walker that collects, projects or closes over parameter types visits a route input through the parameter's own type-traversal owner. Scope lookup distinguishes route parameters: ordinary reads, places and receivers receive a value reference that cannot represent one, and only the route-argument root accessor forwards it. Route formation is one AST operation and one HIR `RouteConstruct` reusing constructor field storage, typed by the output choice. HIR validation requires captures to fill the entire payload for a zero-input route, or every field except the trailing future-input field for a one-input route. Borrow analysis and Boracle treat captures as aggregate fields. Wire arguments lower as ordinary shared reads. JS emits a route as its tagged carrier with the captured fields, and HTML-Wasm target validation rejects reachable route formation before lowering.
 
 Templates remain ordinary strings with no hidden wire, route, subscription or rerender recipe. Structural resource pieces follow their independent contract. Persistent observation, event delivery, UI scheduling and route application require separately defined consumer/lifetime contracts. This foundation supplies none implicitly.
 

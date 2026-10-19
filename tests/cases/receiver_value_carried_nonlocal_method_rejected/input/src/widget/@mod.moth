@@ -1,0 +1,7 @@
+export:
+    @types Counter
+
+    make_counter || -> Counter:
+        return Counter(41)
+    ;
+;

@@ -1,0 +1,6 @@
+@shapes Item
+@contracts LABELED, show
+
+shown = show(Item(text = "x"))
+
+[:[shown]]

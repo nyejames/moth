@@ -5,7 +5,7 @@ mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0074"]
 message_contains = [
-    "Public generic function 'identity' exposes private trait bound 'PRIVATE_DISPLAY'",
+    "Public generic function 'identity' exposes private trait bound 'PRIVATE_DISPLAY'. Make the trait public in the module that declares it, or keep the function private.",
 ]
 
 [[backends.html.diagnostic_assertions]]

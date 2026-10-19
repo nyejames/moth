@@ -1,0 +1,16 @@
+@limits/LIMIT LIMIT as Limit
+@limits/DOUBLE DOUBLE
+@sizes capacity
+
+items ~{capacity String} = {}
+~items.push("a") catch:
+;
+~items.push("b") catch:
+;
+~items.push("c") catch:
+;
+~items.push("d") catch:
+;
+len = items.length()
+
+[:imported_chain limit=[Limit] double=[DOUBLE] length=[len]]

@@ -1,0 +1,4 @@
+@utils Box, Label, NOMINAL_DISPLAY, STRICT_DISPLAY
+
+first = Box(Label(text = "a")).render()
+[:[first]]

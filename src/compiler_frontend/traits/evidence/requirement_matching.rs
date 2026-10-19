@@ -210,6 +210,22 @@ fn validate_parameters(
             ));
         }
 
+        let expected_contract = required
+            .contract
+            .with_trait_this_replaced(trait_this_type, method.receiver_type_id);
+        if expected_contract != actual.contract {
+            return Err(invalid_conformance(
+                context.target_name,
+                Some(context.trait_name),
+                InvalidTraitConformanceReason::ParameterContractMismatch {
+                    requirement_name: requirement.name,
+                    parameter_index: index + 1,
+                },
+                context.conformance_span,
+                requirement_and_method_labels(requirement, method.entry, context.string_table),
+            ));
+        }
+
         let expected_type =
             replace_trait_this(required.type_id, trait_this_type, method.receiver_type_id);
         if expected_type != actual.type_id {

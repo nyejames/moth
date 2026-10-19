@@ -657,7 +657,7 @@ fn wrap_site_fill_applies_wrapper_set_innermost_to_outermost() {
         TemplateTirPhase::Finalized,
         TemplateViewContext::default(),
     );
-    let wrapper_set_id = store.push_or_reuse_wrapper_set(vec![inner_ref, outer_ref]);
+    let wrapper_set_id = store.push_or_reuse_wrapper_set(&[inner_ref, outer_ref]);
     let plan = push_slot_plan(&mut store);
     let fill_root = contribution_fill(&mut store, plan);
     let mut copy_state = TirCopyState::new();

@@ -97,7 +97,7 @@ fn prepare_root(
         TemplateViewContext::default(),
     )?;
     let identity = view.identity();
-    let prepared = prepare_tir_view(&view, &expressions, &const_values, mode)?;
+    let prepared = prepare_tir_view(&view, &expressions, &const_values, mode, None)?;
     Ok((prepared, identity))
 }
 
@@ -391,6 +391,7 @@ fn preparation_reenters_nested_template_payload_authority() {
         &expressions,
         &const_values,
         TemplatePreparationMode::Value,
+        None,
     )
     .expect_err("nested template authority must be traversed");
     let TemplateError::Infrastructure(error) = error else {
@@ -461,6 +462,7 @@ fn preparation_classifies_nested_value_cycle_as_runtime() {
         &expressions,
         &const_values,
         TemplatePreparationMode::Value,
+        None,
     ) {
         Err(error) => error,
         Ok(prepared) => panic!("nested value cycles must be CompilerError, got {prepared:?}"),
@@ -507,6 +509,7 @@ fn preparation_rejects_exact_child_cycle_as_internal_error() {
         &expressions,
         &const_values,
         TemplatePreparationMode::Value,
+        None,
     ) {
         Err(error) => error,
         Ok(prepared) => panic!("exact-view child cycles must be CompilerError, got {prepared:?}"),
@@ -551,6 +554,7 @@ fn preparation_validates_runtime_slot_plan_authority() {
         &expressions,
         &const_values,
         TemplatePreparationMode::Value,
+        None,
     )
     .expect_err("missing runtime slot plan must remain authority failure");
     let TemplateError::Infrastructure(error) = error else {
@@ -615,6 +619,7 @@ fn preparation_classifies_runtime_slot_plan_and_site_as_runtime() {
         &expressions,
         &const_values,
         TemplatePreparationMode::Value,
+        None,
     )
     .expect("runtime-plan view should prepare");
 
@@ -855,6 +860,7 @@ fn runtime_contribution_constness_propagates_option_capture_bindings() {
             &const_values,
             root,
             &string_table,
+            None,
         )
         .expect("constness query should preserve store authority"),
         "a const option capture must make its binding available to the conditional body"
@@ -895,6 +901,7 @@ fn preparation_validates_wrapper_set_authority() {
         &expressions,
         &const_values,
         TemplatePreparationMode::Value,
+        None,
     )
     .expect_err("missing wrapper set must remain authority failure");
     let TemplateError::Infrastructure(error) = error else {
@@ -920,6 +927,7 @@ fn prepare_slot_plan_view(
         &expressions,
         &const_values,
         TemplatePreparationMode::Value,
+        None,
     )
 }
 

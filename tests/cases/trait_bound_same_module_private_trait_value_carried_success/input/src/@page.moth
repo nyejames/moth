@@ -1,0 +1,4 @@
+@helper Label, identity
+
+label = identity(Label("evidence"))
+[:trait_bound_same_module_private_trait_value_carried_success [label.text]]

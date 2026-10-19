@@ -1,0 +1,15 @@
+@provider PUBLIC_DISPLAY
+
+identity type T is PUBLIC_DISPLAY |value T| -> T:
+    return value
+;
+
+Label = |
+    text String,
+|
+
+display |this Label| -> String:
+    return this.text
+;
+
+Label must PUBLIC_DISPLAY

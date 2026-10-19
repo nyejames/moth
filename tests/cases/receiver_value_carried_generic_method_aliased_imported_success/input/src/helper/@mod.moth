@@ -1,0 +1,13 @@
+export:
+    Box type T = |
+        value T,
+    |
+
+    make_box || -> Box of I32:
+        return Box(42)
+    ;
+;
+
+label type T |this Box of T| -> String:
+    return "boxed"
+;

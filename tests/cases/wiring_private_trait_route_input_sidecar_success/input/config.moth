@@ -1,0 +1,5 @@
+project #= (
+    name = "wiring_private_trait_route_input_sidecar_success",
+    entry_root = "src",
+)
+html #= ()

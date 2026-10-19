@@ -15,10 +15,12 @@ use crate::compiler_frontend::ast::templates::template_folding::{
     TemplateEmission, TirFoldContext,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplateIrStore, TemplatePreparation, TemplatePreparationMode, TemplatePreparationOutcome,
-    TemplateTirPhase, TirView, fold_prepared_template, prepare_tir_view,
+    RuntimeTemplateReason, TemplateIrStore, TemplatePreparation, TemplatePreparationMode,
+    TemplatePreparationOutcome, TemplateTirPhase, TirView, fold_prepared_template,
+    prepare_tir_view,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -68,6 +70,7 @@ pub(super) fn finalize_template_value(
         fold_inputs.expression_builder,
         fold_inputs.const_values,
         preparation_mode,
+        fold_inputs.external_package_registry,
     )?;
     let fold_preparation = match preparation.outcome {
         TemplatePreparationOutcome::SlotInsertHelper => {
@@ -84,9 +87,20 @@ pub(super) fn finalize_template_value(
         fold_inputs.string_table,
         fold_inputs.expression_builder,
         fold_inputs.const_values,
+        fold_inputs.external_package_registry,
         fold_inputs.template_const_loop_iteration_limit,
     );
-    let result = fold_prepared_template(&fold_preparation, view, &mut fold_context)?;
+    let mut result = fold_prepared_template(&fold_preparation, view, &mut fold_context)?;
+    if let Some(diagnostic) = result.take_required_diagnostic() {
+        if matches!(preparation_mode, TemplatePreparationMode::ConstRequired) {
+            return Err(diagnostic.into());
+        }
+
+        let mut runtime_preparation = fold_preparation;
+        runtime_preparation.outcome =
+            TemplatePreparationOutcome::Runtime(RuntimeTemplateReason::RuntimeExpression);
+        return Ok(FinalizedTemplateValue::Runtime(runtime_preparation));
+    }
     let provenance = result.provenance;
     let folded = match result.emission {
         TemplateEmission::NoOutput => ConstStringValue::Text(fold_context.string_table.intern("")),
@@ -107,6 +121,7 @@ pub(super) struct TemplateValueFinalizationInputs<'store, 'strings> {
     pub(super) string_table: &'strings mut StringTable,
     pub(super) template_const_loop_iteration_limit: usize,
     pub(super) template_ir_store: &'store Rc<RefCell<TemplateIrStore>>,
+    pub(super) external_package_registry: Option<&'store ExternalPackageRegistry>,
     pub(super) expression_builder: &'strings mut AstExpressionBuilder,
     pub(super) const_values: &'strings mut ConstValueStore,
 }

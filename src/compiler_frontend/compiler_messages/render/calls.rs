@@ -91,6 +91,24 @@ pub(crate) fn invalid_call_shape_message(
         InvalidCallShapeReason::NamedArgumentsNotSupported => {
             "Named arguments are not supported for this call. Use positional arguments only.".to_string()
         }
+        InvalidCallShapeReason::WireArgumentOrigin => {
+            format!("{prefix} requires an unprojected named local binding or an unchanged compatible `Wire` parameter.")
+        }
+        InvalidCallShapeReason::WireArgumentMutableMarker => {
+            format!("{prefix} does not accept the `~` mutable-access marker for a `Wire` parameter.")
+        }
+        InvalidCallShapeReason::RouteArgumentNotDirect => {
+            "A `Route` argument must be a direct choice variant constructor or an unchanged compatible `Route` parameter.".to_owned()
+        }
+        InvalidCallShapeReason::RouteForwardingContractMismatch => {
+            "A route parameter can only be forwarded to a `Route` parameter with exactly matching input and output types.".to_owned()
+        }
+        InvalidCallShapeReason::RouteParameterRead => {
+            "A `Route` parameter is not an ordinary value and can only be forwarded unchanged to a matching `Route` parameter.".to_owned()
+        }
+        InvalidCallShapeReason::RouteInputFieldMismatch => {
+            "The trailing choice payload field must exactly match the route's future input type, and a payload field must remain for that input.".to_owned()
+        }
         InvalidCallShapeReason::MutableAccessRequired {
             parameter_name,
             parameter_index,
@@ -277,6 +295,11 @@ pub(crate) fn invalid_multi_bind_message(
         }
         InvalidMultiBindReason::MutableTargetNeedsExplicitType => {
             format!("Mutable multi-bind target {target_text} requires an explicit type annotation.")
+        }
+        InvalidMultiBindReason::CompileTimeMarkerOnTarget => {
+            format!(
+                "Multi-bind target {target_text} cannot use a compile-time '#' marker. Multi-bind targets are runtime bindings, so remove the '#'."
+            )
         }
         InvalidMultiBindReason::DuplicateTarget => {
             format!("Duplicate multi-bind target {target_text} in the same target list.")

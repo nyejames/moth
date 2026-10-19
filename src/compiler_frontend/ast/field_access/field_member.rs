@@ -18,7 +18,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     ExpressionOperationView, ExpressionView, OwnedExpr, PlaceProjectionView, SuccessShape,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
-use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
+use crate::compiler_frontend::ast::module_ast::scope_context::{ScopeContext, ScopeDeclarationRef};
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -27,6 +27,7 @@ use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::queries::TypeKind;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use moth_lexical::numeric::grammar::NumericLiteralKind;
 
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
@@ -106,6 +107,7 @@ fn expression_is_compile_time_constant(
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     expression_builder: &AstExpressionBuilder,
     const_values: &ConstValueStore,
+    external_package_registry: Option<&ExternalPackageRegistry>,
 ) -> Result<bool, ExpressionParseError> {
     Ok(expression
         .const_value_kind_with_template_classifier(const_values, &mut |template| {
@@ -114,6 +116,7 @@ fn expression_is_compile_time_constant(
                 template_ir_store,
                 expression_builder,
                 const_values,
+                external_package_registry,
             )
         })?
         .is_compile_time_value())
@@ -176,8 +179,11 @@ fn with_const_record_declaration<T>(
         return visit(declaration);
     }
     let name = path_fork.component(*path)?;
-    let reference = scope.get_reference(&name)?;
-    visit(reference.ready_declaration()?)
+    match scope.get_reference(&name)? {
+        ScopeDeclarationRef::Local { declaration, .. } => visit(&declaration),
+        ScopeDeclarationRef::Shared(declaration) => visit(declaration),
+        ScopeDeclarationRef::PendingNumeric { .. } | ScopeDeclarationRef::RouteParameter(_) => None,
+    }
 }
 
 fn const_record_root_and_field_path(
@@ -295,6 +301,7 @@ fn inline_projected_field(
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &ConstValueStore,
+    external_package_registry: Option<&ExternalPackageRegistry>,
 ) -> Result<Option<ExprId>, ExpressionParseError> {
     let is_constant = match field {
         ProjectedField::Expression(id) => expression_is_compile_time_constant(
@@ -302,6 +309,7 @@ fn inline_projected_field(
             template_ir_store,
             expression_builder,
             const_values,
+            external_package_registry,
         )?,
         ProjectedField::Constant(id) => const_values
             .metadata(id)
@@ -488,9 +496,13 @@ fn resolve_field_member(
             )
         });
         match candidate {
-            Some(field) => {
-                inline_projected_field(field, template_ir_store, expression_builder, const_values)?
-            }
+            Some(field) => inline_projected_field(
+                field,
+                template_ir_store,
+                expression_builder,
+                const_values,
+                scope_context.map(|scope| scope.external_package_registry.as_ref()),
+            )?,
             None => None,
         }
     } else {

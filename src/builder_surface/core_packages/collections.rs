@@ -45,6 +45,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                     ExternalReturnAlias::Fresh,
                 ),
                 error_return_type: None,
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
                         COLLECTION_GET_HOST_NAME.to_owned(),
@@ -82,6 +83,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                     ExternalReturnAlias::Fresh,
                 ),
                 error_return_type: None,
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
                         COLLECTION_SET_HOST_NAME.to_owned(),
@@ -113,6 +115,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                     ExternalReturnAlias::Fresh,
                 ),
                 error_return_type: None,
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
                         COLLECTION_PUSH_GROWABLE_HOST_NAME.to_owned(),
@@ -144,6 +147,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                     ExternalReturnAlias::Fresh,
                 ),
                 error_return_type: None,
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
                         COLLECTION_PUSH_FIXED_HOST_NAME.to_owned(),
@@ -177,6 +181,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                     ExternalReturnAlias::Fresh,
                 ),
                 error_return_type: None,
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
                         COLLECTION_REMOVE_HOST_NAME.to_owned(),
@@ -204,6 +209,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                     ExternalReturnAlias::Fresh,
                 ),
                 error_return_type: None,
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
                         COLLECTION_LENGTH_HOST_NAME.to_owned(),

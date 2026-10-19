@@ -718,8 +718,12 @@ allocation, lookup, folding, import, and lowering pressure.
 - `benchmark-root-single-file.moth`: root-level single-file check case that
   exercises the non-project single-file path.
 - `template-stress.moth`: deeply nested template composition, slot usage, `$children` wrappers, and formatter directive stress.
+- `code-highlighter-stress.moth`: one large `$code("moth")` constant whose source-like body
+  exercises the compile-time HTML code formatter over a realistic mix of tokens.
 - `type-stress.moth`: type and method-heavy source with structs, choices, aliases, receivers, and constructor patterns.
 - `fold-stress.moth`: constant folding coverage with large arithmetic trees, chained dependencies, and const record creation.
+- `default-parameters-32.moth`: 32 functions with arithmetic `I32` and `String` signature
+  defaults, each called with both arguments omitted, so every call site fills two defaults.
 - `pattern-stress.moth`: pattern and match coverage including exhaustive choice arms, guards, payload capture, and relational patterns.
 - `collection-stress.moth`: collection operations and loop coverage with mutations, range loops, nested iteration, and fallible fallback patterns.
 - `environment-stress.moth`: AST environment building, type alias expansion, nominal structs and choices, receiver catalog construction, generic declarations and instantiations, and body validation/type resolution.
@@ -731,6 +735,16 @@ allocation, lookup, folding, import, and lowering pressure.
   numeric domains must preserve every size, declaration and driver workload.
 - `constant-scaling/constant-chain-{32,128,512}.moth`: the `constant_chain` scaling series, a
   dependency chain of compile-time constants at three lengths.
+- `generic-scaling/generic-scaling-{20,40,80,160}.moth`: the `generic_instantiation` scaling
+  series. Each size adds distinct concrete types driven through the same seven generic call sites
+  with fixed driver bodies, so instantiation count grows while function body size stays constant.
+- `numeric-scaling/` and `parallelism/`: see Numeric inference workloads and Frontend parallelism
+  matrix above.
+- `data-layout/diagnosed/` and `data-layout/warning-heavy.moth`: the diagnostic data-layout suite
+  (`just bench-data-layout`), an expected-error project and a warning-heavy file measured for
+  diagnostic memory and timing, never correctness.
+- `docs`: the repository documentation project (`docs/config.moth`, `docs/src`), measured as a
+  real multi-page site through `check` and the frontend profile.
 - `module-graph/`: small multi-file project with cross-file imports, constants and templates.
 - `import-fanout/`: multi-file project with repeated imports, aliases, wrapper declarations and cross-file constants for string-table interning and module-graph resolution.
 - `module-root-stress/`: directory project with config parsing, multiple

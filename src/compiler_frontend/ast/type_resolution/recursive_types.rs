@@ -3,26 +3,20 @@
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::type_resolution::TypeResolutionResult;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidDeclarationReason};
-use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::generic_identity_bridge::{
-    GenericBaseType, GenericInstantiationKey, TypeIdentityKey,
-};
+use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::{FxHashMap, FxHashSet};
-
-// --------------------------
-//  Type Recursion Validation
-// --------------------------
 
 pub(crate) fn validate_no_recursive_generic_type(
     declaration_path: &PathId,
-    data_type: &DataType,
+    type_id: TypeId,
+    type_environment: &TypeEnvironment,
     span: Option<SourceSpan>,
-    _string_table: &StringTable,
 ) -> TypeResolutionResult<()> {
-    if !generic_type_references_nominal_path(data_type, declaration_path) {
+    if !type_id_references_nominal_path(type_id, declaration_path, type_environment) {
         return Ok(());
     }
 
@@ -33,79 +27,38 @@ pub(crate) fn validate_no_recursive_generic_type(
     ))
 }
 
-fn generic_type_references_nominal_path(data_type: &DataType, declaration_path: &PathId) -> bool {
-    match data_type {
-        DataType::GenericInstance { base, arguments } => {
-            let base_matches = matches!(
-                base,
-                GenericBaseType::ResolvedNominal(path) if path == declaration_path
-            );
-
-            base_matches
-                || arguments.iter().any(|argument| {
-                    generic_type_references_nominal_path(argument, declaration_path)
+fn type_id_references_nominal_path(
+    type_id: TypeId,
+    declaration_path: &PathId,
+    type_environment: &TypeEnvironment,
+) -> bool {
+    match type_environment.get(type_id) {
+        Some(TypeDefinition::GenericInstance(instance)) => {
+            type_environment
+                .nominal_path_by_id(instance.base)
+                .is_some_and(|path| path == declaration_path)
+                || instance.arguments.iter().any(|argument| {
+                    type_id_references_nominal_path(*argument, declaration_path, type_environment)
                 })
         }
 
-        DataType::Option(inner) => generic_type_references_nominal_path(inner, declaration_path),
-
-        DataType::Struct {
-            nominal_path,
-            generic_instance_key: Some(key),
-            ..
-        }
-        | DataType::Choices {
-            nominal_path,
-            generic_instance_key: Some(key),
-            ..
-        } => {
-            nominal_path == declaration_path
-                || generic_instance_key_references_nominal_path(key, declaration_path)
+        Some(TypeDefinition::Constructed(constructed)) => {
+            constructed.arguments.iter().any(|argument| {
+                type_id_references_nominal_path(*argument, declaration_path, type_environment)
+            })
         }
 
-        DataType::Struct { nominal_path, .. } | DataType::Choices { nominal_path, .. } => {
-            // Callers invoke this validation only for generic declarations.
-            // A direct self-nominal reference here is therefore recursive generic shape,
-            // while non-generic runtime struct cycles stay on the runtime-cycle path.
-            nominal_path == declaration_path
-        }
+        Some(TypeDefinition::Struct(definition)) => definition.path == *declaration_path,
+        Some(TypeDefinition::Choice(definition)) => definition.path == *declaration_path,
 
-        DataType::Parameters(fields) => fields.iter().any(|field| {
-            generic_type_references_nominal_path(&field.diagnostic_type, declaration_path)
-        }),
-
-        _ => false,
-    }
-}
-
-fn generic_instance_key_references_nominal_path(
-    key: &GenericInstantiationKey,
-    declaration_path: &PathId,
-) -> bool {
-    &key.base_path == declaration_path
-        || key
-            .arguments
-            .iter()
-            .any(|argument| type_identity_key_references_nominal_path(argument, declaration_path))
-}
-
-fn type_identity_key_references_nominal_path(
-    key: &TypeIdentityKey,
-    declaration_path: &PathId,
-) -> bool {
-    match key {
-        TypeIdentityKey::Nominal(path) => path == declaration_path,
-        TypeIdentityKey::Collection { element: inner, .. } | TypeIdentityKey::Option(inner) => {
-            type_identity_key_references_nominal_path(inner, declaration_path)
-        }
-        TypeIdentityKey::Map { key, value } => {
-            type_identity_key_references_nominal_path(key, declaration_path)
-                || type_identity_key_references_nominal_path(value, declaration_path)
-        }
-        TypeIdentityKey::GenericInstance(instance) => {
-            generic_instance_key_references_nominal_path(instance, declaration_path)
-        }
-        TypeIdentityKey::Builtin(_) | TypeIdentityKey::External(_) => false,
+        Some(
+            TypeDefinition::Builtin(_)
+            | TypeDefinition::Function(_)
+            | TypeDefinition::External(_)
+            | TypeDefinition::GenericParameter(_)
+            | TypeDefinition::AnonymousConstRecordMarker,
+        )
+        | None => false,
     }
 }
 
@@ -113,39 +66,61 @@ fn type_identity_key_references_nominal_path(
 //  Runtime struct cycle validation
 // --------------------------------
 
-fn collect_runtime_struct_dependencies(data_type: &DataType, dependencies: &mut FxHashSet<PathId>) {
-    // WHY: Cycle validation only cares about runtime struct-to-struct edges,
-    // not scalar or constant data.
-    match data_type {
-        DataType::Struct {
-            nominal_path,
-            const_record: false,
-            ..
-        } => {
-            dependencies.insert(nominal_path.to_owned());
+fn collect_runtime_struct_dependencies(
+    type_id: TypeId,
+    type_environment: &TypeEnvironment,
+    dependencies: &mut FxHashSet<PathId>,
+) {
+    // Runtime-cycle validation follows nominal structs and their inline type arguments.
+    match type_environment.get(type_id) {
+        Some(TypeDefinition::Struct(definition)) if !definition.const_record => {
+            dependencies.insert(definition.path);
         }
 
-        DataType::Option(inner) => collect_runtime_struct_dependencies(inner, dependencies),
-
-        DataType::GenericInstance { arguments, .. } => {
-            for argument in arguments {
-                collect_runtime_struct_dependencies(argument, dependencies);
+        Some(TypeDefinition::Constructed(constructed)) => {
+            for argument in &constructed.arguments {
+                collect_runtime_struct_dependencies(*argument, type_environment, dependencies);
             }
         }
 
-        _ => {}
+        Some(TypeDefinition::GenericInstance(instance)) => {
+            if let Some(TypeDefinition::Struct(definition)) = type_environment
+                .type_id_for_nominal_id(instance.base)
+                .and_then(|base_type_id| type_environment.get(base_type_id))
+                && !definition.const_record
+            {
+                dependencies.insert(definition.path);
+            }
+
+            for argument in &instance.arguments {
+                collect_runtime_struct_dependencies(*argument, type_environment, dependencies);
+            }
+        }
+
+        Some(
+            TypeDefinition::Builtin(_)
+            | TypeDefinition::Struct(_)
+            | TypeDefinition::Choice(_)
+            | TypeDefinition::Function(_)
+            | TypeDefinition::External(_)
+            | TypeDefinition::GenericParameter(_)
+            | TypeDefinition::AnonymousConstRecordMarker,
+        )
+        | None => {}
     }
 }
 
 /// Reject runtime struct cycles that would make concrete layout impossible to lower.
 pub(crate) fn validate_no_recursive_runtime_structs(
     struct_fields_by_path: &FxHashMap<PathId, Vec<Declaration>>,
+    type_environment: &TypeEnvironment,
 ) -> TypeResolutionResult<()> {
     // WHY: V1 runtime structs do not support recursive layout semantics yet.
     // These cycles must fail in AST construction with a targeted rule error.
     fn visit(
         current: &PathId,
         struct_fields_by_path: &FxHashMap<PathId, Vec<Declaration>>,
+        type_environment: &TypeEnvironment,
         visiting: &mut Vec<PathId>,
         visited: &mut FxHashSet<PathId>,
     ) -> TypeResolutionResult<()> {
@@ -176,11 +151,21 @@ pub(crate) fn validate_no_recursive_runtime_structs(
         if let Some(fields) = struct_fields_by_path.get(current) {
             for field in fields {
                 let mut dependencies = FxHashSet::default();
-                collect_runtime_struct_dependencies(&field.diagnostic_type, &mut dependencies);
+                collect_runtime_struct_dependencies(
+                    field.type_id,
+                    type_environment,
+                    &mut dependencies,
+                );
 
                 for dependency in dependencies {
                     if struct_fields_by_path.contains_key(&dependency) {
-                        visit(&dependency, struct_fields_by_path, visiting, visited)?;
+                        visit(
+                            &dependency,
+                            struct_fields_by_path,
+                            type_environment,
+                            visiting,
+                            visited,
+                        )?;
                     }
                 }
             }
@@ -198,6 +183,7 @@ pub(crate) fn validate_no_recursive_runtime_structs(
         visit(
             struct_path,
             struct_fields_by_path,
+            type_environment,
             &mut visiting,
             &mut visited,
         )?;

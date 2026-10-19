@@ -1168,6 +1168,13 @@ contract = "language.generics.function_body_validation"
 role = "boundary"
 
 [[case]]
+id = "generic_fn_imported_generic_body_call_success"
+path = "generic_fn_imported_generic_body_call_success"
+tags = ["integration","generics","functions","dependencies"]
+contract = "language.generics.imported_generic_body_call"
+role = "primary"
+
+[[case]]
 id = "generic_function_local_annotations_success"
 path = "generic_function_local_annotations_success"
 tags = ["integration","generics","functions","collections","choices"]
@@ -1273,10 +1280,10 @@ contract = "language.generics.trait_bound_missing_evidence_rejected"
 role = "boundary"
 
 [[case]]
-id = "imported_evidence_file_visibility_rejected"
-path = "imported_evidence_file_visibility_rejected"
-tags = ["integration", "generics", "traits", "dependencies", "diagnostics"]
-contract = "language.generics.trait_bound_missing_evidence_rejected"
+id = "imported_evidence_unnamed_target_value_carried_success"
+path = "imported_evidence_unnamed_target_value_carried_success"
+tags = ["integration", "generics", "traits", "dependencies"]
+contract = "language.generics.trait_bound_unnamed_target_acceptance"
 role = "boundary"
 
 [[case]]
@@ -1294,10 +1301,10 @@ contract = "language.generics.trait_bound_function"
 role = "boundary"
 
 [[case]]
-id = "local_generic_imported_trait_hidden_target_rejected"
-path = "local_generic_imported_trait_hidden_target_rejected"
-tags = ["integration", "generics", "traits", "dependencies", "aliases", "diagnostics"]
-contract = "language.generics.trait_bound_missing_evidence_rejected"
+id = "local_generic_unnamed_target_value_carried_success"
+path = "local_generic_unnamed_target_value_carried_success"
+tags = ["integration", "generics", "traits", "dependencies", "aliases"]
+contract = "language.generics.trait_bound_unnamed_target_acceptance"
 role = "boundary"
 
 [[case]]
@@ -1469,6 +1476,20 @@ contract = "language.generics.public_bound_public_trait"
 role = "boundary"
 
 [[case]]
+id = "public_generic_struct_bound_private_trait_rejected"
+path = "public_generic_struct_bound_private_trait_rejected"
+tags = ["integration","generics","traits","structs","dependencies","facade","diagnostics"]
+contract = "language.generics.public_nominal_bound_private_trait_rejected"
+role = "primary"
+
+[[case]]
+id = "public_generic_choice_bound_private_trait_rejected"
+path = "public_generic_choice_bound_private_trait_rejected"
+tags = ["integration","generics","traits","choices","dependencies","facade","diagnostics"]
+contract = "language.generics.public_nominal_bound_private_trait_rejected"
+role = "boundary"
+
+[[case]]
 id = "trait_evidence_builtin_receiver_rejected"
 path = "trait_evidence_builtin_receiver_rejected"
 tags = ["integration","traits","receivers","scalars"]
@@ -1476,16 +1497,30 @@ contract = "language.traits.builtin_conformance_target_rejected"
 role = "primary"
 
 [[case]]
-id = "trait_evidence_concrete_fallback_not_imported_rejected"
-path = "trait_evidence_concrete_fallback_not_imported_rejected"
-tags = ["integration","traits","receivers","dependencies","facade","diagnostics"]
-contract = "language.traits.concrete_fallback_not_imported_rejected"
+id = "trait_evidence_concrete_fallback_value_carried_success"
+path = "trait_evidence_concrete_fallback_value_carried_success"
+tags = ["integration", "traits", "receivers", "dependencies", "facade"]
+contract = "language.traits.concrete_fallback_value_carried_acceptance"
 role = "primary"
 
 [[case]]
-id = "trait_bound_imported_private_trait_rejected"
-path = "trait_bound_imported_private_trait_rejected"
-tags = ["integration","generics","traits","functions","dependencies","diagnostics"]
+id = "trait_bound_same_module_private_trait_value_carried_success"
+path = "trait_bound_same_module_private_trait_value_carried_success"
+tags = ["integration", "generics", "traits", "functions", "dependencies"]
+contract = "language.generics.trait_bound_same_module_evidence_acceptance"
+role = "boundary"
+
+[[case]]
+id = "generic_bound_value_carried_unnamed_trait_success"
+path = "generic_bound_value_carried_unnamed_trait_success"
+tags = ["integration", "generics", "traits", "dependencies"]
+contract = "language.generics.trait_bound_unnamed_target_acceptance"
+role = "boundary"
+
+[[case]]
+id = "generic_bound_value_carried_missing_evidence_rejected"
+path = "generic_bound_value_carried_missing_evidence_rejected"
+tags = ["integration", "generics", "traits", "dependencies", "diagnostics"]
 contract = "language.generics.trait_bound_missing_evidence_rejected"
 role = "boundary"
 
@@ -1816,6 +1851,181 @@ id = "generic_receiver_generic_evidence_boundary_success"
 path = "generic_receiver_generic_evidence_boundary_success"
 tags = ["integration","generics","dependencies","receiver-methods","traits"]
 contract = "language.generics.receiver_method"
+role = "boundary"
+
+[[case]]
+id = "generic_imported_bounded_body_evidence_success"
+path = "generic_imported_bounded_body_evidence_success"
+tags = ["integration","generics","traits","functions","receiver-methods","dependencies"]
+contract = "language.generics.imported_bounded_body_trait_evidence"
+role = "primary"
+
+[[case]]
+id = "public_generic_receiver_bound_private_trait_rejected"
+path = "public_generic_receiver_bound_private_trait_rejected"
+tags = ["integration","generics","traits","functions","receiver-methods","dependencies","diagnostics"]
+contract = "language.generics.public_receiver_bound_private_trait_rejected"
+role = "primary"
+
+[[case]]
+id = "public_generic_receiver_bound_unexported_import_rejected"
+path = "public_generic_receiver_bound_unexported_import_rejected"
+tags = ["integration","generics","traits","functions","receiver-methods","dependencies","diagnostics"]
+contract = "language.generics.public_receiver_bound_private_trait_rejected"
+role = "boundary"
+
+[[case]]
+id = "public_generic_reexported_struct_bound_private_trait_rejected"
+path = "public_generic_reexported_struct_bound_private_trait_rejected"
+tags = ["integration","generics","traits","dependencies","facade","diagnostics"]
+contract = "language.generics.public_nominal_bound_private_trait_rejected"
+role = "boundary"
+
+[[case]]
+id = "public_generic_reexported_function_bound_private_trait_rejected"
+path = "public_generic_reexported_function_bound_private_trait_rejected"
+tags = ["integration","generics","traits","functions","dependencies","facade","diagnostics"]
+contract = "language.generics.public_bound_private_trait_rejected"
+role = "boundary"
+
+[[case]]
+id = "public_generic_reexported_choice_bound_private_trait_rejected"
+path = "public_generic_reexported_choice_bound_private_trait_rejected"
+tags = ["integration","generics","traits","dependencies","facade","diagnostics"]
+contract = "language.generics.public_nominal_bound_private_trait_rejected"
+role = "boundary"
+
+[[case]]
+id = "public_generic_reexported_chain_bound_private_trait_rejected"
+path = "public_generic_reexported_chain_bound_private_trait_rejected"
+tags = ["integration","generics","traits","functions","dependencies","facade","diagnostics"]
+contract = "language.generics.public_bound_private_trait_rejected"
+role = "boundary"
+
+[[case]]
+id = "public_generic_reexported_chain_bound_public_trait_success"
+path = "public_generic_reexported_chain_bound_public_trait_success"
+tags = ["integration","generics","traits","functions","dependencies","facade"]
+contract = "language.generics.public_bound_public_trait"
+role = "boundary"
+
+[[case]]
+id = "public_generic_child_imported_trait_success"
+path = "public_generic_child_imported_trait_success"
+tags = ["integration","generics","traits","functions","dependencies","facade"]
+contract = "language.generics.public_bound_public_trait"
+role = "boundary"
+
+[[case]]
+id = "generic_imported_method_bound_stricter_than_nominal_rejected"
+path = "generic_imported_method_bound_stricter_than_nominal_rejected"
+tags = ["integration","generics","traits","receiver-methods","dependencies","diagnostics"]
+contract = "language.generics.trait_bound_missing_evidence_rejected"
+role = "boundary"
+
+[[case]]
+id = "public_generic_receiver_bound_public_trait_success"
+path = "public_generic_receiver_bound_public_trait_success"
+tags = ["integration","generics","traits","functions","receiver-methods","dependencies","facade"]
+contract = "language.generics.public_receiver_bound_public_trait"
+role = "primary"
+
+[[case]]
+id = "public_generic_bound_imported_public_trait_success"
+path = "public_generic_bound_imported_public_trait_success"
+tags = ["integration","generics","traits","functions","dependencies","facade"]
+contract = "language.generics.public_bound_public_trait"
+role = "boundary"
+
+[[case]]
+id = "generic_imported_receiver_bound_nominal_requirement_success"
+path = "generic_imported_receiver_bound_nominal_requirement_success"
+tags = ["integration","generics","traits","receiver-methods","dependencies","facade"]
+contract = "language.generics.imported_receiver_bound_nominal_requirement"
+role = "primary"
+
+[[case]]
+id = "generic_bound_support_package_trait_evidence_success"
+path = "generic_bound_support_package_trait_evidence_success"
+tags = ["integration","generics","traits","functions","dependencies","facade"]
+contract = "language.generics.imported_trait_evidence_forwarded"
+role = "primary"
+
+[[case]]
+id = "public_generic_struct_bound_imported_public_trait_success"
+path = "public_generic_struct_bound_imported_public_trait_success"
+tags = ["integration","generics","traits","structs","dependencies","facade"]
+contract = "language.generics.imported_trait_evidence_forwarded"
+role = "boundary"
+
+[[case]]
+id = "generic_imported_bounded_body_outer_generic_only_success"
+path = "generic_imported_bounded_body_outer_generic_only_success"
+tags = ["integration","generics","traits","functions","receiver-methods","dependencies"]
+contract = "language.generics.imported_bounded_body_trait_evidence"
+role = "boundary"
+
+[[case]]
+id = "generic_bounded_body_outer_only_mixed_evidence_success"
+path = "generic_bounded_body_outer_only_mixed_evidence_success"
+tags = ["integration","generics","traits","functions","receiver-methods","dependencies"]
+contract = "language.generics.imported_bounded_body_trait_evidence"
+role = "boundary"
+
+[[case]]
+id = "generic_bounded_body_private_trait_retained_for_body_success"
+path = "generic_bounded_body_private_trait_retained_for_body_success"
+tags = ["integration","generics","traits","functions","receiver-methods","dependencies"]
+contract = "language.generics.imported_bounded_body_trait_evidence"
+role = "boundary"
+
+[[case]]
+id = "generic_bounded_nominal_constructor_trait_retained_success"
+path = "generic_bounded_nominal_constructor_trait_retained_success"
+tags = ["integration","generics","traits","structs","functions","dependencies"]
+contract = "language.generics.imported_bounded_body_trait_evidence"
+role = "boundary"
+
+[[case]]
+id = "generic_bounded_nominal_constructor_wrapper_only_success"
+path = "generic_bounded_nominal_constructor_wrapper_only_success"
+tags = ["integration","generics","traits","structs","functions","dependencies"]
+contract = "language.generics.imported_bounded_body_trait_evidence"
+role = "boundary"
+
+[[case]]
+id = "generic_bounded_nominal_choice_constructor_trait_retained_success"
+path = "generic_bounded_nominal_choice_constructor_trait_retained_success"
+tags = ["integration","generics","traits","choices","functions","dependencies"]
+contract = "language.generics.imported_bounded_body_trait_evidence"
+role = "boundary"
+
+[[case]]
+id = "generic_bounded_nominal_choice_constructor_wrapper_only_success"
+path = "generic_bounded_nominal_choice_constructor_wrapper_only_success"
+tags = ["integration","generics","traits","choices","functions","dependencies"]
+contract = "language.generics.imported_bounded_body_trait_evidence"
+role = "boundary"
+
+[[case]]
+id = "trait_requirement_nested_nominal_closure_success"
+path = "trait_requirement_nested_nominal_closure_success"
+tags = ["integration","generics","traits","receiver-methods","dependencies","facade"]
+contract = "language.generics.imported_receiver_bound_nominal_requirement"
+role = "boundary"
+
+[[case]]
+id = "trait_requirement_choice_nominal_closure_success"
+path = "trait_requirement_choice_nominal_closure_success"
+tags = ["integration","generics","traits","choices","receiver-methods","dependencies"]
+contract = "language.generics.imported_receiver_bound_nominal_requirement"
+role = "boundary"
+
+[[case]]
+id = "generic_bounded_body_private_evidence_return_alias_rejected"
+path = "generic_bounded_body_private_evidence_return_alias_rejected"
+tags = ["integration","generics","traits","functions","receiver-methods","borrows","diagnostics"]
+contract = "language.generics.imported_bounded_body_trait_evidence"
 role = "boundary"
 
 [[case]]
@@ -3653,11 +3863,32 @@ contract = "backend.html.resource_root_folder"
 role = "primary"
 
 [[case]]
+id = "html_resource_match_guard_reachable"
+path = "html_resource_match_guard_reachable"
+tags = ["integration", "html", "reachability"]
+contract = "backend.html.resource_match_guard_reachable"
+role = "primary"
+
+[[case]]
 id = "html_resource_unreferenced_not_emitted"
 path = "html_resource_unreferenced_not_emitted"
 tags = ["integration", "html"]
 contract = "backend.html.resource_unreferenced_not_emitted"
 role = "primary"
+
+[[case]]
+id = "html_resource_site_root_structural_equality_success"
+path = "html_resource_site_root_structural_equality_success"
+tags = ["integration", "html", "paths"]
+contract = "backend.html.resource_site_root_structural_equality"
+role = "primary"
+
+[[case]]
+id = "html_resource_structural_equality_compile_time_rejected"
+path = "html_resource_structural_equality_compile_time_rejected"
+tags = ["integration", "html", "diagnostics", "paths"]
+contract = "language.constants.structural_string_equality_requires_final_text"
+role = "boundary"
 
 [[case]]
 id = "html_wasm_basic_string"
@@ -4665,6 +4896,13 @@ id = "multi_bind_existing_target_mutable_marker_rejected"
 path = "multi_bind_existing_target_mutable_marker_rejected"
 tags = ["integration", "results", "diagnostics"]
 contract = "language.functions.multi_bind_existing_target_mutable_marker_rejected"
+role = "primary"
+
+[[case]]
+id = "multi_bind_compile_time_marker_rejected"
+path = "multi_bind_compile_time_marker_rejected"
+tags = ["integration", "results", "diagnostics"]
+contract = "language.functions.multi_bind_compile_time_marker_rejected"
 role = "primary"
 
 [[case]]
@@ -7931,11 +8169,123 @@ contract = "language.choices.receiver_method_auto_imported_with_type_acceptance"
 role = "primary"
 
 [[case]]
-id = "receiver_facade_type_alias_no_private_method"
-path = "receiver_facade_type_alias_no_private_method"
-tags = ["integration", "receiver-methods", "dependencies", "facade", "diagnostics"]
-contract = "language.structs.receiver_method_facade_type_alias_private_access_rejected"
+id = "receiver_facade_type_alias_value_methods_success"
+path = "receiver_facade_type_alias_value_methods_success"
+tags = ["integration", "receiver-methods", "dependencies", "facade"]
+contract = "language.structs.receiver_method_facade_type_alias_acceptance"
 role = "primary"
+
+[[case]]
+id = "receiver_value_carried_imported_struct_success"
+path = "receiver_value_carried_imported_struct_success"
+tags = ["integration", "receiver-methods", "dependencies"]
+contract = "language.structs.receiver_method_value_carried_acceptance"
+role = "primary"
+
+[[case]]
+id = "receiver_value_carried_imported_choice_success"
+path = "receiver_value_carried_imported_choice_success"
+tags = ["integration", "receiver-methods", "choices", "dependencies"]
+contract = "language.choices.receiver_method_value_carried_acceptance"
+role = "primary"
+
+[[case]]
+id = "receiver_value_carried_same_module_sibling_success"
+path = "receiver_value_carried_same_module_sibling_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.structs.receiver_method_same_module_value_carried_acceptance"
+role = "primary"
+
+[[case]]
+id = "receiver_value_carried_same_method_name_success"
+path = "receiver_value_carried_same_method_name_success"
+tags = ["integration", "receiver-methods", "dependencies"]
+contract = "language.structs.receiver_method_same_name_value_carried_acceptance"
+role = "primary"
+
+[[case]]
+id = "receiver_value_carried_nonlocal_method_rejected"
+path = "receiver_value_carried_nonlocal_method_rejected"
+tags = ["integration", "receiver-methods", "dependencies", "diagnostics"]
+contract = "language.structs.receiver_method_nonlocal_value_carried_rejected"
+role = "primary"
+
+[[case]]
+id = "receiver_value_carried_generic_body_sibling_success"
+path = "receiver_value_carried_generic_body_sibling_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.generics.receiver_method_value_carried_acceptance"
+role = "primary"
+
+[[case]]
+id = "receiver_value_carried_generic_body_imported_success"
+path = "receiver_value_carried_generic_body_imported_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.generics.receiver_method_value_carried_acceptance"
+role = "boundary"
+
+[[case]]
+id = "receiver_value_carried_generic_method_sibling_success"
+path = "receiver_value_carried_generic_method_sibling_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.generics.receiver_method_value_carried_generic_acceptance"
+role = "primary"
+
+[[case]]
+id = "receiver_value_carried_generic_method_imported_success"
+path = "receiver_value_carried_generic_method_imported_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.generics.receiver_method_value_carried_generic_acceptance"
+role = "boundary"
+
+[[case]]
+id = "receiver_value_carried_generic_method_body_sibling_success"
+path = "receiver_value_carried_generic_method_body_sibling_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.generics.receiver_method_value_carried_generic_body_acceptance"
+role = "primary"
+
+[[case]]
+id = "receiver_value_carried_generic_method_body_imported_success"
+path = "receiver_value_carried_generic_method_body_imported_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.generics.receiver_method_value_carried_generic_body_acceptance"
+role = "boundary"
+
+[[case]]
+id = "receiver_value_carried_generic_method_unnamed_bound_success"
+path = "receiver_value_carried_generic_method_unnamed_bound_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.generics.receiver_method_value_carried_generic_body_acceptance"
+role = "boundary"
+
+[[case]]
+id = "receiver_value_carried_generic_method_named_imported_success"
+path = "receiver_value_carried_generic_method_named_imported_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.generics.receiver_method_value_carried_generic_body_acceptance"
+role = "boundary"
+
+[[case]]
+id = "receiver_value_carried_generic_method_aliased_imported_success"
+path = "receiver_value_carried_generic_method_aliased_imported_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.generics.receiver_method_value_carried_generic_body_acceptance"
+role = "boundary"
+
+[[case]]
+id = "receiver_value_carried_generic_method_named_bound_success"
+path = "receiver_value_carried_generic_method_named_bound_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.generics.receiver_method_value_carried_generic_body_acceptance"
+role = "boundary"
+
+[[case]]
+id = "receiver_value_carried_generic_method_named_sibling_success"
+path = "receiver_value_carried_generic_method_named_sibling_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.generics.receiver_method_value_carried_generic_body_acceptance"
+role = "boundary"
 
 [[case]]
 id = "receiver_same_method_name_different_receivers_success"
@@ -9961,6 +10311,181 @@ contract = "backend.html.core_text_helper_reachability"
 role = "backend"
 
 [[case]]
+id = "core_text_const_eval_folded"
+path = "core_text_const_eval_folded"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "wasm", "reachability"]
+contract = "language.dependencies.core_text_constant_evaluation_folded"
+role = "primary"
+
+[[case]]
+id = "core_text_const_eval_required_rejected"
+path = "core_text_const_eval_required_rejected"
+tags = ["integration", "language", "external-packages", "core-packages", "diagnostics"]
+contract = "language.dependencies.core_text_constant_evaluation_required"
+role = "boundary"
+
+[[case]]
+id = "core_text_const_eval_core_math_rejected"
+path = "core_text_const_eval_core_math_rejected"
+tags = ["integration", "language", "external-packages", "core-packages", "diagnostics"]
+contract = "language.dependencies.core_constant_call_without_evaluator_rejected"
+role = "boundary"
+
+[[case]]
+id = "core_text_const_eval_resource_runtime_retained"
+path = "core_text_const_eval_resource_runtime_retained"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "reachability"]
+contract = "backend.html.core_text_resource_text_runtime_retained"
+role = "backend"
+
+[[case]]
+id = "core_text_const_eval_resource_required_rejected"
+path = "core_text_const_eval_resource_required_rejected"
+tags = ["integration", "language", "external-packages", "core-packages", "diagnostics"]
+contract = "language.dependencies.core_text_resource_constant_evaluation_refused"
+role = "boundary"
+
+[[case]]
+id = "core_text_const_eval_resource_condition_runtime_retained"
+path = "core_text_const_eval_resource_condition_runtime_retained"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "reachability"]
+contract = "backend.html.core_text_resource_condition_runtime_retained"
+role = "backend"
+
+[[case]]
+id = "core_text_const_eval_resource_condition_required_rejected"
+path = "core_text_const_eval_resource_condition_required_rejected"
+tags = ["integration", "language", "external-packages", "core-packages", "diagnostics"]
+contract = "language.templates.resource_condition_requires_final_text"
+role = "boundary"
+
+[[case]]
+id = "core_text_const_eval_resource_range_runtime_retained"
+path = "core_text_const_eval_resource_range_runtime_retained"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "reachability"]
+contract = "backend.html.core_text_resource_range_bound_runtime_retained"
+role = "backend"
+
+[[case]]
+id = "core_text_const_eval_resource_range_required_rejected"
+path = "core_text_const_eval_resource_range_required_rejected"
+tags = ["integration", "language", "external-packages", "core-packages", "diagnostics"]
+contract = "language.templates.resource_range_bound_requires_final_text"
+role = "boundary"
+
+[[case]]
+id = "core_text_const_eval_template_loop"
+path = "core_text_const_eval_template_loop"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "reachability"]
+contract = "language.templates.constant_loop_folds_registered_text_calls"
+role = "primary"
+
+[[case]]
+id = "core_text_const_eval_resource_template_runtime_retained"
+path = "core_text_const_eval_resource_template_runtime_retained"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "reachability"]
+contract = "backend.html.core_text_resource_template_runtime_retained"
+role = "backend"
+
+[[case]]
+id = "core_text_const_eval_resource_template_loop_runtime_retained"
+path = "core_text_const_eval_resource_template_loop_runtime_retained"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "reachability"]
+contract = "backend.html.core_text_resource_loop_runtime_retained"
+role = "backend"
+
+[[case]]
+id = "core_text_const_eval_resource_template_required_rejected"
+path = "core_text_const_eval_resource_template_required_rejected"
+tags = ["integration", "language", "external-packages", "core-packages", "diagnostics"]
+contract = "language.templates.const_template_resource_call_rejected"
+role = "boundary"
+
+[[case]]
+id = "core_text_const_eval_template_header_registry"
+path = "core_text_const_eval_template_header_registry"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "reachability"]
+contract = "language.templates.const_wrapper_registry_classification"
+role = "primary"
+
+[[case]]
+id = "core_text_runtime_parity"
+path = "core_text_runtime_parity"
+tags = ["integration", "language", "external-packages", "core-packages", "js"]
+contract = "language.dependencies.core_text_runtime_folded_parity"
+role = "primary"
+
+[[case]]
+id = "core_text_helper_retention_mixed"
+path = "core_text_helper_retention_mixed"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "wasm", "reachability", "diagnostics"]
+contract = "backend.html_wasm.core_text_mixed_helper_retention"
+role = "backend"
+
+[[case]]
+id = "core_text_reexport_namespace_alias"
+path = "core_text_reexport_namespace_alias"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "dependencies", "facade"]
+contract = "language.dependencies.core_text_reexport_namespace_identity"
+role = "primary"
+
+[[case]]
+id = "core_text_imported_constant_chain"
+path = "core_text_imported_constant_chain"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "dependencies"]
+contract = "language.dependencies.core_text_imported_constant_completed"
+role = "primary"
+
+[[case]]
+id = "core_text_config_origin_result_overflow_rejected"
+path = "core_text_config_origin_result_overflow_rejected"
+tags = ["integration", "language", "external-packages", "core-packages", "numeric", "config", "diagnostics", "dependencies"]
+contract = "language.dependencies.core_text_config_provenance_result"
+role = "primary"
+
+[[case]]
+id = "core_text_const_eval_defaults_static_if"
+path = "core_text_const_eval_defaults_static_if"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "wasm", "reachability"]
+contract = "language.dependencies.core_text_defaults_static_if_folded"
+role = "primary"
+
+[[case]]
+id = "core_text_const_eval_template_interpolation"
+path = "core_text_const_eval_template_interpolation"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "wasm", "reachability"]
+contract = "language.templates.core_text_interpolation_folded"
+role = "primary"
+
+[[case]]
+id = "core_text_const_eval_unary_operand"
+path = "core_text_const_eval_unary_operand"
+tags = ["integration", "language", "external-packages", "core-packages", "js"]
+contract = "language.dependencies.core_text_unary_operand_folded"
+role = "primary"
+
+[[case]]
+id = "core_text_const_eval_folded_argument_runtime_call"
+path = "core_text_const_eval_folded_argument_runtime_call"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "wasm"]
+contract = "language.dependencies.core_text_folded_argument_kept_in_runtime_call"
+role = "primary"
+
+[[case]]
+id = "core_text_const_eval_module_constant_argument"
+path = "core_text_const_eval_module_constant_argument"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "wasm"]
+contract = "language.dependencies.core_text_module_constant_argument_folded"
+role = "primary"
+
+[[case]]
+id = "const_eval_explicit_string_constant_operands"
+path = "const_eval_explicit_string_constant_operands"
+tags = ["integration", "language", "js", "wasm"]
+contract = "language.dependencies.explicit_string_constant_operand_folded"
+role = "primary"
+
+[[case]]
 id = "prelude_name_declaration_rejected"
 path = "prelude_name_declaration_rejected"
 tags = ["integration", "language", "diagnostics"]
@@ -10639,6 +11164,20 @@ path = "unknown_type_name_rejected"
 tags = ["integration", "name-resolution", "diagnostics"]
 contract = "language.bindings.unknown_type_name_rejected"
 role = "primary"
+
+[[case]]
+id = "undeclared_collection_type_application_rejected"
+path = "undeclared_collection_type_application_rejected"
+tags = ["integration", "generics", "diagnostics", "name-resolution"]
+contract = "language.generics.builtin_shapes_use_constructed_syntax"
+role = "primary"
+
+[[case]]
+id = "undeclared_map_type_application_rejected"
+path = "undeclared_map_type_application_rejected"
+tags = ["integration", "generics", "diagnostics", "name-resolution"]
+contract = "language.generics.builtin_shapes_use_constructed_syntax"
+role = "boundary"
 
 [[case]]
 id = "type_used_as_value_rejected"
@@ -11794,6 +12333,34 @@ path = "facade_export_private_choice_payload_rejected"
 tags = ["integration", "diagnostics", "dependencies", "facades"]
 contract = "language.dependencies.facade_export_private_nominal_member_type_rejected"
 role = "boundary"
+
+[[case]]
+id = "facade_reexport_private_struct_field_rejected"
+path = "facade_reexport_private_struct_field_rejected"
+tags = ["integration", "diagnostics", "dependencies", "facades"]
+contract = "language.dependencies.facade_export_private_nominal_member_type_rejected"
+role = "boundary"
+
+[[case]]
+id = "facade_reexport_private_function_param_rejected"
+path = "facade_reexport_private_function_param_rejected"
+tags = ["integration", "diagnostics", "dependencies", "facades"]
+contract = "language.dependencies.facade_export_private_function_type_rejected"
+role = "boundary"
+
+[[case]]
+id = "trait_reexport_private_surface_rejected"
+path = "trait_reexport_private_surface_rejected"
+tags = ["integration", "traits", "diagnostics"]
+contract = "language.traits.export_private_surface_rejected"
+role = "boundary"
+
+[[case]]
+id = "facade_reexport_public_struct_field_success"
+path = "facade_reexport_public_struct_field_success"
+tags = ["integration", "dependencies", "facades"]
+contract = "language.dependencies.facade_export_public_nominal_member_type_accepted"
+role = "primary"
 
 [[case]]
 id = "facade_export_private_alias_target_rejected"
@@ -16770,4 +17337,683 @@ id = "fulfilment_ledger_runtime"
 path = "fulfilment_ledger_runtime"
 tags = ["integration", "language", "runtime", "adversarial", "control-flow", "collections", "borrows", "results"]
 contract = "language.scenarios.fulfilment_stock_conservation"
+role = "primary"
+
+[[case]]
+id = "wiring_wire_runtime"
+path = "wiring_wire_runtime"
+tags = ["integration", "wiring", "runtime", "html-wasm"]
+contract = "language.wiring.wire_runtime_identity_and_reads"
+role = "primary"
+
+[[case]]
+id = "wiring_route_arrow_and_return_arrow"
+path = "wiring_route_arrow_and_return_arrow"
+tags = ["integration", "wiring", "routes", "runtime"]
+contract = "language.wiring.constructor_route_arguments_runtime"
+role = "primary"
+
+[[case]]
+id = "wiring_route_capture_error_runtime"
+path = "wiring_route_capture_error_runtime"
+tags = ["integration", "wiring", "routes", "runtime", "errors"]
+contract = "language.wiring.route_captures_propagate_errors"
+role = "primary"
+
+[[case]]
+id = "wiring_generic_wire_runtime"
+path = "wiring_generic_wire_runtime"
+tags = ["integration", "wiring", "generics", "runtime"]
+contract = "language.wiring.generic_wire_forwarding"
+role = "primary"
+
+[[case]]
+id = "wiring_import_export"
+path = "wiring_import_export"
+tags = ["integration", "wiring", "dependencies", "runtime"]
+contract = "language.wiring.cross_module_wire_export"
+role = "primary"
+
+[[case]]
+id = "wiring_imported_route_d7"
+path = "wiring_imported_route_d7"
+tags = ["integration", "wiring", "routes", "dependencies", "diagnostics"]
+contract = "language.wiring.route_argument_requires_direct_choice"
+role = "boundary"
+
+[[case]]
+id = "wiring_route_partial_outside_rejected"
+path = "wiring_route_partial_outside_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.partial_constructor_requires_route_context"
+role = "primary"
+
+[[case]]
+id = "wiring_route_zero_input_partial_rejected"
+path = "wiring_route_zero_input_partial_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.zero_input_route_requires_complete_constructor"
+role = "primary"
+
+[[case]]
+id = "wiring_route_wasm_rejected"
+path = "wiring_route_wasm_rejected"
+tags = ["integration", "wiring", "routes", "html-wasm"]
+contract = "language.wiring.constructor_routes_rejected_by_wasm"
+role = "primary"
+
+[[case]]
+id = "wiring_route_return_parameter_rejected"
+path = "wiring_route_return_parameter_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.route_parameters_are_not_ordinary_values"
+role = "primary"
+
+[[case]]
+id = "wiring_route_capture_borrow_conflict_rejected"
+path = "wiring_route_capture_borrow_conflict_rejected"
+tags = ["integration", "wiring", "routes", "borrows", "diagnostics"]
+contract = "language.wiring.route_captures_use_ordinary_borrow_rules"
+role = "primary"
+
+[[case]]
+id = "wiring_route_empty_parentheses_rejected"
+path = "wiring_route_empty_parentheses_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.one_input_route_rejects_empty_parentheses"
+role = "primary"
+
+[[case]]
+id = "wiring_route_excess_capture_rejected"
+path = "wiring_route_excess_capture_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.route_captures_use_positional_prefix"
+role = "boundary"
+
+[[case]]
+id = "wiring_route_forwarding_contract_mismatch_rejected"
+path = "wiring_route_forwarding_contract_mismatch_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.route_forwarding_requires_exact_contract"
+role = "primary"
+
+[[case]]
+id = "wiring_route_forwarding_postfix_rejected"
+path = "wiring_route_forwarding_postfix_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.route_argument_requires_direct_choice"
+role = "boundary"
+
+[[case]]
+id = "wiring_route_choice_value_not_root_rejected"
+path = "wiring_route_choice_value_not_root_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.route_argument_requires_direct_choice"
+role = "boundary"
+
+[[case]]
+id = "wiring_route_input_field_mismatch_rejected"
+path = "wiring_route_input_field_mismatch_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.route_input_matches_trailing_field"
+role = "primary"
+
+[[case]]
+id = "wiring_route_missing_capture_rejected"
+path = "wiring_route_missing_capture_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.route_captures_use_positional_prefix"
+role = "boundary"
+
+[[case]]
+id = "wiring_route_named_capture_rejected"
+path = "wiring_route_named_capture_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.route_captures_use_positional_prefix"
+role = "primary"
+
+[[case]]
+id = "wiring_route_pending_choice_rejected"
+path = "wiring_route_pending_choice_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.route_argument_requires_direct_choice"
+role = "primary"
+
+[[case]]
+id = "wiring_route_statement_receiver_rejected"
+path = "wiring_route_statement_receiver_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.route_parameters_are_not_ordinary_values"
+role = "boundary"
+
+[[case]]
+id = "wiring_route_wasm_unreachable_accepted"
+path = "wiring_route_wasm_unreachable_accepted"
+tags = ["integration", "wiring", "routes", "html-wasm"]
+contract = "language.wiring.route_wasm_rejection_tracks_reachability"
+role = "primary"
+
+[[case]]
+id = "wiring_wire_underlying_alias_runtime"
+path = "wiring_wire_underlying_alias_runtime"
+tags = ["integration", "wiring", "aliases", "runtime"]
+contract = "language.wiring.underlying_type_alias_in_wire"
+role = "primary"
+
+[[case]]
+id = "wiring_wire_ordinary_parameter_rejected"
+path = "wiring_wire_ordinary_parameter_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.wire_origins_require_local_bindings"
+role = "primary"
+
+[[case]]
+id = "wiring_wire_constant_rejected"
+path = "wiring_wire_constant_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.wire_origins_require_local_bindings"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_field_projection_rejected"
+path = "wiring_wire_field_projection_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.wire_origins_require_local_bindings"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_index_rejected"
+path = "wiring_wire_index_rejected"
+tags = ["integration", "wiring", "collections", "diagnostics"]
+contract = "language.wiring.wire_origins_require_local_bindings"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_literal_rejected"
+path = "wiring_wire_literal_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.wire_origins_require_local_bindings"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_call_result_rejected"
+path = "wiring_wire_call_result_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.wire_origins_require_local_bindings"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_constructor_rejected"
+path = "wiring_wire_constructor_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.wire_origins_require_local_bindings"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_computed_rejected"
+path = "wiring_wire_computed_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.wire_origins_require_local_bindings"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_mutable_marker_rejected"
+path = "wiring_wire_mutable_marker_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.wire_argument_rejects_mutable_marker"
+role = "primary"
+
+[[case]]
+id = "wiring_wire_parameter_assignment_rejected"
+path = "wiring_wire_parameter_assignment_rejected"
+tags = ["integration", "wiring", "diagnostics", "immutability"]
+contract = "language.wiring.wire_parameters_are_immutable"
+role = "primary"
+
+[[case]]
+id = "wiring_contract_struct_field_rejected"
+path = "wiring_contract_struct_field_rejected"
+tags = ["integration", "wiring", "diagnostics", "structs"]
+contract = "language.wiring.contracts_only_parameter_position"
+role = "primary"
+
+[[case]]
+id = "wiring_contract_choice_payload_rejected"
+path = "wiring_contract_choice_payload_rejected"
+tags = ["integration", "wiring", "diagnostics", "choices"]
+contract = "language.wiring.contracts_only_parameter_position"
+role = "boundary"
+
+[[case]]
+id = "wiring_contract_local_rejected"
+path = "wiring_contract_local_rejected"
+tags = ["integration", "wiring", "diagnostics", "bindings"]
+contract = "language.wiring.contracts_only_parameter_position"
+role = "boundary"
+
+[[case]]
+id = "wiring_contract_return_rejected"
+path = "wiring_contract_return_rejected"
+tags = ["integration", "wiring", "diagnostics", "functions"]
+contract = "language.wiring.contracts_only_parameter_position"
+role = "boundary"
+
+[[case]]
+id = "wiring_contract_type_alias_rejected"
+path = "wiring_contract_type_alias_rejected"
+tags = ["integration", "wiring", "diagnostics", "aliases"]
+contract = "language.wiring.contracts_only_parameter_position"
+role = "boundary"
+
+[[case]]
+id = "wiring_contract_collection_element_rejected"
+path = "wiring_contract_collection_element_rejected"
+tags = ["integration", "wiring", "diagnostics", "collections"]
+contract = "language.wiring.contracts_only_parameter_position"
+role = "boundary"
+
+[[case]]
+id = "wiring_contract_map_value_rejected"
+path = "wiring_contract_map_value_rejected"
+tags = ["integration", "wiring", "diagnostics", "maps"]
+contract = "language.wiring.contracts_only_parameter_position"
+role = "boundary"
+
+[[case]]
+id = "wiring_contract_generic_argument_rejected"
+path = "wiring_contract_generic_argument_rejected"
+tags = ["integration", "wiring", "diagnostics", "generics"]
+contract = "language.wiring.contracts_only_parameter_position"
+role = "boundary"
+
+[[case]]
+id = "wiring_contract_receiver_rejected"
+path = "wiring_contract_receiver_rejected"
+tags = ["integration", "wiring", "diagnostics", "receiver-methods"]
+contract = "language.wiring.contracts_only_parameter_position"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_bare_head_rejected"
+path = "wiring_wire_bare_head_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.invalid_contract_syntax"
+role = "primary"
+
+[[case]]
+id = "wiring_route_bare_head_rejected"
+path = "wiring_route_bare_head_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.invalid_contract_syntax"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_missing_spec_rejected"
+path = "wiring_wire_missing_spec_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.invalid_contract_syntax"
+role = "boundary"
+
+[[case]]
+id = "wiring_route_missing_spec_rejected"
+path = "wiring_route_missing_spec_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.invalid_contract_syntax"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_arrow_rejected"
+path = "wiring_wire_arrow_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.invalid_contract_syntax"
+role = "boundary"
+
+[[case]]
+id = "wiring_route_repeated_arrow_rejected"
+path = "wiring_route_repeated_arrow_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.invalid_contract_syntax"
+role = "boundary"
+
+[[case]]
+id = "wiring_route_missing_output_rejected"
+path = "wiring_route_missing_output_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.invalid_contract_syntax"
+role = "boundary"
+
+[[case]]
+id = "wiring_nested_contract_rejected"
+path = "wiring_nested_contract_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.invalid_contract_syntax"
+role = "boundary"
+
+[[case]]
+id = "wiring_nested_generic_contract_rejected"
+path = "wiring_nested_generic_contract_rejected"
+tags = ["integration", "wiring", "diagnostics", "generics"]
+contract = "language.wiring.invalid_contract_syntax"
+role = "boundary"
+
+[[case]]
+id = "wiring_route_invalid_output_rejected"
+path = "wiring_route_invalid_output_rejected"
+tags = ["integration", "wiring", "diagnostics", "routes"]
+contract = "language.wiring.route_output_must_be_choice_or_generic"
+role = "primary"
+
+[[case]]
+id = "wiring_wire_default_rejected"
+path = "wiring_wire_default_rejected"
+tags = ["integration", "wiring", "diagnostics", "defaults"]
+contract = "language.wiring.contract_defaults_forbidden"
+role = "primary"
+
+[[case]]
+id = "wiring_route_default_rejected"
+path = "wiring_route_default_rejected"
+tags = ["integration", "wiring", "diagnostics", "defaults"]
+contract = "language.wiring.contract_defaults_forbidden"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_mutable_parameter_rejected"
+path = "wiring_wire_mutable_parameter_rejected"
+tags = ["integration", "wiring", "diagnostics", "immutability"]
+contract = "language.wiring.contract_parameters_immutable"
+role = "primary"
+
+[[case]]
+id = "wiring_reserved_type_collision_rejected"
+path = "wiring_reserved_type_collision_rejected"
+tags = ["integration", "wiring", "diagnostics", "name-resolution"]
+contract = "language.wiring.contract_heads_are_reserved"
+role = "primary"
+
+[[case]]
+id = "wiring_reserved_choice_collision_rejected"
+path = "wiring_reserved_choice_collision_rejected"
+tags = ["integration", "wiring", "diagnostics", "name-resolution"]
+contract = "language.wiring.contract_heads_are_reserved"
+role = "boundary"
+
+[[case]]
+id = "wiring_reserved_alias_collision_rejected"
+path = "wiring_reserved_alias_collision_rejected"
+tags = ["integration", "wiring", "diagnostics", "aliases", "name-resolution"]
+contract = "language.wiring.contract_heads_are_reserved"
+role = "boundary"
+
+[[case]]
+id = "wiring_reserved_import_alias_collision_rejected"
+path = "wiring_reserved_import_alias_collision_rejected"
+tags = ["integration", "wiring", "diagnostics", "dependencies", "name-resolution"]
+contract = "language.wiring.contract_heads_are_reserved"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_multiline_runtime"
+path = "wiring_wire_multiline_runtime"
+tags = ["integration", "wiring", "runtime", "templates"]
+contract = "language.wiring.wire_multiline_call_and_forwarding"
+role = "primary"
+
+[[case]]
+id = "wiring_wire_numeric_binding_runtime"
+path = "wiring_wire_numeric_binding_runtime"
+tags = ["integration", "wiring", "runtime", "numbers"]
+contract = "language.wiring.wire_numeric_binding_identity"
+role = "primary"
+
+[[case]]
+id = "wiring_trait_contract_conformance_runtime"
+path = "wiring_trait_contract_conformance_runtime"
+tags = ["integration", "wiring", "traits", "runtime"]
+contract = "language.wiring.trait_requirement_contract_conformance"
+role = "primary"
+
+[[case]]
+id = "wiring_route_input_only_generic_success"
+path = "wiring_route_input_only_generic_success"
+tags = ["integration", "wiring", "generics", "routes"]
+contract = "language.wiring.route_input_only_generic_signature"
+role = "primary"
+
+[[case]]
+id = "wiring_route_input_only_imported_success"
+path = "wiring_route_input_only_imported_success"
+tags = ["integration", "wiring", "routes", "dependencies"]
+contract = "language.wiring.route_input_only_imported_signature"
+role = "primary"
+
+[[case]]
+id = "wiring_private_trait_route_input_sidecar_success"
+path = "wiring_private_trait_route_input_sidecar_success"
+tags = ["integration", "wiring", "traits", "dependencies", "runtime"]
+contract = "language.wiring.private_trait_route_input_closure"
+role = "primary"
+
+[[case]]
+id = "wiring_route_input_private_export_rejected"
+path = "wiring_route_input_private_export_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics", "visibility"]
+contract = "language.wiring.exported_route_input_privacy"
+role = "primary"
+
+[[case]]
+id = "wiring_wire_optional_exactness_rejected"
+path = "wiring_wire_optional_exactness_rejected"
+tags = ["integration", "wiring", "diagnostics", "types"]
+contract = "language.wiring.wire_underlying_types_are_exact"
+role = "primary"
+
+[[case]]
+id = "wiring_wire_copy_argument_rejected"
+path = "wiring_wire_copy_argument_rejected"
+tags = ["integration", "wiring", "diagnostics", "copies"]
+contract = "language.wiring.wire_origins_require_local_bindings"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_body_constant_rejected"
+path = "wiring_wire_body_constant_rejected"
+tags = ["integration", "wiring", "diagnostics", "constants"]
+contract = "language.wiring.wire_origins_require_local_bindings"
+role = "boundary"
+
+[[case]]
+id = "wiring_trait_contract_requirement_wire_rejected"
+path = "wiring_trait_contract_requirement_wire_rejected"
+tags = ["integration", "wiring", "traits", "diagnostics"]
+contract = "language.wiring.trait_requirement_contract_conformance"
+role = "boundary"
+
+[[case]]
+id = "wiring_trait_contract_implementation_wire_rejected"
+path = "wiring_trait_contract_implementation_wire_rejected"
+tags = ["integration", "wiring", "traits", "diagnostics"]
+contract = "language.wiring.trait_requirement_contract_conformance"
+role = "boundary"
+
+[[case]]
+id = "wiring_trait_contract_export_mismatch_rejected"
+path = "wiring_trait_contract_export_mismatch_rejected"
+tags = ["integration", "wiring", "traits", "diagnostics", "visibility"]
+contract = "language.wiring.trait_requirement_contract_conformance"
+role = "boundary"
+
+[[case]]
+id = "wiring_trait_requirement_receiver_contract_rejected"
+path = "wiring_trait_requirement_receiver_contract_rejected"
+tags = ["integration", "wiring", "traits", "diagnostics"]
+contract = "language.wiring.contracts_only_parameter_position"
+role = "boundary"
+
+[[case]]
+id = "wiring_reserved_wire_parameter_name_rejected"
+path = "wiring_reserved_wire_parameter_name_rejected"
+tags = ["integration", "wiring", "diagnostics", "name-resolution", "parameters"]
+contract = "language.wiring.contract_heads_are_reserved"
+role = "boundary"
+
+[[case]]
+id = "wiring_reserved_route_parameter_name_rejected"
+path = "wiring_reserved_route_parameter_name_rejected"
+tags = ["integration", "wiring", "diagnostics", "name-resolution", "parameters"]
+contract = "language.wiring.contract_heads_are_reserved"
+role = "boundary"
+
+[[case]]
+id = "wiring_contract_multiple_specification_types_rejected"
+path = "wiring_contract_multiple_specification_types_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.invalid_contract_syntax"
+role = "boundary"
+
+[[case]]
+id = "wiring_contract_nested_bare_head_rejected"
+path = "wiring_contract_nested_bare_head_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.invalid_contract_syntax"
+role = "boundary"
+
+[[case]]
+id = "wiring_generic_route_output_runtime"
+path = "wiring_generic_route_output_runtime"
+tags = ["integration", "wiring", "generics", "routes", "runtime"]
+contract = "language.wiring.generic_route_output_inferred_immediately"
+role = "primary"
+
+[[case]]
+id = "wiring_generic_route_input_runtime"
+path = "wiring_generic_route_input_runtime"
+tags = ["integration", "wiring", "generics", "routes", "runtime"]
+contract = "language.wiring.generic_route_input_inferred_from_trailing_field"
+role = "primary"
+
+[[case]]
+id = "wiring_generic_choice_route_output_runtime"
+path = "wiring_generic_choice_route_output_runtime"
+tags = ["integration", "wiring", "generics", "routes", "runtime"]
+contract = "language.wiring.generic_choice_route_output_inferred"
+role = "primary"
+
+
+[[case]]
+id = "wiring_imported_route_forwarding_runtime"
+path = "wiring_imported_route_forwarding_runtime"
+tags = ["integration", "wiring", "generics", "routes", "dependencies", "runtime"]
+contract = "language.wiring.imported_route_forwarding_and_child_lifting"
+role = "primary"
+
+[[case]]
+id = "wiring_generic_route_cannot_infer_rejected"
+path = "wiring_generic_route_cannot_infer_rejected"
+tags = ["integration", "wiring", "generics", "routes", "diagnostics"]
+contract = "language.wiring.generic_route_requires_call_site_evidence"
+role = "primary"
+
+[[case]]
+id = "wiring_wire_mutable_alias_conflict_rejected"
+path = "wiring_wire_mutable_alias_conflict_rejected"
+tags = ["integration", "wiring", "borrows", "diagnostics"]
+contract = "language.wiring.wire_and_mutable_alias_conflict"
+role = "primary"
+
+[[case]]
+id = "wiring_imported_generic_wire_runtime"
+path = "wiring_imported_generic_wire_runtime"
+tags = ["integration", "wiring", "generics", "dependencies", "borrows", "runtime"]
+contract = "language.wiring.imported_generic_wire_identity"
+role = "primary"
+
+[[case]]
+id = "wiring_route_wasm_generated_rejected"
+path = "wiring_route_wasm_generated_rejected"
+tags = ["integration", "wiring", "generics", "routes", "dependencies", "html-wasm"]
+contract = "language.wiring.route_wasm_rejects_generated_reachable_construction"
+role = "primary"
+
+[[case]]
+id = "wiring_generic_choice_route_input_mismatch_rejected"
+path = "wiring_generic_choice_route_input_mismatch_rejected"
+tags = ["integration", "wiring", "generics", "routes", "diagnostics"]
+contract = "language.wiring.generic_choice_route_input_exact"
+role = "primary"
+
+[[case]]
+id = "wiring_generic_route_retained_capture_runtime"
+path = "wiring_generic_route_retained_capture_runtime"
+tags = ["integration", "wiring", "generics", "routes", "runtime"]
+contract = "language.wiring.retained_generic_route_input_and_capture"
+role = "primary"
+
+[[case]]
+id = "wiring_route_retained_input_runtime"
+path = "wiring_route_retained_input_runtime"
+tags = ["integration", "wiring", "generics", "routes", "runtime"]
+contract = "language.wiring.retained_route_input_inference"
+role = "primary"
+
+[[case]]
+id = "wiring_route_retained_capture_input_runtime"
+path = "wiring_route_retained_capture_input_runtime"
+tags = ["integration", "wiring", "generics", "routes", "runtime"]
+contract = "language.wiring.retained_capture_supplies_route_input_evidence"
+role = "primary"
+
+[[case]]
+id = "wiring_route_forward_retained_runtime"
+path = "wiring_route_forward_retained_runtime"
+tags = ["integration", "wiring", "generics", "routes", "runtime"]
+contract = "language.wiring.retained_forwarded_route_input_inference"
+role = "primary"
+
+[[case]]
+id = "wiring_route_forwarded_generic_input_runtime"
+path = "wiring_route_forwarded_generic_input_runtime"
+tags = ["integration", "wiring", "generics", "routes", "runtime"]
+contract = "language.wiring.forwarded_route_infers_generic_input"
+role = "primary"
+
+[[case]]
+id = "wiring_route_generic_input_structural_mismatch_rejected"
+path = "wiring_route_generic_input_structural_mismatch_rejected"
+tags = ["integration", "wiring", "generics", "routes", "diagnostics"]
+contract = "language.wiring.generic_route_input_requires_exact_structure"
+role = "primary"
+
+[[case]]
+id = "wiring_route_generic_input_optional_mismatch_rejected"
+path = "wiring_route_generic_input_optional_mismatch_rejected"
+tags = ["integration", "wiring", "generics", "routes", "diagnostics"]
+contract = "language.wiring.generic_route_input_requires_exact_optional"
+role = "primary"
+
+[[case]]
+id = "wiring_route_forwarded_generic_input_structural_mismatch_rejected"
+path = "wiring_route_forwarded_generic_input_structural_mismatch_rejected"
+tags = ["integration", "wiring", "generics", "routes", "diagnostics"]
+contract = "language.wiring.forwarded_generic_route_input_requires_exact_structure"
+role = "primary"
+
+[[case]]
+id = "wiring_route_forwarded_generic_input_optional_mismatch_rejected"
+path = "wiring_route_forwarded_generic_input_optional_mismatch_rejected"
+tags = ["integration", "wiring", "generics", "routes", "diagnostics"]
+contract = "language.wiring.forwarded_generic_route_input_requires_exact_optional"
+role = "primary"
+[[case]]
+id = "wiring_generic_choice_route_retained_sample_runtime"
+path = "wiring_generic_choice_route_retained_sample_runtime"
+tags = ["integration", "wiring", "generics", "routes", "runtime"]
+contract = "language.wiring.retained_generic_choice_route_input_sample_inference"
+role = "primary"
+
+[[case]]
+id = "wiring_generic_choice_route_retained_expected_runtime"
+path = "wiring_generic_choice_route_retained_expected_runtime"
+tags = ["integration", "wiring", "generics", "routes", "runtime"]
+contract = "language.wiring.retained_generic_choice_route_input_expected_inference"
 role = "primary"

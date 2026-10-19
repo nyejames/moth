@@ -1,14 +1,12 @@
-//! Type alias lookup and completed alias projection for AST type resolution.
+//! Type alias lookup by visible canonical identity.
 //!
-//! WHAT: finds visible type aliases by bare name or namespace-qualified name and projects their
-//!       completed declaration-site metadata into a use-site annotation.
-//! WHY: aliases are resolved once while their declaration file is being built. Keeping lookup
-//!      here lets `resolve_type.rs` concentrate on the overall parsed-ref orchestration without
-//!      reopening a declaring module's mutable type environment.
+//! WHAT: finds visible aliases by bare or namespace-qualified name and returns their completed
+//!       canonical `TypeId`.
+//! WHY: aliases are resolved once while their declaration file is being built, so use-site lookup
+//!      can consume declaration-site identity without reopening a mutable type environment.
 //!
 //! This module owns:
-//! - looking up a visible type alias by bare name or namespace-qualified name.
-//! - projecting a completed alias into a use-site annotation with its required `TypeId`.
+//! - returning the resolved target identity from completed declaration-site metadata.
 //!
 //! This module does NOT own:
 //! - alias target resolution (lives in `environment/type_aliases.rs`).
@@ -18,9 +16,8 @@
 //! - generic nominal instantiation (lives in `generics.rs`).
 //! - map nesting and key validation (lives in `maps.rs`).
 
-use crate::compiler_frontend::ast::type_resolution::{
-    TypeResolutionResult,
-    context::{ResolvedTypeAlias, ResolvedTypeAnnotation, TypeResolutionContext},
+use crate::compiler_frontend::ast::type_resolution::context::{
+    ResolvedTypeAlias, TypeResolutionContext,
 };
 use crate::compiler_frontend::headers::binding_environment::NamespaceTypeMember;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
@@ -60,17 +57,4 @@ pub(super) fn visible_namespaced_type_alias_annotation<'a>(
             _ => None,
         })?;
     context.resolved_type_aliases?.get(alias_path.local_path())
-}
-
-/// Project completed alias metadata into the general annotation result used by type resolution.
-///
-/// The alias table itself stores the required target identity. This conversion is deliberately
-/// kept at the use site because other annotation contexts may still represent inference.
-pub(super) fn resolve_alias_annotation(
-    alias: &ResolvedTypeAlias,
-) -> TypeResolutionResult<ResolvedTypeAnnotation> {
-    Ok(ResolvedTypeAnnotation {
-        diagnostic_type: alias.diagnostic_type.clone(),
-        type_id: Some(alias.target_type_id),
-    })
 }

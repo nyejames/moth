@@ -30,6 +30,7 @@ use crate::compiler_frontend::ast::expressions::parse_expression_input::{
 };
 use crate::compiler_frontend::ast::field_access::{RetainedTerminalCall, retained_terminal_call};
 use crate::compiler_frontend::ast::module_ast::scope_context::AuthoredBindingFacts;
+use crate::compiler_frontend::ast::module_ast::scope_context::ScopeDeclarationRef;
 use crate::compiler_frontend::ast::numeric_construction::{
     DeferredCall, DeferredExpression, DeferredExpressionSuffix, DeferredMultiBindTarget,
     DeferredMultiBindValue, MultiBindContinuation, MultiBindProducerFact, NumericConstructionState,
@@ -46,16 +47,13 @@ use crate::compiler_frontend::ast::statements::fallible_handling::DeferredCatchH
 use crate::compiler_frontend::ast::statements::value_production::try_parse_multi_bind_value_block;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::{
-    TypeResolutionContext, TypeResolutionContextInputs, resolve_diagnostic_type_to_type_id_checked,
-    resolve_parsed_type_annotation,
+    TypeResolutionContext, TypeResolutionContextInputs, resolve_parsed_type_annotation,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidControlFlowStatementReason,
     InvalidMultiBindReason, TypeMismatchContext,
 };
-use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
@@ -341,7 +339,10 @@ fn validate_multi_bind_target_identifiers(
             .into());
         }
 
-        if context.get_reference(&target.name).is_none() {
+        if context
+            .get_value_reference(&target.name, target.span)?
+            .is_none()
+        {
             if let Some(diagnostic) =
                 context.check_body_binding_visibility(target.name, target.name_span, string_table)
             {
@@ -429,7 +430,7 @@ fn parse_target_list(
             type_annotation: target_syntax.type_annotation,
             span: target_syntax.span,
         };
-        validate_target_mutability(&target, string_table)?;
+        validate_target_mutability(&target)?;
         parsed_targets.push(target);
 
         match token_stream.current_tag() {
@@ -480,15 +481,30 @@ fn parse_target_list(
         return Ok(None);
     }
 
+    // WHY: `#` is legal on an ordinary declaration such as `name #= "hi"`, so the marker is
+    //      rejected only after the target list commits this statement to a multi-bind. Multi-bind
+    //      targets are runtime bindings and lowering would otherwise drop the marker silently.
+    if let Some(target) = parsed_targets
+        .iter()
+        .find(|target| target.binding_mode.is_compile_time())
+    {
+        return Err(CompilerDiagnostic::invalid_multi_bind(
+            InvalidMultiBindReason::CompileTimeMarkerOnTarget,
+            Some(target.name),
+            target.span,
+        )
+        .into());
+    }
+
     token_stream.advance();
     Ok(Some(parsed_targets))
 }
 
 /// Reject mutable multi-bind targets that lack an explicit type annotation.
-fn validate_target_mutability(
-    target_syntax: &ParsedMultiBindTarget,
-    _string_table: &StringTable,
-) -> MultiBindResult<()> {
+///
+/// WHY: an untyped `~` target is invalid whether or not the statement turns out to be a
+/// multi-bind, so it is rejected while the targets are scanned.
+fn validate_target_mutability(target_syntax: &ParsedMultiBindTarget) -> MultiBindResult<()> {
     if target_syntax.binding_mode.is_mutable()
         && target_syntax.type_annotation.eq(&ParsedTypeRef::Inferred)
     {
@@ -866,16 +882,16 @@ fn resolve_known_slot_types(
             const_values,
             string_table,
         )?;
-        if let Some((type_id, _)) = explicit_type {
+        if let Some(type_id) = explicit_type {
             known.push(Some(type_id));
             continue;
         }
 
-        if let Some(existing_reference) = context.get_reference(&target_syntax.name)
-            && let Some(existing) = existing_reference.ready_declaration()
+        if let Some(existing) = context
+            .get_value_reference(&target_syntax.name, target_syntax.span)?
+            .and_then(|reference| reference.ready_declaration().cloned())
         {
             known.push(Some(existing.type_id));
-            continue;
         }
 
         known.push(None);
@@ -894,7 +910,7 @@ fn resolve_known_slot_types(
 fn register_generic_slot_receivers(
     slot_facts: &MultiBindSlotFacts,
     parsed_targets: &[ParsedMultiBindTarget],
-    explicit_types: &[Option<(TypeId, DataType)>],
+    explicit_types: &[Option<TypeId>],
     context: &ScopeContext,
     type_interner: &AstTypeInterner<'_>,
 ) {
@@ -907,16 +923,18 @@ fn register_generic_slot_receivers(
         let MultiBindSlot::Generic(shape) = *slot else {
             continue;
         };
-        let receiver = match explicit_type {
-            Some((type_id, _)) => Some(*type_id),
-            None => context
-                .get_reference(&target_syntax.name)
-                .and_then(|reference| {
-                    reference
-                        .ready_declaration()
-                        .map(|declaration| declaration.type_id)
-                }),
-        };
+        let receiver =
+            match explicit_type {
+                Some(type_id) => Some(*type_id),
+                None => context
+                    .get_reference(&target_syntax.name)
+                    .and_then(|reference| match reference {
+                        ScopeDeclarationRef::Local { declaration, .. } => Some(declaration.type_id),
+                        ScopeDeclarationRef::Shared(declaration) => Some(declaration.type_id),
+                        ScopeDeclarationRef::PendingNumeric { .. }
+                        | ScopeDeclarationRef::RouteParameter(_) => None,
+                    }),
+            };
         let Some(receiver) = receiver else {
             continue;
         };
@@ -1041,15 +1059,28 @@ fn resolve_multi_bind_targets(
             )
         })?;
         let target_ownership = binding_target_ownership(target_syntax);
-        let explicit_type_id = explicit_type.as_ref().map(|(type_id, _)| *type_id);
-        let explicit_diagnostic_type = explicit_type.map(|(_, diagnostic_type)| diagnostic_type);
+        let explicit_type_id = explicit_type;
         let (rhs_type, generic_shape) = match *slot {
             MultiBindSlot::Known(type_id) => (type_id, None),
             MultiBindSlot::Generic(shape) => (None, Some(shape)),
         };
         let slot_type = rhs_type.or(explicit_type_id);
 
-        let Some(existing_reference) = context.get_reference(&target_syntax.name) else {
+        let Some(existing_reference) =
+            context.get_value_reference(&target_syntax.name, target_syntax.span)?
+        else {
+            if let (Some(explicit_type_id), Some(rhs_type)) = (explicit_type_id, rhs_type)
+                && explicit_type_id != rhs_type
+            {
+                return Err(CompilerDiagnostic::type_mismatch(
+                    explicit_type_id,
+                    rhs_type,
+                    TypeMismatchContext::General,
+                    target_syntax.span,
+                )
+                .into());
+            }
+
             let target_id = path_fork
                 .try_intern_child(context.scope, target_syntax.name)
                 .expect("path table exhausted while creating multi-bind target");
@@ -1119,19 +1150,14 @@ fn resolve_multi_bind_targets(
                 continue;
             };
 
-            let target_data_type = resolve_new_target_data_type(
-                target_syntax,
-                explicit_type_id,
-                explicit_diagnostic_type.as_ref(),
-                slot_type,
-                slot_index,
-                string_table,
-                type_interner.environment(),
-            )?;
             new_declarations.push(Declaration {
                 id: target_id.to_owned(),
                 type_id: slot_type,
-                diagnostic_type: target_data_type.to_owned(),
+                type_syntax: match explicit_type_id {
+                    Some(_) => None,
+                    None if target_syntax.type_annotation.eq(&ParsedTypeRef::Inferred) => None,
+                    None => Some(target_syntax.type_annotation.clone()),
+                },
                 value_mode: target_ownership.to_owned(),
                 value: DeclarationValue::Absent,
                 binding_span: target_span,
@@ -1467,40 +1493,6 @@ fn resolve_existing_target(
     })
 }
 
-/// Determine the diagnostic `DataType` for a new declaration target.
-///
-/// If the target has an explicit annotation, it is checked against the corresponding RHS slot type.
-fn resolve_new_target_data_type(
-    target_syntax: &ParsedMultiBindTarget,
-    explicit_type_id: Option<TypeId>,
-    explicit_diagnostic_type: Option<&DataType>,
-    slot_type: TypeId,
-    _slot_index: usize,
-    _string_table: &StringTable,
-    type_environment: &TypeEnvironment,
-) -> MultiBindResult<DataType> {
-    let Some(explicit_type_id) = explicit_type_id else {
-        // Display-only diagnostic spelling for the declaration.
-        return Ok(diagnostic_type_spelling(slot_type, type_environment));
-    };
-
-    if explicit_type_id != slot_type {
-        return Err(CompilerDiagnostic::type_mismatch(
-            explicit_type_id,
-            slot_type,
-            TypeMismatchContext::General,
-            target_syntax.span,
-        )
-        .into());
-    }
-
-    // Return the explicit annotation's diagnostic spelling if available.
-    // Inferred targets derive display spelling from the canonical TypeId.
-    Ok(explicit_diagnostic_type
-        .cloned()
-        .unwrap_or_else(|| diagnostic_type_spelling(slot_type, type_environment)))
-}
-
 fn register_new_declarations(
     context: &mut ScopeContext,
     new_declarations: Vec<Declaration>,
@@ -1520,7 +1512,7 @@ fn resolve_target_explicit_type(
     type_interner: &mut AstTypeInterner<'_>,
     const_values: &ConstValueStore,
     string_table: &mut StringTable,
-) -> MultiBindResult<Option<(TypeId, DataType)>> {
+) -> MultiBindResult<Option<TypeId>> {
     if target_syntax.type_annotation.eq(&ParsedTypeRef::Inferred) {
         return Ok(None);
     }
@@ -1561,7 +1553,7 @@ fn resolve_target_explicit_type(
             .with_active_generic_type_context(context.active_generic_type_context());
 
         resolve_parsed_type_annotation(
-            target_syntax.type_annotation.clone(),
+            &target_syntax.type_annotation,
             target_syntax.span,
             &mut type_resolution_context,
             string_table,
@@ -1569,15 +1561,12 @@ fn resolve_target_explicit_type(
         )?
     };
 
-    if matches!(resolved_annotation.diagnostic_type, DataType::Inferred) {
+    // Only an inferred placeholder has no canonical identity yet, so the target stays
+    // unannotated. Every other resolved annotation already carries its identity, and an
+    // unresolved nominal fails during checked resolution above.
+    let Some(type_id) = resolved_annotation.type_id else {
         return Ok(None);
-    }
+    };
 
-    let type_id = resolve_diagnostic_type_to_type_id_checked(
-        &resolved_annotation.diagnostic_type,
-        type_interner.environment_mut_for_derived_types(),
-        target_syntax.span,
-    )?;
-
-    Ok(Some((type_id, resolved_annotation.diagnostic_type)))
+    Ok(Some(type_id))
 }

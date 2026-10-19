@@ -244,7 +244,7 @@ fn materialise_generated_request_inner<'build>(
                         requester_call_span: request.call_span,
                         string_table: &mut compiler.string_table,
                         path_fork: &mut compiler.path_fork,
-                        external_package_registry: context.external_packages.as_ref(),
+                        external_package_registry: &context.external_packages,
                         style_directives: context.style_directives,
                         build_profile: context.build_profile,
                         template_const_loop_iteration_limit: context
@@ -263,7 +263,7 @@ fn materialise_generated_request_inner<'build>(
                         requester_call_span: request.call_span,
                         string_table: &mut compiler.string_table,
                         path_fork: &mut compiler.path_fork,
-                        external_package_registry: context.external_packages.as_ref(),
+                        external_package_registry: &context.external_packages,
                         style_directives: context.style_directives,
                         build_profile: context.build_profile,
                         template_const_loop_iteration_limit: context

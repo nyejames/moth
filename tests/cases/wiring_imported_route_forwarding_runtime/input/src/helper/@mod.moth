@@ -1,0 +1,34 @@
+export:
+    EditorMessage ::
+        Changed | value String |,
+    ;
+
+    AppMessage ::
+        Editor | editor_id I32, message EditorMessage |,
+    ;
+
+    receive_editor |on_message Route of EditorMessage -> AppMessage| -> String:
+        return "received"
+    ;
+
+    forward_editor |on_message Route of EditorMessage -> AppMessage| -> String:
+        result = receive_editor(on_message)
+        return [:forward-[result]]
+    ;
+
+    accept_input type T |on_message Route of T -> AppMessage| -> String:
+        return "input"
+    ;
+
+    accept_output type M |on_message Route of String -> M| -> String:
+        return "output"
+    ;
+
+    accept_editor_route |on_message Route of String -> EditorMessage| -> String:
+        return "generated"
+    ;
+
+    build_route type Seed |seed Seed| -> String:
+        return accept_editor_route(EditorMessage::Changed)
+    ;
+;

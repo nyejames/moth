@@ -50,6 +50,13 @@ fingerprint_roots = ["benchmarks/fold-stress.moth"]
 fingerprint_excludes = []
 
 [[workload]]
+id = "default_parameters_32"
+entry = "benchmarks/default-parameters-32.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/default-parameters-32.moth"]
+fingerprint_excludes = []
+
+[[workload]]
 id = "pattern_stress"
 entry = "benchmarks/pattern-stress.moth"
 fingerprint_mode = "full_tree"
@@ -407,6 +414,17 @@ args = []
 [[case]]
 id = "fold_stress_check"
 workload = "fold_stress"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "default_parameters_32_check"
+workload = "default_parameters_32"
 group = "stress"
 quick = false
 expectation = "clean"
@@ -812,6 +830,16 @@ id = "fold_stress_frontend"
 workload = "fold_stress"
 group = "stress"
 quick = true
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "default_parameters_32_frontend"
+workload = "default_parameters_32"
+group = "stress"
+quick = false
 expectation = "clean"
 [case.runner]
 kind = "frontend"
