@@ -140,6 +140,11 @@ pub(super) fn parse_template_expression(
                 );
                 fold_prepared_template(&preparation, view, &mut fold_context)?
             };
+            if fold_result.refusal.is_some() {
+                // The value still exists at runtime: structural text anchored to a resource or
+                // site root has no characters until the owning output boundary supplies them.
+                return Ok(Some(expression_builder.template(template, *value_mode)?));
+            }
             let string_value = match fold_result.emission {
                 TemplateEmission::Output(value) => value,
                 TemplateEmission::NoOutput => {

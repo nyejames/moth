@@ -7,8 +7,11 @@
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, HirCapacityResource};
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirMapEntry, HirVariantField};
+use crate::compiler_frontend::hir::expressions::{
+    HirExpression, HirExpressionKind, HirMapEntry, HirVariantField,
+};
 use crate::compiler_frontend::hir::ids::{FieldId, HirValueId, RegionId};
+use crate::compiler_frontend::hir::places::HirPlace;
 #[cfg(feature = "benchmark_counters")]
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::source::SourceSpan;
@@ -371,6 +374,82 @@ impl HirExpressionStore {
 
     pub fn get_projections(&self, range: HirProjectionRange) -> Option<&[HirProjection]> {
         slice_for_range(self.projection_slice(), range)
+    }
+
+    /// Index values in one place's projection chain, in projection order (root to leaf).
+    ///
+    /// WHY: index expressions are real child expressions that the reachability, borrow,
+    /// backend-support and JS walkers must visit; this is the one projection scan they share.
+    pub fn place_index_values(&self, place: HirPlace) -> PlaceIndexValues<'_> {
+        PlaceIndexValues {
+            projections: self.projections(place.projections).iter(),
+        }
+    }
+
+    /// Direct child value expressions of one expression row, in source order.
+    ///
+    /// WHY: one owner for "what does this expression evaluate", so each consumer only supplies
+    /// its per-kind meaning instead of repeating the child list. Place index values are included
+    /// for `Load`/`Copy` because they are evaluated before the place is read.
+    pub fn child_values(&self, id: HirValueId) -> impl Iterator<Item = HirValueId> + '_ {
+        let expression = self.expression(id);
+        match &expression.kind {
+            HirExpressionKind::FixedScalar(_)
+            | HirExpressionKind::Number(_)
+            | HirExpressionKind::Bool(_)
+            | HirExpressionKind::Char(_)
+            | HirExpressionKind::StringLiteral(_)
+            | HirExpressionKind::StructuralString { .. } => ExpressionChildren::Empty,
+            HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => {
+                ExpressionChildren::PlaceIndexes(self.place_index_values(*place))
+            }
+            HirExpressionKind::BinOp { left, right, .. }
+            | HirExpressionKind::Range {
+                start: left,
+                end: right,
+            } => ExpressionChildren::Pair([*left, *right].into_iter()),
+            HirExpressionKind::UnaryOp { operand, .. } => ExpressionChildren::One(Some(*operand)),
+            HirExpressionKind::Cast { source, .. }
+            | HirExpressionKind::VariantPayloadGet { source, .. } => {
+                ExpressionChildren::One(Some(*source))
+            }
+            HirExpressionKind::StructConstruct { fields, .. } => {
+                ExpressionChildren::StructFields(self.struct_fields(*fields).iter())
+            }
+            HirExpressionKind::Collection(values) => {
+                ExpressionChildren::Values(self.values(*values).iter())
+            }
+            HirExpressionKind::VariantConstruct { fields, .. }
+            | HirExpressionKind::RouteConstruct { fields, .. } => {
+                ExpressionChildren::VariantFields(self.variant_fields(*fields).iter())
+            }
+            HirExpressionKind::MapLiteral(entries) => ExpressionChildren::MapEntries {
+                entries: self.map_entries(*entries).iter(),
+                pending_value: None,
+            },
+        }
+    }
+
+    /// Defers the later children of `id` onto `stack`, reversed so that popping visits them in
+    /// source order, and returns the first child mapped through `to_step` for the caller to visit
+    /// next. Returns `None` for a childless row and leaves `stack` untouched.
+    ///
+    /// WHY: a walker that keeps the returned step as its next item touches `stack` only for rows
+    /// with siblings, so single-child chains and leaves never push. A walker whose stack is its
+    /// only frontier pushes the returned step last, so it pops before the deferred children.
+    pub fn push_child_values_in_source_order<T>(
+        &self,
+        id: HirValueId,
+        stack: &mut Vec<T>,
+        mut to_step: impl FnMut(HirValueId) -> T,
+    ) -> Option<T> {
+        let mut children = self.child_values(id);
+        let first = children.next()?;
+        let first_step = to_step(first);
+        let start = stack.len();
+        stack.extend(children.map(&mut to_step));
+        stack[start..].reverse();
+        Some(first_step)
     }
 
     pub(crate) fn append_expression(
@@ -1113,6 +1192,80 @@ fn remap_side_payloads(
         if let ConstStringPiece::Text(string_id) = piece {
             *string_id = remap.get(*string_id);
         }
+    }
+}
+
+/// Pull-based child cursor for [`HirExpressionStore::child_values`].
+///
+/// WHY: consumers need first-hit and short-circuit walks (unsupported-type search, JS `any`
+/// checks), so the cursor is pulled lazily instead of collected into a `Vec`.
+enum ExpressionChildren<'a> {
+    Empty,
+    One(Option<HirValueId>),
+    Pair(std::array::IntoIter<HirValueId, 2>),
+    Values(std::slice::Iter<'a, HirValueId>),
+    StructFields(std::slice::Iter<'a, (FieldId, HirValueId)>),
+    VariantFields(std::slice::Iter<'a, HirVariantField>),
+    MapEntries {
+        entries: std::slice::Iter<'a, HirMapEntry>,
+        pending_value: Option<HirValueId>,
+    },
+    PlaceIndexes(PlaceIndexValues<'a>),
+}
+
+impl Iterator for ExpressionChildren<'_> {
+    type Item = HirValueId;
+
+    fn next(&mut self) -> Option<HirValueId> {
+        match self {
+            ExpressionChildren::Empty => None,
+            ExpressionChildren::One(value) => value.take(),
+            ExpressionChildren::Pair(values) => values.next(),
+            ExpressionChildren::Values(values) => values.next().copied(),
+            ExpressionChildren::StructFields(fields) => fields.next().map(|(_, value)| *value),
+            ExpressionChildren::VariantFields(fields) => fields.next().map(|field| field.value),
+            ExpressionChildren::MapEntries {
+                entries,
+                pending_value,
+            } => {
+                if let Some(value) = pending_value.take() {
+                    return Some(value);
+                }
+                let entry = entries.next()?;
+                *pending_value = Some(entry.value);
+                Some(entry.key)
+            }
+            ExpressionChildren::PlaceIndexes(indexes) => indexes.next(),
+        }
+    }
+}
+
+/// Pull-based index-value cursor over one place's projection range, readable from either end.
+///
+/// WHY: walkers that push index operands onto a LIFO stack read them from the back, so the first
+/// index is pushed last and pops first.
+pub struct PlaceIndexValues<'a> {
+    projections: std::slice::Iter<'a, HirProjection>,
+}
+
+impl Iterator for PlaceIndexValues<'_> {
+    type Item = HirValueId;
+
+    fn next(&mut self) -> Option<HirValueId> {
+        self.projections.find_map(index_value)
+    }
+}
+
+impl DoubleEndedIterator for PlaceIndexValues<'_> {
+    fn next_back(&mut self) -> Option<HirValueId> {
+        self.projections.by_ref().rev().find_map(index_value)
+    }
+}
+
+fn index_value(projection: &HirProjection) -> Option<HirValueId> {
+    match projection {
+        HirProjection::Index(index) => Some(*index),
+        HirProjection::Field(_) => None,
     }
 }
 

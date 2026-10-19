@@ -137,6 +137,7 @@ fn register_dummy_draw_function(
                     ),
                 )],
                 error_return_type: None,
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings::default(),
             },
         )
@@ -159,6 +160,7 @@ fn register_dummy_make_widget_function(
                     widget_type_id,
                 ))],
                 error_return_type: None,
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings::default(),
             },
         )
@@ -188,6 +190,7 @@ fn register_dummy_use_widget_function(
                     ),
                 )],
                 error_return_type: None,
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings::default(),
             },
         )
@@ -346,6 +349,7 @@ fn register_dummy_draw_function_with_js_lowering(
                     ),
                 )],
                 error_return_type: None,
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction("draw".to_owned())),
                     wasm: None,

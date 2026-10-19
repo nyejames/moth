@@ -1,0 +1,10 @@
+TodoMessage ::
+    Rename | id I32, value String |,
+;
+
+on_rename |route Route of TodoMessage| -> String:
+    return "received"
+;
+
+todo_id = 7
+on_rename(TodoMessage::Rename(todo_id))

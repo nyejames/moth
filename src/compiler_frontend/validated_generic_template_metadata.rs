@@ -147,7 +147,7 @@ fn insert_receiver_callable_origins(
             method.method_origin.clone(),
             matches!(
                 method.category,
-                crate::compiler_frontend::public_interface::PublicReceiverMethodCategory::GenericTemplate
+                crate::compiler_frontend::public_interface::PublicReceiverMethodCategory::GenericTemplate(_)
             ),
         )?;
     }

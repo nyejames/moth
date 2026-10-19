@@ -16,17 +16,17 @@ functions until a separate language decision changes binding-backed receiver met
 ### Current-state capsule
 
 ```text
-STATUS: v1 designed and queued; pre-checkpoint hardening of the existing five functions delivered
-CURRENT_SLICE: none - the v1 expansion waits for its compiler prerequisite
-BLOCKERS: the v1 expansion still waits for the compiler-owned native result-slot and Core const-eval prerequisite
-NEXT_ACTION: after the prerequisite lands, audit its final Text evaluator owner and run this plan's Phase 0 from current main
+STATUS: v1 designed and queued; pre-checkpoint hardening of the existing five functions delivered; their compile-time evaluation is delivered
+CURRENT_SLICE: none - the v1 expansion starts from a main containing its delivered compiler prerequisite
+BLOCKERS: none from the compiler; Core const-eval and native result slots are delivered
+NEXT_ACTION: from a main containing the prerequisite, audit its final Text evaluator owner and run this plan's Phase 0
 ```
 
-The package-foundation baseline this plan waited on is merged. This expansion waits for merged
-native success/error slots and trusted Core constant evaluation on the compact expression/dense
-HIR foundation. Consume the exact numeric migration rather than earlier Dec/Uint sequencing. The umbrella
-package programme remains active in parallel for work whose own prerequisites are satisfied.
-Historical data-layout Phase 3 closeout `4cfd9d492` remains accepted.
+The package-foundation baseline this plan waited on is merged. This expansion waits for trusted
+Core constant evaluation to merge. Native success/error slots are already merged in the compact
+typed-expression and dense HIR foundation. Consume the exact numeric migration rather than earlier
+Dec/Uint sequencing. The umbrella package programme remains active in parallel for work whose own
+prerequisites are satisfied. Historical source-token layout closeout `4cfd9d492` remains accepted.
 
 The pre-checkpoint hardening slice is delivered. `__moth_text_length` now counts scalars with a
 single-pass `charCodeAt` scan, and both successful `tests/cases/core_text_*` cases assert their whole
@@ -476,6 +476,18 @@ infrastructure.
 
 Exit: `@core/text` is useful for common scalar-aware inspection, exact search and immutable
 transformation with lean JS output and Rust const-eval parity where eligible.
+
+## Compile-time evaluation evidence
+
+The five functions `length`, `is_empty`, `contains`, `starts_with` and `ends_with` are registered as
+trusted Core constant evaluators. A fully folded call
+leaves no external HIR call, runtime helper or JS asset dependency. A visible call on a target
+without Text runtime lowering folds, while the equivalent runtime call keeps the existing target
+diagnostic. Imported constants are published as completed values. Multi-result transport is proven
+only by a focused internal fixture. The `core_text_const_eval_*` cases,
+`core_text_imported_constant_chain`, `core_text_runtime_parity` and
+`core_text_helper_retention_mixed` hold the evidence. Remaining evaluator and value-shape blockers
+are listed under Known gaps and next extensions. Runtime HTML-Wasm calls remain target-rejected.
 
 ## Known gaps and next extensions
 

@@ -9,8 +9,8 @@ use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalAccessKind, ExternalReturnAlias, ExternalSignatureType,
 };
 use crate::compiler_frontend::external_packages::{
-    ExternalFunctionLowerings, ExternalFunctionSpec, ExternalJsLowering, ExternalParameter,
-    external_success_returns,
+    ExternalConstEvalOp, ExternalFunctionLowerings, ExternalFunctionSpec, ExternalJsLowering,
+    ExternalParameter, TextConstEvalOp, external_success_returns,
 };
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
@@ -29,40 +29,46 @@ pub fn register_core_text_package(registry: &mut ExternalPackageRegistry) {
         &'static str,
         Vec<ExternalParameter>,
         ExternalSignatureType,
+        TextConstEvalOp,
     )] = &[
         (
             "length",
             "__moth_text_length",
             vec![text_param.clone()],
             ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::I32)),
+            TextConstEvalOp::Length,
         ),
         (
             "is_empty",
             "__moth_text_is_empty",
             vec![text_param.clone()],
             ExternalSignatureType::Abi(ExternalAbiType::Bool),
+            TextConstEvalOp::IsEmpty,
         ),
         (
             "contains",
             "__moth_text_contains",
             vec![text_param.clone(), text_param.clone()],
             ExternalSignatureType::Abi(ExternalAbiType::Bool),
+            TextConstEvalOp::Contains,
         ),
         (
             "starts_with",
             "__moth_text_starts_with",
             vec![text_param.clone(), text_param.clone()],
             ExternalSignatureType::Abi(ExternalAbiType::Bool),
+            TextConstEvalOp::StartsWith,
         ),
         (
             "ends_with",
             "__moth_text_ends_with",
             vec![text_param.clone(), text_param],
             ExternalSignatureType::Abi(ExternalAbiType::Bool),
+            TextConstEvalOp::EndsWith,
         ),
     ];
 
-    for (name, js_name, parameters, return_type) in text_functions {
+    for (name, js_name, parameters, return_type, const_eval_op) in text_functions {
         registry
             .register_external_function(
                 package_id,
@@ -74,6 +80,7 @@ pub fn register_core_text_package(registry: &mut ExternalPackageRegistry) {
                         ExternalReturnAlias::Fresh,
                     ),
                     error_return_type: None,
+                    const_eval: Some(ExternalConstEvalOp::Text(*const_eval_op)),
                     lowerings: ExternalFunctionLowerings {
                         js: Some(ExternalJsLowering::RuntimeFunction((*js_name).to_owned())),
                         wasm: None,

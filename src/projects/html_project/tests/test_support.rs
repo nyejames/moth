@@ -143,6 +143,7 @@ pub(crate) fn add_reachable_external_import(
                 parameters: vec![],
                 returns: vec![],
                 error_return_type: None,
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression("undefined".to_owned())),
                     wasm: None,

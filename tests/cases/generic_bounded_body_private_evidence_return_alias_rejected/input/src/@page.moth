@@ -1,0 +1,4 @@
+@provider outer
+
+result = outer(0)
+[:[result]]

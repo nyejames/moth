@@ -1,0 +1,25 @@
+NOMINAL_DISPLAY must:
+    display |This| -> String
+;
+
+STRICT_DISPLAY must:
+    shout |This| -> String
+;
+
+Label = |
+    text String,
+|
+
+display |this Label| -> String:
+    return this.text
+;
+
+Label must NOMINAL_DISPLAY
+
+Box type T is NOMINAL_DISPLAY = |
+    value T,
+|
+
+render type T is NOMINAL_DISPLAY and STRICT_DISPLAY |this Box of T| -> String:
+    return this.value.shout()
+;

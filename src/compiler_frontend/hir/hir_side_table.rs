@@ -346,17 +346,12 @@ impl HirSideTable {
         self.map_hir_source_span(hir_location, statement.span);
     }
 
-    /// Helper to map a value's AST and HIR spans.
-    pub(crate) fn map_value(
-        &mut self,
-        ast_span: Option<SourceSpan>,
-        value_id: HirValueId,
-        source_span: Option<SourceSpan>,
-    ) {
-        let hir_location = HirLocation::Value(value_id);
-
-        self.map_ast_to_hir(ast_span, hir_location);
-        self.map_hir_source_span(hir_location, source_span);
+    /// Helper to map a value's AST span.
+    ///
+    /// WHY: a value's source span is its `HirExpression.span`; mirroring it here would add a
+    /// second owner that every expression writer had to keep in step.
+    pub(crate) fn map_value(&mut self, ast_span: Option<SourceSpan>, value_id: HirValueId) {
+        self.map_ast_to_hir(ast_span, HirLocation::Value(value_id));
     }
 
     /// Helper to map a function's AST and HIR spans.
@@ -468,12 +463,6 @@ impl HirSideTable {
     // -------------------------
     //  Metadata Lookups
     // -------------------------
-
-    /// Returns the diagnostic source span for the given value, if available.
-    #[inline]
-    pub(crate) fn value_source_span(&self, value_id: HirValueId) -> Option<SourceSpan> {
-        self.hir_source_span_for_hir(HirLocation::Value(value_id))
-    }
 
     /// Returns the original AST source span for the given value, if available.
     #[inline]

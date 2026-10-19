@@ -13,7 +13,6 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticLabelMessage, DiagnosticLabelStyle, DiagnosticPayload, GenericInferenceSubject,
     InvalidFieldAccessReason, InvalidGenericInstantiationReason,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
@@ -143,8 +142,8 @@ fn optional_present_default_preserves_struct_field_type() {
         "a present default must keep the declared String? field identity"
     );
     assert_eq!(
-        fields[0].diagnostic_type, fields[1].diagnostic_type,
-        "declared spelling must survive a present default"
+        fields[0].type_id, fields[1].type_id,
+        "the declared String? semantic type must survive a present default"
     );
     let text_inner =
         optional_payload_inner(&ast, default_constant(&fields[0].value), fields[0].type_id);
@@ -335,8 +334,8 @@ Label = |\n\
         "a constant-backed present default must keep the declared String? field identity"
     );
     assert_eq!(
-        defaulted.diagnostic_type, required.diagnostic_type,
-        "the declared String? spelling must survive a constant-backed field default"
+        defaulted.type_id, required.type_id,
+        "the declared String? semantic type must survive a constant-backed field default"
     );
     let default_inner =
         optional_payload_inner(&ast, default_constant(&defaulted.value), defaulted.type_id);
@@ -598,10 +597,6 @@ fn optional_present_default_numeric_payloads_keep_declared_types() {
         Some(u8_type),
         "U8? default should keep its declared optional identity"
     );
-    assert!(matches!(
-        &fields[0].diagnostic_type,
-        DataType::Option(inner) if matches!(inner.as_ref(), DataType::FixedScalar(FixedScalar::U8))
-    ));
     let u8_default =
         optional_payload_inner(&ast, default_constant(&fields[0].value), fields[0].type_id);
     assert_eq!(
@@ -630,10 +625,6 @@ fn optional_present_default_numeric_payloads_keep_declared_types() {
         Some(2),
         "Dec2? default should preserve its declared scale"
     );
-    assert!(matches!(
-        &fields[1].diagnostic_type,
-        DataType::Option(inner) if matches!(inner.as_ref(), DataType::Number(scale) if scale.get() == 2)
-    ));
     let dec_default =
         optional_payload_inner(&ast, default_constant(&fields[1].value), fields[1].type_id);
     assert_eq!(

@@ -16,13 +16,14 @@ mod functions;
 mod metadata;
 mod structure;
 mod support;
+#[cfg(test)]
+#[path = "tests/hir_validation_walk_tests.rs"]
+mod tests;
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-#[cfg(test)]
-use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::ids::{
     BlockId, FieldId, FunctionId, HirNodeId, LocalId, RegionId, StructId,
 };
@@ -37,22 +38,6 @@ pub(crate) fn validate_hir_module(
 ) -> Result<(), CompilerError> {
     let mut validator = HirValidator::new(module, type_environment, external_packages);
     validator.validate()
-}
-
-/// Retries one expression without rebuilding the validator's active-path state.
-#[cfg(test)]
-pub(super) fn validate_expression_twice_for_tests(
-    module: &HirModule,
-    type_environment: &TypeEnvironment,
-    external_packages: &ExternalPackageRegistry,
-    expression_id: HirValueId,
-) -> Result<[Result<(), CompilerError>; 2], CompilerError> {
-    let mut validator = HirValidator::new(module, type_environment, external_packages);
-    validator.collect_definition_ids()?;
-    Ok([
-        validator.validate_expression(expression_id, None),
-        validator.validate_expression(expression_id, None),
-    ])
 }
 
 struct HirValidator<'a> {
@@ -75,6 +60,9 @@ struct HirValidator<'a> {
     field_types: FxHashMap<FieldId, TypeId>,
     field_owner: FxHashMap<FieldId, StructId>,
     active_expression_rows: Vec<Cell<bool>>,
+    // Reused by every expression walk: a walk takes the buffer and puts it back, so leaf rows
+    // allocate nothing once the buffer has grown.
+    expression_frames: Cell<Vec<expressions::ExpressionFrame>>,
 }
 
 impl<'a> HirValidator<'a> {
@@ -106,6 +94,7 @@ impl<'a> HirValidator<'a> {
             field_types: FxHashMap::default(),
             field_owner: FxHashMap::default(),
             active_expression_rows: vec![Cell::new(false); expression_count],
+            expression_frames: Cell::new(Vec::new()),
         }
     }
 

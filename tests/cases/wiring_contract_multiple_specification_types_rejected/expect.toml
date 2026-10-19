@@ -1,0 +1,17 @@
+entry = "."
+
+# A contract head accepts exactly one specification. A second type after the
+# `Wire` underlying type is a typed contract error, not a generic unexpected
+# token.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0038"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0038"
+reason = "invalid_parameter_contract.multiple_specification_types"
+path = "input/@page.moth"
+line = 1
+count = 1

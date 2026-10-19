@@ -1,0 +1,7 @@
+Label = |
+    text String,
+|
+
+Box = |
+    value Label,
+|

@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
-use super::{DeclarationSemanticTable, TopLevelDeclarationTable};
+use super::{DeclarationSemanticInputs, DeclarationSemanticTable, TopLevelDeclarationTable};
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
@@ -49,7 +49,7 @@ fn declaration_semantics_preserves_missing_template_authority() {
                 .try_intern_portable_path("value", &mut string_table)
                 .expect("test path fits"),
             type_id: crate::compiler_frontend::datatypes::ids::builtin_type_ids::STRING,
-            diagnostic_type: crate::compiler_frontend::datatypes::DataType::StringSlice,
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Initializer(value),
             binding_span: None,
@@ -61,12 +61,15 @@ fn declaration_semantics_preserves_missing_template_authority() {
 
     let error = DeclarationSemanticTable::from_environment(
         &table,
-        &FxHashMap::default(),
-        &FxHashMap::default(),
-        &TypeEnvironment::new(),
-        &store,
-        &expression_builder,
-        &ConstValueStore::default(),
+        DeclarationSemanticInputs {
+            resolved_function_signatures_by_path: &FxHashMap::default(),
+            nominal_type_ids_by_path: &FxHashMap::default(),
+            type_environment: &TypeEnvironment::new(),
+            template_ir_store: &store,
+            expression_builder: &expression_builder,
+            const_values: &ConstValueStore::default(),
+            external_package_registry: None,
+        },
     )
     .expect_err("missing declaration template authority must fail classification");
 

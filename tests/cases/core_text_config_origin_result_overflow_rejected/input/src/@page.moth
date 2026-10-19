@@ -1,0 +1,7 @@
+@settings len
+
+overflow || -> I32, Error!:
+    return len + 2147483645
+;
+
+io.line([: [overflow()]])

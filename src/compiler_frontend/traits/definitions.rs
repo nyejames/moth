@@ -2,11 +2,10 @@
 //!
 //! WHAT: stores trait definitions after names, visibility, `This`, and requirement signatures
 //! have been resolved into compiler-owned identities.
-//! WHY: traits are compile-time metadata, not `DataType` declarations. Keeping them here gives
-//! conformance and bounds a focused lookup surface without widening the normal value/type
-//! declaration table.
+//! WHY: trait declarations and evidence have a focused lookup surface separate from value and
+//!      nominal type declarations.
 
-use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
+use crate::compiler_frontend::ast::statements::functions::{ParameterContract, ReturnChannel};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -17,7 +16,9 @@ use crate::compiler_frontend::value_mode::ValueMode;
 /// Source/visibility ownership for a resolved trait definition.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TraitVisibility {
-    /// Authored source trait. `exported` means the trait is part of the module public surface.
+    /// Authored source trait. `exported` means the trait is public at its owner: declared in
+    /// its module root's export block, or imported from a provider's public interface.
+    /// Re-exported local traits are recognised through the root's export entries instead.
     Source { exported: bool },
     /// Compiler-owned core trait metadata visible without a user declaration.
     Core,
@@ -49,7 +50,20 @@ pub(crate) struct ResolvedTraitParameter {
     pub(crate) name: PathId,
     pub(crate) value_mode: ValueMode,
     pub(crate) type_id: TypeId,
+    pub(crate) contract: ParameterContract,
     pub(crate) span: Option<SourceSpan>,
+}
+
+impl ResolvedTraitParameter {
+    /// Every canonical type id this requirement parameter touches.
+    ///
+    /// WHAT: yields the parameter's ordinary value type and its contract-owned type (the `Route`
+    ///       input) in a stable order.
+    /// WHY: exported-trait surface validation and conformance must reason about the same type set
+    ///      as the authored requirement; one owner keeps the Route input from being skipped.
+    pub(crate) fn semantic_type_ids(&self) -> impl Iterator<Item = TypeId> + '_ {
+        self.contract.semantic_type_ids(self.type_id)
+    }
 }
 
 /// One requirement return slot.

@@ -1,0 +1,12 @@
+Envelope type T ::
+    Wrapped | id I32, value T |,
+;
+
+StringEnvelope as Envelope of String
+
+receive |event Route of I32 -> StringEnvelope| -> String:
+    return "mismatch"
+;
+
+result = receive(Envelope::Wrapped(7))
+io.line(result)

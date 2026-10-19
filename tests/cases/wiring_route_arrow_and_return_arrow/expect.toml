@@ -1,0 +1,11 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "routes unit=unit input=input rename=rename delete=delete named=named forward=editor capture=captured effect=\"x\" order=ordered order_effect=beforecapture-1capture-2after borrow=borrowed source=after"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["{ tag: 0, \"id\": "]

@@ -8,18 +8,19 @@ use super::nominal_blueprints::{
 };
 use super::preparation_freeze::ModuleMaterialisationCapture;
 use super::stable_types::{
-    GenericTemplateArtefact, MaterialisationNominalSource, StableCallableBinding,
-    StableDeclarationBinding, StableFunctionSignature, StableFunctionTarget, StableNominalBinding,
+    GeneratedValueMaterialisationServices, GenericTemplateArtefact, MaterialisationNominalSource,
+    StableCallableBinding, StableDeclarationBinding, StableFunctionSignature, StableFunctionTarget,
+    StableNominalBinding,
 };
 use super::visibility::collect_namespace_source_paths;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionBody;
 use crate::compiler_frontend::ast::module_ast::environment::AstModuleEnvironment;
-use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
+use crate::compiler_frontend::ast::statements::functions::{ParameterContract, ReturnChannel};
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTraitIdentity, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -27,6 +28,7 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::public_interface::PublicDeclarationRecord;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, OriginDeclarationId,
@@ -110,6 +112,22 @@ impl StableSemanticClosure {
             evidence.remap_path_ids(remap);
         }
     }
+
+    /// Private evidence rows carry their own copy of the callable they dispatch to, because a
+    /// consumer installs them without the provider's preparation. Convergence widens summaries
+    /// after those copies are made, so every widening must refresh them too: a stale bootstrap
+    /// summary would hide return aliases from the consumer.
+    pub(super) fn update_callable_summary(&mut self, path: &PathId, summary: &PublicCallSummary) {
+        for callable in self
+            .evidence
+            .iter_mut()
+            .flat_map(|evidence| evidence.requirements.iter_mut())
+            .filter_map(|requirement| requirement.callable.as_mut())
+            .filter(|callable| &callable.local_path == path)
+        {
+            callable.summary = summary.clone();
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -152,6 +170,38 @@ struct StablePrivateTraitParameter {
     value_mode: ValueMode,
     parameter_type: StableTraitTypeBlueprint,
     span: Option<crate::compiler_frontend::source::SourceSpan>,
+    contract: StablePrivateTraitParameterContract,
+}
+
+#[derive(Clone)]
+enum StablePrivateTraitParameterContract {
+    Value,
+    Wire,
+    Route {
+        input: Option<StableTraitTypeBlueprint>,
+    },
+}
+
+impl StablePrivateTraitParameterContract {
+    /// Trait-type blueprint this contract contributes beyond the parameter's own type.
+    fn input_blueprint(&self) -> Option<&StableTraitTypeBlueprint> {
+        match self {
+            StablePrivateTraitParameterContract::Route { input } => input.as_ref(),
+            StablePrivateTraitParameterContract::Value
+            | StablePrivateTraitParameterContract::Wire => None,
+        }
+    }
+}
+
+impl StablePrivateTraitParameter {
+    /// Every trait-type blueprint this requirement parameter touches.
+    ///
+    /// WHAT: yields the parameter's own blueprint, then any contract-owned blueprint.
+    /// WHY: the private-trait sidecar closure must retain a blueprint for every type the frozen
+    ///      requirement names, including a Route input.
+    fn semantic_type_blueprints(&self) -> impl Iterator<Item = &StableTraitTypeBlueprint> {
+        std::iter::once(&self.parameter_type).chain(self.contract.input_blueprint())
+    }
 }
 
 #[derive(Clone)]
@@ -180,6 +230,9 @@ struct StablePrivateEvidence {
 struct StablePrivateEvidenceRequirement {
     requirement_name: String,
     method_path: PathId,
+    /// Concrete binding of `method_path`, so each environment that installs this row can call it.
+    /// `None` for generic templates, which keep their own lane.
+    callable: Option<StableCallableBinding>,
 }
 impl StablePrivateTrait {
     fn remap_path_ids(&mut self, remap: &PathIdRemap) {
@@ -210,6 +263,9 @@ impl StablePrivateEvidence {
         self.source_file = remap.get(self.source_file);
         for requirement in &mut self.requirements {
             requirement.method_path = remap.get(requirement.method_path);
+            if let Some(callable) = &mut requirement.callable {
+                callable.remap_path_ids(remap);
+            }
         }
     }
 }
@@ -217,9 +273,9 @@ impl StablePrivateEvidence {
 impl StableFunctionSignature {
     fn collect_nominal_identities(&self, identities: &mut FxHashSet<CanonicalTypeIdentity>) {
         for parameter in &self.parameters {
-            parameter
-                .parameter_type
-                .collect_nominal_identities(identities);
+            for blueprint in parameter.semantic_type_blueprints() {
+                blueprint.collect_nominal_identities(identities);
+            }
             if let Some(default) = &parameter.folded_default {
                 default.visit_type_identities(&mut |identity| {
                     collect_reachable_nominal_identities(identity, identities);
@@ -287,11 +343,12 @@ pub(super) fn install_private_semantic_closure(
     nominal_source: &GenericTemplateArtefact,
     context: &ModuleMaterialisationContext,
     environment: &mut AstModuleEnvironment,
-    external_package_registry: &ExternalPackageRegistry,
+    services: &mut GeneratedValueMaterialisationServices<'_>,
     template_ir_store: &Rc<RefCell<crate::compiler_frontend::ast::templates::tir::TemplateIrStore>>,
     string_table: &mut StringTable,
     path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
-) -> Result<(), CompilerError> {
+) -> Result<(), Box<InfrastructureErrors>> {
+    let external_package_registry = services.external_registry;
     for stable_trait in &context.semantic_closure.traits {
         if environment
             .lookups
@@ -331,6 +388,29 @@ pub(super) fn install_private_semantic_closure(
                             path_fork,
                         )?,
                         span: parameter.span,
+                        contract: match &parameter.contract {
+                            StablePrivateTraitParameterContract::Value => ParameterContract::Value,
+                            StablePrivateTraitParameterContract::Wire => ParameterContract::Wire,
+                            StablePrivateTraitParameterContract::Route { input } => {
+                                ParameterContract::Route {
+                                    input: input
+                                        .as_ref()
+                                        .map(|input| {
+                                            intern_stable_trait_type(
+                                                input,
+                                                this_type,
+                                                nominal_source,
+                                                &mut environment.type_environment,
+                                                external_package_registry,
+                                                template_ir_store,
+                                                string_table,
+                                                path_fork,
+                                            )
+                                        })
+                                        .transpose()?,
+                                }
+                            }
+                        },
                     })
                 })
                 .collect::<Result<Vec<_>, CompilerError>>()?;
@@ -380,7 +460,8 @@ pub(super) fn install_private_semantic_closure(
         if trait_environment.insert(definition).is_some() {
             return Err(CompilerError::compiler_error(
                 "Private materialisation trait path was registered more than once",
-            ));
+            )
+            .into());
         }
         trait_environment.register_path(canonical_path, trait_id)?;
         trait_environment.register_canonical_identity(stable_trait.identity.clone(), trait_id)?;
@@ -442,6 +523,28 @@ pub(super) fn install_private_semantic_closure(
                 })
             })
             .collect::<Result<Vec<_>, CompilerError>>()?;
+        // A private evidence row names a concrete method, which this generated environment needs
+        // to call through the row. Several rows can name one method, so a path already present
+        // is skipped.
+        for requirement in &stable_evidence.requirements {
+            let Some(callable) = &requirement.callable else {
+                continue;
+            };
+            if environment
+                .lookups
+                .imported_functions_by_local_path
+                .contains_key(&callable.local_path)
+            {
+                continue;
+            }
+            callable.install_requester_callable(
+                environment,
+                services,
+                nominal_source,
+                string_table,
+                path_fork,
+            )?;
+        }
         let definition = TraitEvidenceDefinition {
             id: TraitEvidenceId(0),
             kind: TraitEvidenceKind::Canonical,
@@ -496,6 +599,7 @@ impl ModuleMaterialisationCapture {
         &self,
         const_values: &ConstValueStore,
         retained_local_paths: &FxHashSet<PathId>,
+        callable_contracts: &[StableCallableBinding],
         resources: &ModuleResourceTable,
         path_fork: &PathInternerFork,
     ) -> Result<StableSemanticClosure, CompilerError> {
@@ -545,7 +649,7 @@ impl ModuleMaterialisationCapture {
         aliases.sort_by_key(|row| row.local_path);
 
         let traits = self.stable_private_traits()?;
-        let evidence = self.stable_private_evidence()?;
+        let evidence = self.stable_private_evidence(callable_contracts)?;
 
         Ok(StableSemanticClosure {
             constants: constants.into_boxed_slice(),
@@ -583,6 +687,26 @@ impl ModuleMaterialisationCapture {
                                     definition.this_type,
                                 )?,
                                 span: parameter.span,
+                                contract: match parameter.contract {
+                                    ParameterContract::Value => {
+                                        StablePrivateTraitParameterContract::Value
+                                    }
+                                    ParameterContract::Wire => {
+                                        StablePrivateTraitParameterContract::Wire
+                                    }
+                                    ParameterContract::Route { input } => {
+                                        StablePrivateTraitParameterContract::Route {
+                                            input: input
+                                                .map(|type_id| {
+                                                    self.stable_trait_type(
+                                                        type_id,
+                                                        definition.this_type,
+                                                    )
+                                                })
+                                                .transpose()?,
+                                        }
+                                    }
+                                },
                             })
                         })
                         .collect::<Result<Box<[_]>, CompilerError>>()?;
@@ -626,7 +750,10 @@ impl ModuleMaterialisationCapture {
         Ok(traits.into_boxed_slice())
     }
 
-    fn stable_private_evidence(&self) -> Result<Box<[StablePrivateEvidence]>, CompilerError> {
+    fn stable_private_evidence(
+        &self,
+        callable_contracts: &[StableCallableBinding],
+    ) -> Result<Box<[StablePrivateEvidence]>, CompilerError> {
         let mut evidence = Vec::new();
         for definition in self.trait_evidence_environment.canonical_evidence() {
             let target_type_identity = self.stable_type_identity(definition.target_type_id)?;
@@ -682,6 +809,14 @@ impl ModuleMaterialisationCapture {
                             .resolve(trait_requirement.name)
                             .to_owned(),
                         method_path: requirement.method_path,
+                        // A miss means a generic template, or a method with no contract, so the
+                        // row has no callable; `callable_contracts` is sorted by `local_path`.
+                        callable: callable_contracts
+                            .binary_search_by_key(&requirement.method_path, |binding| {
+                                binding.local_path
+                            })
+                            .ok()
+                            .map(|index| callable_contracts[index].clone()),
                     })
                 })
                 .collect::<Result<Box<[_]>, CompilerError>>()?;
@@ -752,6 +887,7 @@ impl ModuleMaterialisationCapture {
         &self,
         source_file: &PathId,
         referenced_names: &FxHashSet<String>,
+        path_fork: &PathInternerFork,
     ) -> Result<FxHashSet<PathId>, CompilerError> {
         let visibility = self.binding_environment.visibility_for(source_file)?;
         let mut selected = visibility
@@ -767,30 +903,84 @@ impl ModuleMaterialisationCapture {
                 selected.extend(methods.iter().map(|method| *method.target.local_path()));
             }
         }
+        // WHY: a value-carried method reaches the body through its receiver value, so a referenced
+        // name selects it whether or not the name is visible in the body's file.
+        selected.extend(self.value_carried_paths_for_names(referenced_names));
         for (name, record) in &visibility.visible_namespace_records {
             if referenced_names.contains(self.string_table.resolve(*name)) {
                 collect_namespace_source_paths(record, &mut selected);
             }
         }
+        // WHY: an imported receiver method is projected under the authored binding path of its
+        // nominal (`child(nominal binding, method name)`). A body that reaches the method must
+        // therefore also capture that nominal binding; otherwise the restored body projects the
+        // nominal at its deterministic path and the captured method path no longer resolves.
+        let nominal_paths = selected
+            .iter()
+            .filter(|path| {
+                self.resolved_function_signatures_by_path
+                    .get(*path)
+                    .is_some_and(|resolved| resolved.receiver.is_some())
+            })
+            .filter_map(|path| path_fork.try_parent(*path))
+            .filter(|parent| {
+                self.binding_environment
+                    .imported_declarations_by_local_path
+                    .get(parent)
+                    .is_some_and(|origin| matches!(origin, OriginDeclarationId::Type(_)))
+            })
+            .collect::<Vec<_>>();
+        selected.extend(nominal_paths);
         Ok(selected)
     }
 
+    /// Function paths of the value-carried receiver methods that a body's referenced names select.
+    ///
+    /// WHAT: a referenced name selects each value-carried method with that name, whether or not the
+    /// name is visible in the body's file.
+    /// WHY: a value-carried method reaches a body through its receiver value, so file visibility
+    /// must not decide whether it is captured.
+    pub(super) fn value_carried_paths_for_names(
+        &self,
+        referenced_names: &FxHashSet<String>,
+    ) -> Vec<PathId> {
+        self.receiver_methods.value_carried_paths_named(|name| {
+            referenced_names.contains(self.string_table.resolve(name))
+        })
+    }
+
+    /// Stable target of a function reached through a visible name or a value-carried method.
+    ///
+    /// WHAT: a source target that carries its own identity wins; otherwise the path decides.
+    /// WHY: a visible-name entry already carries its target, while a value-carried entry is known
+    /// only by its path.
     pub(super) fn stable_target_for_path(
         &self,
         target: &SourceFunctionTarget,
     ) -> Option<StableFunctionTarget> {
-        if let Some(stable) = StableFunctionTarget::capture(target) {
-            return Some(stable);
-        }
-        if let Some(contract) = self
+        StableFunctionTarget::capture(target)
+            .or_else(|| self.stable_target_for_local_path(target.local_path()))
+    }
+
+    /// Stable target of the function at one canonical path.
+    ///
+    /// WHAT: a retained executable contract wins; otherwise a generic template resolves through its
+    /// declaration identity.
+    /// WHY: the contract owns the identity of every concrete executable, including same-module
+    /// methods, so it is consulted before the template.
+    pub(super) fn stable_target_for_local_path(
+        &self,
+        local_path: &PathId,
+    ) -> Option<StableFunctionTarget> {
+        if let Some(stable) = self
             .imported_functions_by_local_path
-            .get(target.local_path())
-            && let Some(stable) = StableFunctionTarget::capture(&contract.target)
+            .get(local_path)
+            .and_then(|contract| StableFunctionTarget::capture(&contract.target))
         {
             return Some(stable);
         }
         self.generic_function_templates_by_path
-            .get(target.local_path())
+            .get(local_path)
             .and_then(|template| match template.declaration_identity.as_ref()? {
                 GeneratedDeclarationIdentity::Public(origin) => {
                     Some(StableFunctionTarget::Imported(origin.clone()))
@@ -952,8 +1142,10 @@ impl ModuleMaterialisationCapture {
         for trait_definition in &semantic_closure.traits {
             for requirement in &trait_definition.requirements {
                 for parameter in &requirement.parameters {
-                    if let StableTraitTypeBlueprint::Type(blueprint) = &parameter.parameter_type {
-                        blueprint.collect_nominal_identities(&mut identities);
+                    for blueprint in parameter.semantic_type_blueprints() {
+                        if let StableTraitTypeBlueprint::Type(blueprint) = blueprint {
+                            blueprint.collect_nominal_identities(&mut identities);
+                        }
                     }
                 }
                 for returned in &requirement.returns {
@@ -965,6 +1157,15 @@ impl ModuleMaterialisationCapture {
         }
         for evidence in &semantic_closure.evidence {
             collect_reachable_nominal_identities(&evidence.target_type_identity, &mut identities);
+            // Evidence methods can name nominals that no retained body mentions, so their
+            // signatures contribute blueprints the same way the trait requirements do.
+            for requirement in &evidence.requirements {
+                if let Some(callable) = &requirement.callable {
+                    callable
+                        .signature
+                        .collect_nominal_identities(&mut identities);
+                }
+            }
         }
         let mut blueprints = FxHashMap::default();
         let mut initial_identities = identities.into_iter().collect::<Vec<_>>();

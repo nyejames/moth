@@ -4266,7 +4266,7 @@ with no errors or warnings, and all three scaling series within budget.
 
 ## Phase 0 evidence: typed semantic expressions baseline (2026-10-07)
 
-Phase 0 of `docs/roadmap/plans/typed-semantic-expressions-plan.md` stops at
+Phase 0 of the retired typed semantic expressions plan stops at
 activation, contracts and baseline. Measurements use the dirty Phase 0
 candidate worktree over `ab706091376373451afb32081c21476b56b5752a`, not that
 pristine revision. Raw records retain `git_dirty=true` and before/after
@@ -6151,3 +6151,614 @@ without required findings. It checks visibility/binding and constant-projection
 handoffs, validation/continuation/JS interactions, retained regression owners,
 benchmark qualification and pause status. It doesn't approve unstarted later
 phases or a future merge tree.
+
+## Typed-expression Phase 5 repeated type and folding work
+
+Phase 5 runs from baseline `a24230c87` to the P5e resolution correction on
+`expression-refactor`. The matched comparison uses macOS arm64, Rust 1.99.0 and
+release `detailed_timers` binaries for both trees, alternating baseline and
+candidate five times per case with `RAYON_NUM_THREADS=1`, `MOTH_TIMERS=bench`
+and counters disabled. Both binaries check the same current inputs. Counters
+come from separate `detailed_timers benchmark_counters` builds with
+`MOTH_COUNTERS=summary`. Raw logs stay under `tmp/p5/`.
+
+### Stage timing medians (ms)
+
+| Case | check total | AST environment | AST emit | generated materialise |
+|---|---:|---:|---:|---:|
+| docs | 204.97 → 202.45 | 88.58 → 87.46 | 34.60 → 34.41 | — |
+| type stress | 6.03 → 5.85 | 0.29 → 0.28 | 0.72 → 0.67 | — |
+| fold stress | 5.33 → 5.18 | 1.41 → 1.37 | 0.28 → 0.26 | — |
+| environment stress | 4.13 → 4.15 | 0.31 → 0.29 | 0.28 → 0.26 | — |
+| template stress | 7.39 → 7.20 | 0.79 → 0.77 | 0.55 → 0.54 | — |
+| generic scaling 20 | 22.24 → 15.94 | 0.20 → 0.18 | 1.20 → 1.10 | 12.46 → 6.39 |
+| generic scaling 40 | 45.88 → 34.16 | 0.25 → 0.24 | 2.09 → 1.95 | 27.22 → 15.53 |
+| generic scaling 80 | 107.54 → 84.31 | 0.36 → 0.35 | 3.83 → 3.55 | 64.10 → 41.47 |
+| generic scaling 160 | 301.56 → 250.87 | 0.58 → 0.58 | 7.24 → 6.74 | 173.19 → 126.33 |
+| constant chain 512 | 5.68 → 5.68 | 2.27 → 2.30 | 0.08 → 0.08 | — |
+| code highlighter stress | 3.46 → 3.53 | 0.81 → 0.85 | 0.05 → 0.05 | — |
+| one-module kitchen sink | 9.46 → 8.95 | 0.38 → 0.36 | 0.52 → 0.48 | 0.39 → 0.20 |
+
+Generic scaling gains come from sharing the generated external registry and
+building call expectations once per call. Sub-millisecond rows move within
+run-to-run spread; a 15-pair rerun puts fold stress at 5.25 → 5.22 ms.
+
+### Counters
+
+| Counter | docs | type stress | environment stress | generic scaling 160 |
+|---|---:|---:|---:|---:|
+| external package registry clones | 3 → 3 | 1 → 1 | 1 → 1 | 801 → 1 |
+| external function definition clones | 624 → 624 | 208 → 208 | 208 → 208 | 166,608 → 208 |
+| external ABI parameter clones | 1,365 → 1,365 | 455 → 455 | 455 → 455 | 364,455 → 455 |
+| constructor field views | 3 → 3 | 52 → 45 | 3 → 3 | 800 → 800 |
+| visible type lookups | 11 → 11 | 48 → 48 | 123 → 121 | 347 → 347 |
+| scope contexts | 5,030 → 5,032 | 391 → 391 | 262 → 262 | 4,835 → 4,835 |
+| type-resolution calls | 530 → 501 | 545 → 388 | 319 → 289 | 2,125 → 2,286 |
+
+Type-resolution calls now count each recursive authored-type node rather than
+each `DataType` resolution, so that row is not a like-for-like work measure.
+Direct `ParsedTypeRef` resolution first raised visible lookups and scope
+contexts. Final member and signature passes now reuse the TypeId their shell
+pass just resolved, unless generic, applied or capacity syntax needs the fuller
+context, which restores both counts. TIR fold, constant and HIR constant
+counters are unchanged.
+
+### Retained and declined work
+
+- Retained: shared call-site descriptors and registry; direct
+  `ParsedTypeRef` → `TypeId` resolution with `DataType` deleted; AST-selected
+  range domains consumed by HIR, const template folding and failure
+  classification; ownership-only TIR clone and string-interning fixes. Type
+  deletion and TIR ownership changes are performance-neutral simplifications.
+- Constant lookups already return `ConstValueId` handles over a shared module
+  base, and HIR lowers constants directly from the module store.
+- Declined: per-detach, per-instance and HIR per-use constant memos (new memo
+  tables); a resolver validate+fold fusion that kept the old walk as fallback
+  for about 0.28 ms on docs; an `Rc` store wrapper replacing O(1) store takes; a
+  sorted closure merge relying on `PathId` order across fork remaps; a static-if
+  pre-scan duplicating the specialisation walker for about 0.06 ms; a counted
+  handoff-injection move and a moved copy cursor that added invariants or
+  changed error-path state without measured cost.
+
+## Typed-expression final qualification
+
+This section qualifies the final tree, `aad5eb2aa` on `expression-refactor`,
+against baseline `a24230c87`. It supersedes an earlier round on `2525e99b7`
+that failed nominal scaling, stack depth and retained-string checks; the
+corrections are listed below. The protocol follows Phase 5: macOS arm64,
+Rust 1.99.0, `--locked` release `detailed_timers` builds from a clean candidate
+worktree, and the Phase 5 baseline binaries with unchanged digests. All 68
+timed CLI `check` cases run five alternating pairs with `RAYON_NUM_THREADS=1`,
+`MOTH_TIMERS=bench` and counters off, and both sides read the candidate
+worktree's inputs. Stdout and stderr match on every case. Rows a five-pair
+screen marks as slower rerun at 15 pairs. Another workload held load averages
+between 3 and 8, so single sub-millisecond rows are noise. Raw logs stay under
+`tmp/p8/aad/`.
+
+### Stage timing medians (ms)
+
+| Case | check total | AST environment | AST emit | HIR | generated materialise |
+|---|---:|---:|---:|---:|---:|
+| docs | 210.31 → 208.30 | 91.38 → 90.19 | 35.52 → 35.24 | 2.08 → 2.11 | — |
+| type stress | 6.09 → 6.18 | 0.29 → 0.28 | 0.72 → 0.71 | 0.44 → 0.45 | — |
+| fold stress | 5.21 → 5.34 | 1.41 → 1.40 | 0.28 → 0.28 | 0.22 → 0.23 | — |
+| template stress | 7.50 → 7.53 | 0.83 → 0.81 | 0.57 → 0.56 | 0.41 → 0.41 | — |
+| generic scaling 20 | 23.31 → 16.75 | 0.20 → 0.19 | 1.24 → 1.22 | 0.77 → 0.74 | 12.85 → 6.45 |
+| generic scaling 160 | 318.46 → 260.85 | 0.61 → 0.58 | 7.51 → 7.28 | 5.50 → 5.28 | 177.96 → 121.67 |
+| nominal scaling 320 | 11.29 → 10.96 | 3.86 → 3.49 | 0.20 → 0.19 | 0.63 → 0.57 | — |
+| default parameters 32 | 4.75 → 4.65 | 0.37 → 0.37 | 0.47 → 0.47 | 0.36 → 0.35 | — |
+| aggregate forwarding 512 | 525.10 → 518.22 | 0.10 → 0.10 | 10.97 → 9.87 | 4.12 → 4.16 | 0.49 → 0.31 |
+
+Generic scaling is 18–28% faster at every size. Fifteen-pair reruns place
+every rescreened total within 2.3% of baseline in either direction: narrow
+chains 512 1039.64 → 1021.95, grouped `not` 512 2.97 → 2.91, fold stress
+5.36 → 5.38, `root_single_file` 2.43 → 2.46, docs 206.08 → 206.23, and nominal
+40/80/160/320 at 0.977–0.998.
+
+### Scaling, stack and memory
+
+`just bench-scaling` passes all 14 series on both trees. Nominal members fit
+`n^0.93` (baseline `n^0.92`). Generic instantiation fits `n^1.47` (baseline
+`n^1.36`) while running faster at every size. Its materialise savings of
+6.4, 12.6, 25.3 and 56.3 ms at n = 20, 40, 80 and 160 remove a linear term,
+which leaves the unchanged superlinear term to dominate the fit. Main-thread
+stack floors match baseline: 120 KB for `check` on grouped `not` 2048, and
+168 KB for the entry-project build on both JS and HTML-Wasm.
+
+The requested-byte probe shows lower live bytes in every fixture,
+identical after-drop bytes, and unchanged retained fields except donor
+identity strings: 12,992 → 12,932 B (generic trait churn) and 16,786 → 16,730 B
+(kitchen sink). Requested peaks move between −1.8% and +2.3%. The largest
+rises are transient: generic trait churn +27.5 KB and environment stress
++18.2 KB.
+
+| Case | max RSS (MiB) | peak footprint (MiB) |
+|---|---:|---:|
+| docs | 63.39 → 62.62 | 53.08 → 52.34 |
+| generic scaling 160 | 385.25 → 385.34 | 371.80 → 371.92 |
+| nominal scaling 320 | 19.97 → 19.91 | 10.41 → 10.44 |
+| grouped `not` 2048 | 14.83 → 14.84 | 5.56 → 5.59 |
+| default parameters 32 | 14.52 → 14.94 | 4.67 → 5.03 |
+
+Small cases show a 0.1–0.4 MiB peak-footprint offset whose requested bytes
+move by about 1 KB. Across the phase-checkpoint binaries the offset rises and
+falls non-monotonically, and two builds of the same source measure identically,
+so it follows build-specific page residency rather than retained compiler data.
+
+### Counters
+
+| Counter | docs | type stress | generic scaling 160 | nominal scaling 320 |
+|---|---:|---:|---:|---:|
+| constant fold entries (incl. retired compile-time-expression entries) | 2,796 → 2,796 | 228 → 228 | 7,373 → 7,373 | 4 → 4 |
+| external package registry clones | 3 → 3 | 1 → 1 | 801 → 1 | unchanged |
+| external function definition clones | 624 → 624 | 208 → 208 | 166,608 → 208 | unchanged |
+| scope contexts | 5,031 → 5,033 | 391 → 391 | 4,835 → 4,835 | 1,693 → 2,093 |
+
+The baseline split fold entries between `constant_fold` and the retired
+`fold_compile_time_expression` counter; the candidate records both under one
+entry point and now classifies every outcome. Nominal scope contexts include the
+retained constructor-shell scope that lets bare-constant collection capacities
+fold. `default_parameters_32` fills 64 function defaults on both trees.
+
+### Harness results
+
+`just bench-validate` passes all 152 cases. `just bench-frontend-check` and
+`just bench-check` exit 0 with `git_dirty: false`, but they print
+`No local baseline found`, so they give no comparison verdict.
+
+### Corrected regressions and attributed deltas
+
+- Nominal scaling: `939c7d6b6` held each constructor shell's scope context
+  across `Rc::make_mut` shell-table writes, so every write copied the table.
+  Dropping the scope first restores the fit, and the 320-member check moves
+  from 37.41 ms to 10.96 ms.
+- Stack: recursive HIR walkers from `529e3a6fe` raised the `check` floor from
+  119 KB to 375 KB. Explicit work lists in reachability, backend feature
+  validation and the JS emitter restore it.
+- Retained strings: unconditional `Wire`/`Route` interning added 41 B per
+  table. They are now reserved only when tokenisation already interned them.
+- Docs `frontend.ast.finalise.module_constant` reads 4.50 → 5.02 ms from
+  `529e3a6fe` to the qualification binary over 40 rotated rounds. A rebuild of
+  the same source from another worktree measures 4.59 ms in those rounds, so the
+  step is code layout, not source behaviour; the docs total doesn't move.
+- Nominal `boundary.inventory` rises 0.09–0.16 ms (+4.7–6.5%) at 160/320
+  members, where it includes header preparation. Phase-commit bisection places
+  the whole step at `bb292b44d`, which added `Wire`/`Route` parameter-contract
+  parsing. Removing the per-type contract-head check or boxing the `Route`
+  payload leaves it unchanged, so the line-level cause remains open. Across all
+  68 cases the inventory median moves +1.2%, and every nominal check total stays
+  below baseline.
+
+This local Darwin run supplies no fresh Windows Canvas or in-process frontend
+result.
+
+## Typed-expression follow-ups
+
+Speed-ups from the typed-expression follow-up plan, each its own audited commit.
+Ratios are medians of per-round ratios from paired interleaved runs, new over
+old; below 1 is faster.
+
+| Section | Headline |
+|---|---|
+| Signature member contract merge | nominal `boundary.inventory` regression about 60% recovered |
+| Borrow root membership | aggregate forwarding 512 wall 0.65x |
+| TIR traversal sets | docs wall 0.85x |
+| Shared borrow root words | mutable cycles 512 borrow validation 2,446 ms to 215 ms |
+| Generated nominal registration | generic scaling 160 materialise 0.81x |
+| External package registry indexes | type stress wall 0.96x |
+| Empty borrow root sets own no words | mutable cycles 512 wall 0.67x |
+| Covering visibility masks skip the sweep | mutable cycles 512 converge a further 0.86x |
+| HIR concrete type checks without a set | `frontend.hir` 0.91-0.97x |
+| Template summary paths and whitespace cursors | docs wall 0.92x |
+| Requester aliases for reconstructed nominals only | generic scaling 160 materialise 0.39x, now linear |
+| Source tree walk uses listed entry types | docs build directory inventory 0.83x |
+| Follow-up branch qualification | no row above +5% against `a24230c87`; docs check 0.74x |
+
+### Signature member contract merge
+
+Nominal `boundary.inventory` regression from `bb292b44d` (above), re-measured with
+fresh binaries; older bisect binaries embedded deleted worktree paths and failed
+`check`, so the earlier contract-head exclusion was re-run and still holds.
+
+- Profile (xctrace, 15 rotated runs, 10,000-member fixture): self time in
+  `parse_signature_member_syntax` rises from 0.07 to 2.27 samples per run, on the
+  `(type_annotation, contract)` tuple merged from an `if` expression and the
+  struct-field call result. Disassembly shows overlapping stack copies at those
+  lines; the stall mechanism is inferred, not counter-confirmed.
+- Change: assign `type_annotation` and `contract` per branch. Output matches
+  apart from timing lines.
+- Paired per-round medians, `check`, `MOTH_TIMERS=bench RAYON_NUM_THREADS=1`,
+  interleaved, 100 rounds at 320 members and 30 at 3,200:
+
+| Pair (`boundary.inventory`) | 320 members | 3,200 members |
+|---|---:|---:|
+| before − base `0c1a55395` | +0.169 ms | +1.817 ms |
+| after − base | +0.067 ms | +0.867 ms |
+| before − after | +0.104 ms (≈43 ns/member) | +0.977 ms (≈41 ns/member) |
+| 136 B size control − base | +0.042 ms | +0.871 ms |
+
+Same-source rebuilds agree within 0.01 ms at 320. The residual matches a
+control that only grows `SignatureMemberSyntax` to its current 136 B with a
+zero-initialised pad, and boxing the contract (88 B) or constructing members in
+place did not beat this change, so the residual is retained as size and layout
+cost of the contract field.
+
+### Borrow root membership
+
+Profile (xctrace, aggregate forwarding 512): `active_alias_count_for_root` built
+a full `RootSet` per local through `effective_roots` only to test one bit, and
+`roots_overlap` cloned a set per argument pair; allocator leaves were 109.6 of
+201.6 borrow-checker samples per run.
+
+- `effective_root_sources` is the one rule behind the `effective_roots` builder
+  and the new non-allocating `effective_root_contains` used by the three alias
+  scans.
+- `RootSet::intersects` replaces clone, intersect and emptiness test.
+- `active_mutable_alias_for_root` tests pure state predicates before the origin
+  lookup.
+
+Paired interleaved rounds against `dca16305f` with the signature member fix, 25
+rounds, median of per-round ratios:
+
+| Case | Wall | `borrow.initial` | `borrow.converge` |
+|---|---:|---:|---:|
+| aggregate forwarding 512 | 0.650 | 0.585 | 0.881 |
+| aggregate forwarding 128 | 0.883 | 0.395 | 0.968 |
+| origin fanout 512 | 0.717 | 0.356 | 0.361 |
+| mutable cycles 512 | 0.985 | 0.674 | 0.985 |
+| generic failure chain 512 | 0.989 | 0.920 | 0.985 |
+
+Across all 74 CLI cases (5 rounds, worst 14 re-run at 25) no case regresses
+beyond noise, and exit codes, stdout and stderr match. Borrow-checker samples
+fall from 201.6 to 78.4 per run on aggregate forwarding 512. The remaining
+per-call `RootSet` construction is 2-4% of that stage and was left alone.
+
+### TIR traversal sets
+
+Docs `frontend.ast.environment.constant_header_resolution` (about 84 ms) was the
+largest stage in a touched area without a profile. TIR template preparation and
+summary guard their recursive walks with std `HashSet`s of typed IDs that are
+only inserted, removed and queried, so they paid std SipHash on every visit.
+`TirView::transition` also formatted an owner label on every call for an error
+it rarely reports.
+
+- The guard sets in `preparation.rs` and `summary.rs` use `FxHashSet`, following
+  `slot_layout.rs`; none is iterated, so output order cannot change.
+- `validate_context` takes `impl Display`, so the label is formatted only when
+  an error is built; error text is byte-identical.
+
+Paired interleaved rounds against the signature member contract merge tree, 15
+rounds in each of two windows, median of per-round ratios:
+
+| Case · metric | Ratio |
+|---|---:|
+| docs · constant header resolution | 0.767-0.768 |
+| docs · wall | 0.848-0.849 |
+| speed test · constant header resolution | 0.784-0.788 |
+| speed test · finalise | 0.514-0.529 |
+| template stress · constant header resolution | 0.833-0.859 |
+
+The set change alone gives about 89% of the gain. Exit codes, stdout and output
+trees match across the 74 CLI cases. Docs `frontend.ast.finalise` read 5-9%
+(about 0.4 ms) higher on this binary only, in code the change does not touch;
+the same stage moved with code layout in the final qualification above, and the
+branch qualification re-measures it.
+
+### Shared borrow root words
+
+Cloning a borrow state copied every `RootSet` word vector, and converge-heavy
+functions clone states at block joins and transfers on every worklist pass.
+`RootSet` now shares its words through `Rc<[u64]>` and copies only on write;
+combinators test for a change before copying shared words, so no-op updates
+never copy.
+
+Paired interleaved rounds against the borrow root membership tree, 25 rounds,
+median of per-round ratios:
+
+| Case | Wall | `borrow.initial` | `borrow.converge` |
+|---|---:|---:|---:|
+| mutable cycles 512 | 0.102 | 0.989 | 0.089 |
+| narrow chains 512 | 0.227 | 0.976 | 0.206 |
+| generic failure chain 512 | 0.297 | 0.999 | 0.245 |
+| collection stress | 0.565 | 0.505 | 0.414 |
+| aggregate forwarding 512 | 0.923 | 0.896 | 0.985 |
+| aggregate forwarding 128 | 0.997 | 1.055 | 0.929 |
+| origin fanout 512 | 1.000 | 1.002 | 1.016 |
+
+Mutable cycles 512 borrow validation falls from 2,446 ms to 215 ms. Across the
+74 CLI cases the summed wall medians fall from 7,479 ms to 2,405 ms, no case
+regresses beyond noise after 25-round re-runs, and exit codes, stdout and stderr
+match. The one stage cost is aggregate forwarding 128 `borrow.initial`, +5.5%
+of a 5.6 ms stage over the previous tree; it stays at 0.42x of the tree before
+borrow root membership, and its wall time does not move.
+
+### Generated nominal registration
+
+Generic scaling 160 spends about 56% of its wall time in
+`frontend.generated.materialise`. Every generated request rebuilds its
+requester's nominal bindings, and each generated nominal registered its
+canonical identity twice: once for the shell inside
+`intern_materialisation_nominal`, so recursive references resolve to it, and
+again in the epilogue of `intern_generated_canonical_type`.
+`register_canonical_identity` was 19.7% of the stage inclusive.
+
+- The nominal arm returns the shell's TypeId directly, so the identical second
+  insert and its conflict check are gone; nothing between the two writes can
+  register a conflicting pair.
+- The repeated lookup at the top of `intern_materialisation_nominal` is gone;
+  its only caller has just performed it.
+- Blueprints are borrowed from the immutable nominal source instead of cloned.
+
+TypeIds are allocated in the same order. Paired interleaved rounds against the
+shared borrow root words tree, 25 rounds, median of per-round ratios with
+bootstrap CI95:
+
+| Case · metric | Ratio | CI95 |
+|---|---:|---|
+| generic scaling 160 · materialise | 0.814 | 0.811-0.818 |
+| generic scaling 160 · wall | 0.892 | 0.886-0.905 |
+| docs · wall | 0.994 | 0.989-1.005 |
+
+An A/A run of the base binary against a byte-identical copy gave 0.998 for the
+materialise stage. Exit codes, stdout and output files match across the 74 CLI
+cases. The stage still grows about as n^1.4: rebuilding every requester binding
+per request is the remaining quadratic term.
+
+### External package registry indexes
+
+The external package registry kept three registry-wide maps keyed by a cloned
+`(package, symbol path)` pair. They duplicated each package's own function,
+type and constant maps, so every registration and lookup cloned a path key and
+hashed it with SipHash. Lookups now index `packages[package_id]` directly, the
+duplicate maps and their key type are gone, and the remaining maps use
+`FxHashMap`. Three same-kind duplicate checks are deleted because
+`reject_duplicate_path` already rejects every collision before them.
+
+Paired interleaved rounds against the shared borrow root words tree, 25 rounds,
+median of per-round wall ratios with bootstrap CI95:
+
+| Case | Ratio | CI95 |
+|---|---:|---|
+| type stress | 0.958 | 0.943-0.982 |
+| fold stress | 0.983 | 0.970-1.012 |
+| docs | 0.991 | 0.982-1.005 |
+| speed test | 0.987 | 0.978-1.005 |
+| narrow chains 512 (control) | 1.005 | 0.980-1.026 |
+
+Type stress reproduced at 0.961 in an earlier session. Exit codes, stdout and
+output files match across the 74 CLI cases. Package IDs still come from
+registration counters, and namespace records built from these maps now intern
+in a fixed order rather than a per-run random one.
+
+### Empty borrow root sets own no words
+
+After shared root words, `frontend.borrow.converge` was still 84% of mutable
+cycles 512 wall time. Iteration count was not the cause: each of the 1,025
+reachable blocks is visited once. Every `RootSet` held a dense `Rc<[u64]>` of
+`ceil(locals / 64)` words even when empty, so the per-visit visibility sweep
+scanned all of them through `is_empty`, and every `LocalState` clone and drop
+touched their reference counts. `is_empty` alone was 15% of the stage.
+
+`RootSet.words` is now `Option<Rc<[u64]>>`: `None` is the empty set, and `Some`
+always holds at least one non-zero word, so emptiness has one owner and costs
+one branch. Union into an empty set shares the donor's buffer, and intersection,
+subtraction and `clear` return to `None` when no bit survives.
+
+Paired interleaved rounds against `9b0929229`, 25 rounds, median of per-round
+ratios with bootstrap CI95:
+
+| Case · metric | Ratio | CI95 |
+|---|---:|---|
+| mutable cycles 512 · converge | 0.611 | 0.584-0.626 |
+| mutable cycles 512 · wall | 0.667 | 0.641-0.675 |
+| narrow chains 512 · converge | 0.629 | 0.546-0.670 |
+| narrow chains 512 · wall | 0.676 | 0.559-0.703 |
+| mutable cycles 128 · converge | 0.768 | 0.746-0.786 |
+| mutable cycles 32 · converge | 0.867 | 0.836-0.909 |
+| docs · wall | 0.972 | 0.872-1.015 |
+| module graph · wall (control) | 1.014 | 0.998-1.104 |
+
+A fresh rerun against a rebuilt base gave 0.603 and 0.649 for the two 512
+cases. Exit codes, stdout and output files match across the 74 CLI cases. The
+gain grows with size, but converge still scales close to quadratically because
+each visit copies a state with one entry per local.
+
+### Covering visibility masks skip the sweep
+
+With empty root sets cheap, `BorrowState::kill_invisible` still walked every
+local on every visit and intersected each rooted local's sets with the
+visibility mask: 13% of mutable cycles 512 converge and 10% of narrow chains
+512. In both cases the function body is one region, so the mask covers every
+local and the whole sweep changes nothing. `RootSet::covers_all` checks the mask
+in `ceil(locals / 64)` word compares and `kill_invisible` returns early when it
+covers the layout; narrower masks take the existing sweep.
+
+Paired interleaved rounds, 25 rounds, three binaries interleaved, median of
+per-round ratios with bootstrap CI95:
+
+| Case · metric | Against empty root sets | Against `9b0929229` |
+|---|---:|---:|
+| mutable cycles 512 · converge | 0.855 (0.851-0.859) | 0.517 (0.513-0.520) |
+| mutable cycles 512 · wall | 0.890 (0.883-0.892) | 0.588 (0.583-0.590) |
+| narrow chains 512 · converge | 0.905 (0.895-0.924) | 0.591 (0.575-0.604) |
+| narrow chains 512 · wall | 0.923 (0.913-0.938) | 0.637 (0.624-0.656) |
+| mutable cycles 128 · converge | 0.941 | 0.714 |
+| docs · wall | 0.987 (0.979-1.006) | 0.994 |
+| module graph · wall (control) | 1.000 (0.974-1.036) | 0.953 |
+
+The saving matches the sweep's measured share of the stage. Exit codes, stdout
+and output files match across the 74 CLI cases. The converge exponent from 128
+to 512 locals falls from 2.13 to 1.90 for mutable cycles; the remaining cost is
+copying one state entry per local per visit, which needs a state
+representation change rather than a local fix.
+
+### HIR concrete type checks without a set
+
+`require_concrete_type_id` guards its walk over constructed, function and
+generic-instance types with a visited set, and inserted every type it reached,
+so each check of a builtin, struct, choice or external type allocated a set
+table for one entry. Only the three recursive arms can cycle, so only they now
+mark the set before recursing; leaf types return without inserting, and an
+error still ends the walk at its first occurrence. Traversal order, cycle
+detection and error choice are unchanged.
+
+Paired interleaved rounds against `9b0929229`, 60 rounds, median of per-round
+ratios with bootstrap CI95, beside a null run of the base binary against itself:
+
+| Case · `frontend.hir` | Ratio | CI95 | Null CI95 |
+|---|---:|---|---|
+| generic scaling 160 | 0.967 | 0.946-0.981 | 0.992-1.030 |
+| speed test | 0.945 | 0.927-0.954 | 0.989-1.008 |
+| narrow chains 512 | 0.909 | 0.897-0.920 | 0.996-1.020 |
+| docs | 0.959 | 0.940-1.006 | 0.958-0.997 |
+
+The saving is 0.05-0.22 ms per case, so no wall time change is measurable.
+Exit codes, stdout and output files match across the 74 CLI cases. The change
+removes an avoidable allocation from the common path rather than chasing a
+wall-time target.
+
+### Template summary paths and whitespace cursors
+
+Docs `frontend.ast.emit.const_template_parse` was about 20 ms, 11% of docs
+wall time. A third of it was the TIR summary walk, where hashing its active-path
+set was 20% of the stage, and 15% was template whitespace normalisation, which
+collected strings into `Vec<char>` buffers to dedent and trim them.
+
+- The summary's active node path is a `Vec` stack. It holds only the nested
+  body nodes above the current node, because construction flattens body
+  sequences and nested templates start a fresh path, so a linear check is
+  cheaper than a hash probe. The cycle error and traversal order are unchanged.
+- The whitespace helpers work on the string directly with character-aware
+  cursors. Whitespace classification and character-counted dedent widths are
+  unchanged; a new test pins multibyte horizontal whitespace.
+
+Paired interleaved rounds against `9b0929229`, 25 rounds, median of per-round
+ratios with bootstrap CI95:
+
+| Case · metric | Path stack | Whitespace | Both |
+|---|---:|---:|---:|
+| docs · template parse | 0.827 | 0.920 | 0.720 (0.716-0.740) |
+| docs · AST total | 0.919 | 0.953 | 0.855 (0.851-0.864) |
+| docs · wall | 0.949 | 0.974 | 0.915 (0.898-0.920) |
+| speed test · wall (control) | 0.998 | 0.997 | 0.985 (0.970-1.007) |
+
+Exit codes, stdout and output files match across the 74 CLI cases for each
+variant.
+
+### Requester aliases for reconstructed nominals only
+
+After generated nominal registration, materialisation still grew as about
+n^1.34 on generic scaling, and the quadratic term was 58% of the stage at 160.
+For every generated request, the sidecar interned every nominal blueprint the
+requester binds, so each request's cost grew with the requester's blueprint
+count, then registered the requester's spelling for each one.
+
+The sidecar now registers a requester spelling only for nominals it has already
+reconstructed (the type arguments, their members and the declaring module's
+installed nominals) by looking up the existing canonical identity index; it
+interns nothing in that loop. The declaring module's names come from
+`install_closed_environment`, and requester evidence and member types cross
+through canonical identities and the unfiltered blueprint source, so no other
+binding has a spelling the request can use. The sidecar holds fewer aliases and
+nominals than before, so its internal TypeIds can differ; emitted output does
+not.
+
+Paired interleaved rounds against the generated nominal registration tree, 25
+rounds, median of per-round ratios with bootstrap CI95:
+
+| Case · metric | Ratio | CI95 |
+|---|---:|---|
+| generic scaling 160 · materialise | 0.394 | 0.389-0.399 |
+| generic scaling 160 · wall | 0.616 | 0.613-0.619 |
+| docs · wall (control) | 1.003 | 0.983-1.012 |
+
+Per-request materialisation, in µs:
+
+| n | Before | After |
+|---:|---:|---:|
+| 20 | 61.95 | 50.50 |
+| 40 | 69.92 | 49.01 |
+| 80 | 88.18 | 47.91 |
+| 160 | 125.56 | 49.67 |
+
+The stage exponent falls from 1.34 to 0.99. A prototype that filtered bindings
+by a type-argument reachability set ran at the same speed (ratio 1.002,
+0.980-1.027) but allocated a set per request, so it was not kept. Exit codes,
+stdout and output files match across the 74 CLI cases.
+
+### Source tree walk uses listed entry types
+
+The build-path review profiled `build` workloads, which earlier reviews had not
+covered. Backend feature validation does no work on the JS target, the JS path
+showed no sort or dedup cost, and per-page metadata and emitter formatting were
+below 1 ms. The one owner above the bar was the source tree walk in
+`source_tree_index.rs`: it called `Path::is_dir` and `Path::is_file` on every
+listed entry, each a `stat`, and `fs::canonicalize` on every recognised file and
+again on every module-root directory. On docs these syscalls cost about 3.8 ms
+per build.
+
+Each popped directory is already canonicalised, so a listed non-symlink entry's
+type comes from the directory listing and its joined path is already canonical.
+Symlinks, and entries whose type cannot be read, keep the old queries and
+canonicalisation, so link targets, the skip policy and cycle protection are
+unchanged. A file deleted between listing and loading now fails when it is
+loaded rather than when it is canonicalised.
+
+Paired interleaved rounds against `9d490beb1`, 25 rounds, median of per-round
+ratios with bootstrap CI95, beside an A/A null of the base binary against a copy:
+
+| Case · `stage0.directory.inventory` | Ratio | CI95 | Null CI95 |
+|---|---:|---|---|
+| docs build | 0.832 | 0.811-0.838 | 0.972-1.004 |
+| import fanout build | 0.839 | 0.764-0.875 | 0.895-1.005 |
+| module root stress build | 0.876 | 0.833-0.918 | 0.870-1.188 |
+
+Docs build wall time reads 0.957 (0.952-0.978) against a null of 0.990
+(0.946-1.004); small-project wall times do not move beyond noise. Exit codes,
+stdout and output files match across the 74 CLI cases.
+
+### Follow-up branch qualification
+
+The follow-up tree `a08f2f6f3` repeats the final qualification above against
+`a24230c87` with the same protocol, scripts and baseline binaries (digests
+unchanged). All 68 timed `check` cases ran five alternating pairs; the eleven
+rows the screen marked slower, and the main headline cases, reran at 15 pairs.
+Load averages stayed between 4.7 and 7.2. Stdout and stderr match on every
+case. Raw logs stay under `tmp/followups/qual/`.
+
+| Case | check total (ms) | Ratio | Pairs |
+|---|---:|---:|---:|
+| docs | 216.59 → 160.67 | 0.742 | 15 |
+| type stress | 6.30 → 5.71 | 0.906 | 5 |
+| fold stress | 6.70 → 5.21 | 0.778 | 5 |
+| template stress | 7.83 → 5.52 | 0.704 | 5 |
+| generic scaling 20 | 24.33 → 13.89 | 0.571 | 5 |
+| generic scaling 160 | 351.37 → 111.72 | 0.318 | 5 |
+| nominal scaling 320 | 11.60 → 10.65 | 0.919 | 15 |
+| default parameters 32 | 4.74 → 4.44 | 0.937 | 5 |
+| aggregate forwarding 512 | 665.53 → 110.71 | 0.166 | 5 |
+| mutable cycles 512 | 2,805.25 → 131.59 | 0.047 | 15 |
+| narrow chains 512 | 1,811.75 → 149.15 | 0.082 | 5 |
+
+All eleven rescreened rows are faster at 15 pairs. The five-pair copy-chain
+flags, ×1.27 and ×1.32, read 0.938 and 0.870 at 15 pairs. Three stage rows
+below 1 ms read up to ×1.066 at five pairs and were not rescreened, since the
+protocol's flag floor is 1 ms.
+
+`just bench-scaling` passes all 14 series on both trees. Generic
+instantiation now fits `n^1.06` (baseline `n^1.40`), and nominal members fit
+`n^0.95` (baseline `n^0.93`). Main-thread stack floors match the baseline and
+the earlier round: 120 KB for `check` on grouped `not` 2048, and 168 KB for the
+entry-project build on JS and HTML-Wasm.
+
+No max-RSS ratio exceeds 1.05. Generic scaling 160 peak footprint falls from
+371.2 to 122.8 MiB. At 15 pairs, peak footprint reads +3.1% for nominal
+scaling 320 and +3.3% for default parameters 32 while requested bytes fall by
+about 120 KB and 41 KB, so the offset is not retained compiler data. Requested
+peaks fall in 32 of 33 probe fixtures; docs rises by 17 KB (+0.04%).
+
+Counters are deterministic on both trees and the four rows of the earlier
+round match. External symbol path clones fall from 540,675 to 450 on generic
+scaling 160. Nominal scaling 320 makes 50% more type resolution calls
+(16,324 → 24,484) and 24% more scope contexts, the latter from the retained
+constructor-shell scope noted above, while its check total still falls.

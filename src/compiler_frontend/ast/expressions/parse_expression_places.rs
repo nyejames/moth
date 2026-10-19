@@ -21,7 +21,7 @@ use crate::compiler_frontend::ast::field_access::{
     parse_field_access_expression_with_receiver_access, parse_postfix_chain_expression,
     reference_expression_from_declaration, retain_pending_operand_member_access,
 };
-use crate::compiler_frontend::ast::module_ast::scope_context::ScopeDeclarationRef;
+use crate::compiler_frontend::ast::module_ast::scope_context::ValueDeclarationRef;
 use crate::compiler_frontend::ast::numeric_construction::NumericBindingId;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -412,23 +412,26 @@ fn resolve_place_root<'a>(
     token_stream: &mut AstCursor,
     context: &'a ScopeContext,
     string_table: &mut StringTable,
-) -> Result<ScopeDeclarationRef<'a>, ExpressionParseError> {
+) -> Result<ValueDeclarationRef<'a>, ExpressionParseError> {
     let span = token_stream.current_span();
-    match token_stream.current_tag() {
-        TokenTag::THIS => Ok(context.resolve_this_reference(string_table.intern("this"), span)?),
+    let declaration = match token_stream.current_tag() {
+        TokenTag::THIS => context.resolve_this_reference(string_table.intern("this"), span)?,
         TokenTag::SYMBOL => {
             let symbol_id = token_stream
                 .current_string_id_in(string_table)?
                 .ok_or_else(|| {
                     CompilerError::compiler_error("place root symbol had no string payload")
                 })?;
-            Ok(context.resolve_value_reference(symbol_id, span)?)
+            context.resolve_value_reference(symbol_id, span)?
         }
-        _ => Err(CompilerError::compiler_error(
-            "place root resolution received a token other than a name or `this`",
-        )
-        .into()),
-    }
+        _ => {
+            return Err(CompilerError::compiler_error(
+                "place root resolution received a token other than a name or `this`",
+            )
+            .into());
+        }
+    };
+    Ok(declaration)
 }
 
 /// Record a completed place using its resolved root and ordered field projections.

@@ -1,0 +1,15 @@
+entry = "."
+
+# One input, both targets: JavaScript and HTML-Wasm must agree on wire reads,
+# identity-preserving forwarding, mutable reassignment, per-iteration bindings
+# and exact output.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "wire read=initial forward=initial mutable=after number=7 loop=ab"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "wire read=initial forward=initial mutable=after number=7 loop=ab"

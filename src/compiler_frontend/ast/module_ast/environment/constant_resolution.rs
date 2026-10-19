@@ -19,7 +19,7 @@ use super::config_resolution::resolve_config_declaration;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationValue};
 use crate::compiler_frontend::ast::const_eval::{
-    ConstantFoldError, ConstantFoldOutcome, constant_fold,
+    ConstantFoldError, ConstantFoldOutcome, FoldServices, constant_fold,
 };
 use crate::compiler_frontend::ast::const_values::binding::{
     bound_constant_initializer, resolve_const_expression_content,
@@ -58,7 +58,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
-use crate::compiler_frontend::datatypes::{DataType, diagnostic_type_spelling};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SyntheticContentPayload;
@@ -232,8 +231,8 @@ impl ConstantResolutionSession {
         let mut declaration = match payload {
             Some(SyntheticContentPayload::RenderedHtml(rendered_html)) => Declaration {
                 id: header.declaration_path,
+                type_syntax: None,
                 type_id: builtin_type_ids::STRING,
-                diagnostic_type: DataType::StringSlice,
                 value_mode: ValueMode::ImmutableOwned,
                 value: DeclarationValue::Initializer(
                     expression_builder
@@ -325,38 +324,45 @@ impl ConstantResolutionSession {
                     );
                     let fold_result =
                         fold_prepared_template(&preparation, view, &mut fold_context)?;
-                    let value = match fold_result.emission {
-                        TemplateEmission::Output(value) => value,
-                        TemplateEmission::NoOutput => {
-                            ConstStringValue::Text(fold_context.string_table.intern(""))
-                        }
-                    };
-                    let value = const_values.insert_resolved(
-                        builtin_type_ids::STRING,
-                        ConstValuePayload::String(value),
-                        template_span,
-                    )?;
-                    let folded_expression = expression_builder.constant(
-                        value,
-                        builtin_type_ids::STRING,
-                        template_span,
-                        ValueMode::ImmutableOwned,
-                    )?;
-                    let mut input = expression_builder
-                        .view_owned(folded_expression)?
-                        .to_completed_input(expression_builder)?;
-                    input.occurrence = Some(OccurrenceFacts {
-                        provenance: fold_result.provenance,
-                        diagnostic_spelling: None,
-                    });
-                    expression_builder.commit_replacement(input)?
+                    if fold_result.refusal.is_some() {
+                        // Structural text has no characters until the owning output boundary
+                        // supplies them, so the template survives as a runtime value.
+                        drop(fold_context);
+                        expression_builder.template(template, ValueMode::ImmutableOwned)?
+                    } else {
+                        let value = match fold_result.emission {
+                            TemplateEmission::Output(value) => value,
+                            TemplateEmission::NoOutput => {
+                                ConstStringValue::Text(fold_context.string_table.intern(""))
+                            }
+                        };
+                        let value = const_values.insert_resolved(
+                            builtin_type_ids::STRING,
+                            ConstValuePayload::String(value),
+                            template_span,
+                        )?;
+                        let folded_expression = expression_builder.constant(
+                            value,
+                            builtin_type_ids::STRING,
+                            template_span,
+                            ValueMode::ImmutableOwned,
+                        )?;
+                        let mut input = expression_builder
+                            .view_owned(folded_expression)?
+                            .to_completed_input(expression_builder)?;
+                        input.occurrence = Some(OccurrenceFacts {
+                            provenance: fold_result.provenance,
+                            diagnostic_spelling: None,
+                        });
+                        expression_builder.commit_replacement(input)?
+                    }
                 } else {
                     expression_builder.template(template, ValueMode::ImmutableOwned)?
                 };
                 Declaration {
                     id: header.declaration_path,
+                    type_syntax: None,
                     type_id: expression_builder.view_owned(value)?.value_type_id()?,
-                    diagnostic_type: DataType::StringSlice,
                     value_mode: expression_builder.view_owned(value)?.value_mode(),
                     value: DeclarationValue::Initializer(value.id()),
                     binding_span: None,
@@ -442,8 +448,6 @@ impl ConstantResolutionSession {
         })?;
         let initializer = expression_builder.view(initializer)?;
         declaration.type_id = initializer.value_type_id()?;
-        declaration.diagnostic_type =
-            diagnostic_type_spelling(declaration.type_id, type_interner.environment());
         declaration.value_mode = initializer.value_mode();
         let initializer_is_compile_time_constant = initializer
             .const_value_kind_with_template_classifier(const_values, &mut |template| {
@@ -452,6 +456,7 @@ impl ConstantResolutionSession {
                     &scope_context.template_ir_store,
                     expression_builder,
                     const_values,
+                    Some(scope_context.external_package_registry.as_ref()),
                 )
             })
             .map(|kind| kind.is_compile_time_value())
@@ -461,8 +466,12 @@ impl ConstantResolutionSession {
                 initializer.id(),
                 expression_builder,
                 const_values,
-                string_table,
-                Some(&scope_context),
+                FoldServices::new(
+                    string_table,
+                    Some(&scope_context),
+                    Some(scope_context.external_package_registry.as_ref()),
+                ),
+                crate::compiler_frontend::ast::const_eval::FoldRequirement::Required,
             ))?;
 
             return Err(CompilerDiagnostic::compile_time_evaluation_error(
@@ -568,16 +577,16 @@ impl ConstantResolutionSession {
 
 /// Map the fold of a runtime constant initializer onto the header's error lanes.
 ///
-/// A text-unavailable refusal keeps its precise diagnostic and a broken compiler invariant stays
-/// on the infrastructure lane. A builder capacity diagnostic stays on the diagnostic lane so it
+/// A typed fold refusal keeps its precise diagnostic and a broken compiler invariant stays on
+/// the infrastructure lane. A builder capacity diagnostic stays on the diagnostic lane so it
 /// reaches the module build. `Ok(())` leaves the caller to report the ordinary
 /// `ConstantInitializerNotFoldable` refusal, which also covers source fold diagnostics.
 fn non_constant_initializer_fold_refusal(
     fold: Result<ConstantFoldOutcome, ConstantFoldError>,
 ) -> Result<(), ExpressionParseError> {
     match fold {
-        Ok(ConstantFoldOutcome::TextUnavailable { diagnostic, .. }) => {
-            Err(ExpressionParseError::from(diagnostic))
+        Ok(ConstantFoldOutcome::Refused { reason, .. }) => {
+            Err(ExpressionParseError::from(reason.into_diagnostic()))
         }
         // A broken compiler invariant must not surface as a source refusal.
         Err(ConstantFoldError::Infrastructure(error)) => {

@@ -2,7 +2,10 @@
 
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
-use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
+use crate::compiler_frontend::ast::const_eval::external_calls::materialise_success_slots;
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringPiece, ConstValueCandidate, ConstValueId, ConstValuePayload,
+};
 use crate::compiler_frontend::ast::expressions::eval_expression::result_type::resolve_expression_result_type;
 use crate::compiler_frontend::ast::expressions::eval_expression::{
     ExpressionTypingError, expression_from_resolved_items,
@@ -15,11 +18,14 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     CastFacts, ExprId, ExpressionOperationView, LogicalOperator, SuccessShape,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::{
-    CastHandling, ConstRecordState, FallibleExpressionHandling, FallibleHandling,
+    CastHandling, ConstRecordState, ConstValueKind, FallibleExpressionHandling, FallibleHandling,
     ResolvedCastEvidence,
 };
+use crate::compiler_frontend::ast::statements::body_expr_stmt::is_expression_statement;
 use crate::compiler_frontend::ast::statements::fallible_handling::wrap_catch_expression;
 use crate::compiler_frontend::ast::statements::value_production::ProducedValues;
+use crate::compiler_frontend::ast::statements::value_production::expression_build::commit_constant_result_block;
+use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastPolicyId,
 };
@@ -28,16 +34,19 @@ use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, DiagnosticPayload, InvalidCastReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId, builtin_type_ids};
+use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use crate::compiler_frontend::external_packages::{
+    ConstEvalLeafType, ConstEvalSlotType, ExternalFunctionId,
+};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
-use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId};
+use crate::compiler_frontend::traits::ids::TraitEvidenceId;
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass, FixedScalarValue};
@@ -65,14 +74,20 @@ fn folding_handled_expressions_preserves_zero_and_multiple_success_shapes() {
             )
             .expect("test handled result should construct")
             .id();
-        let folded = fold_compile_time_expression(
+        let folded = match constant_fold(
             handled,
             &mut f.builder,
             &mut f.constants,
-            &mut f.strings,
-            false,
+            FoldServices::new(&mut f.strings, None, None),
+            FoldRequirement::Opportunistic,
         )
-        .expect("ordinary handling folds without scalarizing its result");
+        .expect("ordinary handling folds without scalarizing its result")
+        {
+            ConstantFoldOutcome::Folded(root) | ConstantFoldOutcome::NotConstant(root) => root,
+            ConstantFoldOutcome::Refused { .. } => {
+                panic!("ordinary handling must not refuse constant folding")
+            }
+        };
 
         let view = f
             .builder
@@ -317,6 +332,7 @@ impl FoldFixture {
             &mut self.constants,
             &mut self.strings,
             None,
+            &self.path_fork,
             ValueMode::ImmutableOwned,
         )
         .unwrap_or_else(|_| panic!("test operator sequence should construct"))
@@ -385,8 +401,8 @@ impl FoldFixture {
             root,
             &mut self.builder,
             &mut self.constants,
-            &mut self.strings,
-            None,
+            FoldServices::new(&mut self.strings, None, None),
+            FoldRequirement::Opportunistic,
         )
     }
 
@@ -507,13 +523,18 @@ impl FoldFixture {
     }
 
     fn fold_compile_time(&mut self, root: ExprId) -> Result<ExprId, ConstantFoldError> {
-        fold_compile_time_expression(
+        match constant_fold(
             root,
             &mut self.builder,
             &mut self.constants,
-            &mut self.strings,
-            true,
-        )
+            FoldServices::new(&mut self.strings, None, None),
+            FoldRequirement::Required,
+        )? {
+            ConstantFoldOutcome::Folded(root) | ConstantFoldOutcome::NotConstant(root) => Ok(root),
+            ConstantFoldOutcome::Refused { reason, .. } => {
+                Err(ConstantFoldError::Diagnostic(reason.into_diagnostic()))
+            }
+        }
     }
 }
 
@@ -523,8 +544,8 @@ fn expect_folded(outcome: ConstantFoldOutcome) -> ExprId {
         ConstantFoldOutcome::NotConstant(_) => {
             panic!("expected a folded constant, found a runtime expression")
         }
-        ConstantFoldOutcome::TextUnavailable { .. } => {
-            panic!("expected a folded constant, found unavailable text")
+        ConstantFoldOutcome::Refused { .. } => {
+            panic!("expected a folded constant, found a refused fold")
         }
     }
 }
@@ -535,8 +556,8 @@ fn expect_not_constant(outcome: ConstantFoldOutcome) -> ExprId {
         ConstantFoldOutcome::Folded(_) => {
             panic!("expected a runtime expression, found a folded constant")
         }
-        ConstantFoldOutcome::TextUnavailable { .. } => {
-            panic!("expected a runtime expression, found unavailable text")
+        ConstantFoldOutcome::Refused { .. } => {
+            panic!("expected a runtime expression, found a refused fold")
         }
     }
 }
@@ -822,9 +843,10 @@ fn structural_string_equality_reports_text_unavailable_outcome() {
         .fold(root)
         .expect("structural equality should be a typed fold refusal");
 
-    let ConstantFoldOutcome::TextUnavailable { diagnostic, .. } = outcome else {
+    let ConstantFoldOutcome::Refused { reason, .. } = outcome else {
         panic!("expected structural equality to report unavailable text");
     };
+    let diagnostic = reason.into_diagnostic();
     assert_eq!(
         diagnostic.identity().reason_key,
         Some("compile_time_evaluation_error.structural_string_requires_final_text")
@@ -856,9 +878,10 @@ fn constant_fold_propagates_structural_string_text_unavailable_outcome() {
     let outcome = f
         .fold(root)
         .expect("structural equality should return a typed fold outcome");
-    let ConstantFoldOutcome::TextUnavailable { diagnostic, .. } = outcome else {
+    let ConstantFoldOutcome::Refused { reason, .. } = outcome else {
         panic!("expected constant folding to preserve text-unavailable outcome");
     };
+    let diagnostic = reason.into_diagnostic();
     assert_eq!(
         diagnostic.identity().reason_key,
         Some("compile_time_evaluation_error.structural_string_requires_final_text")
@@ -900,7 +923,7 @@ fn text_unavailable_refusal_keeps_the_items_that_follow_it() {
         },
     ]);
 
-    let ConstantFoldOutcome::TextUnavailable {
+    let ConstantFoldOutcome::Refused {
         root: preserved, ..
     } = f.fold(root).expect("text refusal is a typed fold outcome")
     else {
@@ -2086,6 +2109,7 @@ fn constant_fold_reports_static_failure_at_authored_operator_inside_runtime_expr
         &mut f.constants,
         &mut f.strings,
         None,
+        &f.path_fork,
         ValueMode::ImmutableOwned,
     )
     .expect_err("divide by zero inside a runtime expression should still be diagnosed");
@@ -2576,10 +2600,7 @@ fn fold_cast_generic_bound_evidence_rejected_in_const_context() {
     let target_type_id = f.types.builtins().string;
     let cast = f.cast_expr(
         source,
-        ResolvedCastEvidence::GenericBound {
-            trait_id: TraitId(0),
-            parameter_id: GenericParameterId(0),
-        },
+        ResolvedCastEvidence::GenericBound,
         target_type_id,
         BuiltinCastFallibility::Infallible,
         CastHandling::Implicit,
@@ -2863,5 +2884,512 @@ fn evaluate_operator_folds_u64_at_full_bounds_and_rejects_overflow() {
         CompileTimeEvaluationErrorReason::IntegerOverflow,
         Some("*"),
         &f.strings,
+    );
+}
+
+#[test]
+fn speculative_substitution_reports_the_refusal_it_recorded() {
+    // The TIR fold reads this refusal from the substitution instead of folding the same
+    // expression a second time to recover an outcome the walk already discarded.
+    let mut f = FoldFixture::new();
+    let slot_path = f
+        .path_fork
+        .try_intern_portable_path("slot", &mut f.strings)
+        .expect("test path fits");
+    let slot = f.reference_path(
+        slot_path,
+        builtin_type_ids::STRING,
+        None,
+        ValueMode::ImmutableReference,
+    );
+    let plain = f.string_literal("plain");
+    let root = f.binary(slot, plain, Operator::Equality, None);
+    let structural = f.structural_string(vec![ConstStringPiece::SiteRoot]);
+
+    let result = fold_expression_with_bindings(
+        root,
+        &mut f.builder,
+        &mut f.constants,
+        &mut f.strings,
+        BindingFold::speculative(None, None),
+        |path| (path == slot_path).then_some(structural),
+    )
+    .expect("a refused comparison must not fail the substitution");
+
+    let view = f.builder.view(result.expression).expect("view");
+    assert!(
+        matches!(view.operation(), ExpressionOperationView::Compare { .. }),
+        "a refused comparison stays unfolded for runtime evaluation"
+    );
+    let reason = result
+        .refusal
+        .expect("the substitution reports the refusal it recorded");
+    assert_eq!(
+        reason.into_diagnostic().identity().reason_key,
+        Some("compile_time_evaluation_error.structural_string_requires_final_text")
+    );
+}
+
+/// Builds a fixed-width `I32` payload for slot tests. The value is small so these tests stay
+/// about slot plumbing rather than numeric range.
+fn i32_payload(value: i64) -> ConstValuePayload {
+    ConstValuePayload::FixedScalar(
+        FixedScalarValue::signed(FixedScalar::I32, value).expect("test i32 value fits its domain"),
+    )
+}
+
+/// Runs the slot materialiser inside a staging candidate and hands the staged rows to `check`
+/// before staging decides what to keep. Staging commits only the selected root's reachable
+/// suffix, so the first slot stands in as the root of an accepted candidate.
+fn materialise_slots_then_check(
+    f: &mut FoldFixture,
+    original: ExprId,
+    slots: &[ConstEvalSlotType],
+    result_types: &[TypeId],
+    payloads: Vec<Option<ConstValuePayload>>,
+    check: impl FnOnce(&ConstValueCandidate<'_>, &[ConstValueId]),
+) -> Result<(), ConstantFoldError> {
+    let view = f
+        .builder
+        .view(original)
+        .expect("test original expression should be stored");
+    let provenance = SyntheticInterfaceProvenance::empty();
+    f.constants
+        .stage_values(
+            |values| -> Result<Option<ConstValueId>, ConstantFoldError> {
+                let mut ids = Vec::new();
+                materialise_success_slots(
+                    slots,
+                    result_types,
+                    payloads.into_iter(),
+                    view,
+                    &provenance,
+                    values,
+                    &mut ids,
+                )?;
+                check(values, &ids);
+                Ok(ids.first().copied())
+            },
+        )
+        .map(|_| ())
+}
+
+#[test]
+fn materialised_present_bool_slot_is_a_literal_under_its_builtin_type() {
+    let mut f = FoldFixture::new();
+    let original = f.bool_literal(true, Some(marked_span(1)));
+    materialise_slots_then_check(
+        &mut f,
+        original,
+        &[ConstEvalSlotType {
+            leaf: ConstEvalLeafType::Bool,
+            optional: false,
+        }],
+        &[builtin_type_ids::BOOL],
+        vec![Some(ConstValuePayload::Bool(true))],
+        |values, ids| {
+            let [id] = ids else {
+                panic!("one non-optional slot should materialise exactly one value");
+            };
+            let metadata = values
+                .metadata(*id)
+                .expect("materialised slot should be staged");
+            assert_eq!(metadata.type_id, builtin_type_ids::BOOL);
+            assert_eq!(metadata.value_kind, ConstValueKind::Literal);
+            assert_eq!(metadata.span, Some(marked_span(1)));
+            assert!(matches!(
+                values.payload(*id),
+                Some(ConstValuePayload::Bool(true))
+            ));
+        },
+    )
+    .expect("a present bool slot should materialise");
+}
+
+#[test]
+fn materialised_present_optional_slot_wraps_its_leaf_exactly_once() {
+    let mut f = FoldFixture::new();
+    let original = f.bool_literal(true, None);
+    let option_i32 = f
+        .types
+        .intern_option(builtin_type_ids::fixed_scalar(FixedScalar::I32));
+    materialise_slots_then_check(
+        &mut f,
+        original,
+        &[ConstEvalSlotType {
+            leaf: ConstEvalLeafType::I32,
+            optional: true,
+        }],
+        &[option_i32],
+        vec![Some(i32_payload(7))],
+        |values, ids| {
+            let [id] = ids else {
+                panic!("one optional slot should materialise exactly one value");
+            };
+            let wrapper = values.metadata(*id).expect("wrapper should be staged");
+            assert_eq!(wrapper.type_id, option_i32);
+            assert_eq!(wrapper.value_kind, ConstValueKind::Composite);
+            let Some(ConstValuePayload::OptionSome(leaf)) = values.payload(*id) else {
+                panic!("a present optional slot should be stored as OptionSome");
+            };
+            let leaf_metadata = values
+                .metadata(*leaf)
+                .expect("wrapped leaf should be staged");
+            assert_eq!(
+                leaf_metadata.type_id,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32)
+            );
+            assert_eq!(leaf_metadata.value_kind, ConstValueKind::Literal);
+            // The leaf must hold the scalar itself; a second wrap would make it an `OptionSome`.
+            assert!(matches!(
+                values.payload(*leaf),
+                Some(ConstValuePayload::FixedScalar(_))
+            ));
+        },
+    )
+    .expect("a present optional slot should materialise");
+}
+
+#[test]
+fn materialised_absent_optional_slot_is_a_successful_option_none() {
+    let mut f = FoldFixture::new();
+    let original = f.bool_literal(true, None);
+    let option_i32 = f
+        .types
+        .intern_option(builtin_type_ids::fixed_scalar(FixedScalar::I32));
+    materialise_slots_then_check(
+        &mut f,
+        original,
+        &[ConstEvalSlotType {
+            leaf: ConstEvalLeafType::I32,
+            optional: true,
+        }],
+        &[option_i32],
+        vec![None],
+        |values, ids| {
+            let [id] = ids else {
+                panic!("one optional slot should materialise exactly one value");
+            };
+            let metadata = values.metadata(*id).expect("absent slot should be staged");
+            assert_eq!(metadata.type_id, option_i32);
+            assert_eq!(metadata.value_kind, ConstValueKind::Literal);
+            assert!(matches!(
+                values.payload(*id),
+                Some(ConstValuePayload::OptionNone)
+            ));
+        },
+    )
+    .expect("absence in an optional slot is an ordinary successful value, not a refusal");
+}
+
+#[test]
+fn materialised_multi_slot_results_keep_declared_order_and_absence() {
+    let mut f = FoldFixture::new();
+    let original = f.bool_literal(true, None);
+    let option_i32 = f
+        .types
+        .intern_option(builtin_type_ids::fixed_scalar(FixedScalar::I32));
+    materialise_slots_then_check(
+        &mut f,
+        original,
+        &[
+            ConstEvalSlotType {
+                leaf: ConstEvalLeafType::Bool,
+                optional: false,
+            },
+            ConstEvalSlotType {
+                leaf: ConstEvalLeafType::I32,
+                optional: true,
+            },
+        ],
+        &[builtin_type_ids::BOOL, option_i32],
+        vec![Some(ConstValuePayload::Bool(false)), None],
+        |values, ids| {
+            let [first, second] = ids else {
+                panic!("two result slots should materialise two values");
+            };
+            let first_metadata = values
+                .metadata(*first)
+                .expect("first slot should be staged");
+            assert_eq!(first_metadata.type_id, builtin_type_ids::BOOL);
+            assert!(matches!(
+                values.payload(*first),
+                Some(ConstValuePayload::Bool(false))
+            ));
+            let second_metadata = values
+                .metadata(*second)
+                .expect("second slot should be staged");
+            assert_eq!(second_metadata.type_id, option_i32);
+            assert!(matches!(
+                values.payload(*second),
+                Some(ConstValuePayload::OptionNone)
+            ));
+        },
+    )
+    .expect("mixed result slots should materialise in declared order");
+}
+
+#[test]
+fn materialisation_rejects_slot_shapes_that_disagree_with_the_registered_table() {
+    // Registration already checked each signature against its table, so a disagreement here is
+    // a compiler bug. The materialiser must abort the compile rather than store a guessed value.
+    let cases = [
+        (
+            "more result types than slots",
+            vec![ConstEvalSlotType {
+                leaf: ConstEvalLeafType::Bool,
+                optional: false,
+            }],
+            vec![builtin_type_ids::BOOL, builtin_type_ids::BOOL],
+            vec![Some(ConstValuePayload::Bool(true))],
+        ),
+        (
+            "fewer payloads than slots",
+            vec![ConstEvalSlotType {
+                leaf: ConstEvalLeafType::Bool,
+                optional: false,
+            }],
+            vec![builtin_type_ids::BOOL],
+            vec![],
+        ),
+        (
+            "absent value for a required slot",
+            vec![ConstEvalSlotType {
+                leaf: ConstEvalLeafType::Bool,
+                optional: false,
+            }],
+            vec![builtin_type_ids::BOOL],
+            vec![None],
+        ),
+        (
+            "result type that is not the leaf type",
+            vec![ConstEvalSlotType {
+                leaf: ConstEvalLeafType::I32,
+                optional: false,
+            }],
+            vec![builtin_type_ids::BOOL],
+            vec![Some(i32_payload(7))],
+        ),
+        (
+            "payload kind that is not the leaf kind",
+            vec![ConstEvalSlotType {
+                leaf: ConstEvalLeafType::Bool,
+                optional: false,
+            }],
+            vec![builtin_type_ids::BOOL],
+            vec![Some(i32_payload(7))],
+        ),
+    ];
+
+    for (case, slots, result_types, payloads) in cases {
+        let mut f = FoldFixture::new();
+        let original = f.bool_literal(true, None);
+        let error = materialise_slots_then_check(
+            &mut f,
+            original,
+            &slots,
+            &result_types,
+            payloads,
+            |_, _| unreachable!("a rejected materialisation must not reach its staged rows"),
+        )
+        .expect_err(case);
+        assert!(
+            matches!(error, ConstantFoldError::Infrastructure(_)),
+            "{case}: a slot disagreement is a compiler error, not a diagnostic: {error:?}"
+        );
+    }
+}
+
+/// Builds the carrier the way `fold_root` does: the slot values are materialised into one staged
+/// candidate, and the committed slot roots feed the lexical-scope block that replaces the call.
+fn carrier_for_folded_host_call(
+    f: &mut FoldFixture,
+    call: ExprId,
+    slots: &[ConstEvalSlotType],
+    payloads: Vec<Option<ConstValuePayload>>,
+) -> ExprId {
+    let view = f
+        .builder
+        .view(call)
+        .expect("test host call should be stored");
+    let provenance = SyntheticInterfaceProvenance::empty();
+    let results = f
+        .constants
+        .stage_values(
+            |values| -> Result<Option<Vec<ConstValueId>>, ConstantFoldError> {
+                let mut ids = Vec::new();
+                materialise_success_slots(
+                    slots,
+                    view.success_types(),
+                    payloads.into_iter(),
+                    view,
+                    &provenance,
+                    values,
+                    &mut ids,
+                )?;
+                Ok(Some(ids))
+            },
+        )
+        .expect("evaluated host-call slots should stage")
+        .expect("the staged slot roots should be selected");
+    let (success, value_mode) = (view.success_shape(), view.value_mode());
+    let carrier = commit_constant_result_block(&mut f.builder, call, &results, PathId::ROOT, None)
+        .expect("folded host call should commit its carrier block")
+        .id();
+    let carrier_view = f
+        .builder
+        .view(carrier)
+        .expect("the carrier should be stored in place of the call");
+    assert_eq!(
+        carrier_view.success_shape(),
+        success,
+        "the carrier should keep the call's success shape, range included"
+    );
+    assert_eq!(
+        carrier_view.value_mode(),
+        value_mode,
+        "the carrier should keep the call's value mode"
+    );
+    carrier
+}
+
+#[test]
+fn folded_host_call_with_two_results_becomes_one_constant_row_per_slot_in_declared_order() {
+    let mut f = FoldFixture::new();
+    let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let call = f
+        .builder
+        .host_function_call_with_typed_arguments(
+            ExternalFunctionId::IoPrint,
+            vec![],
+            vec![i32_type, builtin_type_ids::BOOL],
+            false,
+            Some(marked_span(1)),
+        )
+        .expect("test host call should construct")
+        .id();
+    let carrier = carrier_for_folded_host_call(
+        &mut f,
+        call,
+        &[
+            ConstEvalSlotType {
+                leaf: ConstEvalLeafType::I32,
+                optional: false,
+            },
+            ConstEvalSlotType {
+                leaf: ConstEvalLeafType::Bool,
+                optional: false,
+            },
+        ],
+        vec![Some(i32_payload(7)), Some(ConstValuePayload::Bool(true))],
+    );
+
+    assert_eq!(
+        f.builder
+            .view(carrier)
+            .expect("carrier should be stored")
+            .success_types(),
+        f.builder
+            .view(call)
+            .expect("call should be stored")
+            .success_types(),
+        "the carrier must keep the call's success types"
+    );
+    let ExpressionOperationView::ValueBlock(ValueBlock::LexicalScope(block)) = f
+        .builder
+        .view(carrier)
+        .expect("carrier should be stored")
+        .operation()
+    else {
+        panic!("a folded multi-result host call must become a lexical-scope value block");
+    };
+    assert_eq!(block.scope, PathId::ROOT);
+    assert_eq!(
+        block.result_type_ids,
+        vec![i32_type, builtin_type_ids::BOOL]
+    );
+    let [carried] = block.body.as_slice() else {
+        panic!("the carrier body should hold exactly one ThenValue row");
+    };
+    let NodeKind::ThenValue(produced) = &carried.kind else {
+        panic!("the carrier row should be a ThenValue node");
+    };
+    let [first_row, second_row] = produced.expressions.as_slice() else {
+        panic!("one constant row should be produced per declared result");
+    };
+    let ExpressionOperationView::Constant(first) = f
+        .builder
+        .view(*first_row)
+        .expect("first result row should be stored")
+        .operation()
+    else {
+        panic!("a folded result row must be a constant");
+    };
+    let ExpressionOperationView::Constant(second) = f
+        .builder
+        .view(*second_row)
+        .expect("second result row should be stored")
+        .operation()
+    else {
+        panic!("a folded result row must be a constant");
+    };
+    let seven =
+        FixedScalarValue::signed(FixedScalar::I32, 7).expect("test i32 value fits its domain");
+    assert!(matches!(
+        f.constants.payload(first),
+        Some(ConstValuePayload::FixedScalar(stored)) if *stored == seven
+    ));
+    assert!(matches!(
+        f.constants.payload(second),
+        Some(ConstValuePayload::Bool(true))
+    ));
+    assert_eq!(
+        f.constants
+            .metadata(first)
+            .expect("first result should be staged")
+            .type_id,
+        i32_type
+    );
+    assert_eq!(
+        f.constants
+            .metadata(second)
+            .expect("second result should be staged")
+            .type_id,
+        builtin_type_ids::BOOL
+    );
+}
+
+#[test]
+fn folded_zero_result_host_call_becomes_an_empty_block_that_is_an_expression_statement() {
+    let mut f = FoldFixture::new();
+    let call = f
+        .builder
+        .host_function_call_with_typed_arguments(
+            ExternalFunctionId::IoPrint,
+            vec![],
+            vec![],
+            false,
+            Some(marked_span(1)),
+        )
+        .expect("test host call should construct")
+        .id();
+    let carrier = carrier_for_folded_host_call(&mut f, call, &[], Vec::new());
+
+    let ExpressionOperationView::ValueBlock(ValueBlock::LexicalScope(block)) = f
+        .builder
+        .view(carrier)
+        .expect("carrier should be stored")
+        .operation()
+    else {
+        panic!("a folded zero-result host call must become a lexical-scope value block");
+    };
+    assert!(
+        block.body.is_empty(),
+        "a zero-result carrier has no rows to produce values"
+    );
+    assert!(block.result_type_ids.is_empty());
+    assert!(
+        is_expression_statement(f.builder.view(carrier).expect("carrier should be stored")),
+        "a zero-result carrier must be accepted as an expression statement"
     );
 }

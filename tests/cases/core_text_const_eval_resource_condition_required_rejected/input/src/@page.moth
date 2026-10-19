@@ -1,0 +1,5 @@
+@core/text
+
+#[if text.length(@assets/value.txt) is 18:
+    yes
+]

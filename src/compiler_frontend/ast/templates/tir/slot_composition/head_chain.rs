@@ -15,9 +15,8 @@ use crate::compiler_frontend::ast::templates::tir::slot_layout::{
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrNode, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore,
 };
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 
-#[cfg(test)]
-use crate::compiler_frontend::ast::templates::tir::TemplateIrId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use super::helpers::{
@@ -32,6 +31,7 @@ pub(super) struct HeadChainResolutionInputs<'a> {
     pub(super) string_table: &'a StringTable,
     pub(super) expressions: &'a AstExpressionBuilder,
     pub(super) const_values: &'a ConstValueStore,
+    pub(super) external_package_registry: Option<&'a ExternalPackageRegistry>,
     pub(super) allow_runtime_plans: bool,
 }
 
@@ -71,35 +71,6 @@ enum TirChainItem {
     },
 }
 
-/// Composes a template's head-chain from a template ID.
-///
-/// Test convenience wrapper: production callers use `compose_tir_head_chain_from_root`
-/// directly to avoid pushing scratch templates for node-root composition.
-#[cfg(test)]
-pub(crate) fn compose_tir_head_chain(
-    store: &mut TemplateIrStore,
-    expressions: &AstExpressionBuilder,
-    const_values: &ConstValueStore,
-    template_id: TemplateIrId,
-    string_table: &StringTable,
-    allow_runtime_plans: bool,
-) -> HeadChainResult<TemplateIrNodeId> {
-    let template = store.get_template(template_id).ok_or_else(|| {
-        internal_compiler_error(
-            "TIR head-chain composition: template ID was not present in the store.",
-        )
-    })?;
-    let root_node_id = template.root;
-    compose_tir_head_chain_from_root(
-        store,
-        expressions,
-        const_values,
-        root_node_id,
-        string_table,
-        allow_runtime_plans,
-    )
-}
-
 /// Composes a head-chain directly from a root node, without requiring a
 /// durable `TemplateIr` entry.
 ///
@@ -117,11 +88,13 @@ pub(crate) fn compose_tir_head_chain_from_root(
     root_node_id: TemplateIrNodeId,
     string_table: &StringTable,
     allow_runtime_plans: bool,
+    external_package_registry: Option<&ExternalPackageRegistry>,
 ) -> HeadChainResult<TemplateIrNodeId> {
     let inputs = HeadChainResolutionInputs {
         string_table,
         expressions,
         const_values,
+        external_package_registry,
         allow_runtime_plans,
     };
     compose_tir_head_chain_from_root_into(store, root_node_id, &inputs)

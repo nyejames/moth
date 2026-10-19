@@ -1,0 +1,10 @@
+Point = |text String|
+
+needs_wire |value Wire of String| -> String:
+    return value
+;
+
+render || -> String:
+    point = Point("field")
+    return needs_wire(point.text)
+;

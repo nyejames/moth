@@ -112,8 +112,9 @@ pub(crate) fn binary_operation_domain(
 /// WHY: a range header combines three operands at once, while `Add` only sees
 ///      pairs; reusing that one table keeps a single shared domain selector.
 ///      Endpoint, no-progress and termination semantics stay range-owned and are
-///      not ordinary checked arithmetic. AST parsing, HIR lowering and const
-///      folding derive the same answer from this one selector.
+///      not ordinary checked arithmetic. AST parsing selects the header's
+///      iteration domain through this selector; HIR lowering and const folding
+///      then consume that selected domain.
 pub(crate) fn range_iteration_domain(
     start: NumericScalar,
     end: NumericScalar,

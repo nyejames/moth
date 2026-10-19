@@ -1,0 +1,13 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "core_text_const_eval_resource_template_runtime_retained direct=18 loop=18;"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "function __moth_text_length(",
+]

@@ -75,14 +75,18 @@ pub(crate) fn inline_source_consts_for_const_required_expression(
         expressions,
         constants,
         string_table,
-        BindingFold::speculative(Some(context)),
+        BindingFold::speculative(
+            Some(context),
+            Some(context.external_package_registry.as_ref()),
+        ),
         |path| {
             substitutions
                 .iter()
                 .find(|(binding, _)| *binding == path)
                 .map(|(_, value)| *value)
         },
-    )?)
+    )?
+    .expression)
 }
 
 fn collect_source_substitutions(
@@ -161,6 +165,7 @@ fn expression_is_compile_time_constant_from_effective_tir(
                 &context.template_ir_store,
                 expressions,
                 constants,
+                Some(context.external_package_registry.as_ref()),
             )
         })?
         .is_compile_time_value())

@@ -1,0 +1,27 @@
+TodoMessage ::
+    Rename | id I32, value String |,
+;
+
+on_rename |route Route of String -> TodoMessage| -> String:
+    return "route received"
+;
+
+lookup |key String| -> I32, Error!:
+    if key is "missing":
+        return! Error("missing key")
+    ;
+    return 42
+;
+
+attempt |key String| -> String, Error!:
+    result = on_rename(TodoMessage::Rename(lookup(key)!))
+    return result
+;
+
+first = attempt("present") catch |error|:
+    then "failed"
+;
+second = attempt("missing") catch |error|:
+    then "failed"
+;
+[:[first] [second]]

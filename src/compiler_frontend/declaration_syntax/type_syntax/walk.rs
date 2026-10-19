@@ -1,11 +1,12 @@
-//! Named-type walkers for parsed and diagnostic type surfaces.
+//! Named-type walkers for parsed type syntax.
 //!
-//! WHAT: visits nominal type names embedded in parsed refs and DataType diagnostics.
+//! WHAT: visits nominal type names embedded in retained `ParsedTypeRef` syntax.
 //! WHY: dependency discovery and validation need traversal without taking ownership of
 //! type-resolution policy.
 
 use super::*;
 use crate::compiler_frontend::datatypes::parsed::ParsedCollectionCapacity;
+use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 
 /// One named type reference preserved from parsed type syntax.

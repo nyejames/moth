@@ -1,0 +1,7 @@
+TodoMessage ::
+    Rename | id I32, value String |,
+;
+
+reject |route Route of String -> TodoMessage| -> TodoMessage:
+    return route
+;

@@ -32,6 +32,8 @@ use super::support::{
 };
 use crate::compiler_frontend::ast::ast_nodes::{LoopBindings, RangeEndKind, RangeLoopSpec};
 use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
+use crate::compiler_frontend::ast::expressions::eval_expression::result_type::resolved_operation;
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOperationView,
@@ -48,6 +50,7 @@ use crate::compiler_frontend::ast::templates::template_slots::{
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
@@ -152,9 +155,27 @@ impl TirExpressionPayloadMutator for CountingMutator {
         expression: &mut ExprId,
     ) -> Result<(), CompilerError> {
         self.count += 1;
+        // WHY: the walker tests need real regular-division provenance, which only the operator
+        // path creates, so self-division stands in for an authored divide.
+        let operand = expressions.own(*expression);
+        let operand_type = expressions
+            .view_owned(operand)
+            .expect("test expression should exist")
+            .value_type_id()
+            .expect("test expression should have one value type");
+        let Ok(divide) = resolved_operation(
+            Operator::Divide,
+            None,
+            operand_type,
+            operand_type,
+            Some(operand_type),
+            &TypeEnvironment::new(),
+        ) else {
+            panic!("self-division of a test expression should resolve");
+        };
         *expression = expressions
-            .with_regular_division_provenance(expressions.own(*expression), true)
-            .expect("test provenance should apply")
+            .resolved_operation(operand, Some(operand), divide, ValueMode::ImmutableOwned)
+            .expect("test division should construct")
             .id();
         Ok(())
     }
@@ -1137,6 +1158,7 @@ fn range_loop_header_positions_are_visited_by_mutation_and_collected_by_site_id(
             end: expression(&mut expressions, &mut const_values, 10),
             end_kind: RangeEndKind::Exclusive,
             step: Some(expression(&mut expressions, &mut const_values, 2)),
+            domain: NumericScalar::Fixed(FixedScalar::I32),
         }),
     };
     let header_sites = store.allocate_loop_header_expression_sites(&header);
@@ -1299,6 +1321,7 @@ fn view_walker_reads_loop_header_overlay() {
                 end: expression(&mut expressions, &mut const_values, 10),
                 end_kind: RangeEndKind::Exclusive,
                 step: Some(expression(&mut expressions, &mut const_values, 2)),
+                domain: NumericScalar::Fixed(FixedScalar::I32),
             }),
         };
         let header_sites = store.allocate_loop_header_expression_sites(&header);

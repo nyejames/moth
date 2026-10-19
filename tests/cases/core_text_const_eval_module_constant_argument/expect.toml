@@ -1,0 +1,16 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "len=5 next=6 passed=5 has_needle=1 starts=1 ends=1 empty=1 nested=5"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_not_contain = ["__moth_text_"]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "len=5 next=6 passed=5 has_needle=1 starts=1 ends=1 empty=1 nested=5"

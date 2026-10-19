@@ -1,0 +1,7 @@
+LOCAL_DISPLAY must:
+    display |This| -> String
+;
+
+Box type T is LOCAL_DISPLAY = |
+    value T,
+|

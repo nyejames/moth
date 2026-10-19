@@ -398,9 +398,8 @@ impl<'a> HirBuilder<'a> {
                 // Wrapper-shaped templates can reach HIR as runtime values when
                 // they are not used as helpers. Their slot placeholders are
                 // structural insertion points, not renderable chunks, so ordinary
-                // rendering skips them just as the old flattened expression
-                // path did. Inside an active runtime slot application wrapper
-                // the placeholder should have been resolved to a site by AST
+                // rendering skips them. Inside an active runtime slot application
+                // wrapper the placeholder should have been resolved to a site by AST
                 // routing, so the reject policy raises an internal compiler error.
                 self.append_unresolved_slot_node_to_accumulator(append_context, span_ref)
             }

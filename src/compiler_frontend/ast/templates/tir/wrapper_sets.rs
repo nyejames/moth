@@ -99,7 +99,7 @@ pub(crate) fn conditional_wrapper_set_for_control_flow(
     if combined.is_empty() {
         Ok(None)
     } else {
-        Ok(Some(store.push_or_reuse_wrapper_set(combined)))
+        Ok(Some(store.push_or_reuse_wrapper_set(&combined)))
     }
 }
 
@@ -130,7 +130,7 @@ pub(crate) fn merge_wrapper_sets(
     })?;
     combined.extend(additional_set.wrappers.iter().copied());
 
-    Ok(store.push_or_reuse_wrapper_set(combined))
+    Ok(store.push_or_reuse_wrapper_set(&combined))
 }
 
 /// Converts a wrapper `Template` into an effective module-local wrapper reference.
@@ -248,7 +248,7 @@ pub(crate) fn attach_wrapper_context_overlay(
         .any(|context| !context.skip_parent_child_wrappers)
     {
         let mut store = store_handle.borrow_mut();
-        let wrapper_set_id = store.push_or_reuse_wrapper_set(inherited_wrapper_refs.to_vec());
+        let wrapper_set_id = store.push_or_reuse_wrapper_set(inherited_wrapper_refs);
         Some(wrapper_set_id)
     } else {
         None

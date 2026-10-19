@@ -1,0 +1,16 @@
+Message ::
+    Update | id I32, text String |,
+;
+
+same |this Message, marker I32| -> Message:
+    return this
+;
+
+receive |route Route of String -> Message| -> String:
+    return "received"
+;
+
+forward |route Route of String -> Message| -> String:
+    marker = 1
+    return receive(route.same(marker))
+;

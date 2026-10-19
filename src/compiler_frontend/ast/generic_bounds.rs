@@ -4,7 +4,6 @@
 //! instantiations once concrete type arguments are known.
 //! WHY: nominal generic instances are keyed only by constructor plus type arguments, so
 //! only reusable canonical/compiler-owned evidence may satisfy those bounds.
-use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAlias;
 use crate::compiler_frontend::builtins::casts::evidence::builtin_cast_proves_core_trait;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidGenericInstantiationReason,
@@ -12,18 +11,13 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::headers::binding_environment::{
-    FileVisibility, NamespaceRecord, NamespaceTypeMember, SourceDeclarationTarget,
-};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::PathId;
 
 use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::compiler_frontend::traits::definitions::TraitVisibility;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 
 type GenericBoundValidationResult<T> = Result<T, CompilerDiagnostic>;
 
@@ -45,86 +39,6 @@ pub(crate) struct GenericBoundEvidenceContext<'a> {
     pub(crate) type_environment: &'a TypeEnvironment,
     pub(crate) trait_environment: Option<&'a TraitEnvironment>,
     pub(crate) trait_evidence_environment: Option<&'a TraitEvidenceEnvironment>,
-    pub(crate) generated_evidence_pairs: Option<&'a FxHashSet<(TypeId, TraitId)>>,
-    pub(crate) visible_trait_names: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
-    pub(crate) visible_source_names: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
-    pub(crate) visible_type_alias_names: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
-    pub(crate) visible_namespace_records: Option<&'a FxHashMap<StringId, NamespaceRecord>>,
-    pub(crate) resolved_type_aliases: Option<&'a FxHashMap<PathId, ResolvedTypeAlias>>,
-}
-
-impl<'a> GenericBoundEvidenceContext<'a> {
-    pub(crate) fn from_file_visibility(
-        type_environment: &'a TypeEnvironment,
-        trait_environment: &'a TraitEnvironment,
-        trait_evidence_environment: &'a TraitEvidenceEnvironment,
-        visibility: &'a FileVisibility,
-        resolved_type_aliases: &'a FxHashMap<PathId, ResolvedTypeAlias>,
-    ) -> Self {
-        Self {
-            type_environment,
-            trait_environment: Some(trait_environment),
-            trait_evidence_environment: Some(trait_evidence_environment),
-            generated_evidence_pairs: None,
-            visible_trait_names: Some(&visibility.visible_trait_names),
-            visible_source_names: Some(&visibility.visible_source_names),
-            visible_type_alias_names: Some(&visibility.visible_type_alias_names),
-            visible_namespace_records: Some(&visibility.visible_namespace_records),
-            resolved_type_aliases: Some(resolved_type_aliases),
-        }
-    }
-
-    /// Whether one concrete `(type, trait)` pair may use its evidence in this requester context.
-    ///
-    /// WHAT: an exact generated pair the requester already transferred is visible on its own;
-    ///       every other pair still needs both the trait and the evidence target visible in the
-    ///       requester's file scope.
-    /// WHY: a generated sidecar validates bounds in a domain where a provider-owned trait and its
-    ///      target may never be name-visible, while the pair itself arrives as the request's own
-    ///      selected evidence and is installed beside the body. This predicate owns the whole
-    ///      visibility decision so no caller can re-impose one half of it; a visible pair still
-    ///      needs its real evidence row, which callers check separately through `evidence_for_type`.
-    pub(crate) fn evidence_is_visible_for_trait(&self, type_id: TypeId, trait_id: TraitId) -> bool {
-        if self.generated_evidence_pairs.is_some_and(|pairs| {
-            generated_evidence_pair_is_selected(type_id, trait_id, self.type_environment, pairs)
-        }) {
-            return true;
-        }
-        self.trait_environment.is_some_and(|trait_environment| {
-            trait_is_visible(trait_id, trait_environment, self.visible_trait_names)
-        }) && evidence_target_is_visible(
-            type_id,
-            self.type_environment,
-            self.visible_source_names,
-            self.visible_type_alias_names,
-            self.visible_namespace_records,
-            self.resolved_type_aliases,
-        )
-    }
-}
-
-/// Check the exact generated evidence pair selected by one requester.
-///
-/// A generic instance may use evidence registered on its nominal constructor, so the
-/// constructor pair is accepted alongside an exact instance pair. The trait remains part of
-/// the key: selecting evidence for one trait must never make a different trait visible merely
-/// because it shares the same target type.
-pub(crate) fn generated_evidence_pair_is_selected(
-    type_id: TypeId,
-    trait_id: TraitId,
-    type_environment: &TypeEnvironment,
-    pairs: &FxHashSet<(TypeId, TraitId)>,
-) -> bool {
-    if pairs.contains(&(type_id, trait_id)) {
-        return true;
-    }
-    let Some(TypeDefinition::GenericInstance(instance)) = type_environment.get(type_id) else {
-        return false;
-    };
-    let Some(base_type_id) = type_environment.type_id_for_nominal_id(instance.base) else {
-        return false;
-    };
-    pairs.contains(&(base_type_id, trait_id))
 }
 
 pub(crate) fn validate_nominal_generic_bound_evidence(
@@ -286,26 +200,22 @@ fn validate_single_bound(
         return Ok(());
     };
 
-    // A concrete generic-parameter argument that declares the bound needs no evidence row, but
-    // its trait still has to be visible. The cheap bound lookup runs first so an ordinary
-    // concrete type pays for trait visibility at most once, inside the pair predicate below.
-    if generic_parameter_declares_bound(concrete_type_id, trait_id, context.type_environment)
-        && trait_is_visible(trait_id, trait_environment, context.visible_trait_names)
-    {
+    // A concrete generic-parameter argument that declares the bound satisfies it from the
+    // parameter's own declaration, so it needs no evidence row.
+    if generic_parameter_declares_bound(concrete_type_id, trait_id, context.type_environment) {
         return Ok(());
     }
 
-    // The predicate owns the whole pair visibility rule, including the generated-pair bypass, so
-    // the trait must not be gated again here; the evidence row itself stays mandatory.
-    let has_reusable_evidence = context.evidence_is_visible_for_trait(concrete_type_id, trait_id)
-        && evidence_for_type(
-            concrete_type_id,
-            trait_id,
-            context.type_environment,
-            trait_environment,
-            evidence_environment,
-        )
-        .is_some();
+    // WHY: names never gate reuse. A conformance reaches this requester only through evidence
+    // its imports or declarations carried in, so the selected evidence row is the whole check.
+    let has_reusable_evidence = evidence_for_type(
+        concrete_type_id,
+        trait_id,
+        context.type_environment,
+        trait_environment,
+        evidence_environment,
+    )
+    .is_some();
 
     if has_reusable_evidence {
         return Ok(());
@@ -327,97 +237,6 @@ fn validate_single_bound(
     ))
 }
 
-pub(crate) fn evidence_target_is_visible(
-    type_id: TypeId,
-    type_environment: &TypeEnvironment,
-    visible_source_names: Option<&FxHashMap<StringId, SourceDeclarationTarget>>,
-    visible_type_alias_names: Option<&FxHashMap<StringId, SourceDeclarationTarget>>,
-    visible_namespace_records: Option<&FxHashMap<StringId, NamespaceRecord>>,
-    resolved_type_aliases: Option<&FxHashMap<PathId, ResolvedTypeAlias>>,
-) -> bool {
-    if matches!(
-        type_environment.get(type_id),
-        Some(TypeDefinition::Builtin(_))
-    ) {
-        return true;
-    }
-
-    let no_file_visibility = visible_source_names.is_none()
-        && visible_type_alias_names.is_none()
-        && visible_namespace_records.is_none();
-    if no_file_visibility {
-        return true;
-    }
-
-    let target_matches = |target: &SourceDeclarationTarget| {
-        source_target_resolves_to_type(target, type_id, type_environment, resolved_type_aliases)
-    };
-
-    if visible_source_names
-        .into_iter()
-        .flat_map(|names| names.values())
-        .any(target_matches)
-        || visible_type_alias_names
-            .into_iter()
-            .flat_map(|names| names.values())
-            .any(target_matches)
-    {
-        return true;
-    }
-
-    visible_namespace_records
-        .into_iter()
-        .flat_map(|records| records.values())
-        .flat_map(|record| record.type_members.values())
-        .any(|member| match member {
-            NamespaceTypeMember::SourceDeclaration(target) => target_matches(target),
-            NamespaceTypeMember::ExternalSymbol(_) => false,
-        })
-}
-
-fn source_target_resolves_to_type(
-    target: &SourceDeclarationTarget,
-    type_id: TypeId,
-    type_environment: &TypeEnvironment,
-    resolved_type_aliases: Option<&FxHashMap<PathId, ResolvedTypeAlias>>,
-) -> bool {
-    if let SourceDeclarationTarget::Imported { origin, .. } = target
-        && let crate::compiler_frontend::semantic_identity::OriginDeclarationId::Type(origin) =
-            origin
-    {
-        let source_nominal_matches = |candidate_type_id: TypeId| {
-            matches!(
-                type_environment.canonical_identity_for_type_id(candidate_type_id),
-                Some(crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity::SourceNominal(type_origin))
-                    if type_origin == origin
-            )
-        };
-        if source_nominal_matches(type_id)
-            || matches!(
-                type_environment.get(type_id),
-                Some(TypeDefinition::GenericInstance(instance))
-                    if type_environment
-                        .type_id_for_nominal_id(instance.base)
-                        .is_some_and(source_nominal_matches)
-            )
-        {
-            return true;
-        }
-    }
-
-    if type_environment
-        .nominal_path(type_id)
-        .is_some_and(|path| path == target.local_path())
-    {
-        return true;
-    }
-
-    resolved_type_aliases
-        .and_then(|aliases| aliases.get(target.local_path()))
-        .map(|alias| alias.target_type_id)
-        == Some(type_id)
-}
-
 pub(crate) fn generic_parameter_declares_bound(
     concrete_type_id: TypeId,
     trait_id: TraitId,
@@ -431,26 +250,4 @@ pub(crate) fn generic_parameter_declares_bound(
     type_environment
         .trait_bounds_for_generic_parameter(parameter.id)
         .is_some_and(|bounds| bounds.contains(&trait_id))
-}
-
-fn trait_is_visible(
-    trait_id: TraitId,
-    trait_environment: &TraitEnvironment,
-    visible_trait_names: Option<&FxHashMap<StringId, SourceDeclarationTarget>>,
-) -> bool {
-    let Some(trait_definition) = trait_environment.get(trait_id) else {
-        return false;
-    };
-
-    if matches!(trait_definition.visibility, TraitVisibility::Core) {
-        return true;
-    }
-
-    let Some(visible_trait_names) = visible_trait_names else {
-        return true;
-    };
-
-    visible_trait_names
-        .values()
-        .any(|target| trait_environment.has_path(trait_id, target.local_path()))
 }

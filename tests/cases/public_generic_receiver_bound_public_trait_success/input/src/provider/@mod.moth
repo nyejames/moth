@@ -1,0 +1,18 @@
+export:
+    LEFT_TEXT must:
+        left_text |This| -> String
+    ;
+    RIGHT_TEXT must:
+        right_text |This| -> String
+    ;
+    FIRST_TEXT must:
+        first_text |This| -> String
+    ;
+    SECOND_TEXT must:
+        second_text |This| -> String
+    ;
+
+    combine type T is FIRST_TEXT and SECOND_TEXT |value T| -> String:
+        return [:[value.first_text()]/[value.second_text()]]
+    ;
+;

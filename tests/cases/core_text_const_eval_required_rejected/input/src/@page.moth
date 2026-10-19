@@ -1,0 +1,8 @@
+@core/text
+
+helper |param String| -> I32:
+    value #= text.length(param)
+    return value
+;
+
+[:[helper("moth")]]

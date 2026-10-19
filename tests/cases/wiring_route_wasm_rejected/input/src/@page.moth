@@ -1,0 +1,10 @@
+Message ::
+    Update | value String |,
+;
+
+accept |route Route of String -> Message| -> String:
+    return "accepted"
+;
+
+accepted = accept(Message::Update)
+[:wasm route accepted=[accepted]]

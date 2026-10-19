@@ -1,0 +1,25 @@
+Square = |
+    side I32,
+|
+
+make_square || -> Square:
+    return Square(3)
+;
+
+area |this Square| -> I32:
+    return this.side * this.side
+;
+
+MEASURED must:
+    measure |This| -> I32
+;
+
+measure |this Square| -> I32:
+    return this.side
+;
+
+Square must MEASURED
+
+doubled_measure type T is MEASURED |value T| -> I32:
+    return value.measure() * 2
+;

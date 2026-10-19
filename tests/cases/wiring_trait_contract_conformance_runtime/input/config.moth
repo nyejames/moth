@@ -1,0 +1,5 @@
+project #= (
+    name = "wiring_trait_contract_conformance_runtime",
+    entry_root = "src",
+)
+html #= ()

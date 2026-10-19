@@ -1,0 +1,4 @@
+@widget make_counter
+
+result = make_counter().tick()
+[:receiver_value_carried_nonlocal_method_rejected result=[result]]

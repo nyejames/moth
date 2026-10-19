@@ -29,13 +29,11 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 ## Sequenced work
 
-- [Typed semantic expressions and dense compiler foundations](./plans/typed-semantic-expressions-plan.md) - **Phase 4 onwards will resume after plans above** The checkpoint retains `expression-refactor` source `534aea1a5`, including accepted R1, R2.0–R2.4 and P2 isolation. Historical R2.4 matched comparisons, local `just validate-full` and all 14 scaling series qualify `6b855aab9`, not the main squash tree, with grouped-not dev HIR at n^0.88 under n^1.25. Fresh Windows Canvas/frontend proof remains pending. Phases 5–8 remain unstarted and require explicit reactivation. Later type/folding, Wiring and Core-evaluation scopes remain unchanged. Package work consumes only merged prerequisites.
-
 - [Compiler source, token and diagnostic data layout](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md) - Resume Phase 4 onward on `diagnostic-data-layout-changes` only after explicit reactivation. Consume merged exact numeric and MON capabilities, compact typed expressions, dense HIR/native result channels, V1 retirement, the bounded Wiring foundation and Core constant evaluation. Run the fresh owner/lifetime inventory, verify transferred diagnostic capabilities and preserve the locked packed-span and diagnostic decisions. The plan's reactivation gate remains authoritative.
 
 - [Compiler diagnostic recovery and budgets](./plans/compiler-diagnostic-recovery-and-budgets-plan.md) - Queued after compact diagnostic layout: measured ordinary concrete-body recovery, configurable per-module error allowances, a soft project scheduling cutoff and lightweight stop metadata. Preserve parallel preparation and future incremental compatibility without adding a scheduler or cache.
 
-- [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Paused until diagnostic layout and bounded diagnostic recovery complete. Consume delivered exact numeric conflict/default-range, narrow-operation and authored safety-catch diagnostics. Native result arity and narrow propagation-context work remain with the earlier typed-expression cutover. Resume with a fresh inventory and only the remaining catch-recovery presentation work, without rebuilding transferred fixes.
+- [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Paused until diagnostic layout and bounded diagnostic recovery complete. Consume delivered exact numeric conflict/default-range, narrow-operation and authored safety-catch diagnostics. Native result arity and narrow propagation-context work are delivered with the compact typed-expression foundation. Resume with a fresh inventory and only the remaining catch-recovery presentation work, without rebuilding transferred fixes.
 
 - [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) - Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
 
@@ -169,12 +167,11 @@ Permanent owners: `docs/src/docs/directives/directives.mtf`, `docs/src/docs/desi
 
 ## Wiring follow-ups
 
-Wiring replaces Reactivity V1. The queued compiler foundation removes reactive bindings,
-subscriptions and implicit live-string behaviour before expression storage changes. It implements
-the accepted parameter identity and constructor-route contracts only after native result channels
-and compact typed nodes are in place. Later observation, route application and UI runtime work
-require their own accepted contracts. The former reactivity follow-up list does not authorise
-restoring `$bind`, reactive binding modes or subscription expansion.
+Wiring replaces Reactivity V1. The compiler implements the bounded foundation: Wire and Route
+parameter contracts, Wire identity forwarding and contextual constructor routes. Later
+observation, route application and UI runtime work require their own accepted contracts. The
+former reactivity follow-up list does not authorise restoring `$bind`, reactive binding modes or
+subscription expansion.
 
 ## Hash map follow-ups
 

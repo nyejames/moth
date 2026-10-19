@@ -1,0 +1,10 @@
+entry = "."
+
+# A private trait requirement reaches its private `Request` nominal only through
+# the `Route` input. Instantiating the exported generic from the page must
+# retain that nominal in the private sidecar closure.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "private-sidecar sidecar"

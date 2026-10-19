@@ -47,6 +47,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateSlotReason, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -62,6 +63,7 @@ struct TemplateNormalizationContext<'strings> {
     const_values: &'strings mut ConstValueStore,
     string_table: &'strings mut StringTable,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
+    external_package_registry: Option<&'strings ExternalPackageRegistry>,
     module_resources:
         Option<Rc<RefCell<crate::compiler_frontend::paths::module_resources::ModuleResourceTable>>>,
     expression_pending: Vec<NormalizationFrame>,
@@ -95,6 +97,7 @@ impl AstFinalizer<'_, '_> {
             expression_builder: &mut self.context.expression_builder,
             const_values: &mut self.context.const_values,
             template_ir_store: Rc::clone(&self.context.template_ir_store),
+            external_package_registry: Some(self.context.external_package_registry.as_ref()),
             module_resources: self
                 .context
                 .file_value_resolution
@@ -1225,6 +1228,7 @@ fn normalize_expression_template_node(
                 const_values: context.const_values,
                 template_const_loop_iteration_limit: context.template_const_loop_iteration_limit,
                 template_ir_store: &context.template_ir_store,
+                external_package_registry: context.external_package_registry,
             },
             TemplatePreparationMode::Value,
         )?;

@@ -1112,15 +1112,18 @@ fn rejects_config_runtime_call_in_value() {
         .expect_err("config should fail");
 
     let diagnostic = first_error_diagnostic(&messages);
+
+    assert_eq!(diagnostic.identity().code, "MOTH-RULE-0087");
     assert!(
         matches!(
             &diagnostic.payload,
-            DiagnosticPayload::CompileTimeEvaluationError {
-                reason: CompileTimeEvaluationErrorReason::ExternalFunctionCallInConstantContext,
-                ..
+            DiagnosticPayload::InvalidValueReceiver {
+                receiver: ValueReceiverContext::Declaration,
+                target_count: 1,
+                produced_count: 0,
             }
         ),
-        "expected external-function-call-in-constant-context diagnostic for runtime call, got: {:?}",
+        "expected invalid declaration receiver diagnostic for runtime call, got: {:?}",
         diagnostic.payload
     );
 }

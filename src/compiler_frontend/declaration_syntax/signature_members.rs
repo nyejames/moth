@@ -12,11 +12,12 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
 };
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticToken, InvalidFunctionSignatureReason,
-    InvalidSignatureMemberReason,
+    InvalidParameterContractReason, InvalidSignatureMemberReason, ParameterContractKind,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
-    TypeAnnotationContext, parse_type_annotation_cursor,
+    ParsedParameterContractSyntax, TypeAnnotationContext,
+    parse_parameter_contract_or_type_annotation_cursor, parse_type_annotation_cursor,
 };
 use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::SourceSpan;
@@ -71,6 +72,7 @@ pub struct SignatureMemberSyntax {
     pub id: PathId,
     pub value_mode: ValueMode,
     pub type_annotation: ParsedTypeRef,
+    pub contract: ParsedParameterContractSyntax,
     /// Canonical source-owned default range. `None` means no authored default expression.
     pub default_range: Option<TokenRange>,
     pub span: Option<SourceSpan>,
@@ -109,6 +111,7 @@ impl SignatureMemberSyntax {
     /// Source-owned default ranges are identity-qualified and need no remap.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.type_annotation.remap_string_ids(remap);
+        self.contract.remap_string_ids(remap);
     }
 
     /// Remap the member path identity after its path fork merges.
@@ -407,6 +410,7 @@ pub fn parse_signature_members_syntax(
                     token_stream,
                     this_path,
                     ValueMode::ImmutableOwned,
+                    string_table,
                 )?;
 
                 members.push(member);
@@ -448,6 +452,7 @@ pub fn parse_signature_members_syntax(
                     token_stream,
                     this_path,
                     ValueMode::MutableOwned,
+                    string_table,
                 )?;
 
                 members.push(member);
@@ -553,6 +558,7 @@ fn record_ordinary_member_name(
     }
     Ok(())
 }
+
 fn parse_signature_member_syntax(
     token_stream: &mut DeclarationCursor<'_>,
     full_name: PathId,
@@ -581,7 +587,9 @@ fn parse_signature_member_syntax(
     token_stream.advance();
 
     let mut value_mode = ValueMode::ImmutableOwned;
+    let mut mutable_marker_span = None;
     if token_stream.current_tag() == TokenTag::MUTABLE {
+        mutable_marker_span = current_source_span(token_stream);
         token_stream.advance();
         value_mode = ValueMode::MutableOwned;
     }
@@ -608,13 +616,53 @@ fn parse_signature_member_syntax(
         token_stream.advance();
     }
 
-    let type_annotation = parse_type_annotation_cursor(
-        token_stream,
-        type_annotation_context_for_member(member_context),
-        string_table,
-    )?;
+    let parameter_name = path_fork.component(full_name);
+    // WHY: assigned per branch instead of merging a `(ParsedTypeRef, contract)` tuple from an
+    //      `if` expression. The tuple merge measured about 40 ns per member in header inventory
+    //      (benchmarks/frontend-optimization-results.md, "signature member contract merge").
+    let type_annotation;
+    let contract;
+    if matches!(
+        member_context,
+        SignatureMemberContext::FunctionParameter | SignatureMemberContext::TraitRequirement
+    ) {
+        (type_annotation, contract) = parse_parameter_contract_or_type_annotation_cursor(
+            token_stream,
+            parameter_name,
+            type_annotation_context_for_member(member_context),
+            string_table,
+        )?;
+    } else {
+        type_annotation = parse_type_annotation_cursor(
+            token_stream,
+            type_annotation_context_for_member(member_context),
+            string_table,
+        )?;
+        contract = ParsedParameterContractSyntax::Value;
+    }
+    if let Some(contract_kind) = contract.kind()
+        && value_mode == ValueMode::MutableOwned
+    {
+        return Err(CompilerDiagnostic::invalid_parameter_contract(
+            InvalidParameterContractReason::MutableParameter {
+                contract: contract_kind,
+            },
+            mutable_marker_span,
+        )
+        .into());
+    }
     let default_range = match token_stream.current_tag() {
         TokenTag::ASSIGN => {
+            let default_span = current_source_span(token_stream);
+            if let Some(contract_kind) = contract.kind() {
+                return Err(CompilerDiagnostic::invalid_parameter_contract(
+                    InvalidParameterContractReason::ParameterDefault {
+                        contract: contract_kind,
+                    },
+                    default_span,
+                )
+                .into());
+            }
             token_stream.advance();
             if member_context == SignatureMemberContext::TraitRequirement {
                 return Err(CompilerDiagnostic::invalid_signature_member(
@@ -666,6 +714,7 @@ fn parse_signature_member_syntax(
         id: full_name,
         value_mode,
         type_annotation,
+        contract,
         default_range,
         span: member_span,
     })
@@ -690,10 +739,27 @@ fn parse_trait_this_member_syntax(
     token_stream: &mut DeclarationCursor<'_>,
     full_name: PathId,
     value_mode: ValueMode,
+    string_table: &mut StringTable,
 ) -> SignatureMemberParseResult<SignatureMemberSyntax> {
     let member_span = current_source_span(token_stream);
 
     token_stream.advance(); // past This
+
+    // The trait receiver is the implementing type itself, so it cannot carry a `Wire`/`Route`
+    // contract. Report the same typed receiver-contract reason the function-parameter form uses
+    // instead of leaving a contract head to the generic separator error.
+    if token_stream.current_tag() == TokenTag::SYMBOL
+        && let Some(name) = token_stream
+            .current_string_id_in(string_table)
+            .map_err(HeaderParseFailure::Infrastructure)?
+        && let Some(contract) = ParameterContractKind::from_spelling(string_table.resolve(name))
+    {
+        return Err(CompilerDiagnostic::invalid_parameter_contract(
+            InvalidParameterContractReason::ReceiverContract { contract },
+            current_source_span(token_stream),
+        )
+        .into());
+    }
 
     // Trait receiver parameters have no explicit type annotation. The type is implicitly
     // the implementing concrete type and requirements cannot carry defaults.
@@ -703,6 +769,7 @@ fn parse_trait_this_member_syntax(
         id: full_name,
         value_mode,
         type_annotation,
+        contract: ParsedParameterContractSyntax::Value,
         default_range: None,
         span: member_span,
     })

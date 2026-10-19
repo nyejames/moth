@@ -1,0 +1,13 @@
+AppMessage ::
+    Search | query String |,
+;
+
+pair type T, N |event Route of T -> AppMessage, count N| -> String:
+    return "pair"
+;
+
+outer |event Route of String -> AppMessage| -> String:
+    return pair(event, 1)
+;
+
+io.line(outer(AppMessage::Search))

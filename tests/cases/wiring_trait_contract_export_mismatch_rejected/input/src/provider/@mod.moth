@@ -1,0 +1,15 @@
+export:
+    CONSUMER must:
+        consume |This, value Wire of String| -> String
+    ;
+
+    Label = |
+        text String,
+    |
+;
+
+consume |this Label, value String| -> String:
+    return value
+;
+
+Label must CONSUMER

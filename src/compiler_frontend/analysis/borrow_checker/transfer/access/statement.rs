@@ -329,10 +329,6 @@ pub(crate) fn transfer_statement(
             )?;
         }
 
-        HirStatementKind::Drop(_local) => {
-            // Ownership/drop semantics are handled by later analyses.
-        }
-
         HirStatementKind::PushRuntimeFragment { value, .. } => {
             let location = context.diagnostics.statement_error_span(statement);
             let mut read_env = SharedReadEnv {
@@ -810,7 +806,7 @@ fn effective_call_argument_effect(
             .enumerate()
             .any(|(other_index, other_roots)| {
                 other_index != argument_index
-                    && roots_overlap(&argument_roots[argument_index], other_roots)
+                    && argument_roots[argument_index].intersects(other_roots)
             });
     if !result_may_alias_argument && !has_same_statement_use {
         return effect;
@@ -825,12 +821,6 @@ fn fallback_call_argument_effect(effect: ArgEffect) -> ArgEffect {
         ArgEffect::MayConsumeMutable => ArgEffect::MutableBorrow,
         _ => effect,
     }
-}
-
-fn roots_overlap(left: &RootSet, right: &RootSet) -> bool {
-    let mut overlap = left.clone();
-    overlap.intersect_with(right);
-    !overlap.is_empty()
 }
 
 fn check_call_mutable_borrow(

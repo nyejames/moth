@@ -1,0 +1,5 @@
+project #= (
+    name = "wiring_contract_return_rejected",
+    entry_root = "src",
+)
+html #= ()

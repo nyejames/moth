@@ -6,7 +6,6 @@
 
 use super::HirValidator;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::hir::expression_store::HirProjection;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
 use crate::compiler_frontend::hir::ids::{BlockId, HirValueId, LocalId};
@@ -161,7 +160,6 @@ impl HirValidator<'_> {
                 expression(*value)?;
                 self.require_defined_local(*vec_local, defined, anchor)?;
             }
-            HirStatementKind::Drop(local) => self.require_defined_local(*local, defined, anchor)?,
             HirStatementKind::MapOp {
                 receiver,
                 args,
@@ -297,10 +295,8 @@ impl HirValidator<'_> {
         reads: &mut ExpressionReads,
     ) -> Result<(), CompilerError> {
         self.require_defined_local(place.root, defined, anchor)?;
-        for projection in self.module.expressions.projections(place.projections) {
-            if let HirProjection::Index(value) = projection {
-                self.validate_expression_reads(*value, defined, anchor, reads)?;
-            }
+        for index in self.module.expressions.place_index_values(place) {
+            self.validate_expression_reads(index, defined, anchor, reads)?;
         }
         Ok(())
     }
@@ -320,67 +316,23 @@ impl HirValidator<'_> {
                 continue;
             }
             match &self.module.expressions.expression(value).kind {
+                // WHY: index operands are pushed in projection order, so the last index is checked
+                // first. The store's source-order listing would reverse which undefined read is
+                // reported first, so Load and Copy keep the projection push.
                 HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => {
                     self.require_defined_local(place.root, defined, anchor)?;
-                    for projection in self.module.expressions.projections(place.projections) {
-                        if let HirProjection::Index(value) = projection {
-                            reads.pending.push(*value);
-                        }
-                    }
+                    let indexes = self.module.expressions.place_index_values(*place);
+                    reads.pending.extend(indexes);
                 }
-                HirExpressionKind::BinOp { left, right, .. } => {
-                    reads.pending.push(*right);
-                    reads.pending.push(*left);
-                }
-                HirExpressionKind::Range { start, end } => {
-                    reads.pending.push(*end);
-                    reads.pending.push(*start);
-                }
-                HirExpressionKind::UnaryOp { operand, .. } => reads.pending.push(*operand),
-                HirExpressionKind::Cast { source, .. }
-                | HirExpressionKind::VariantPayloadGet { source, .. } => {
-                    reads.pending.push(*source)
-                }
-                HirExpressionKind::StructConstruct { fields, .. } => {
-                    reads.pending.extend(
-                        self.module
-                            .expressions
-                            .struct_fields(*fields)
-                            .iter()
-                            .rev()
-                            .map(|(_, value)| *value),
+                _ => {
+                    let expressions = &self.module.expressions;
+                    let first = expressions.push_child_values_in_source_order(
+                        value,
+                        &mut reads.pending,
+                        |child| child,
                     );
+                    reads.pending.extend(first);
                 }
-                HirExpressionKind::Collection(values) => reads.pending.extend(
-                    self.module
-                        .expressions
-                        .values(*values)
-                        .iter()
-                        .rev()
-                        .copied(),
-                ),
-                HirExpressionKind::VariantConstruct { fields, .. } => {
-                    reads.pending.extend(
-                        self.module
-                            .expressions
-                            .variant_fields(*fields)
-                            .iter()
-                            .rev()
-                            .map(|field| field.value),
-                    );
-                }
-                HirExpressionKind::MapLiteral(entries) => {
-                    for entry in self.module.expressions.map_entries(*entries).iter().rev() {
-                        reads.pending.push(entry.value);
-                        reads.pending.push(entry.key);
-                    }
-                }
-                HirExpressionKind::FixedScalar(_)
-                | HirExpressionKind::Number(_)
-                | HirExpressionKind::Bool(_)
-                | HirExpressionKind::Char(_)
-                | HirExpressionKind::StringLiteral(_)
-                | HirExpressionKind::StructuralString { .. } => {}
             }
         }
         Ok(())
@@ -439,9 +391,6 @@ fn transfer_statement_definitions(statement: &HirStatementKind, defined: &mut De
         } => {
             defined.insert(candidate_result.local());
             defined.insert(in_range_result.local());
-        }
-        HirStatementKind::Drop(local) => {
-            defined.remove(local);
         }
         HirStatementKind::Write {
             target: HirWriteTarget::AssignPlace(_),

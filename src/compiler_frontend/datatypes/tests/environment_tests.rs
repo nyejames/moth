@@ -13,9 +13,7 @@ use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, FunctionTypeKey, GenericInstanceKey, GenericParameterId, NominalTypeId,
     TypeConstructor, TypeId, builtin_type_ids,
 };
-use crate::compiler_frontend::datatypes::{
-    BuiltinScalarReceiver, DataType, ReceiverKey, diagnostic_type_spelling,
-};
+use crate::compiler_frontend::datatypes::{BuiltinScalarReceiver, ReceiverKey};
 use crate::compiler_frontend::external_packages::ExternalTypeId;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerBuilder, PathTable};
@@ -1441,18 +1439,16 @@ fn external_type_interning_distinguishes_external_ids() {
 }
 
 #[test]
-fn external_type_id_reconstructs_legacy_data_type() {
+fn external_type_id_interns_canonical_environment_identity() {
     let mut env = TypeEnvironment::new();
     let external_type = ExternalTypeId(7);
 
     let type_id = env.intern_external(external_type);
 
-    assert_eq!(
-        diagnostic_type_spelling(type_id, &env),
-        DataType::External {
-            type_id: external_type
-        }
-    );
+    assert!(matches!(
+        env.get(type_id),
+        Some(TypeDefinition::External(definition)) if definition.type_id == external_type
+    ));
 }
 
 #[test]

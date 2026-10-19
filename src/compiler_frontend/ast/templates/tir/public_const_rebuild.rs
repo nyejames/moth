@@ -133,7 +133,7 @@ impl Rebuild<'_> {
         let conditional_wrappers = self.wrappers(&template.conditional_child_wrappers)?;
         if !conditional_wrappers.is_empty() {
             template_ir.conditional_child_wrapper_set =
-                Some(self.store.push_or_reuse_wrapper_set(conditional_wrappers));
+                Some(self.store.push_or_reuse_wrapper_set(&conditional_wrappers));
         }
 
         Ok(self.store.push_template(template_ir))
@@ -213,8 +213,8 @@ impl Rebuild<'_> {
         let applied = self.wrappers(&slot.applied_child_wrappers)?;
         let child = self.wrappers(&slot.child_wrappers)?;
         let applied_set =
-            (!applied.is_empty()).then(|| self.store.push_or_reuse_wrapper_set(applied));
-        let child_set = (!child.is_empty()).then(|| self.store.push_or_reuse_wrapper_set(child));
+            (!applied.is_empty()).then(|| self.store.push_or_reuse_wrapper_set(&applied));
+        let child_set = (!child.is_empty()).then(|| self.store.push_or_reuse_wrapper_set(&child));
 
         Ok(TirSlotPlaceholder::with_wrapper_sets(
             slot_key(&slot.key, self.string_table),

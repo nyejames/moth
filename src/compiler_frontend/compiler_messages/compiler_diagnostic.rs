@@ -19,15 +19,16 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidExternalModuleReason, InvalidFallibleHandlingReason, InvalidFunctionSignatureReason,
     InvalidGenericParameterReason, InvalidImportPathReason, InvalidLoopHeaderReason,
     InvalidMapLiteralReason, InvalidMapTypeReason, InvalidMatchArmReason,
-    InvalidMutableAccessReason, InvalidPageMetadataReason, InvalidRangeOperandReason,
-    InvalidSignatureMemberReason, InvalidStandaloneStatementReason, InvalidStatementPositionReason,
-    InvalidStringEscapeReason, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
-    InvalidTraitConformanceReason, InvalidTraitIncompatibilityReason,
-    InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason, LegacyDependencyClauseReason,
-    MalformedTemplateReason, NameNamespace, NamespaceTypeValueMisuseKind, NamingConvention,
-    OperatorOperandPosition, PathKind, ProjectContextEscapeReason, RangeOperandKind,
-    RuleDiagnosticKind, SourceSpanCapacityResource, SyntaxDiagnosticKind, TypeAnnotationContext,
-    TypeDiagnosticKind, TypeMismatchContext, UnsupportedBackendFeatureReason, ValueReceiverContext,
+    InvalidMutableAccessReason, InvalidPageMetadataReason, InvalidParameterContractReason,
+    InvalidRangeOperandReason, InvalidRouteOutputReason, InvalidSignatureMemberReason,
+    InvalidStandaloneStatementReason, InvalidStatementPositionReason, InvalidStringEscapeReason,
+    InvalidTemplateDirectiveReason, InvalidTemplateStructureReason, InvalidTraitConformanceReason,
+    InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason,
+    LegacyDependencyClauseReason, MalformedTemplateReason, NameNamespace,
+    NamespaceTypeValueMisuseKind, NamingConvention, OperatorOperandPosition, PathKind,
+    ProjectContextEscapeReason, PublicGenericOwnerKind, RangeOperandKind, RuleDiagnosticKind,
+    SourceSpanCapacityResource, SyntaxDiagnosticKind, TypeAnnotationContext, TypeDiagnosticKind,
+    TypeMismatchContext, UnsupportedBackendFeatureReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -969,6 +970,16 @@ impl CompilerDiagnostic {
             DiagnosticPayload::InvalidGenericApplication { reason },
         )
     }
+    pub(crate) fn invalid_parameter_contract(
+        reason: InvalidParameterContractReason,
+        span: Option<SourceSpan>,
+    ) -> Self {
+        Self::new(
+            DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidParameterContract),
+            span,
+            DiagnosticPayload::InvalidParameterContract { reason },
+        )
+    }
 
     pub(crate) fn unexpected_end_of_file(
         expected_delimiter: Option<StringId>,
@@ -1382,7 +1393,8 @@ impl CompilerDiagnostic {
     }
 
     pub(crate) fn generic_bound_private_surface_leak(
-        function_name: StringId,
+        owner_kind: PublicGenericOwnerKind,
+        owner_name: StringId,
         trait_name: StringId,
         span: Option<SourceSpan>,
     ) -> Self {
@@ -1390,7 +1402,8 @@ impl CompilerDiagnostic {
             DiagnosticKind::Rule(RuleDiagnosticKind::GenericBoundPrivateSurfaceLeak),
             span,
             DiagnosticPayload::GenericBoundPrivateSurfaceLeak {
-                function_name,
+                owner_kind,
+                owner_name,
                 trait_name,
             },
         )
@@ -2106,6 +2119,24 @@ impl CompilerDiagnostic {
                 found,
                 context,
             },
+        )
+    }
+
+    /// Report a `Route` parameter whose resolved output type cannot carry future inputs.
+    ///
+    /// WHAT: a semantic type diagnostic, because the authored contract is well-formed and only
+    ///       the resolved output type kind is wrong.
+    /// WHY: reporting this from the syntax kind let a fully parsed, semantically invalid
+    ///      signature look like a parse failure.
+    pub(crate) fn invalid_route_output(
+        reason: InvalidRouteOutputReason,
+        output: TypeId,
+        span: Option<SourceSpan>,
+    ) -> Self {
+        Self::new(
+            DiagnosticKind::Type(TypeDiagnosticKind::InvalidRouteOutput),
+            span,
+            DiagnosticPayload::InvalidRouteOutput { reason, output },
         )
     }
 

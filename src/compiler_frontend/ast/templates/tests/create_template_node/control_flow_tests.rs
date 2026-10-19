@@ -53,7 +53,7 @@ fn template_option_capture_binding_is_scoped_to_selected_body() {
             .try_intern_child(source_path, maybe_name)
             .expect("test path fits"),
         type_id: maybe_name_type_id,
-        diagnostic_type: DataType::Option(Box::new(DataType::StringSlice)),
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,

@@ -1,0 +1,27 @@
+export:
+    BOX_SOURCE must:
+        boxed |This| -> Box of Helper
+    ;
+
+    Helper = |
+        text String,
+    |
+
+    Box type T = |
+        value T,
+    |
+
+    Maker = |
+        label String,
+    |
+
+    make_maker || -> Maker:
+        return Maker(label = "maker")
+    ;
+;
+
+boxed |this Maker| -> Box of Helper:
+    return Box(Helper(text = this.label))
+;
+
+Maker must BOX_SOURCE

@@ -1,0 +1,9 @@
+pair || -> I32, I32:
+    return 1, 2
+;
+
+run ||:
+    x ~I32 = 1
+    x #I32, other = pair()
+    io.line([: [x] [other]])
+;

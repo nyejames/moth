@@ -1,0 +1,5 @@
+project #= (
+    name = "wiring_generic_route_cannot_infer_rejected",
+    entry_root = "src",
+)
+html #= ()

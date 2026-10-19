@@ -1,0 +1,13 @@
+Message ::
+    Update | text String |,
+;
+
+accept |route Route of String -> Message| -> String:
+    return "accepted"
+;
+
+unused |seed String| -> String:
+    return accept(Message::Update)
+;
+
+[:unreachable route formation accepted]

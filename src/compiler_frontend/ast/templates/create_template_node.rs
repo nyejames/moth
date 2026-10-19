@@ -510,7 +510,7 @@ impl Template {
 
             let template_id = tir_reference.root;
 
-            // --- Phase 1: head-chain composition ---
+            // --- Head-chain composition ---
 
             add_ast_counter(AstCounter::TemplateTirHeadChainCompositionCalls, 1);
 
@@ -536,6 +536,7 @@ impl Template {
                     control_flow_validation,
                     TemplateControlFlowValidationMode::RuntimeCapable
                 ),
+                Some(context.external_package_registry.as_ref()),
             )?;
 
             if composed_root != original_root {
@@ -563,7 +564,7 @@ impl Template {
 
             let wrapper_context_owns_direct_children = !build_state.child_wrappers.is_empty();
 
-            // --- Phase 2: wrapper-context overlay ---
+            // --- Wrapper-context overlay ---
             //
             // Record `$fresh` suppression and inherited wrapper-set context on
             // the final authoritative root after head-chain composition so the
@@ -578,7 +579,7 @@ impl Template {
             }
         }
 
-        // Stage 6: Preparation from the effective TirView of the final
+        // Preparation from the effective TirView of the final
         // reference (post-composition).
         //
         // The reference is now either a composed root with slots expanded and

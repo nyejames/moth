@@ -1,0 +1,12 @@
+Message ::
+    Update | id I32, text String |,
+;
+
+inspect |this Message| -> String:
+    return "inspected"
+;
+
+receive |route Route of String -> Message| -> String:
+    route.inspect()
+    return "received"
+;

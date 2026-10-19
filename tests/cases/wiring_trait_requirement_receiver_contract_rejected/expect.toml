@@ -1,0 +1,17 @@
+entry = "."
+
+# The trait-requirement receiver is the implementing type, so it cannot carry a
+# `Wire` receiver contract. It must report the same typed receiver-contract
+# reason as the function form, not a generic separator error.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0038"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0038"
+reason = "invalid_parameter_contract.receiver_contract"
+path = "input/@page.moth"
+line = 2
+count = 1

@@ -21,6 +21,7 @@ fn deep_static_specialisation_uses_one_mib_stack() {
                 &mut builder,
                 Rc::new(RefCell::new(TemplateIrStore::new())),
                 &types,
+                None,
             );
             let mut specializer = StaticIfSpecializer {
                 resolver,

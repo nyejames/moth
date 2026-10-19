@@ -25,7 +25,6 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplateViewContext,
 };
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidFieldAccessReason};
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
@@ -230,7 +229,7 @@ fn resolved_default_field_uses_foreign_effective_tir() {
                     .expect("field is owned")
                     .value_type_id()
                     .expect("field is single-valued"),
-                diagnostic_type: DataType::StringSlice,
+                type_syntax: None,
                 value_mode: ValueMode::ImmutableOwned,
                 value: DeclarationValue::Initializer(value.id()),
                 binding_span: None,
@@ -322,7 +321,7 @@ fn resolved_field_default_uses_constant_content_without_reexpansion() {
         vec![Declaration {
             id: field_path,
             type_id: bool_type,
-            diagnostic_type: DataType::Bool,
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Default(default),
             binding_span: None,

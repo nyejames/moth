@@ -245,7 +245,6 @@ pub(super) fn lookup_generic_bound_receiver_method(
                 candidate.trait_definition,
                 candidate.requirement,
                 receiver_type_id,
-                type_environment,
                 string_table,
                 path_fork,
             );

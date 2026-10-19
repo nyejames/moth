@@ -1,0 +1,9 @@
+entry = "."
+
+# The generic parameter is referenced only through the `Route` input. It must
+# count as used and the declaration must compile without instantiating it.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "route-input-only-generic accepted"

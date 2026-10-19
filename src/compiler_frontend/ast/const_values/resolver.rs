@@ -10,9 +10,9 @@ use std::rc::Rc;
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_eval::{
-    ConstantFoldError, fold_expression_with_constants,
+    ConstantFoldError, ConstantFoldOutcome, FoldRequirement, FoldServices,
+    fold_expression_with_constants,
 };
-use crate::compiler_frontend::ast::const_values::facts::ConstFactValueKind;
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView,
@@ -20,14 +20,11 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
-#[cfg(test)]
-use crate::compiler_frontend::ast::templates::tir::TemplatePreparationFacts;
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrStore, TemplatePreparationMode, TemplateTirPhase, TirView, prepare_tir_view,
 };
-#[cfg(test)]
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -135,7 +132,6 @@ impl Eq for ConstResolutionError {}
 #[derive(Debug)]
 pub(crate) struct ResolvedConstDeclaration {
     pub(crate) value: ConstValueId,
-    pub(crate) value_kind: ConstFactValueKind,
 }
 
 pub(crate) struct ConstValueResolver<'a> {
@@ -143,6 +139,7 @@ pub(crate) struct ConstValueResolver<'a> {
     const_values: &'a mut ConstValueStore,
     expression_builder: &'a mut AstExpressionBuilder,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
+    external_package_registry: Option<&'a ExternalPackageRegistry>,
     type_environment: &'a TypeEnvironment,
     // Reuse heap traversal storage across resolutions, including after advisory failures.
     pending_references: Vec<ExprId>,
@@ -155,6 +152,7 @@ impl<'a> ConstValueResolver<'a> {
         expression_builder: &'a mut AstExpressionBuilder,
         template_ir_store: Rc<RefCell<TemplateIrStore>>,
         type_environment: &'a TypeEnvironment,
+        external_package_registry: Option<&'a ExternalPackageRegistry>,
     ) -> Self {
         Self {
             string_table,
@@ -162,6 +160,7 @@ impl<'a> ConstValueResolver<'a> {
             expression_builder,
             template_ir_store,
             type_environment,
+            external_package_registry,
             pending_references: Vec::new(),
         }
     }
@@ -176,7 +175,9 @@ impl<'a> ConstValueResolver<'a> {
         self.const_values
     }
 
-    pub(crate) fn resolve_private_top_level_declaration(
+    /// Top-level and body-local constants resolve identically: reject mutable bindings, then
+    /// resolve the initializer. Callers record the declaration's scope themselves.
+    pub(crate) fn resolve_declaration(
         &mut self,
         declaration: &Declaration,
         environment: &ConstValueEnvironment,
@@ -189,22 +190,7 @@ impl<'a> ConstValueResolver<'a> {
             .initializer()
             .ok_or(ConstResolutionError::NonConstExpression)?;
         let value = self.resolve_expression(initializer, environment)?;
-        let metadata = self
-            .const_values
-            .metadata(value)
-            .ok_or(ConstResolutionError::NonConstExpression)?;
-        Ok(ResolvedConstDeclaration {
-            value,
-            value_kind: ConstFactValueKind::from_const_value_kind(metadata.value_kind),
-        })
-    }
-
-    pub(crate) fn resolve_body_local_declaration(
-        &mut self,
-        declaration: &Declaration,
-        environment: &ConstValueEnvironment,
-    ) -> Result<ResolvedConstDeclaration, ConstResolutionError> {
-        self.resolve_private_top_level_declaration(declaration, environment)
+        Ok(ResolvedConstDeclaration { value })
     }
 
     pub(crate) fn resolve_expression(
@@ -254,12 +240,13 @@ impl<'a> ConstValueResolver<'a> {
             ))
         })?;
         validate_references(view, environment, &mut self.pending_references)?;
-        let resolved = fold_expression_with_constants(
+        let outcome = fold_expression_with_constants(
             expression,
             self.expression_builder,
             self.const_values,
-            self.string_table,
+            FoldServices::new(self.string_table, None, self.external_package_registry),
             self.type_environment,
+            FoldRequirement::Opportunistic,
             |path| {
                 environment
                     .lookup_local(&path)
@@ -278,6 +265,12 @@ impl<'a> ConstValueResolver<'a> {
                 ConstResolutionError::TemplateClassification(TemplateError::Infrastructure(error))
             }
         })?;
+        let resolved = match outcome {
+            ConstantFoldOutcome::Folded(root) | ConstantFoldOutcome::NotConstant(root) => root,
+            ConstantFoldOutcome::Refused { .. } => {
+                return Err(ConstResolutionError::NonFoldableRuntimeExpression);
+            }
+        };
         let view = self.expression_builder.view(resolved).map_err(|error| {
             ConstResolutionError::TemplateClassification(TemplateError::Infrastructure(
                 error.into(),
@@ -306,6 +299,7 @@ impl<'a> ConstValueResolver<'a> {
                     &self.template_ir_store,
                     self.expression_builder,
                     self.const_values,
+                    self.external_package_registry,
                 )?;
                 Err(ConstResolutionError::NonConstExpression)
             }
@@ -332,6 +326,7 @@ pub(crate) fn classify_template_from_effective_tir(
     store: &Rc<RefCell<TemplateIrStore>>,
     expression_builder: &AstExpressionBuilder,
     const_values: &ConstValueStore,
+    external_package_registry: Option<&ExternalPackageRegistry>,
 ) -> Result<TemplateConstValueKind, TemplateError> {
     let reference = &template.tir_reference;
     let store = store.borrow();
@@ -347,40 +342,7 @@ pub(crate) fn classify_template_from_effective_tir(
         expression_builder,
         const_values,
         TemplatePreparationMode::Value,
+        external_package_registry,
     )?;
     Ok(preparation.facts.final_value_kind)
-}
-
-#[cfg(test)]
-pub(crate) fn prepare_template_tir_facts(
-    template: &Template,
-    store: &Rc<RefCell<TemplateIrStore>>,
-    expression_builder: &AstExpressionBuilder,
-    const_values: &ConstValueStore,
-) -> Result<TemplatePreparationFacts, TemplateError> {
-    let reference = &template.tir_reference;
-
-    if !reference.phase.is_at_least(TemplateTirPhase::Composed) {
-        return Err(CompilerError::compiler_error(format!(
-            "AST const template preparation requires Composed TIR, but root {} is at phase {}.",
-            reference.root, reference.phase
-        ))
-        .into());
-    }
-
-    let store = store.borrow();
-    let view = TirView::with_minimum_phase(
-        &store,
-        reference.root,
-        reference.phase,
-        TemplateTirPhase::Composed,
-        reference.context,
-    )?;
-    Ok(prepare_tir_view(
-        &view,
-        expression_builder,
-        const_values,
-        TemplatePreparationMode::Value,
-    )?
-    .facts)
 }

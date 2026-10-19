@@ -14,29 +14,33 @@
 
 use super::direct_projection::FoldedValueJoinContext;
 use super::model::{
-    PublicParameterTypeSlot, PublicReceiverMethodCategory, PublicReceiverMethodSemantics,
+    PublicGenericTemplateDescriptor, PublicParameterTypeSlot, PublicReceiverMethodCategory,
+    PublicReceiverMethodSemantics,
 };
 use super::type_projection::{
     ProjectedReceiverMethodSignature, RootIndex, origin_category_mismatch_error,
-    project_defaults_provenance, project_folded_default, project_parameter_access,
+    project_defaults_provenance, project_exported_generic_parameter_surfaces,
+    project_folded_default, project_parameter_access, project_parameter_contract,
     project_return_slots,
 };
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::{
     ReceiverMethodEntry, ResolvedPublicTypeRootKind, ResolvedPublicTypeRootTable,
+    ResolvedTraitSourceFact,
 };
 use crate::compiler_frontend::canonical_type_identity::{
-    CanonicalTypeProjectionContext, project_type_id_to_canonical_identity,
+    CanonicalTypeProjectionContext, GenericDeclarationOrigin, project_type_id_to_canonical_identity,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::semantic_identity::{
-    ExportBinding, OriginDeclarationId, OriginFunctionId, OriginTypeCategory, OriginTypeId,
-    StableModuleOriginIdentity,
+    ExportBinding, OriginDeclarationId, OriginFunctionId, OriginTraitId, OriginTypeCategory,
+    OriginTypeId, StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::traits::ids::TraitId;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// One transient callable identity seed: the single authority pairing a donor-local
@@ -265,6 +269,12 @@ pub(super) struct ReceiverProjectionContext<'a> {
     pub(super) string_table: &'a StringTable,
     pub(super) path_fork: &'a PathInternerFork,
     pub(super) folded_value_context: &'a FoldedValueJoinContext<'a>,
+    /// Generic templates by declaration path; a generic receiver method's own parameter list is
+    /// read from its template.
+    pub(super) generic_function_templates: &'a FxHashMap<PathId, GenericFunctionTemplate>,
+    /// Trait identity sources for a generic receiver method's bounds, shared with free functions.
+    pub(super) trait_source_facts: &'a FxHashMap<TraitId, ResolvedTraitSourceFact>,
+    pub(super) public_source_trait_origins: &'a FxHashMap<PathId, OriginTraitId>,
 }
 
 /// Project the canonical signature for each receiver-method callable seed.
@@ -288,7 +298,11 @@ pub(crate) fn project_receiver_method_signatures(
     let mut signatures: FxHashMap<usize, ProjectedReceiverMethodSignature> = FxHashMap::default();
 
     for seed in callable_seeds {
-        let CallableSeedKind::ReceiverMethod { method_index, .. } = &seed.kind else {
+        let CallableSeedKind::ReceiverMethod {
+            receiver_origin,
+            method_index,
+        } = &seed.kind
+        else {
             continue;
         };
 
@@ -331,6 +345,11 @@ pub(crate) fn project_receiver_method_signatures(
                     type_identity,
                     access,
                     folded_default,
+                    contract: project_parameter_contract(
+                        declaration.contract,
+                        type_environment,
+                        canonical_context,
+                    )?,
                 })
             })
             .collect::<Result<Vec<_>, CompilerError>>()?;
@@ -341,6 +360,31 @@ pub(crate) fn project_receiver_method_signatures(
             canonical_context,
         )?;
 
+        // WHY: a generic method's parameters are its own list rather than the nominal's, so its
+        // bounds are projected from that list. The template is the one that classified the seed.
+        let generic_parameters = if seed.generic_template {
+            let template = context
+                .generic_function_templates
+                .get(&entry.function_path)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "receiver-method signature projection: generic receiver method {:?} has \
+                         no generic function template",
+                        seed.origin
+                    ))
+                })?;
+            project_exported_generic_parameter_surfaces(
+                Some(template.generic_parameter_list_id),
+                type_environment,
+                canonical_context.generic_parameter_origins(),
+                &GenericDeclarationOrigin::nominal_type(receiver_origin.clone())?,
+                context.trait_source_facts,
+                context.public_source_trait_origins,
+            )?
+        } else {
+            Vec::new()
+        };
+
         if signatures
             .insert(
                 *method_index,
@@ -349,6 +393,7 @@ pub(crate) fn project_receiver_method_signatures(
                     returns,
                     error_return,
                     default_provenance,
+                    generic_parameters,
                 },
             )
             .is_some()
@@ -397,7 +442,9 @@ pub(super) fn receiver_method_semantics_from_seed(
     Ok(PublicReceiverMethodSemantics {
         method_origin: seed.origin.clone(),
         category: if seed.generic_template {
-            PublicReceiverMethodCategory::GenericTemplate
+            PublicReceiverMethodCategory::GenericTemplate(PublicGenericTemplateDescriptor {
+                generic_parameters: signature.generic_parameters.clone(),
+            })
         } else {
             PublicReceiverMethodCategory::ConcreteLocal
         },

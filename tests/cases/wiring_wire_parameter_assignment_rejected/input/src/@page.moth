@@ -1,0 +1,4 @@
+change |value Wire of String| -> String:
+    value = "changed"
+    return value
+;

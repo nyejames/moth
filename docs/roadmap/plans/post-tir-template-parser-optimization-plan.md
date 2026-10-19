@@ -8,8 +8,8 @@ the final TIR architecture. This plan may optimise each established owner, but i
 second template representation, preparation pass, fold entry or AST-to-HIR boundary.
 
 Compact semantic expression nodes, constant-value adapters, immutable expression reuse and
-ownership-taking folded-text handoffs belong to the earlier typed semantic expression and dense
-compiler foundation work. This plan consumes those delivered representations. It retains the
+ownership-taking folded-text handoffs belong to the earlier compact typed-expression and dense
+compiler foundation work. This plan consumes those representations once merged. It retains the
 independent source-text, parser, formatter, cache, invalidation, scheduling and backend-assembly
 investigations described below.
 
@@ -328,7 +328,8 @@ Backtrack if scheduling overhead, synchronization or deterministic replay remove
 - Attribute runtime append/coercion, JS helper output, JS source assembly and HTML document assembly
   separately.
 - Consume dense HIR and completed constant payloads directly. Constant re-expansion and expression
-  adapters belong to the earlier semantic cutover, while independent output assembly remains here.
+  adapters belong to the earlier compact typed-expression foundation, while independent output
+  assembly remains here.
 - Keep HIR runtime string operations backend-neutral.
 - Keep JS runtime/helper emission with the JS backend and HTML document assembly with the HTML
   project owner.
@@ -356,8 +357,8 @@ the experiment and retain the evidence.
 ## Roadmap relationship
 
 This plan is the single owner for the deferred post-TIR source-text, template-parser, formatter,
-template-cache, invalidation and fold-scheduling investigations that remain after the typed
-semantic expression and constant ownership cutover. It is queued/deferred and does not block the
+template-cache, invalidation and fold-scheduling investigations that remain after the compact
+typed-expression and constant-owner work. It is queued/deferred and does not block the
 ordered implementation chain. Stable source/module identity and fingerprint requirements are named
 capability gates. Backend assembly consumes its owning target and memory contracts. No completion
 of the expression work automatically activates these cache or scheduling experiments.

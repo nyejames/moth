@@ -14,6 +14,7 @@ use crate::compiler_frontend::ast::templates::doc_fragments;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -118,6 +119,7 @@ pub(crate) fn collect_and_strip_comment_templates(
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
+    external_package_registry: Option<&ExternalPackageRegistry>,
     template_const_loop_iteration_limit: usize,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
 ) -> Result<Vec<AstDocFragment>, TemplateError> {
@@ -126,6 +128,7 @@ pub(crate) fn collect_and_strip_comment_templates(
         expression_builder,
         const_values,
         string_table,
+        external_package_registry,
         template_const_loop_iteration_limit,
         template_ir_store,
     )

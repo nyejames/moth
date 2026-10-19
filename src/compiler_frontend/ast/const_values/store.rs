@@ -554,25 +554,61 @@ fn take_fields<'a>(
         .collect())
 }
 
+/// Roots a staged candidate hands back. Staging rewrites each root in place to its committed id,
+/// so a single root and a multi-root result share one commit path.
+pub(crate) trait StagedRoots {
+    fn roots(&self) -> &[ConstValueId];
+    fn roots_mut(&mut self) -> &mut [ConstValueId];
+}
+
+impl StagedRoots for ConstValueId {
+    fn roots(&self) -> &[ConstValueId] {
+        std::slice::from_ref(self)
+    }
+
+    fn roots_mut(&mut self) -> &mut [ConstValueId] {
+        std::slice::from_mut(self)
+    }
+}
+
+impl StagedRoots for Vec<ConstValueId> {
+    fn roots(&self) -> &[ConstValueId] {
+        self.as_slice()
+    }
+
+    fn roots_mut(&mut self) -> &mut [ConstValueId] {
+        self.as_mut_slice()
+    }
+}
+
 impl ConstValueStore {
-    /// Stage ordinary content and move only the selected root's reachable suffix on acceptance.
-    pub(crate) fn stage_values<E>(
+    /// Stage ordinary content and move only the selected roots' reachable suffix on acceptance.
+    ///
+    /// WHY: a multi-root result (one constant row per result slot) commits as one unit. Every
+    /// check runs before the first row is pushed, so a refused or invalid candidate leaves no
+    /// orphan rows behind.
+    pub(crate) fn stage_values<R, E>(
         &mut self,
-        produce: impl FnOnce(&mut ConstValueCandidate<'_>) -> Result<Option<ConstValueId>, E>,
-    ) -> Result<Option<ConstValueId>, E>
+        produce: impl FnOnce(&mut ConstValueCandidate<'_>) -> Result<Option<R>, E>,
+    ) -> Result<Option<R>, E>
     where
+        R: StagedRoots,
         E: From<ConstValueStoreError>,
     {
         let prefix_len = self.values.len();
-        let (root, values) = {
+        let (mut roots, values) = {
             let mut candidate = ConstValueCandidate {
                 prefix: self,
                 values: Vec::new(),
             };
-            let Some(root) = produce(&mut candidate)? else {
+            let Some(roots) = produce(&mut candidate)? else {
                 return Ok(None);
             };
-            if candidate.value(root).is_none() {
+            if roots
+                .roots()
+                .iter()
+                .any(|&root| candidate.value(root).is_none())
+            {
                 return Err(E::from(
                     CompilerError::compiler_error(
                         "Selected constant root is outside its candidate.",
@@ -580,20 +616,25 @@ impl ConstValueStore {
                     .into(),
                 ));
             }
-            (root, candidate.values)
+            (roots, candidate.values)
         };
-        if root.index() < prefix_len {
-            return Ok(Some(root));
-        }
+
+        // Only candidate roots need staging; prefix roots are already committed. Every candidate
+        // root is live, and the first one anchors the index-limit diagnostic.
+        let mut pending: Vec<ConstValueId> = roots
+            .roots()
+            .iter()
+            .copied()
+            .filter(|root| root.index() >= prefix_len)
+            .collect();
+        let Some(&anchor) = pending.first() else {
+            return Ok(Some(roots));
+        };
 
         // Every staged edge is backwards: append validates against the already issued prefix.
         // Reachability does not depend on visit order, so an explicit stack marks the same rows.
         let mut live = vec![false; values.len()];
-        let mut pending = vec![root];
         while let Some(id) = pending.pop() {
-            if id.index() < prefix_len {
-                continue;
-            }
             let index = id.index() - prefix_len;
             if live[index] {
                 continue;
@@ -609,7 +650,7 @@ impl ConstValueStore {
         checked_const_value_index(
             prefix_len,
             live_count,
-            values[root.index() - prefix_len].metadata.span,
+            values[anchor.index() - prefix_len].metadata.span,
         )
         .map_err(|error| E::from(ConstValueStoreError::from(error)))?;
         self.values.reserve(live_count);
@@ -628,9 +669,13 @@ impl ConstValueStore {
             self.values.push(value);
             remapped[index] = Some(id);
         }
-        Ok(Some(
-            remapped[root.index() - prefix_len].expect("selected staged root is marked reachable"),
-        ))
+        for root in roots.roots_mut() {
+            if root.index() >= prefix_len {
+                *root = remapped[root.index() - prefix_len]
+                    .expect("selected staged root is marked reachable");
+            }
+        }
+        Ok(Some(roots))
     }
 
     /// Bind every resolved module constant to its header-bound value and record its row.
@@ -873,6 +918,10 @@ impl ConstValueStore {
                 );
                 Ok(None)
             }
+            ExpressionOperationView::RouteConstruct { .. } => Err(CompilerError::compiler_error(
+                "Constructor routes are runtime-only and cannot enter the constant store.",
+            )
+            .into()),
             ExpressionOperationView::Range { start, end, .. } => {
                 queue_children(
                     work,
@@ -986,12 +1035,15 @@ impl ConstValueStore {
         )
     }
 
-    pub(crate) fn metadata_from_view(
+    /// Builds metadata whose type the caller supplies. Multi-slot results have no single value
+    /// type, so the slot materialiser passes each slot's builtin or optional type explicitly.
+    pub(crate) fn metadata_for_type(
         expression: ExpressionView<'_>,
+        type_id: TypeId,
         value_kind: ConstValueKind,
-    ) -> Result<ConstValueMetadata, CompilerError> {
-        Ok(ConstValueMetadata {
-            type_id: expression.value_type_id()?,
+    ) -> ConstValueMetadata {
+        ConstValueMetadata {
+            type_id,
             value_mode: expression.value_mode(),
             span: expression.span(),
             const_record_state: expression.classification().const_record_state,
@@ -1002,7 +1054,18 @@ impl ConstValueStore {
                 .unwrap_or_default(),
             value_kind,
             hir_visible: true,
-        })
+        }
+    }
+
+    pub(crate) fn metadata_from_view(
+        expression: ExpressionView<'_>,
+        value_kind: ConstValueKind,
+    ) -> Result<ConstValueMetadata, CompilerError> {
+        Ok(Self::metadata_for_type(
+            expression,
+            expression.value_type_id()?,
+            value_kind,
+        ))
     }
 
     pub(crate) fn value(&self, id: ConstValueId) -> Option<&ConstValue> {

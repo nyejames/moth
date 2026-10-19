@@ -28,6 +28,7 @@ use crate::compiler_frontend::ast::templates::tir::overlays::{
     TemplateViewContext, TirSlotResolutionKind,
 };
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirReference;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 
 use crate::compiler_frontend::ast::templates::tir::view::{
     TemplateTirPhase, TirView, TirViewIdentity,
@@ -40,7 +41,7 @@ use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counte
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 type PreparationNodeKey = (TemplateIrNodeId, TirViewIdentity);
 type PreparationSlotPlanKey = (TemplateSlotPlanId, TirViewIdentity);
@@ -106,13 +107,16 @@ pub(crate) fn refresh_kind_from_preparation(
 
 /// Mutable state for the one exhaustive preparation traversal.
 struct PreparationWalk<'scope> {
-    visiting_templates: HashSet<TirViewIdentity>,
-    visiting_nodes: HashSet<PreparationNodeKey>,
-    visiting_slot_plans: HashSet<PreparationSlotPlanKey>,
+    // Path sets: membership-only (insert on entry, remove on exit), never iterated, probed for
+    // every node. Fx hashing keeps that per-node probe cheap; iteration order never reaches output.
+    visiting_templates: FxHashSet<TirViewIdentity>,
+    visiting_nodes: FxHashSet<PreparationNodeKey>,
+    visiting_slot_plans: FxHashSet<PreparationSlotPlanKey>,
     runtime_reason: Option<RuntimeTemplateReason>,
     mode: TemplatePreparationMode,
     const_diagnostic: Option<CompilerDiagnostic>,
     source_scope: Option<&'scope ScopeContext>,
+    external_package_registry: Option<&'scope ExternalPackageRegistry>,
     expressions: &'scope AstExpressionBuilder,
     const_values: &'scope ConstValueStore,
 }
@@ -142,7 +146,7 @@ impl Default for PreparationFacts {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 struct PreparationTraversalRole {
     virtual_wrapper: bool,
     in_aggregate_wrapper: bool,
@@ -180,17 +184,19 @@ impl<'scope> PreparationWalk<'scope> {
     fn new(
         mode: TemplatePreparationMode,
         source_scope: Option<&'scope ScopeContext>,
+        external_package_registry: Option<&'scope ExternalPackageRegistry>,
         expressions: &'scope AstExpressionBuilder,
         const_values: &'scope ConstValueStore,
     ) -> Self {
         Self {
-            visiting_templates: HashSet::new(),
-            visiting_nodes: HashSet::new(),
-            visiting_slot_plans: HashSet::new(),
+            visiting_templates: FxHashSet::default(),
+            visiting_nodes: FxHashSet::default(),
+            visiting_slot_plans: FxHashSet::default(),
             runtime_reason: None,
             mode,
             const_diagnostic: None,
             source_scope,
+            external_package_registry,
             expressions,
             const_values,
         }
@@ -222,13 +228,25 @@ impl<'scope> PreparationWalk<'scope> {
     }
 }
 
+/// Prepares one exact TIR view into its exclusive preparation facts.
+///
+/// The registry is the package owner consulted for registered external constant calls, so
+/// classification and folding agree on which calls are compile-time evaluable.
 pub(crate) fn prepare_tir_view(
     view: &TirView<'_>,
     expressions: &AstExpressionBuilder,
     const_values: &ConstValueStore,
     mode: TemplatePreparationMode,
+    external_package_registry: Option<&ExternalPackageRegistry>,
 ) -> Result<TemplatePreparation, TemplateError> {
-    prepare_tir_view_in_scope(view, expressions, const_values, mode, None)
+    prepare_tir_view_in_scope(
+        view,
+        expressions,
+        const_values,
+        mode,
+        None,
+        external_package_registry,
+    )
 }
 
 /// Prepares a parser-owned view with access to the scope's visible resolved constants.
@@ -239,7 +257,14 @@ pub(crate) fn prepare_tir_view_with_source_scope(
     mode: TemplatePreparationMode,
     source_scope: &ScopeContext,
 ) -> Result<TemplatePreparation, TemplateError> {
-    prepare_tir_view_in_scope(view, expressions, const_values, mode, Some(source_scope))
+    prepare_tir_view_in_scope(
+        view,
+        expressions,
+        const_values,
+        mode,
+        Some(source_scope),
+        Some(&source_scope.external_package_registry),
+    )
 }
 
 fn prepare_tir_view_in_scope(
@@ -248,6 +273,7 @@ fn prepare_tir_view_in_scope(
     const_values: &ConstValueStore,
     mode: TemplatePreparationMode,
     source_scope: Option<&ScopeContext>,
+    external_package_registry: Option<&ExternalPackageRegistry>,
 ) -> Result<TemplatePreparation, TemplateError> {
     if !view.phase().is_at_least(TemplateTirPhase::Composed) {
         return Err(CompilerError::compiler_error(format!(
@@ -259,7 +285,13 @@ fn prepare_tir_view_in_scope(
     }
 
     increment_ast_counter(AstCounter::TirPreparationAttempts);
-    let mut walk = PreparationWalk::new(mode, source_scope, expressions, const_values);
+    let mut walk = PreparationWalk::new(
+        mode,
+        source_scope,
+        external_package_registry,
+        expressions,
+        const_values,
+    );
     let facts = walk.walk_template(
         view.root_ref(),
         view,
@@ -370,7 +402,7 @@ impl PreparationWalk<'_> {
                     }
                 }
             }
-            let mut node_role = role.clone();
+            let mut node_role = role;
             let runtime_slot_plan_facts = if let Some(slot_plan_id) = runtime_slot_plan {
                 node_role.active_slot_plan = Some(slot_plan_id);
                 let facts = self.walk_slot_plan(slot_plan_id, view, &node_role)?;
@@ -493,7 +525,7 @@ impl PreparationWalk<'_> {
                         child_template_id,
                         &child_view,
                         loop_binding_paths,
-                        role.clone(),
+                        *role,
                     )?;
                     facts.merge(child_facts);
                     if view
@@ -543,7 +575,7 @@ impl PreparationWalk<'_> {
                                 *source,
                                 &source_view,
                                 loop_binding_paths,
-                                role.clone(),
+                                *role,
                             )?);
                         }
                     }
@@ -568,12 +600,8 @@ impl PreparationWalk<'_> {
                 }
                 TemplateIrNodeKind::InsertContribution { template } => {
                     let helper_view = view.structural_helper(*template)?;
-                    let mut facts = self.walk_template(
-                        *template,
-                        &helper_view,
-                        loop_binding_paths,
-                        role.clone(),
-                    )?;
+                    let mut facts =
+                        self.walk_template(*template, &helper_view, loop_binding_paths, *role)?;
                     facts.has_slot_insertions = true;
                     self.record_role_runtime(
                         &mut facts,
@@ -588,16 +616,18 @@ impl PreparationWalk<'_> {
                     body,
                 } => {
                     let mut facts = PreparationFacts::const_value();
-                    let effective_selector = effective_branch_selector_for_view(
+                    let effective_selector_override = effective_branch_selector_for_view(
                         view,
                         self.expressions,
                         selector,
                         *selector_site_id,
                     )?;
+                    let effective_selector =
+                        effective_selector_override.as_ref().unwrap_or(selector);
                     let (body_binding_paths, selector_const, selector_facts) = self
                         .const_required_branch_selector(
                             view,
-                            &effective_selector,
+                            effective_selector,
                             node.span,
                             loop_binding_paths,
                             role,
@@ -637,21 +667,22 @@ impl PreparationWalk<'_> {
                     aggregate_wrapper,
                     ..
                 } => {
-                    let effective_header = effective_loop_header_for_view(
+                    let effective_header_override = effective_loop_header_for_view(
                         view,
                         self.expressions,
                         header,
                         *header_sites,
                     )?;
+                    let effective_header = effective_header_override.as_ref().unwrap_or(header);
                     let mut facts = self.walk_loop_header(
                         view,
-                        &effective_header,
+                        effective_header,
                         node.span,
                         loop_binding_paths,
                         role,
                     )?;
                     let body_binding_paths =
-                        loop_body_const_evaluation_bindings(&effective_header, loop_binding_paths);
+                        loop_body_const_evaluation_bindings(effective_header, loop_binding_paths);
                     let body_facts = self.walk_node(*body, view, &body_binding_paths, role)?;
                     if !body_facts.const_evaluable
                         && matches!(self.mode, TemplatePreparationMode::ConstRequired)
@@ -667,7 +698,7 @@ impl PreparationWalk<'_> {
                     if let Some(aggregate_wrapper) = aggregate_wrapper {
                         let aggregate_role = PreparationTraversalRole {
                             in_aggregate_wrapper: true,
-                            ..role.clone()
+                            ..*role
                         };
                         facts.merge(self.walk_node(
                             *aggregate_wrapper,
@@ -808,7 +839,7 @@ impl PreparationWalk<'_> {
                 }
             }
 
-            let mut plan_role = role.clone();
+            let mut plan_role = *role;
             plan_role.active_slot_plan = Some(slot_plan_id);
             let mut facts = PreparationFacts::const_value();
             for source in &slot_plan.contribution_sources {
@@ -963,6 +994,7 @@ impl PreparationWalk<'_> {
         role: &PreparationTraversalRole,
     ) -> Result<PreparationFacts, TemplateError> {
         let expression = self.expressions.view(expression)?;
+        let external_package_registry = self.external_package_registry;
         let mut nested_facts = PreparationFacts::const_value();
         let mut visit_nested_template =
             |reference: TemplateTirReference, _nested_binding_paths: &[PathId]| {
@@ -971,7 +1003,7 @@ impl PreparationWalk<'_> {
                     reference.root,
                     &nested_view,
                     nested_template_binding_paths,
-                    role.clone(),
+                    *role,
                 )?;
                 let const_evaluable = facts.const_evaluable;
                 nested_facts.merge(facts);
@@ -981,6 +1013,7 @@ impl PreparationWalk<'_> {
         let expression_const = classify_expression_const_evaluable_with_nested_template(
             expression,
             const_binding_paths,
+            external_package_registry,
             &mut visit_nested_template,
         )?;
         nested_facts.const_evaluable &= expression_const;

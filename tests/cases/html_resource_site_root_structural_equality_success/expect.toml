@@ -1,0 +1,14 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "root same=1 not_plain=0 home_same=1 home_literal=1 shown=direct=./assets/logo.svg via=./assets/logo.svg home_direct=/moth/ home_via=/moth/docs mixed=via=./assets/logo.svg rt=z"
+
+# A resource URL or the site root only receives its final text once the build assigns URL
+# contexts. Runtime comparisons of those values must still evaluate against that final text
+# (`same`, `not_plain`, `home_same`, `home_literal`), and a runtime text piece inside a template
+# stays runtime (`mixed`). The emitted asset must exist at the URL the page references.
+[[backends.html.artifact_assertions]]
+path = "assets/logo.svg"
+kind = "binary"

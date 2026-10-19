@@ -9,7 +9,6 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::compiler_messages::{BorrowDiagnosticKind, DiagnosticKind};
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::module_compilation::artefact::{
@@ -22,8 +21,8 @@ use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase, Sou
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, function_node, make_test_variable, node, reference_expr_with_datatype,
-    symbol, test_source_location,
+    assignment_target, function_node, immutable_reference_expr, make_test_variable, node, symbol,
+    test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
@@ -97,10 +96,9 @@ fn frontend_check_borrows_propagates_failures() {
         node(
             NodeKind::VariableDeclaration(make_test_variable(
                 z,
-                reference_expr_with_datatype(
+                immutable_reference_expr(
                     &mut builder,
                     x,
-                    DataType::FixedScalar(FixedScalar::I32),
                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     test_source_location(3),
                 ),
@@ -199,7 +197,6 @@ fn successful_borrow_report_can_be_stored_on_module() {
                     target: assignment_target(
                         &mut builder,
                         counter,
-                        DataType::FixedScalar(FixedScalar::I32),
                         builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(2),
                     ),

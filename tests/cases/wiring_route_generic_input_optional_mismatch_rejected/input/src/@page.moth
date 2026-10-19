@@ -1,0 +1,10 @@
+AppMessage ::
+    Search | query String |,
+;
+
+mismatch type T |event Route of T? -> AppMessage, value T| -> String:
+    return "accepted"
+;
+
+result = mismatch(AppMessage::Search, "x")
+io.line(result)

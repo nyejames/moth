@@ -364,7 +364,7 @@ fn loop_binding(
             .try_intern_portable_path(name, string_table)
             .expect("test path fits"),
         type_id,
-        diagnostic_type: crate::compiler_frontend::datatypes::DataType::Inferred,
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
@@ -1053,7 +1053,6 @@ fn lowers_unary_not_in_runtime_rpn() {
         let row = expression_row(&builder, value);
         assert_eq!(row.ty, builtin_type_ids::BOOL);
         assert_eq!(row.span, expected_span);
-        assert_eq!(builder.side_table.value_source_span(value), expected_span);
         let HirExpressionKind::UnaryOp {
             op: HirUnaryOp::Not,
             operand,
@@ -2679,6 +2678,7 @@ fn runtime_template_control_flow_loop_range_lowers_inline_and_wraps_aggregate_wh
         end,
         end_kind: RangeEndKind::Exclusive,
         step: None,
+        domain: NumericScalar::Fixed(FixedScalar::I32),
     };
     let expr = runtime_template_range_loop_expression(
         &mut expressions,
@@ -2926,6 +2926,7 @@ fn runtime_template_control_flow_loop_empty_body_does_not_mark_iteration_emitted
         end,
         end_kind: RangeEndKind::Exclusive,
         step: None,
+        domain: NumericScalar::Fixed(FixedScalar::I32),
     };
     let expr = runtime_template_range_loop_expression(
         &mut expressions,
@@ -4716,9 +4717,7 @@ fn metadata_replacement_preserves_distinct_occurrence_mappings() {
             RegionId(0),
         )
         .unwrap();
-    builder
-        .side_table
-        .map_value(Some(ast_span), original, Some(source_span));
+    builder.side_table.map_value(Some(ast_span), original);
     let before = builder.module.expressions.measurements();
     let unchanged = builder
         .replace_expression_metadata(original, &Some(source_span), None, None)
@@ -4732,10 +4731,6 @@ fn metadata_replacement_preserves_distinct_occurrence_mappings() {
     assert_ne!(replacement, original);
     for value in [original, replacement] {
         assert_eq!(builder.side_table.value_ast_span(value), Some(ast_span));
-        assert_eq!(
-            builder.side_table.value_source_span(value),
-            Some(source_span)
-        );
         assert_eq!(
             builder.module.expressions.expression(value).span,
             Some(source_span)
@@ -4760,10 +4755,6 @@ fn metadata_replacement_preserves_distinct_occurrence_mappings() {
     assert_ne!(retagged, replacement);
     assert_eq!(builder.side_table.value_ast_span(retagged), Some(new_span));
     assert_eq!(
-        builder.side_table.value_source_span(retagged),
-        Some(new_span)
-    );
-    assert_eq!(
         builder.module.expressions.expression(retagged).span,
         Some(new_span)
     );
@@ -4772,7 +4763,7 @@ fn metadata_replacement_preserves_distinct_occurrence_mappings() {
         Some(ast_span)
     );
     assert_eq!(
-        builder.side_table.value_source_span(replacement),
+        builder.module.expressions.expression(replacement).span,
         Some(source_span)
     );
 }

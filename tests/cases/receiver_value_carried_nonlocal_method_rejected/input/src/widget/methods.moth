@@ -1,0 +1,5 @@
+@types Counter
+
+tick |this Counter| -> I32:
+    return this.count + 1 catch then 0
+;

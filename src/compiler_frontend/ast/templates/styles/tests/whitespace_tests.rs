@@ -69,6 +69,20 @@ fn inline_body_without_leading_boundary_is_unchanged() {
 }
 
 #[test]
+fn multibyte_horizontal_whitespace_counts_by_char() {
+    // U+3000 is three bytes but one char. The dedent width counts chars, while the
+    // leading trim end is a byte offset, so this input covers both.
+    assert_eq!(
+        apply_default_template_body_whitespace("\n\u{3000}a\n\u{3000}  b"),
+        "a\n  b"
+    );
+    assert_eq!(
+        apply_default_template_body_whitespace("\n\u{3000}a\n\u{3000}\u{3000}"),
+        "a"
+    );
+}
+
+#[test]
 fn no_pass_preserves_text_and_opaque_pieces() {
     let mut string_table = StringTable::new();
     let anchor = FormatterOpaquePiece {

@@ -564,6 +564,46 @@ fn places_keep_flat_root_outward_field_and_index_order() {
 }
 
 #[test]
+fn place_index_values_iterate_projection_order_from_either_end() {
+    let mut store = HirExpressionStore::default();
+    let first = store
+        .append_expression(row(i32_kind(1)))
+        .expect("first index expression should fit");
+    let second = store
+        .append_expression(row(i32_kind(2)))
+        .expect("second index expression should fit");
+    let third = store
+        .append_expression(row(i32_kind(3)))
+        .expect("third index expression should fit");
+    let place = HirPlace::local(LocalId(9))
+        .with_index(first, &mut store, None)
+        .expect("first index projection should fit")
+        .with_field(FieldId(4), &mut store, None)
+        .expect("field projection should fit")
+        .with_index(second, &mut store, None)
+        .expect("second index projection should fit")
+        .with_index(third, &mut store, None)
+        .expect("third index projection should fit");
+
+    assert_eq!(
+        store.place_index_values(place).collect::<Vec<_>>(),
+        vec![first, second, third]
+    );
+    assert_eq!(
+        store.place_index_values(place).rev().collect::<Vec<_>>(),
+        vec![third, second, first]
+    );
+
+    // WHY: both ends consume one shared cursor, so mixed-end reads must never revisit an index.
+    let mut indexes = store.place_index_values(place);
+    assert_eq!(indexes.next(), Some(first));
+    assert_eq!(indexes.next_back(), Some(third));
+    assert_eq!(indexes.next(), Some(second));
+    assert_eq!(indexes.next(), None);
+    assert_eq!(indexes.next_back(), None);
+}
+
+#[test]
 fn branched_place_prefixes_survive_store_growth_and_extension() {
     let mut store = HirExpressionStore::default();
     let index = store
@@ -847,7 +887,7 @@ fn expression_rewrites_reuse_unchanged_rows_and_allocate_changed_parents() {
     let old_parent = store
         .append_expression(parent_row)
         .expect("changed parent row should fit");
-    side_table.map_value(Some(ast_span), old_parent, Some(source_span));
+    side_table.map_value(Some(ast_span), old_parent);
 
     let before_unchanged_rewrite = store.measurements();
     let unchanged_parent =
@@ -877,7 +917,7 @@ fn expression_rewrites_reuse_unchanged_rows_and_allocate_changed_parents() {
 
     for value in [old_parent, rewritten_parent] {
         assert_eq!(side_table.value_ast_span(value), Some(ast_span));
-        assert_eq!(side_table.value_source_span(value), Some(source_span));
+        assert_eq!(store.expression(value).span, Some(source_span));
         assert!(
             side_table
                 .hir_locations_for_ast(ast_span)
@@ -957,4 +997,39 @@ fn metadata_replacements_reuse_unchanged_roots_and_isolate_changed_rows() {
         TypeId(1),
         RegionId(2),
     )));
+}
+
+#[test]
+fn pushed_children_pop_in_source_order_after_the_returned_first_child() {
+    let mut store = HirExpressionStore::default();
+    let first = store
+        .append_expression(row(i32_kind(1)))
+        .expect("first element should fit");
+    let second = store
+        .append_expression(row(i32_kind(2)))
+        .expect("second element should fit");
+    let third = store
+        .append_expression(row(i32_kind(3)))
+        .expect("third element should fit");
+    let elements = store
+        .append_values(&[first, second, third], None)
+        .expect("element list should fit");
+    let parent = store
+        .append_expression(row(HirExpressionKind::Collection(elements)))
+        .expect("parent expression should fit");
+
+    let mut deferred = Vec::new();
+    let mut next = store.push_child_values_in_source_order(parent, &mut deferred, |child| child);
+    let mut visited = Vec::new();
+    while let Some(child) = next.take().or_else(|| deferred.pop()) {
+        visited.push(child);
+    }
+    assert_eq!(visited, vec![first, second, third]);
+
+    let mut leaf_deferred = Vec::new();
+    assert_eq!(
+        store.push_child_values_in_source_order(first, &mut leaf_deferred, |child| child),
+        None
+    );
+    assert!(leaf_deferred.is_empty());
 }

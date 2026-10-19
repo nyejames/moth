@@ -51,12 +51,6 @@ pub(crate) enum AstCounter {
     /// outcome rebuilds a runtime node from the items as they stood before the fold.
     ExpressionOperandClones,
 
-    /// `DataType` spellings built for a resolved expression result.
-    ///
-    /// Operator typing decides on `TypeId` alone, so a fully folded expression materialises
-    /// none. Only a partial fold, which needs a spelling for its runtime node, contributes.
-    DiagnosticDataTypeMaterialisations,
-
     // Static Bool control-flow specialisation inputs.
     BranchLocalGenericRequests,
 
@@ -122,8 +116,7 @@ pub(crate) enum AstCounter {
 
     // Exact-view finalization attribution counters.
     //
-    // WHAT: fine-grained attribution for module-store view folds and fold-cache
-    // behavior.
+    // WHAT: fine-grained attribution for module-store view folds.
     // WHY: broad TIR materialization counters cannot identify which finalization
     // paths drove view-fold volume.
     /// Finalization view fold attempt that passed reference and store
@@ -371,7 +364,6 @@ mod detailed {
             AstCounter::ExpressionTypedStackItems,
             AstCounter::ExpressionFoldItems,
             AstCounter::ExpressionOperandClones,
-            AstCounter::DiagnosticDataTypeMaterialisations,
             AstCounter::BranchLocalGenericRequests,
             AstCounter::TemplateWrapperApplications,
             AstCounter::TemplateFoldLoopIterations,
@@ -486,9 +478,6 @@ mod detailed {
             AstCounter::ExpressionTypedStackItems => "ast_expression_typed_stack_items",
             AstCounter::ExpressionFoldItems => "ast_expression_fold_items",
             AstCounter::ExpressionOperandClones => "ast_expression_operand_clones",
-            AstCounter::DiagnosticDataTypeMaterialisations => {
-                "ast_diagnostic_data_type_materialisations"
-            }
 
             AstCounter::BranchLocalGenericRequests => "ast_branch_local_generic_requests",
 

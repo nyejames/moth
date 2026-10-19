@@ -1,0 +1,22 @@
+needs_text |value Wire of String| -> String:
+    return value
+;
+
+forward_text |value Wire of String| -> String:
+    return needs_text(
+        value
+    )
+;
+
+render || -> String:
+    local = "multiline"
+    direct = needs_text(
+        local
+    )
+    forwarded = forward_text(
+        local
+    )
+    return [:direct=[direct] forwarded=[forwarded]]
+;
+
+[:multiline [render()]]

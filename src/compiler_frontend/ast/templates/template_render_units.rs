@@ -133,6 +133,7 @@ fn compose_conditional_body_tir_root(
         candidate_root,
         string_table,
         true,
+        Some(context.external_package_registry.as_ref()),
     )
 }
 
@@ -206,6 +207,7 @@ fn prepare_loop_render_unit_roots(
         &mut store,
         expression_builder,
         const_values,
+        Some(context.external_package_registry.as_ref()),
     )?;
     Ok(PreparedLoopRenderUnit {
         body,

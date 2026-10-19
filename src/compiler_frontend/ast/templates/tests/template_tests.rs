@@ -4,7 +4,9 @@ use crate::compiler_frontend::ast::const_values::store::{
     ConstStringPiece, ConstStringValue, ConstValueStore,
 };
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
-use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
+use crate::compiler_frontend::ast::statements::functions::{
+    FunctionSignature, ReturnChannel, ReturnSlot,
+};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::styles::markdown::markdown_formatter;
 use crate::compiler_frontend::ast::templates::template::Template;
@@ -19,7 +21,7 @@ use crate::compiler_frontend::ast::templates::top_level_templates::FoldedConstTe
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::paths::module_resources::{ModuleResourceTable, ResourceId};
@@ -55,7 +57,10 @@ fn start_function_node(
             start_path,
             FunctionSignature {
                 parameters: vec![],
-                returns: vec![ReturnSlot::success(DataType::StringSlice)],
+                returns: vec![ReturnSlot {
+                    type_id: Some(builtin_type_ids::STRING),
+                    channel: ReturnChannel::Success,
+                }],
             },
             body,
         ),
@@ -92,6 +97,7 @@ fn collect_and_strip_comment_templates_for_tests_with_store(
         expression_builder,
         const_values,
         string_table,
+        None,
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         template_ir_store,
     )

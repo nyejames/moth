@@ -1,0 +1,9 @@
+Message ::
+    Update | id I32, text String |,
+;
+
+receive |route Route of I32 -> Message| -> String:
+    return "received"
+;
+
+receive(Message::Update(7))

@@ -95,6 +95,7 @@ fn function_record(
                 )),
                 access: crate::compiler_frontend::public_call_summary::PublicCallParameterAccess::Shared,
                 folded_default: None,
+                contract: crate::compiler_frontend::public_interface::PublicParameterContract::Value,
             })
             .collect(),
         returns: Vec::new(),

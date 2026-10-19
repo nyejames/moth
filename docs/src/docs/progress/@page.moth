@@ -40,15 +40,16 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
     domains with full-range containment; other domains are
     excluded from that discharge; the @../numbers/#checked-arithmetic (checked-arithmetic reference) states which operations can fail.
 
-    Typed Phase 4 is complete and squash-merged into main from `expression-refactor`
-    source `534aea1a5`, retaining accepted R1, R2.0–R2.4 and P2 test isolation.
+    The compact typed-expression foundation is complete and squash-merged into main from
+    `expression-refactor` source `534aea1a5`, retaining accepted R1, R2.0–R2.4 and P2 test isolation.
     Historical review `1343c64ec` retains its original scope. R2.4 evidence qualifies
     compiler source `6b855aab9`, not the main squash tree. Its matched standard/focused
     comparisons and local `just validate-full` cover 6,105 primary units, 2,784
     integration target results, ten feature lanes and all 14 scaling series.
     Grouped-not dev HIR fits n^0.88 under n^1.25 in that evidence.
     Fresh Windows Canvas/frontend proof remains pending.
-    Phases 5–8 remain unstarted and require explicit reactivation.
+    Type and folding reductions, the bounded Wiring foundation, trusted Core constant
+    evaluation, owner hardening and the permanent-documentation handoff are complete.
 
     Use this together with `tests/cases/manifest.toml` when changing language features.
 
@@ -454,10 +455,10 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
 
         [data:
             [: Wiring parameter contracts]
-            [: Deferred]
-            [: None]
-            [: JS / HTML after Phase 6]
-            [$md: Wire and Route are accepted parameter contracts, but the current Alpha compiler does not support their source syntax. Phase 6 owns implementation; this does not include route application or composition, subscriptions, event delivery, channels or async. See @../wiring (Wiring) for the canonical contract.]
+            [: Supported]
+            [: Broad integration coverage for contract parsing and positions, Wire origins and forwarding, route formation, captures, forwarding, generic and imported routes, borrow interactions and target gates.]
+            [: JS / HTML; HTML-Wasm for Wire only]
+            [$md: `Wire of T`, `Route of Output` and `Route of Input -> Output` are function-parameter contracts. Wires accept named locals or unchanged Wire parameters of the exact type and read as immutable values. Routes accept a direct choice constructor with a captured leading payload, or an unchanged matching Route parameter. HTML-Wasm rejects reachable route formation with a target diagnostic. Route application or composition, subscriptions, event delivery, channels and async remain outside this foundation. See @../wiring (Wiring) for the canonical contract.]
         ]
 
         [data:
@@ -625,7 +626,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Supported]
             [: Broad same-file struct/choice receiver, aligned generic receiver, imported generic receiver, namespace receiver type, module-boundary exposure, nonlocal/builtin/external receiver rejection, duplicate, collision and mutability coverage. Mutable self calls and nested collection-field mutation execute through reserved receiver roots. Invalid mutable operands retain the offending token's exact span.]
             [: JS / HTML]
-            [: Source-authored receiver methods travel with receiver type visibility, including retained generic receiver templates across module and package boundaries. They are never selected independently, aliased or exposed as namespace-record fields.]
+            [: Source-authored receiver methods travel with values of their receiver type, including retained generic receiver templates across module and package boundaries. They are never selected independently, aliased or exposed as namespace-record fields.]
         ]
 
         [data:
@@ -699,7 +700,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Frontend Arena + Semantic Invariant Optimisation]
             [: Partial]
             [: Broad benchmark, profiling, adversarial-fixture, scope-frame, capacity-estimate and historical validation coverage. Focused typed-store tests cover checked extents, owner isolation, compaction, detached generic preparation and owned service/diagnostic lifetimes.]
-            [: Implemented pieces include token/header statistics, conservative capacity estimates, scope-frame arenas and seeding, external registry clone reduction, dense HIR and phase-owned typed expression stores. Phase 4 completes the typed-store, result and lifetime cutover on its branch. Repeated type/default/fold work remains with the paused Phase 5, while broader template/render-plan, bump-allocation and persistent-cache work remains deferred.]
+            [: Implemented pieces include token/header statistics, conservative capacity estimates, scope-frame arenas and seeding, external registry clone reduction, dense HIR and phase-owned typed expression stores. The typed-store, native result and lifetime work is complete. Call-site descriptors and the generated registry are shared, authored types resolve directly to TypeIds and selected range domains are reused, which cuts generic-scaling check time by 17–28%. Broader template/render-plan, bump-allocation and persistent-cache work remains deferred.]
         ]
 
         [data:
@@ -811,8 +812,8 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Trait bounds on generics]
             [: Partial]
-            [: Broad declaration-site bound, visible evidence, module public-surface privacy, receiver-call, nominal generic instance and negative diagnostic coverage.]
-            [: Bounds use [$html:<code>is</code>]. Concrete generic calls and nominal generic instances require visible reusable evidence. Core cast bounds derive pair-scoped evidence on demand with exact fallibility. Retained requests freeze canonical identities without mutating the frozen requester.]
+            [: Broad declaration-site bound, value-carried evidence, module public-surface privacy, receiver-call, nominal generic instance and negative diagnostic coverage.]
+            [: Bounds use [$html:<code>is</code>]. Concrete generic calls and nominal generic instances require reusable evidence. Core cast bounds derive pair-scoped evidence on demand with exact fallibility. Retained requests freeze canonical identities without mutating the frozen requester.]
         ]
 
         [data:

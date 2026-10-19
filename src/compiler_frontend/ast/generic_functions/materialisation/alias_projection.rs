@@ -10,7 +10,6 @@ use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAlias;
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_errors::ErrorType;
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -69,7 +68,7 @@ pub(super) fn restore_generated_local_alias(
     let declaration = Declaration {
         id: local_path,
         type_id,
-        diagnostic_type: diagnostic_type_spelling(type_id, &environment.type_environment),
+        type_syntax: None,
         value_mode: ValueMode::ImmutableReference,
         value: DeclarationValue::Shell(DeclarationShell::TypeAlias),
         binding_span: None,
@@ -82,7 +81,6 @@ pub(super) fn restore_generated_local_alias(
     Rc::make_mut(&mut lookups.resolved_type_aliases_by_path).insert(
         local_path,
         ResolvedTypeAlias {
-            diagnostic_type: diagnostic_type_spelling(type_id, &environment.type_environment),
             target_type_id: type_id,
             declaration_span: alias.declaration_span,
         },

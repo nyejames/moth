@@ -20,6 +20,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     ExpressionOperationView, ExpressionView, OwnedExpr,
 };
 use crate::compiler_frontend::ast::file_value_resolution::resolve_file_value;
+use crate::compiler_frontend::ast::module_ast::scope_context::ScopeDeclarationRef;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{TemplateSegmentOrigin, TemplateType};
@@ -66,12 +67,16 @@ fn is_unresolved_constant_placeholder_reference(
     path_fork
         .component(path)
         .and_then(|name| context.get_reference(&name))
-        .is_some_and(|reference| {
-            // A pending numeric binding is a runtime body-local value with no declaration,
-            // never a constant placeholder, so it cannot satisfy this predicate.
-            reference
-                .ready_declaration()
-                .is_some_and(|declaration| context.is_unresolved_constant_placeholder(declaration))
+        .is_some_and(|reference| match reference {
+            ScopeDeclarationRef::Local { declaration, .. } => {
+                context.is_unresolved_constant_placeholder(&declaration)
+            }
+            ScopeDeclarationRef::Shared(declaration) => {
+                context.is_unresolved_constant_placeholder(declaration)
+            }
+            ScopeDeclarationRef::PendingNumeric { .. } | ScopeDeclarationRef::RouteParameter(_) => {
+                false
+            }
         })
 }
 
@@ -268,6 +273,7 @@ pub(super) fn push_template_head_expression(
                 &target.context.template_ir_store,
                 target.expression_builder,
                 target.const_values,
+                Some(target.context.external_package_registry.as_ref()),
             )
         })?
         .is_compile_time_value();

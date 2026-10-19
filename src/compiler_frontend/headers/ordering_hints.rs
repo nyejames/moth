@@ -7,7 +7,9 @@
 //! Binding canonicalizes or drops dependency-spelled hints; Stage 3 resolves retained local hints
 //! into sortable graph edges.
 
-use crate::compiler_frontend::builtins::error_type::is_reserved_builtin_symbol;
+use crate::compiler_frontend::builtins::error_type::{
+    is_reserved_builtin_symbol, is_reserved_parameter_contract_symbol,
+};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
@@ -96,7 +98,9 @@ pub(super) fn collect_named_type_ordering_hint(
 ) -> Result<(), CompilerError> {
     match type_reference {
         ParsedNamedTypeReference::Bare(type_name) => {
-            if is_reserved_builtin_symbol(string_table.resolve(type_name)) {
+            if is_reserved_builtin_symbol(string_table.resolve(type_name))
+                || is_reserved_parameter_contract_symbol(string_table.resolve(type_name))
+            {
                 return Ok(());
             }
 

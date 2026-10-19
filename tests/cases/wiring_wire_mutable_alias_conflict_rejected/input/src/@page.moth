@@ -1,0 +1,7 @@
+mixed |identity Wire of String, writer ~String| -> String:
+    writer = "changed"
+    return identity
+;
+
+source ~= "before"
+result = mixed(source, ~source)

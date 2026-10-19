@@ -1,0 +1,5 @@
+@core/math sin
+
+value #= sin(0.5)
+
+[:[value]]

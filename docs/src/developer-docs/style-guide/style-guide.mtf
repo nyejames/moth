@@ -25,7 +25,7 @@ Priorities:
 - Use `CompilerError` only for internal compiler, filesystem, backend, dev-server and tooling infrastructure failures.
 - Diagnostic payloads and reason enums should carry typed `DiagnosticPayload` facts and stable diagnostic codes, not pre-rendered prose.
 - Include an exact `SourceSpan` when authored source owns the diagnostic and preserve source labels wherever they add useful context.
-- Type diagnostics should carry semantic `TypeId`s and context enums and render through `DiagnosticRenderContext`, not cloned `DataType` values or formatted type names.
+- Type diagnostics should carry semantic `TypeId`s and context enums and render through `DiagnosticRenderContext`, not cloned type syntax or formatted type names.
 - Use `DiagnosticBag` for stage-local accumulation and `CompilerMessages` only at build/render boundaries.
 - Never suggest wrapping arithmetic, an unchecked mode, resource recovery, a grouped `if:` handler or a public `fails` marker.
 - Treat an assertion as an explicit user choice, never the default repair suggestion.

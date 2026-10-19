@@ -1,0 +1,17 @@
+EditorMessage ::
+    Changed | value String |,
+;
+
+AppMessage ::
+    Editor | editor_id I32, message EditorMessage |,
+;
+
+accept_mixed type T, M |event Route of T -> M, sample T| -> String:
+    return "mixed"
+;
+
+outer |event Route of EditorMessage -> AppMessage| -> String:
+    return accept_mixed(event, EditorMessage::Changed("x"))
+;
+
+io.line(outer(AppMessage::Editor(1)))

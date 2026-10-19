@@ -1,0 +1,5 @@
+@helper build_route
+
+generated = build_route(4)
+
+[:wasm-generated=[generated]]

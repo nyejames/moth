@@ -72,68 +72,69 @@ impl TemplateWhitespacePassProfile {
     }
 }
 
+/// Returns the byte length of the leading run of horizontal (non-newline) whitespace.
+/// It scans by char but reports bytes, so callers can slice the same string directly.
+fn horizontal_whitespace_len(text: &str) -> usize {
+    text.find(|ch: char| !ch.is_non_newline_whitespace())
+        .unwrap_or(text.len())
+}
+
 /// Scans the start of a text buffer for the leading whitespace pattern
 /// (optional spaces + newline + blank lines + indentation) and returns the shared
-/// dedent width and the char-index end of the leading boundary block.
+/// dedent width and the byte end of the leading boundary block.
+///
+/// WHY: the width counts chars because `dedent_after_newlines` removes chars, while the
+/// end is a byte offset so the caller can drain it without rebuilding the string.
 pub(crate) fn compute_leading_dedent_info(content: &str) -> (usize, usize) {
-    let chars: Vec<char> = content.chars().collect();
-    let mut char_index = 0usize;
-
     // Skip optional leading horizontal whitespace before the first newline.
-    while char_index < chars.len() && chars[char_index].is_non_newline_whitespace() {
-        char_index += 1;
+    let mut cursor = horizontal_whitespace_len(content);
+    if !content[cursor..].starts_with('\n') {
+        return (0, 0);
     }
 
-    if char_index < chars.len() && chars[char_index] == '\n' {
-        char_index += 1;
-        let leading_boundary_end = char_index;
-        let mut saw_blank_line = false;
-        let mut first_blank_line_indentation = 0usize;
+    cursor += 1;
+    let leading_boundary_end = cursor;
+    let mut saw_blank_line = false;
+    let mut first_blank_line_indentation = 0usize;
 
-        loop {
-            let indentation_start = char_index;
+    loop {
+        let indentation_start = cursor;
 
-            // Measure indentation on this line. A line containing only this
-            // whitespace is blank, so keep scanning for the first content line.
-            while char_index < chars.len() && chars[char_index].is_non_newline_whitespace() {
-                char_index += 1;
+        // Measure indentation on this line. A line containing only this
+        // whitespace is blank, so keep scanning for the first content line.
+        cursor += horizontal_whitespace_len(&content[cursor..]);
+        let indentation = &content[indentation_start..cursor];
+
+        match content[cursor..].chars().next() {
+            Some('\n') => {
+                if !saw_blank_line {
+                    first_blank_line_indentation = indentation.len();
+                }
+                saw_blank_line = true;
+                cursor += 1;
             }
-
-            let indentation_width = char_index.saturating_sub(indentation_start);
-
-            match chars.get(char_index) {
-                Some('\n') => {
-                    if !saw_blank_line {
-                        first_blank_line_indentation = indentation_width;
-                    }
-                    saw_blank_line = true;
-                    char_index += 1;
-                }
-                Some(_) => {
-                    // Preserve authored blank-line newlines. When one precedes
-                    // the first content line, the normal dedent pass removes
-                    // that line's baseline after its retained newline.
-                    let leading_trim_end = if saw_blank_line {
-                        leading_boundary_end + first_blank_line_indentation
-                    } else {
-                        char_index
-                    };
-                    return (indentation_width, leading_trim_end);
-                }
-                None => {
-                    // A body containing only formatting whitespace has no
-                    // content baseline. Retain the existing boundary behavior
-                    // for a single trailing indentation run.
-                    return if saw_blank_line {
-                        (0, leading_boundary_end + first_blank_line_indentation)
-                    } else {
-                        (indentation_width, char_index)
-                    };
-                }
+            Some(_) => {
+                // Preserve authored blank-line newlines. When one precedes
+                // the first content line, the normal dedent pass removes
+                // that line's baseline after its retained newline.
+                let leading_trim_end = if saw_blank_line {
+                    leading_boundary_end + first_blank_line_indentation
+                } else {
+                    cursor
+                };
+                return (indentation.chars().count(), leading_trim_end);
+            }
+            None => {
+                // A body containing only formatting whitespace has no
+                // content baseline. Retain the existing boundary behavior
+                // for a single trailing indentation run.
+                return if saw_blank_line {
+                    (0, leading_boundary_end + first_blank_line_indentation)
+                } else {
+                    (indentation.chars().count(), cursor)
+                };
             }
         }
-    } else {
-        (0, 0)
     }
 }
 
@@ -142,28 +143,24 @@ pub(crate) fn dedent_after_newlines(input: &str, dedent_width: usize) -> String 
         return input.to_owned();
     }
 
-    let chars: Vec<char> = input.chars().collect();
     let mut output = String::with_capacity(input.len());
-    let mut char_index = 0usize;
+    let mut chars = input.chars().peekable();
 
-    while char_index < chars.len() {
-        let current = chars[char_index];
+    while let Some(current) = chars.next() {
         output.push(current);
-        char_index += 1;
 
         if current != '\n' {
             continue;
         }
 
-        let mut removed = 0usize;
-        while char_index < chars.len() && removed < dedent_width {
-            let next = chars[char_index];
-            if !next.is_non_newline_whitespace() {
+        // Drop up to `dedent_width` horizontal whitespace chars after each newline.
+        for _ in 0..dedent_width {
+            if chars
+                .next_if(|next| next.is_non_newline_whitespace())
+                .is_none()
+            {
                 break;
             }
-
-            char_index += 1;
-            removed += 1;
         }
     }
 
@@ -180,23 +177,19 @@ pub(crate) fn dedent_after_newlines(input: &str, dedent_width: usize) -> String 
 /// - A blank line can be indented more deeply than the first content baseline, so baseline
 ///   dedenting alone must not leave formatting spaces in the preserved leading boundary.
 fn trim_leading_blank_line_indentation(content: &mut String) {
-    let chars: Vec<char> = content.chars().collect();
     let mut output = String::with_capacity(content.len());
     let mut line_start = 0usize;
 
     loop {
-        let mut cursor = line_start;
-        while cursor < chars.len() && chars[cursor].is_non_newline_whitespace() {
-            cursor += 1;
-        }
-
-        match chars.get(cursor) {
+        let rest = &content[line_start..];
+        let indentation_len = horizontal_whitespace_len(rest);
+        match rest[indentation_len..].chars().next() {
             Some('\n') => {
                 output.push('\n');
-                line_start = cursor + 1;
+                line_start += indentation_len + 1;
             }
             Some(_) => {
-                output.extend(chars[line_start..].iter().copied());
+                output.push_str(rest);
                 break;
             }
             None => break,
@@ -207,16 +200,15 @@ fn trim_leading_blank_line_indentation(content: &mut String) {
 }
 
 pub(crate) fn trim_trailing_whitespace_from_final_newline(content: &mut String) {
-    let chars: Vec<char> = content.chars().collect();
-    let Some(last_newline) = chars.iter().rposition(|ch| *ch == '\n') else {
+    let Some(last_newline) = content.rfind('\n') else {
         return;
     };
 
-    if chars[last_newline + 1..]
-        .iter()
+    if content[last_newline + 1..]
+        .chars()
         .all(|ch| ch.is_non_newline_whitespace())
     {
-        *content = chars[..last_newline].iter().collect();
+        content.truncate(last_newline);
     }
 }
 
@@ -352,7 +344,8 @@ fn normalize_structured_default_whitespace(
                     && leading_text_is_run_boundary
                     && leading_trim_end > 0
                 {
-                    text = text.chars().skip(leading_trim_end).collect();
+                    // Byte offset from compute_leading_dedent_info; drain it in place.
+                    text.drain(..leading_trim_end);
                     trim_leading_blank_line_indentation(&mut text);
                 }
 

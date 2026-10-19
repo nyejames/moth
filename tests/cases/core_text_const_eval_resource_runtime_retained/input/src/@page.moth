@@ -1,0 +1,5 @@
+@core/text
+
+resource_length = text.length(@assets/value.txt)
+
+[:core_text_const_eval_resource_runtime_retained resource_length=[resource_length]]

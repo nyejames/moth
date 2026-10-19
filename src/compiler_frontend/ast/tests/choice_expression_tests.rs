@@ -9,7 +9,7 @@ use crate::compiler_frontend::compiler_messages::{
     ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason, DiagnosticPayload,
     InvalidChoiceVariantReason, NameNamespace,
 };
-use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     function_body_by_name, start_function_body,
 };
@@ -60,29 +60,17 @@ fn resolves_choice_variant_expressions_with_choice_types() {
     let ExpressionOperationView::Choice { tag, .. } = choice.operation() else {
         panic!("expected Choice operation");
     };
-    let DataType::Choices { nominal_path, .. } = &current_declaration.diagnostic_type else {
-        panic!("expected Choices diagnostic type");
+    let current_type_id = current_declaration.type_id;
+    let Some(TypeDefinition::Choice(definition)) = ast.type_environment.get(current_type_id) else {
+        panic!("expected the current declaration to have a registered choice type");
     };
     assert_eq!(tag, 0, "expected Status::Ready to have tag 0");
     assert_eq!(
         path_fork
-            .component(*nominal_path)
+            .component(definition.path)
             .map(|id| string_table.resolve(id)),
         Some("Status"),
         "expected nominal path to be Status"
-    );
-    assert!(
-        matches!(
-            &current_declaration.diagnostic_type,
-            DataType::Choices {
-                nominal_path,
-                ..
-            } if path_fork
-                .component(*nominal_path)
-                .map(|id| string_table.resolve(id))
-                == Some("Status")
-        ),
-        "choice literal should keep declaration-backed choice identity"
     );
 
     let make_status_body = function_body_by_name(&ast, &path_fork, &string_table, "make_status");
@@ -113,29 +101,22 @@ fn resolves_choice_variant_expressions_with_choice_types() {
     let ExpressionOperationView::Choice { tag, .. } = selected.operation() else {
         panic!("expected Choice operation");
     };
-    let DataType::Choices { nominal_path, .. } = &selected_declaration.diagnostic_type else {
-        panic!("expected Choices diagnostic type");
+    let Some(TypeDefinition::Choice(definition)) =
+        ast.type_environment.get(selected_declaration.type_id)
+    else {
+        panic!("expected the selected declaration to have a registered choice type");
     };
     assert_eq!(tag, 1, "expected Status::Busy to have tag 1");
     assert_eq!(
         path_fork
-            .component(*nominal_path)
+            .component(definition.path)
             .map(|id| string_table.resolve(id)),
         Some("Status"),
         "expected nominal path to be Status"
     );
-    assert!(
-        matches!(
-            &selected_declaration.diagnostic_type,
-            DataType::Choices {
-                nominal_path,
-                ..
-            } if path_fork
-                .component(*nominal_path)
-                .map(|id| string_table.resolve(id))
-                == Some("Status")
-        ),
-        "choice literal should preserve declaration-backed choice type"
+    assert_eq!(
+        selected_declaration.type_id, current_type_id,
+        "choice literals should share the declaration-backed semantic type"
     );
 }
 

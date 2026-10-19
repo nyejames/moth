@@ -1,0 +1,15 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "html_resource_match_guard_reachable picked=miss"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["./assets/guard.txt"]
+
+[[backends.html.artifact_assertions]]
+path = "assets/guard.txt"
+kind = "binary"

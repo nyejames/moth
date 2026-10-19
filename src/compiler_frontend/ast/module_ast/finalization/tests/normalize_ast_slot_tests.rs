@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::ast::const_eval::FoldServices;
 
 // ------------------------------
 //  Slot-bearing template classification uses effective view
@@ -79,7 +80,7 @@ fn slot_bearing_module_constant_classifies_through_effective_tir_view() {
         &registry.borrow(),
         &mut expression_builder,
         &mut const_values,
-        &mut string_table,
+        FoldServices::new(&mut string_table, None, None),
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         None,
     )
@@ -180,7 +181,7 @@ fn const_template_projection_round_trips_structural_resource_and_site_root() {
         &producer_store,
         &mut expression_builder,
         &mut const_values,
-        &mut producer_strings,
+        FoldServices::new(&mut producer_strings, None, None),
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         Some(&producer_resources),
     )

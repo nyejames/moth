@@ -18,7 +18,7 @@ use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
 use crate::compiler_frontend::ast::templates::template_folding::TemplateEmission;
 use crate::compiler_frontend::ast::templates::tir::{
     TemplatePreparationMode, TemplatePreparationOutcome, TemplateTirPhase, TirView,
-    fold_prepared_template, prepare_tir_view,
+    fold_prepared_template, prepare_tir_view_with_source_scope,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::build_config::{
@@ -28,7 +28,6 @@ use crate::compiler_frontend::build_config::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -102,11 +101,8 @@ pub(super) fn resolve_config_declaration(
             const_values,
             string_table,
         )?;
-        let (contract_required, contract_default) = match &authored_default {
-            AuthoredConfigDefault::Missing => (!contract.is_optional(), None),
-            AuthoredConfigDefault::None { .. } => (false, None),
-            AuthoredConfigDefault::Value { value, .. } => (false, Some(value.clone())),
-        };
+        let contract_required =
+            matches!(&authored_default, AuthoredConfigDefault::Missing) && !contract.is_optional();
         let configured_value = if let Some(entry) = services.explicit_input(&input_name) {
             Some((
                 entry.value().materialise_for(contract),
@@ -126,6 +122,10 @@ pub(super) fn resolve_config_declaration(
         };
 
         if let Some((value, origin, value_location, argument_index)) = configured_value {
+            let contract_default = match authored_default {
+                AuthoredConfigDefault::Missing | AuthoredConfigDefault::None { .. } => None,
+                AuthoredConfigDefault::Value { value, .. } => Some(value),
+            };
             let value = value.map_err(|error| {
                 configured_value_error(
                     error,
@@ -154,7 +154,7 @@ pub(super) fn resolve_config_declaration(
                 input_name.clone(),
                 contract,
                 contract_required,
-                contract_default.clone(),
+                contract_default,
                 Some(value),
                 origin,
                 qualifier.qualifier_span,
@@ -186,7 +186,7 @@ pub(super) fn resolve_config_declaration(
                         input_name.clone(),
                         contract,
                         contract_required,
-                        contract_default.clone(),
+                        None,
                         None,
                         BuildConfigValueOrigin::DeclarationDefault,
                         qualifier.qualifier_span,
@@ -212,7 +212,7 @@ pub(super) fn resolve_config_declaration(
                         input_name.clone(),
                         contract,
                         contract_required,
-                        contract_default.clone(),
+                        None,
                         None,
                         BuildConfigValueOrigin::DeclarationDefault,
                         qualifier.qualifier_span,
@@ -256,7 +256,7 @@ pub(super) fn resolve_config_declaration(
                         input_name.clone(),
                         contract,
                         contract_required,
-                        contract_default,
+                        Some(value.clone()),
                         Some(value),
                         BuildConfigValueOrigin::DeclarationDefault,
                         qualifier.qualifier_span,
@@ -270,8 +270,6 @@ pub(super) fn resolve_config_declaration(
         })?;
         let expression = expression_builder.view(expression_id)?;
         declaration.type_id = expression.value_type_id()?;
-        declaration.diagnostic_type =
-            diagnostic_type_spelling(declaration.type_id, type_interner.environment());
         declaration.value_mode = expression.value_mode();
         let provenance = expression
             .occurrence_facts()
@@ -735,11 +733,12 @@ fn primitive_value_from_template(
             reference.context,
         )
         .map_err(ExpressionParseError::from)?;
-        prepare_tir_view(
+        prepare_tir_view_with_source_scope(
             &view,
             expression_builder,
             const_values,
             TemplatePreparationMode::Value,
+            scope_context,
         )
         .map_err(ExpressionParseError::from)?
     };
@@ -762,8 +761,12 @@ fn primitive_value_from_template(
         reference.context,
     )
     .map_err(ExpressionParseError::from)?;
-    let fold_result = fold_prepared_template(&preparation, view, &mut fold_context)
+    let mut fold_result = fold_prepared_template(&preparation, view, &mut fold_context)
         .map_err(ExpressionParseError::from)?;
+    if let Some(diagnostic) = fold_result.take_required_diagnostic() {
+        // A grouped-project config field must resolve to concrete build-time text.
+        return Err(ExpressionParseError::Diagnostic(diagnostic));
+    }
     match fold_result.emission {
         TemplateEmission::NoOutput => Ok(Some(PrimitiveBuildValue::String(String::new()))),
         TemplateEmission::Output(value) => {

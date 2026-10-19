@@ -1,0 +1,10 @@
+BorrowMessage ::
+    Store | source String, next String |,
+;
+
+consume |route Route of String -> BorrowMessage, source ~String| -> String:
+    return "consumed"
+;
+
+source ~= "initial"
+consume(BorrowMessage::Store(source), ~source)

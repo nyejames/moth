@@ -7,14 +7,15 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_eval::{
-    ConstantFoldOutcome, constant_fold, fold_compile_time_expression,
+    ConstantFoldOutcome, ExplicitConstantPayload, FoldRequirement, FoldServices, constant_fold,
+    explicit_constant_operand,
 };
-use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOp, OwnedExpr,
 };
-use crate::compiler_frontend::ast::field_access::project_explicit_const_record_field;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, TypeMismatchContext};
@@ -87,13 +88,32 @@ pub fn evaluate_expression(
             .into());
         };
 
-        let only_expression = fold_compile_time_expression(
+        let requirement = if context.kind.is_constant_context() {
+            FoldRequirement::Required
+        } else {
+            FoldRequirement::Opportunistic
+        };
+        let only_expression = match constant_fold(
             *expression,
             expressions,
             const_values,
-            string_table,
-            context.kind.is_constant_context(),
-        )?;
+            FoldServices::new(
+                string_table,
+                Some(context),
+                Some(context.external_package_registry.as_ref()),
+            ),
+            requirement,
+        )? {
+            ConstantFoldOutcome::Folded(root) | ConstantFoldOutcome::NotConstant(root) => root,
+            ConstantFoldOutcome::Refused { root, .. }
+                if requirement == FoldRequirement::Opportunistic =>
+            {
+                root
+            }
+            ConstantFoldOutcome::Refused { reason, .. } => {
+                return Err(reason.into_diagnostic().into());
+            }
+        };
         // A standalone producer retains its slots for multi-bind, return and handling owners.
         // Only scalar results participate in natural expected-type inference here.
         let Some(value_type_id) = expressions.view(only_expression)?.success_shape().single()
@@ -166,6 +186,7 @@ pub fn evaluate_expression(
         const_values,
         string_table,
         Some(context),
+        path_fork,
         value_mode.as_owned(),
     )?;
     // The occurrence anchors at its first operand; operator facts keep the exact operator span.
@@ -179,12 +200,21 @@ pub fn evaluate_expression(
         root
     };
     increment_frontend_counter(FrontendCounter::ConstantFoldAttemptCount);
+    let requirement = if context.kind.is_constant_context() {
+        FoldRequirement::Required
+    } else {
+        FoldRequirement::Opportunistic
+    };
     let outcome = constant_fold(
         root.id(),
         expressions,
         const_values,
-        string_table,
-        Some(context),
+        FoldServices::new(
+            string_table,
+            Some(context),
+            Some(context.external_package_registry.as_ref()),
+        ),
+        requirement,
     )?;
     let folded = match outcome {
         ConstantFoldOutcome::Folded(root) => {
@@ -192,12 +222,14 @@ pub fn evaluate_expression(
             root
         }
         ConstantFoldOutcome::NotConstant(root) => root,
-        ConstantFoldOutcome::TextUnavailable { diagnostic, .. }
-            if context.kind.is_constant_context() =>
+        ConstantFoldOutcome::Refused { root, .. }
+            if requirement == FoldRequirement::Opportunistic =>
         {
-            return Err(diagnostic.into());
+            root
         }
-        ConstantFoldOutcome::TextUnavailable { root, .. } => root,
+        ConstantFoldOutcome::Refused { reason, .. } => {
+            return Err(reason.into_diagnostic().into());
+        }
     };
 
     // Surviving operation rows own their contributors. The outer occurrence adds only the
@@ -215,18 +247,6 @@ pub fn evaluate_expression(
     Ok(expressions.with_failure_facts(expressions.own(folded), failure)?)
 }
 
-fn is_matching_materialized_numeric_value(
-    expression: OwnedExpr,
-    expected_type_id: TypeId,
-    expressions: &AstExpressionBuilder,
-    const_values: &ConstValueStore,
-) -> Result<bool, CompilerError> {
-    let view = expressions.view_owned(expression)?;
-    Ok(view.success_shape().single() == Some(expected_type_id)
-        && matches!(view.operation_id(), ExpressionOp::Constant(id)
-            if matches!(const_values.payload(id), Some(ConstValuePayload::FixedScalar(_) | ConstValuePayload::Number(_)))))
-}
-
 fn substitute_explicit_numeric_constants(
     nodes: &mut [ExpressionRpnItem],
     context: &ScopeContext,
@@ -239,71 +259,73 @@ fn substitute_explicit_numeric_constants(
         let ExpressionRpnItem::Operand(expression) = item else {
             continue;
         };
-        let view = expressions.view(*expression)?;
-        let type_id = view.value_type_id()?;
+        let type_id = expressions.view(*expression)?.value_type_id()?;
         if NumericScalar::from_type_id(type_id, type_environment).is_none() {
             continue;
         }
-        let span = view.span();
-        let mode = view.value_mode();
-        let replacement = match view.operation_id() {
-            ExpressionOp::Reference(path) => context
-                .explicit_constant_value(&path, path_fork, const_values)
-                .filter(|&value| {
-                    const_values
-                        .metadata(value)
-                        .is_some_and(|metadata| metadata.type_id == type_id)
-                        && matches!(
-                            const_values.payload(value),
-                            Some(ConstValuePayload::FixedScalar(_) | ConstValuePayload::Number(_))
-                        )
-                })
-                .map(|value| expressions.constant(value, type_id, span, mode))
-                .transpose()?,
-            ExpressionOp::Copy(place) if expressions.place(place)?.projections().len() == 0 => {
-                let path = expressions.place(place)?.metadata().root;
-                context
-                    .explicit_constant_value(&path, path_fork, const_values)
-                    .filter(|&value| {
-                        const_values
-                            .metadata(value)
-                            .is_some_and(|metadata| metadata.type_id == type_id)
-                            && matches!(
-                                const_values.payload(value),
-                                Some(
-                                    ConstValuePayload::FixedScalar(_)
-                                        | ConstValuePayload::Number(_)
-                                )
-                            )
-                    })
-                    .map(|value| expressions.constant(value, type_id, span, mode))
-                    .transpose()?
-            }
-            ExpressionOp::FieldAccess { .. } | ExpressionOp::Copy(_) => {
-                project_explicit_const_record_field(
-                    expressions.own(*expression),
-                    context,
-                    path_fork,
-                    expressions,
-                    const_values,
-                )?
-            }
-            _ => None,
-        };
-        if let Some(replacement) = replacement
-            && is_matching_materialized_numeric_value(
-                replacement,
-                type_id,
-                expressions,
-                const_values,
-            )?
-        {
-            *expression = expressions
-                .preserve_authored_metadata(replacement, expressions.own(*expression))?
-                .id();
+        if let Some(replacement) = explicit_constant_operand(
+            expressions.own(*expression),
+            ExplicitConstantPayload::Numeric,
+            context,
+            path_fork,
+            expressions,
+            const_values,
+        )? {
+            *expression = replacement.id();
         }
     }
     Ok(())
+}
+
+/// Replace explicit String `#` constant operands of an equality comparison with their values.
+///
+/// WHAT: only `Equality` and `NotEqual` read String payloads at compile time, so every other
+///       operator returns its operands unchanged.
+/// WHY: `binary_payload` rejects every other operator on a String constant with a diagnostic,
+///      so substituting for them would turn valid runtime String operations, such as
+///      concatenation, into compile errors.
+fn substitute_explicit_text_equality_operands(
+    operator: &Operator,
+    left: ExprId,
+    right: Option<ExprId>,
+    scope: Option<&ScopeContext>,
+    path_fork: &PathInternerFork,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+) -> Result<(ExprId, Option<ExprId>), ExpressionTypingError> {
+    let Some(scope) = scope else {
+        return Ok((left, right));
+    };
+    if !matches!(operator, Operator::Equality | Operator::NotEqual) {
+        return Ok((left, right));
+    }
+    let left = explicit_text_operand(left, scope, path_fork, expressions, const_values)?;
+    let right = right
+        .map(|right| explicit_text_operand(right, scope, path_fork, expressions, const_values))
+        .transpose()?;
+    Ok((left, right))
+}
+
+/// Replace one operand that names an explicit String `#` constant with that constant's value.
+///
+/// WHY: `explicit_constant_operand` is the single replacement owner; this only selects the text
+/// payload family for one operand.
+fn explicit_text_operand(
+    operand: ExprId,
+    scope: &ScopeContext,
+    path_fork: &PathInternerFork,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+) -> Result<ExprId, ExpressionTypingError> {
+    let replacement = explicit_constant_operand(
+        expressions.own(operand),
+        ExplicitConstantPayload::Text,
+        scope,
+        path_fork,
+        expressions,
+        const_values,
+    )?;
+    Ok(replacement.map_or(operand, |replacement| replacement.id()))
 }
 
 /// Materialise one pending literal at its selected destination or natural value mode.
@@ -478,6 +500,7 @@ pub(crate) fn expression_from_resolved_items(
     const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     scope: Option<&ScopeContext>,
+    path_fork: &PathInternerFork,
     value_mode: ValueMode,
 ) -> Result<OwnedExpr, ExpressionTypingError> {
     let mut stack: Vec<ExprId> = Vec::with_capacity(items.len());
@@ -500,6 +523,15 @@ pub(crate) fn expression_from_resolved_items(
                 let left = stack.pop().ok_or_else(|| {
                     CompilerError::compiler_error("Resolved operation lost its left operand.")
                 })?;
+                let (left, right) = substitute_explicit_text_equality_operands(
+                    &facts.operator,
+                    left,
+                    right,
+                    scope,
+                    path_fork,
+                    expressions,
+                    const_values,
+                )?;
                 let right_constant = match right {
                     Some(right) => is_constant_node(expressions, right)?,
                     None => true,
@@ -530,10 +562,10 @@ pub(crate) fn expression_from_resolved_items(
     Ok(expressions.own(*root))
 }
 
-/// Fold one completed node in place; a runtime or text-unavailable outcome keeps the node.
+/// Fold one completed node in place; an opportunistic refusal keeps the node.
 ///
-/// WHAT: `constant_fold` is the single folding owner. A text-unavailable node stays runtime
-/// here; the root pass reports its diagnostic for constant contexts.
+/// WHAT: `constant_fold` is the single folding owner. A refusal preserves the runtime expression
+/// here; a required receiver reports the refusal's owned diagnostic.
 fn fold_completed_node(
     node: ExprId,
     expressions: &mut AstExpressionBuilder,
@@ -541,13 +573,30 @@ fn fold_completed_node(
     string_table: &mut StringTable,
     scope: Option<&ScopeContext>,
 ) -> Result<ExprId, ExpressionTypingError> {
-    Ok(
-        match constant_fold(node, expressions, const_values, string_table, scope)? {
-            ConstantFoldOutcome::Folded(folded) => folded,
-            ConstantFoldOutcome::NotConstant(id)
-            | ConstantFoldOutcome::TextUnavailable { root: id, .. } => id,
-        },
-    )
+    let registry = scope.map(|scope| scope.external_package_registry.as_ref());
+    let requirement = if scope.is_some_and(|scope| scope.kind.is_constant_context()) {
+        FoldRequirement::Required
+    } else {
+        FoldRequirement::Opportunistic
+    };
+    let outcome = constant_fold(
+        node,
+        expressions,
+        const_values,
+        FoldServices::new(string_table, scope, registry),
+        requirement,
+    )?;
+    match outcome {
+        ConstantFoldOutcome::Folded(folded) | ConstantFoldOutcome::NotConstant(folded) => {
+            Ok(folded)
+        }
+        ConstantFoldOutcome::Refused { root, .. }
+            if requirement == FoldRequirement::Opportunistic =>
+        {
+            Ok(root)
+        }
+        ConstantFoldOutcome::Refused { reason, .. } => Err(reason.into_diagnostic().into()),
+    }
 }
 
 /// Whether a completed node is already a folded `Constant`.
@@ -565,8 +614,8 @@ fn is_constant_node(
 /// contextual expectation.
 ///
 /// WHAT: compares canonical `TypeId`s through the `TypeEnvironment`.
-/// WHY: semantic type decisions must use `TypeId` equality, not parse-level
-///      `DataType` shape matching.
+/// WHY: compatibility is defined over canonical `TypeId` pairs and queried through the
+///      `TypeEnvironment`.
 fn validate_expression_result_type(
     expected_type: &mut ExpectedType,
     actual_type_id: TypeId,

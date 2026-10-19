@@ -20,6 +20,7 @@ fn deep_const_fact_walk_uses_one_mib_stack() {
                 &mut builder,
                 Rc::new(RefCell::new(TemplateIrStore::new())),
                 &types,
+                None,
             );
             collector
                 .walk_expression_for_body_local(&root, &mut ConstValueEnvironment::default())

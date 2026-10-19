@@ -230,9 +230,6 @@ impl<'a> HirValidator<'a> {
                 self.require_statement_destination(*candidate_result, block_id, anchor)?;
                 self.require_statement_destination(*in_range_result, block_id, anchor)?;
             }
-            HirStatementKind::Drop(local) => {
-                self.require_statement_local(*local, block_id, anchor)?;
-            }
             HirStatementKind::PushRuntimeFragment { vec_local, .. } => {
                 self.require_statement_local(*vec_local, block_id, anchor)?;
             }
@@ -304,10 +301,6 @@ impl<'a> HirValidator<'a> {
                     false,
                     anchor,
                 )?;
-            }
-
-            HirStatementKind::Drop(local) => {
-                self.require_statement_local(*local, block_id, anchor)?;
             }
 
             HirStatementKind::PushRuntimeFragment { vec_local, value } => {

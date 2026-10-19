@@ -1,0 +1,13 @@
+AppMessage ::
+    Search | query String |,
+;
+
+mismatch type T |event Route of {T} -> AppMessage, value T| -> String:
+    return "accepted"
+;
+
+outer |event Route of String -> AppMessage| -> String:
+    return mismatch(event, "x")
+;
+
+io.line(outer(AppMessage::Search))

@@ -1,0 +1,15 @@
+EditorMessage ::
+    Changed | value String |,
+;
+
+AppMessage ::
+    Editor | editor_id I32, message EditorMessage |,
+;
+
+echo type T |event Route of T -> AppMessage, sample T| -> String:
+    return "echo"
+;
+
+id = 5
+result = echo(AppMessage::Editor(id), EditorMessage::Changed("x"))
+io.line(result)

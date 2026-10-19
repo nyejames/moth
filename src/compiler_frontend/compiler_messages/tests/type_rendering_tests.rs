@@ -13,7 +13,7 @@ use crate::compiler_frontend::compiler_messages::render::{
 use crate::compiler_frontend::compiler_messages::{
     BuiltinFailureOriginKind, BuiltinFailureWitness, CompilerDiagnostic, DiagnosticOperator,
     InvalidAssignmentTargetReason, InvalidFallibleHandlingReason, InvalidFieldAccessReason,
-    TypeMismatchContext,
+    InvalidReceiverDeclarationReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition,
@@ -82,6 +82,38 @@ fn rule_diagnostics_render_receiver_type_names() {
         assignment_guidance
             .iter()
             .any(|line| line.contains("A temporary value cannot be assigned through"))
+    );
+}
+
+#[test]
+fn receiver_declaration_reason_renders_the_receiver_type_identity() {
+    // WHAT: the payload carries the receiver type as semantic identity, so the rule message must
+    //       name it through the render context rather than an interned spelling.
+    let mut type_environment = TypeEnvironment::new();
+    let element_type = type_environment.builtins().string;
+    let receiver_type = type_environment.intern_collection(element_type, None);
+    let mut string_table = StringTable::new();
+    let function_name = string_table.intern("describe");
+    let path_fork = PathInternerFork::empty();
+    let path_table = path_fork.snapshot_table();
+    let context = DiagnosticRenderContext::new(&string_table)
+        .with_optional_type_environment(Some(&type_environment))
+        .with_path_table(&path_table);
+
+    let diagnostic = CompilerDiagnostic::invalid_receiver_declaration(
+        InvalidReceiverDeclarationReason::UnsupportedType {
+            function_name,
+            type_id: receiver_type,
+        },
+        None,
+    );
+    let guidance = format_payload_guidance(&diagnostic.payload, context);
+    assert!(
+        guidance
+            .iter()
+            .any(|line| line
+                .contains("Function 'describe' uses unsupported receiver type '{String}'")),
+        "receiver declaration message must render the receiver type identity: {guidance:?}"
     );
 }
 

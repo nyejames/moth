@@ -17,8 +17,10 @@ use crate::compiler_frontend::ast::generic_functions::IfGenericRequestRanges;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::{DataType, ReceiverKey};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::BuildConfigQualifierSyntax;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -31,8 +33,8 @@ pub struct Declaration {
     pub id: PathId,
     /// Canonical static type of the binding, independent of any initializer result.
     pub type_id: TypeId,
-    /// Display-only declared type spelling.
-    pub diagnostic_type: DataType,
+    /// Parsed annotation retained only while a later type-resolution phase still needs source syntax.
+    pub(crate) type_syntax: Option<ParsedTypeRef>,
     /// Access mode of the binding rather than the initializer value.
     pub value_mode: ValueMode,
     pub value: DeclarationValue,
@@ -192,6 +194,16 @@ pub struct RangeLoopSpec {
     pub end: ExprId,
     pub end_kind: RangeEndKind,
     pub step: Option<ExprId>,
+    /// The iteration domain the range policy selected from these operands.
+    ///
+    /// WHAT: the counter type, operand conversion target, unit-step domain and generated
+    ///       stepping-op domain of this header, already selected and checked by
+    ///       `range_loop_spec_from_completed_operands`.
+    /// WHY: domain selection is a pure function of the operands' canonical types, and those types
+    ///      only exist at AST construction. Carrying the selected domain with the header keeps
+    ///      HIR lowering, the counter declaration and template copies reading one selected fact
+    ///      instead of each re-deriving it from operand types.
+    pub domain: NumericScalar,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -714,7 +726,7 @@ impl AstNode {
     /// WHY: exported structs share the same canonical type identity for runtime
     /// and const-record values; the const-record call restriction is value-level,
     /// so it must inspect the explicit `ConstRecordState` on the expression rather
-    /// than branching on diagnostic-only `DataType` spelling.
+    /// than branching on the declaration's canonical type identity.
     pub fn expression_is_const_record_value(
         &self,
         expressions: &AstExpressionBuilder,

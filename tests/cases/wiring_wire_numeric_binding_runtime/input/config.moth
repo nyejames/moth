@@ -1,0 +1,5 @@
+project #= (
+    name = "wiring_wire_numeric_binding_runtime",
+    entry_root = "src",
+)
+html #= ()

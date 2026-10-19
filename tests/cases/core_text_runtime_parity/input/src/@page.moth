@@ -1,0 +1,45 @@
+@core/text length, is_empty, contains, starts_with, ends_with
+
+runtime_length |value String| -> I32:
+    return length(value)
+;
+
+runtime_is_empty |value String| -> Bool:
+    return is_empty(value)
+;
+
+runtime_contains |value String, pattern String| -> Bool:
+    return contains(value, pattern)
+;
+
+runtime_starts_with |value String, pattern String| -> Bool:
+    return starts_with(value, pattern)
+;
+
+runtime_ends_with |value String, pattern String| -> Bool:
+    return ends_with(value, pattern)
+;
+
+folded_len_nonbmp #= length("a😊b")
+folded_len_combining #= length("é")
+folded_empty_true #= is_empty("")
+folded_empty_false #= is_empty("a")
+folded_contains_nonbmp #= contains("a😊b", "😊")
+folded_contains_empty #= contains("", "")
+folded_starts_combining #= starts_with("é", "e")
+folded_ends_combining #= ends_with("é", "́")
+folded_nfc_contains #= contains("é", "é")
+folded_nfc_starts #= starts_with("é", "e")
+
+runtime_len_nonbmp = runtime_length("a😊b")
+runtime_len_combining = runtime_length("é")
+runtime_empty_true = runtime_is_empty("")
+runtime_empty_false = runtime_is_empty("a")
+runtime_contains_nonbmp = runtime_contains("a😊b", "😊")
+runtime_contains_empty = runtime_contains("", "")
+runtime_starts_combining = runtime_starts_with("é", "e")
+runtime_ends_combining = runtime_ends_with("é", "́")
+runtime_nfc_contains = runtime_contains("é", "é")
+runtime_nfc_starts = runtime_starts_with("é", "e")
+
+[:parity_probe len_nonbmp=[folded_len_nonbmp]/[runtime_len_nonbmp] len_combining=[folded_len_combining]/[runtime_len_combining] empty_true=[folded_empty_true]/[runtime_empty_true] empty_false=[folded_empty_false]/[runtime_empty_false] contains_nonbmp=[folded_contains_nonbmp]/[runtime_contains_nonbmp] contains_empty=[folded_contains_empty]/[runtime_contains_empty] starts_combining=[folded_starts_combining]/[runtime_starts_combining] ends_combining=[folded_ends_combining]/[runtime_ends_combining] nfc_contains=[folded_nfc_contains]/[runtime_nfc_contains] nfc_starts=[folded_nfc_starts]/[runtime_nfc_starts]]

@@ -1,0 +1,31 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "len=3 has_b=true ready=true prefix=true suffix=true"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "function __moth_text_length(",
+    "function __moth_text_contains(",
+]
+must_not_contain = [
+    "__moth_text_is_empty",
+    "__moth_text_starts_with",
+    "__moth_text_ends_with",
+]
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0058"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0058"
+occurrence = 1
+path = "input/@page.moth"
+line = 4
+column = 12

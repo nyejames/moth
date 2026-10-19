@@ -16,8 +16,8 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidLoopHeaderReason, InvalidRangeOperandReason, RangeOperandKind,
     ReservedNameOwner, TypeMismatchContext,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId};
 use crate::compiler_frontend::tests::ast_fixture_support::function_body_by_name;
 use crate::compiler_frontend::tests::parse_support::{
@@ -263,13 +263,10 @@ fn range_index_binding_has_i32_type() {
         panic!("expected range loop in function body");
     };
 
-    assert!(matches!(
-        bindings
-            .index
-            .as_ref()
-            .map(|binding| &binding.diagnostic_type),
-        Some(DataType::FixedScalar(FixedScalar::I32))
-    ));
+    assert_eq!(
+        bindings.index.as_ref().map(|binding| binding.type_id),
+        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32))
+    );
 }
 
 #[test]
@@ -287,18 +284,17 @@ fn range_item_type_uses_canonical_fixed_integer_promotion() {
         panic!("expected fixed integer range loop");
     };
 
-    assert!(bindings.item.as_ref().is_some_and(|binding| {
-        matches!(
-            &binding.diagnostic_type,
-            DataType::FixedScalar(FixedScalar::I32)
-        )
-    }));
-    assert!(bindings.index.as_ref().is_some_and(|binding| {
-        matches!(
-            &binding.diagnostic_type,
-            DataType::FixedScalar(FixedScalar::I32)
-        )
-    }));
+    assert_eq!(
+        bindings.item.as_ref().map(|binding| binding.type_id),
+        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32))
+    );
+    assert_eq!(
+        bindings.index.as_ref().map(|binding| binding.type_id),
+        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32))
+    );
+    // The spec carries the selected iteration domain: the counter type and the domain must
+    // agree, because HIR lowers the loop from the spec's domain alone.
+    assert_eq!(range.domain, NumericScalar::Fixed(FixedScalar::I32));
     assert_eq!(
         expression_type_id(&ast, range.start),
         builtin_type_ids::fixed_scalar(FixedScalar::I8)
@@ -320,16 +316,18 @@ fn range_item_type_promotes_mixed_i32_u32_to_i64() {
     );
     let body = loop_function_body(&ast, &path_fork, &string_table);
 
-    let NodeKind::RangeLoop { bindings, .. } = &body[2].kind else {
+    let NodeKind::RangeLoop {
+        bindings, range, ..
+    } = &body[2].kind
+    else {
         panic!("expected mixed fixed integer range loop");
     };
 
-    assert!(bindings.item.as_ref().is_some_and(|binding| {
-        matches!(
-            &binding.diagnostic_type,
-            DataType::FixedScalar(FixedScalar::I64)
-        )
-    }));
+    assert_eq!(
+        bindings.item.as_ref().map(|binding| binding.type_id),
+        Some(builtin_type_ids::fixed_scalar(FixedScalar::I64))
+    );
+    assert_eq!(range.domain, NumericScalar::Fixed(FixedScalar::I64));
 }
 
 #[test]
@@ -352,18 +350,15 @@ fn omitted_range_start_zero_uses_promoted_fixed_domain() {
         Some(value)
             if value.scalar() == FixedScalar::U64 && value.as_u64() == Some(0)
     ));
-    assert!(bindings.item.as_ref().is_some_and(|binding| {
-        matches!(
-            &binding.diagnostic_type,
-            DataType::FixedScalar(FixedScalar::U64)
-        )
-    }));
-    assert!(bindings.index.as_ref().is_some_and(|binding| {
-        matches!(
-            &binding.diagnostic_type,
-            DataType::FixedScalar(FixedScalar::I32)
-        )
-    }));
+    assert_eq!(
+        bindings.item.as_ref().map(|binding| binding.type_id),
+        Some(builtin_type_ids::fixed_scalar(FixedScalar::U64))
+    );
+    assert_eq!(range.domain, NumericScalar::Fixed(FixedScalar::U64));
+    assert_eq!(
+        bindings.index.as_ref().map(|binding| binding.type_id),
+        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32))
+    );
 }
 
 #[test]
@@ -388,12 +383,10 @@ fn omitted_range_zero_keeps_endpoint_type_before_step_promotion() {
     ));
     // D15: the `U16` endpoint and `I8` step mix selects the smallest signed type that contains
     // both complete ranges, so the counter domain is `I32` without a minimum-width floor.
-    assert!(bindings.item.as_ref().is_some_and(|binding| {
-        matches!(
-            &binding.diagnostic_type,
-            DataType::FixedScalar(FixedScalar::I32)
-        )
-    }));
+    assert_eq!(
+        bindings.item.as_ref().map(|binding| binding.type_id),
+        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32))
+    );
 }
 
 #[test]
@@ -404,16 +397,18 @@ fn range_item_type_promotes_f16_with_explicit_step_to_f32() {
     );
     let body = loop_function_body(&ast, &path_fork, &string_table);
 
-    let NodeKind::RangeLoop { bindings, .. } = &body[3].kind else {
+    let NodeKind::RangeLoop {
+        bindings, range, ..
+    } = &body[3].kind
+    else {
         panic!("expected fixed float range loop");
     };
 
-    assert!(bindings.item.as_ref().is_some_and(|binding| {
-        matches!(
-            &binding.diagnostic_type,
-            DataType::FixedScalar(FixedScalar::F32)
-        )
-    }));
+    assert_eq!(
+        bindings.item.as_ref().map(|binding| binding.type_id),
+        Some(builtin_type_ids::fixed_scalar(FixedScalar::F32))
+    );
+    assert_eq!(range.domain, NumericScalar::Fixed(FixedScalar::F32));
 }
 
 #[test]
@@ -520,13 +515,10 @@ fn float_step_selects_wider_precision_for_mixed_float_bounds_in_either_order() {
         let NodeKind::RangeLoop { bindings, .. } = &body[3].kind else {
             panic!("expected an F32 range loop for {start_type}/{end_type} bounds");
         };
-        let item_type = bindings
-            .item
-            .as_ref()
-            .map(|binding| binding.diagnostic_type.to_owned());
+        let item_type = bindings.item.as_ref().map(|binding| binding.type_id);
         assert_eq!(
             item_type,
-            Some(DataType::FixedScalar(FixedScalar::F32)),
+            Some(builtin_type_ids::fixed_scalar(FixedScalar::F32)),
             "{start_type}/{end_type} bounds must iterate at the wider F32 precision"
         );
     }
@@ -641,13 +633,10 @@ fn collection_index_binding_has_i32_type() {
         panic!("expected collection loop in function body");
     };
 
-    assert!(matches!(
-        bindings
-            .index
-            .as_ref()
-            .map(|binding| &binding.diagnostic_type),
-        Some(DataType::FixedScalar(FixedScalar::I32))
-    ));
+    assert_eq!(
+        bindings.index.as_ref().map(|binding| binding.type_id),
+        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32))
+    );
 }
 
 // --------------------------

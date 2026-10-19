@@ -45,7 +45,7 @@ pub(crate) mod generic_functions;
 mod module_ast;
 mod receiver_methods;
 
-/// Body-owned numeric construction state for the Phase 4 scalar inference path.
+/// Body-owned numeric construction state for the scalar inference path.
 pub(crate) mod numeric_construction;
 pub(crate) mod numeric_known_shape;
 
@@ -145,6 +145,7 @@ pub(crate) use module_ast::environment::{
 pub(crate) use module_ast::environment::{
     ResolvedTraitParameterFact, ResolvedTraitReceiverFact, ResolvedTraitReturnFact,
 };
+pub(crate) use module_ast::scope_context::ScopeDeclarationRef;
 pub use module_ast::scope_context::{ContextKind, ScopeContext};
 pub(crate) use module_ast::scope_context::{FileValueResolutionServices, Stage0ResolutionFacts};
 pub(crate) use receiver_methods::{ReceiverMethodCatalog, ReceiverMethodEntry};

@@ -10,13 +10,12 @@ use super::state::{FunctionLayout, FunctionLayoutInputs, RootSet};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalAccessKind};
 
-use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirProjection};
+use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::hir_side_table::{HirLocalOriginKind, HirLocation};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
-use crate::compiler_frontend::hir::patterns::HirPattern;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
@@ -1197,7 +1196,6 @@ fn collect_statement_defined_locals(statement: &HirStatement, visitor: &mut impl
         }
         HirStatementKind::Write { .. }
         | HirStatementKind::Expr(_)
-        | HirStatementKind::Drop(_)
         | HirStatementKind::PushRuntimeFragment { .. } => {}
     }
 }
@@ -1232,7 +1230,9 @@ fn collect_statement_loaded_locals(
     match &statement.kind {
         HirStatementKind::Write { target, value } => {
             if let HirWriteTarget::AssignPlace(place) = target {
-                collect_place_index_loaded_locals(expressions, place, visitor);
+                for index in expressions.place_index_values(*place) {
+                    collect_expression_loaded_locals(expressions, index, visitor);
+                }
             }
             collect_expression_loaded_locals(expressions, *value, visitor);
         }
@@ -1275,7 +1275,6 @@ fn collect_statement_loaded_locals(
         HirStatementKind::Expr(expression) => {
             collect_expression_loaded_locals(expressions, *expression, visitor);
         }
-        HirStatementKind::Drop(local) => visitor(*local),
         HirStatementKind::RangeStepFailure { .. } => {}
         HirStatementKind::PushRuntimeFragment { vec_local, value } => {
             visitor(*vec_local);
@@ -1313,25 +1312,12 @@ fn collect_statement_written_locals(statement: &HirStatement, visitor: &mut impl
         | HirStatementKind::ValidateFloat { result, .. } => visitor(result.local()),
         HirStatementKind::MapOp { result: None, .. }
         | HirStatementKind::Expr(_)
-        | HirStatementKind::Drop(_)
         | HirStatementKind::PushRuntimeFragment { .. } => {}
     }
 }
 
 fn collect_place_written_local(place: &HirPlace, visitor: &mut impl FnMut(LocalId)) {
     visitor(place.root);
-}
-
-fn collect_place_index_loaded_locals(
-    expressions: &HirExpressionStore,
-    place: &HirPlace,
-    visitor: &mut impl FnMut(LocalId),
-) {
-    for projection in expressions.projections(place.projections) {
-        if let HirProjection::Index(index) = projection {
-            collect_expression_loaded_locals(expressions, *index, visitor);
-        }
-    }
 }
 
 fn collect_terminator_loaded_locals(
@@ -1353,13 +1339,8 @@ fn collect_terminator_loaded_locals(
         HirTerminator::Match { scrutinee, arms } => {
             collect_expression_loaded_locals(expressions, *scrutinee, visitor);
             for arm in arms {
-                if let HirPattern::Literal(expression)
-                | HirPattern::OptionValue { value: expression }
-                | HirPattern::OptionRelational {
-                    value: expression, ..
-                } = &arm.pattern
-                {
-                    collect_expression_loaded_locals(expressions, *expression, visitor);
+                if let Some(value) = arm.pattern.value() {
+                    collect_expression_loaded_locals(expressions, value, visitor);
                 }
                 if let Some(guard) = arm.guard {
                     collect_expression_loaded_locals(expressions, guard, visitor);
@@ -1391,65 +1372,43 @@ fn collect_terminator_loaded_locals(
 
 /// Visits every local read by one expression tree, in evaluation order.
 ///
-/// WHAT: walks the tree with an explicit stack. Children are pushed in reverse,
-/// so nodes are visited in evaluation pre-order.
-/// WHY: nested arithmetic can be deeper than the thread stack allows, so the
-/// walk must not recurse once per nesting level.
+/// WHAT: walks the tree in pre-order with an explicit stack of child iterators. Each node is
+/// visited before its children, and siblings keep source order.
+/// WHY: nested arithmetic can be deeper than the thread stack allows, so the walk must not
+/// recurse once per nesting level.
 fn collect_expression_loaded_locals(
     expressions: &HirExpressionStore,
     expression_id: HirValueId,
     visitor: &mut impl FnMut(LocalId),
 ) {
-    let mut pending = vec![expression_id];
-    while let Some(expression_id) = pending.pop() {
-        match &expressions.expression(expression_id).kind {
-            HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => {
-                visitor(place.root);
-                for projection in expressions.projections(place.projections).iter().rev() {
-                    if let HirProjection::Index(index) = projection {
-                        pending.push(*index);
-                    }
-                }
+    visit_expression_read(expressions, expression_id, visitor);
+    let mut frames = vec![expressions.child_values(expression_id)];
+    while let Some(frame) = frames.last_mut() {
+        match frame.next() {
+            Some(child) => {
+                visit_expression_read(expressions, child, visitor);
+                frames.push(expressions.child_values(child));
             }
-            HirExpressionKind::BinOp { left, right, .. } => {
-                pending.push(*right);
-                pending.push(*left);
+            None => {
+                frames.pop();
             }
-            HirExpressionKind::UnaryOp { operand, .. } => pending.push(*operand),
-            HirExpressionKind::StructConstruct { fields, .. } => {
-                for (_, value) in expressions.struct_fields(*fields).iter().rev() {
-                    pending.push(*value);
-                }
-            }
-            HirExpressionKind::Collection(elements) => {
-                for element in expressions.values(*elements).iter().rev() {
-                    pending.push(*element);
-                }
-            }
-            HirExpressionKind::MapLiteral(entries) => {
-                for entry in expressions.map_entries(*entries).iter().rev() {
-                    pending.push(entry.value);
-                    pending.push(entry.key);
-                }
-            }
-            HirExpressionKind::Range { start, end } => {
-                pending.push(*end);
-                pending.push(*start);
-            }
-            HirExpressionKind::VariantConstruct { fields, .. } => {
-                for field in expressions.variant_fields(*fields).iter().rev() {
-                    pending.push(field.value);
-                }
-            }
-            HirExpressionKind::Cast { source: result, .. } => pending.push(*result),
-            HirExpressionKind::VariantPayloadGet { source, .. } => pending.push(*source),
-            HirExpressionKind::Number(_)
-            | HirExpressionKind::FixedScalar(_)
-            | HirExpressionKind::Bool(_)
-            | HirExpressionKind::Char(_)
-            | HirExpressionKind::StringLiteral(_)
-            | HirExpressionKind::StructuralString { .. } => {}
         }
+    }
+}
+
+/// Reports the local that a load or copy node reads directly.
+///
+/// WHY: index operands are separate child expressions, so the caller's child iteration walks
+/// them; reporting them here as well would count each read twice.
+fn visit_expression_read(
+    expressions: &HirExpressionStore,
+    expression_id: HirValueId,
+    visitor: &mut impl FnMut(LocalId),
+) {
+    if let HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) =
+        &expressions.expression(expression_id).kind
+    {
+        visitor(place.root);
     }
 }
 

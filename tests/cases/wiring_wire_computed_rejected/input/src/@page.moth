@@ -1,0 +1,8 @@
+needs_wire |value Wire of I32| -> I32:
+    return value
+;
+
+left = 1
+right = 2
+result = needs_wire(left + right)
+[:[result]]

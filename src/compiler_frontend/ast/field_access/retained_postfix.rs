@@ -1737,7 +1737,7 @@ fn complete_retained_builtin_step<'env, S: DeferredExpressionCompletion<'env> + 
                 member_name: kind.source_name(),
                 member_span,
             },
-            &arguments,
+            arguments,
             &builtin_argument_expectations(slots),
             services.context,
             services.type_interner,
@@ -2211,7 +2211,7 @@ fn parse_retained_postfix_steps(
                 // Ordinary argument validation (arity, access, type) runs before the static target
                 // rejection, so a bad argument reports ahead of the target. The validated result is
                 // discarded: the rejected target never completes the call and no RHS is parsed.
-                if let ParsedCallArguments::Ready(parsed) = &arguments {
+                if let ParsedCallArguments::Ready(parsed) = arguments {
                     resolve_builtin_member_arguments(
                         BuiltinCallSite {
                             member_name: collection_builtin_op_source_name(member.op),
@@ -2354,7 +2354,7 @@ fn parse_retained_postfix_steps(
                 {
                     // Same ordering as the collection lane: ordinary argument validation runs before
                     // the static target rejection; the validated result is discarded.
-                    if let ParsedCallArguments::Ready(parsed) = &arguments {
+                    if let ParsedCallArguments::Ready(parsed) = arguments {
                         resolve_builtin_member_arguments(
                             BuiltinCallSite {
                                 member_name: member.op.source_name(),
@@ -2543,6 +2543,11 @@ fn parse_retained_postfix_steps(
                     method_path,
                     method_name: member_name,
                     callee: DeferredReceiverCallee::Concrete(signature),
+                    unchanged_expectations: if generic_template.is_none() {
+                        Some(initial_expectations)
+                    } else {
+                        None
+                    },
                     receiver: DeferredCallReceiver::Chained,
                     receiver_mutable: method_entry.receiver_mutable,
                     authored_marker_span: chain_access.authored_marker_span,

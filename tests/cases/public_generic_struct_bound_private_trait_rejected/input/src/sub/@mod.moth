@@ -1,0 +1,7 @@
+@internal PRIVATE_DISPLAY
+
+export:
+    Box type T is PRIVATE_DISPLAY = |
+        value T,
+    |
+;

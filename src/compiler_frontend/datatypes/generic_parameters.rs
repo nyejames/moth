@@ -4,7 +4,9 @@
 //! WHY: header parsing and AST validation need the same parameter rules, while semantic
 //!      type identity stays in `TypeEnvironment` as canonical `GenericParameterId`s.
 
-use crate::compiler_frontend::builtins::error_type::is_reserved_builtin_symbol;
+use crate::compiler_frontend::builtins::error_type::{
+    is_reserved_builtin_symbol, is_reserved_parameter_contract_symbol,
+};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidDeclarationReason};
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
@@ -284,6 +286,7 @@ fn is_generic_parameter_name(name: &str) -> bool {
 fn is_reserved_generic_parameter_name(name: &str) -> bool {
     matches!(name, "Bool" | "String" | "Char")
         || is_reserved_builtin_symbol(name)
+        || is_reserved_parameter_contract_symbol(name)
         // Explicit-width spellings and `Byte` are builtin type names too, so a generic parameter
         // must not shadow them.
         || FixedScalar::from_name(name).is_some()

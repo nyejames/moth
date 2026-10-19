@@ -1,0 +1,4 @@
+@shapes make_square, doubled_measure
+
+value = make_square()
+[:receiver_value_carried_same_module_sibling_success area=[value.area()] doubled=[doubled_measure(value)]]

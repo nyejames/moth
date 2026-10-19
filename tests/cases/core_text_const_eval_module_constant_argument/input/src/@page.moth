@@ -1,0 +1,26 @@
+@core/text length, is_empty, contains, starts_with, ends_with
+
+greeting #= "héllo"
+needle #= "ll"
+blank #= ""
+
+show |n I32| -> I32:
+    return n
+;
+
+flag_value |flag Bool| -> I32:
+    if flag:
+        return 1
+    ;
+    return 0
+;
+
+len = length(greeting)
+next = length(greeting) + 1
+passed = show(length(greeting))
+has_needle = contains(greeting, needle)
+starts = starts_with(greeting, "h")
+ends = ends_with(greeting, "lo")
+empty = is_empty(blank)
+
+[:len=[len] next=[next] passed=[passed] has_needle=[flag_value(has_needle)] starts=[flag_value(starts)] ends=[flag_value(ends)] empty=[flag_value(empty)] nested=[length(greeting)]]

@@ -4,14 +4,17 @@
 //! types and expression-owned failure facts until whole-expression catch completion decides their
 //! delivery. Arguments retain their own pending contributors independently of the outer call: a
 //! non-generic source call whose numeric-dependent arguments defer is retained as one pending
-//! operand together with its stable callee identity, signature snapshot, argument routing and
-//! authored operand `!`, and body completion resumes it exactly once. A visible external call
+//! operand together with its stable callee identity, parameter expectations, ordered result slots
+//! and authored operand `!`, and body completion resumes it exactly once. A visible external call
 //! retains the same way: its host identity, parameter expectations, already-settled result slots,
 //! float-integrity fact and authored operand `!` travel with the pending operand, and body
 //! completion rebuilds the ordinary host constructor without a registry lookup or a second token
 //! cursor. A `catch` is never consumed by a retained call: it protects the whole selected
 //! expression, so the enclosing fragment owner retains it with the pending operand in place.
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_eval::{
+    ExplicitConstantPayload, explicit_constant_operand,
+};
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
@@ -19,7 +22,7 @@ use crate::compiler_frontend::ast::expressions::call_arguments::{
     CallArgumentSyntax, ParsedCallArguments, parse_call_arguments_typed_with_numeric_retention,
 };
 use crate::compiler_frontend::ast::expressions::call_validation::{
-    CallArgumentResolutionContext, CallDiagnosticContext, ParameterExpectation,
+    CallArgumentResolutionContext, CallDiagnosticContext, CallDiagnosticName, ParameterExpectation,
     expectations_from_host_function, expectations_from_user_parameters, resolve_call_arguments,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
@@ -43,13 +46,11 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
     parse_fallible_handling_suffix_for_host_call_expression, parse_fragment_handling_suffix,
     token_stream_starts_typed_propagation_suffix,
 };
-use crate::compiler_frontend::ast::statements::functions::FunctionParameter;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -241,6 +242,7 @@ pub(crate) fn parse_function_call_expression(
                 path_fork,
                 function_path: id,
                 signature,
+                expectations: parameter_expectations,
                 arguments,
                 call_span,
                 value_required,
@@ -249,13 +251,10 @@ pub(crate) fn parse_function_call_expression(
         }
     };
 
-    // ------------------------
-    //  Resolve and finish
-    // ------------------------
     let args = resolve_user_function_call_arguments(
         id,
-        &arguments,
-        &signature.parameters,
+        arguments,
+        &parameter_expectations,
         call_span,
         string_table,
         type_interner,
@@ -305,6 +304,7 @@ struct RetainedSourceCallInput<'a, 'b, 'tokens> {
     path_fork: &'a mut PathInternerFork,
     function_path: &'a PathId,
     signature: &'a FunctionSignature,
+    expectations: Vec<ParameterExpectation>,
     arguments: Vec<DeferredCallArgument>,
     call_span: Option<SourceSpan>,
     value_required: bool,
@@ -314,14 +314,14 @@ struct RetainedSourceCallInput<'a, 'b, 'tokens> {
 /// Builds the retained record of one non-generic source call with numeric-dependent arguments.
 ///
 /// WHAT: consumes the authored operand postfix `!` (when present) through the shared
-///       fallible-handling fragment entry and snapshots the callee identity, signature and ordered
-///       argument list into the construction-only call record.
-/// WHY: the call site is the only place the authored operand handling and the concrete signature
-///      are available; recording them here lets body completion resume the call exactly once
-///      instead of reparsing the argument list or dropping the authored propagation. A `catch`
-///      is never this site's to consume: it protects the whole selected expression (for example
-///      `10 + f(pending) catch:`), so the token stays for the enclosing fragment owner, which
-///      retains the complete fragment together with its handler.
+///       fallible-handling fragment entry and retains parameter expectations, result facts and
+///       ordered arguments in the construction-only call record.
+/// WHY: the call site is the only place the authored operand handling and concrete signature are
+///      available; recording only completion facts lets body completion resume the call exactly
+///      once instead of reparsing the argument list or dropping the authored propagation. A
+///      `catch` is never this site's to consume: it protects the whole selected expression (for
+///      example `10 + f(pending) catch:`), so the token stays for the enclosing fragment owner,
+///      which retains the complete fragment together with its handler.
 fn retain_numeric_source_call(
     input: RetainedSourceCallInput<'_, '_, '_>,
 ) -> Result<ParsedFunctionCallExpression, ExpressionParseError> {
@@ -336,17 +336,16 @@ fn retain_numeric_source_call(
         path_fork,
         function_path,
         signature,
+        expectations,
         arguments,
         call_span,
         value_required,
         allow_boundary_catch,
     } = input;
 
-    let error_return = signature
-        .error_return_type_id()
-        .map(GenericErrorReturn::Concrete);
+    let error_return_type_id = signature.error_return_type_id();
+    let error_return = error_return_type_id.map(GenericErrorReturn::Concrete);
     let success_result_type_ids = signature.success_return_type_ids();
-
     // ------------------------
     //  Operand postfix `!`
     // ------------------------
@@ -375,7 +374,9 @@ fn retain_numeric_source_call(
     Ok(retained_pending_call_operand(
         retained_source_call_record(
             function_path,
-            signature,
+            success_result_type_ids,
+            error_return_type_id,
+            expectations,
             arguments,
             call_span,
             authored_handling,
@@ -463,17 +464,20 @@ pub(crate) fn parse_retained_call_authored_handling(
     })
 }
 
-/// Builds the construction-only record of one retained source call.
 fn retained_source_call_record(
     function_path: &PathId,
-    signature: &FunctionSignature,
+    success_result_type_ids: Vec<TypeId>,
+    error_return_type_id: Option<TypeId>,
+    expectations: Vec<ParameterExpectation>,
     arguments: Vec<DeferredCallArgument>,
     call_span: Option<SourceSpan>,
     authored_handling: DeferredCallHandling,
 ) -> DeferredCall {
     DeferredCall::Source(Box::new(DeferredSourceCall {
         function_path: function_path.to_owned(),
-        signature: signature.clone(),
+        success_result_type_ids,
+        error_return_type_id,
+        expectations,
         arguments,
         call_span,
         authored_handling,
@@ -558,14 +562,18 @@ pub(crate) fn finish_function_call_expression(
     Ok(expression_builder.with_typed_error_producer(call, error_return_type_id, None)?)
 }
 
+/// Validates a non-generic source call against the expectations used to parse its arguments.
+///
+/// WHY: immediate and numeric-retained calls share this one validator so their diagnostics and
+///      callee-name fallback cannot drift apart.
 #[allow(
     clippy::too_many_arguments,
-    reason = "user call argument resolution keeps the function name, raw arguments, parameters, span, string table, type interner, expression builder, const store, and path fork as separate borrows"
+    reason = "user call argument resolution keeps the function name, owned arguments, expectations, span, string table, type interner, expression builder, const store, and path fork as separate inputs"
 )]
 pub(crate) fn resolve_user_function_call_arguments(
     function_name: &PathId,
-    raw_args: &[CallArgument<OwnedExpr>],
-    parameters: &[FunctionParameter],
+    raw_args: Vec<CallArgument<OwnedExpr>>,
+    expectations: &[ParameterExpectation],
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
     type_interner: &mut AstTypeInterner<'_>,
@@ -573,17 +581,15 @@ pub(crate) fn resolve_user_function_call_arguments(
     const_values: &mut ConstValueStore,
     path_fork: &PathInternerFork,
 ) -> Result<Vec<CallArgument<OwnedExpr>>, ExpressionParseError> {
-    let callee_name = path_fork
-        .component(*function_name)
-        .map(|name| string_table.resolve(name).to_owned())
-        .unwrap_or_else(|| String::from("<unknown>"));
-    let expectations = expectations_from_user_parameters(parameters, path_fork);
+    let callee_name = path_fork.component(*function_name);
     let type_check_context = type_interner.type_check_context();
-
     resolve_call_arguments(
-        CallDiagnosticContext::function(&callee_name),
+        CallDiagnosticContext::function(CallDiagnosticName::PathComponent {
+            component: callee_name,
+            fallback: "<unknown>",
+        }),
         raw_args,
-        &expectations,
+        expectations,
         span,
         CallArgumentResolutionContext {
             expression_builder,
@@ -690,9 +696,9 @@ pub(crate) fn parse_external_function_call_expression(
     //  Resolve and validate arguments
     // ------------------------
     let type_check_context = type_interner.type_check_context();
-    let args = resolve_call_arguments(
-        CallDiagnosticContext::host_function(&external_function.name),
-        &arguments,
+    let mut args = resolve_call_arguments(
+        CallDiagnosticContext::host_function(CallDiagnosticName::Interned(callee_name)),
+        arguments,
         &expectations,
         call_span,
         CallArgumentResolutionContext {
@@ -705,6 +711,23 @@ pub(crate) fn parse_external_function_call_expression(
         },
     )
     .map_err(ExpressionParseError::from)?;
+
+    // A compile-time text call folds only over values, so an explicit `#` operand is read as
+    // its constant rather than kept as a runtime read of the module binding.
+    if external_function.const_eval.is_some() {
+        for argument in &mut args {
+            if let Some(value) = explicit_constant_operand(
+                argument.value,
+                ExplicitConstantPayload::Text,
+                context,
+                path_fork,
+                expression_builder,
+                const_values,
+            )? {
+                argument.value = value;
+            }
+        }
+    }
 
     // ------------------------
     //  Validate signature and returns
@@ -772,17 +795,11 @@ fn settle_external_call_facts(
     // ------------------------
     let builtin_error_type = resolve_builtin_error_type_typed(context, call_span, string_table)?;
     validate_external_signature_types_are_registered(external_function, context, call_span)?;
-    let diagnostic_result_types = external_function.success_return_data_types();
     let result_type_ids = external_function.success_return_type_ids(
         type_interner.environment_mut_for_derived_types(),
         builtin_error_type.type_id,
     );
-    validate_external_return_slots_are_visible(
-        external_function,
-        &diagnostic_result_types,
-        &result_type_ids,
-        call_span,
-    )?;
+    validate_external_return_slots_are_visible(external_function, &result_type_ids, call_span)?;
 
     let error_return_type_id = external_function.error_return_type_id(
         type_interner.environment_mut_for_derived_types(),
@@ -1082,13 +1099,10 @@ pub(crate) fn complete_deferred_external_call<
         path_fork,
         ..
     } = session.session_services();
-    // Argument resolution can intern strings, so detach the diagnostic name before that mutable
-    // borrow. The retained call carries only its existing interned identity, not a host definition.
-    let callee_name = string_table.resolve(callee_name).to_owned();
     let type_check_context = type_interner.type_check_context();
     let args = resolve_call_arguments(
-        CallDiagnosticContext::host_function(&callee_name),
-        &completed_arguments,
+        CallDiagnosticContext::host_function(CallDiagnosticName::Interned(callee_name)),
+        completed_arguments,
         &expectations,
         call_span,
         CallArgumentResolutionContext {
@@ -1171,15 +1185,17 @@ fn external_call_requires_float_validation(
         .is_some_and(NumericScalar::is_binary_float)
 }
 
-/// Verifies that every declared return slot has a corresponding frontend-visible type.
+/// Verifies every external success-return slot has a frontend-visible semantic type.
 fn validate_external_return_slots_are_visible(
     external_function: &ExternalFunctionDef,
-    diagnostic_result_types: &[DataType],
     result_type_ids: &[TypeId],
     span: Option<SourceSpan>,
 ) -> Result<(), ExpressionParseError> {
-    if external_function.returns.len() != diagnostic_result_types.len()
-        || external_function.returns.len() != result_type_ids.len()
+    if external_function.returns.len() != result_type_ids.len()
+        || external_function
+            .returns
+            .iter()
+            .any(|slot| !slot.value_type.supports_success_return_type())
     {
         return Err(CompilerError::compiler_error(format!(
             "External function '{}' declares a return slot that is not frontend-visible at {:?}.",

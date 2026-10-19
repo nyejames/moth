@@ -37,7 +37,12 @@ use super::append_context::{
 use super::render_append::RuntimeTemplateEmission;
 
 impl<'a> HirBuilder<'a> {
-    pub(super) fn lower_runtime_slot_application_template_expression(
+    /// WHAT: lowers a runtime slot application after AST has already routed the wrapper,
+    /// contribution sources, and slot-site render plan into owned data.
+    /// WHY: this is the direct HIR entry point for the final expression variant. It keeps slot
+    /// lowering on the same accumulator path as the owned runtime template handoff without
+    /// exposing TIR identities.
+    pub(crate) fn lower_runtime_slot_application_template_expression(
         &mut self,
         handoff: &OwnedRuntimeSlotApplicationHandoff,
         anchor: ExpressionView<'_>,

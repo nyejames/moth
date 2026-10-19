@@ -51,6 +51,18 @@ impl<'hir> JsEmitter<'hir> {
                 variant_index,
                 fields,
             } => self.lower_variant_construct(carrier, *variant_index, *fields),
+            HirExpressionKind::RouteConstruct {
+                choice_id,
+                variant_index,
+                fields,
+                ..
+            } => self.lower_variant_construct(
+                &HirVariantCarrier::Choice {
+                    choice_id: *choice_id,
+                },
+                *variant_index,
+                *fields,
+            ),
 
             HirExpressionKind::Bool(value) => Ok(value.to_string()),
             HirExpressionKind::Char(value) => Ok(escape_js_char(*value)),

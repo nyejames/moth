@@ -1,0 +1,3 @@
+@core/text
+
+[:core_text_const_eval_resource_range_runtime_retained range=[loop 0 to text.length(@assets/value.txt) |i|:[i];]]

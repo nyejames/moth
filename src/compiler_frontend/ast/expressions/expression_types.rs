@@ -7,17 +7,15 @@
 
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
-use crate::compiler_frontend::datatypes::ids::GenericParameterId;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
-use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId};
+use crate::compiler_frontend::traits::ids::TraitEvidenceId;
 
 /// Value-level classification for const-record semantics.
 ///
 /// WHAT: distinguishes a compile-time const-record value from a normal runtime value.
-/// WHY: const-record status is a value fact, not a type identity. It must not be encoded
-///      in `DataType` because the same struct type can produce both runtime instances and
-///      const-record values depending on the construction context.
+/// WHY: const-record state belongs to values. One struct `TypeId` can describe runtime instances
+///      or const-record values depending on their construction context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConstRecordState {
     RuntimeValue,
@@ -69,7 +67,6 @@ impl ConstValueKind {
 
 /// The evidence selected for a cast.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub(crate) enum ResolvedCastEvidence {
     /// Compiler-owned builtin policy identified by its stable policy id.
     Builtin { policy: BuiltinCastPolicyId },
@@ -90,10 +87,7 @@ pub(crate) enum ResolvedCastEvidence {
     ///      and selects real builtin or user-defined evidence; this marker is
     ///      discarded with the validation-only AST nodes and must never reach
     ///      HIR or backend lowering.
-    GenericBound {
-        trait_id: TraitId,
-        parameter_id: GenericParameterId,
-    },
+    GenericBound,
 }
 
 /// Delivery context for a resolved cast; pair fallibility is selected independently.

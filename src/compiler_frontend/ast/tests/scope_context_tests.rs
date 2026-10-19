@@ -7,6 +7,7 @@
 use super::environment::TopLevelDeclarationTable;
 use super::scope_context::{
     ContextKind, EnclosingCallableContract, EnclosingCallableOwner, ScopeContext,
+    ValueDeclarationRef,
 };
 use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::ast::statements::value_production::{
@@ -14,8 +15,8 @@ use crate::compiler_frontend::ast::statements::value_production::{
 };
 use std::sync::Arc;
 
+use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -88,7 +89,7 @@ fn add_var_extends_visibility_gate_when_gate_is_set() {
     let declaration = Declaration {
         id: variable_path.to_owned(),
         type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
@@ -139,7 +140,7 @@ fn add_compile_time_var_extends_visibility_gate_when_gate_is_set() {
     let declaration = Declaration {
         id: constant_path.to_owned(),
         type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
@@ -156,7 +157,8 @@ fn add_compile_time_var_extends_visibility_gate_when_gate_is_set() {
         "add_compile_time_var must keep the visibility gate synchronized"
     );
     let reference = context
-        .get_reference(&constant_name)
+        .get_value_reference(&constant_name, None)
+        .expect("compile-time local lookup must be valid")
         .expect("compile-time local must resolve after insertion");
     assert!(
         context.is_explicit_compile_time_constant(
@@ -240,6 +242,7 @@ fn child_contexts_preserve_callable_identity_independently_of_scope_kind() {
             success_types: vec![string_type_id],
             authored_success_slot_count: 1,
             error_type: Some(string_type_id),
+            parameter_contracts: Vec::new(),
         });
         context.enclosing_callable = Some(Rc::clone(&contract));
         context.expected_result_type_ids = vec![builtin_type_ids::BOOL];
@@ -431,7 +434,7 @@ fn parent_frame_lookup_finds_ancestor_declaration() {
         Declaration {
             id: variable_path.to_owned(),
             type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -484,7 +487,7 @@ fn child_frame_declaration_is_not_visible_to_parent() {
         Declaration {
             id: variable_path.to_owned(),
             type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -542,7 +545,7 @@ fn same_frame_duplicate_lookup_returns_latest_declaration() {
         Declaration {
             id: first_path.to_owned(),
             type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -555,7 +558,7 @@ fn same_frame_duplicate_lookup_returns_latest_declaration() {
         Declaration {
             id: second_path.to_owned(),
             type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -566,7 +569,8 @@ fn same_frame_duplicate_lookup_returns_latest_declaration() {
     );
 
     let resolved = context
-        .get_reference(&name)
+        .get_value_reference(&name, None)
+        .expect("ordinary value lookup must be valid")
         .expect("same-frame name must resolve");
     assert_eq!(
         resolved
@@ -606,7 +610,7 @@ fn no_shadowing_across_ancestor_frames() {
         Declaration {
             id: parent_path.to_owned(),
             type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -695,7 +699,7 @@ fn child_scope_local_does_not_leak_into_the_shared_visibility_gate() {
     let declaration = Declaration {
         id: local_path.to_owned(),
         type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
@@ -793,7 +797,7 @@ fn cloned_context_does_not_share_current_frame() {
         Declaration {
             id: path.to_owned(),
             type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -841,7 +845,7 @@ fn child_frame_shares_ancestors_but_not_current_frame() {
         Declaration {
             id: parent_path,
             type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -861,7 +865,7 @@ fn child_frame_shares_ancestors_but_not_current_frame() {
         Declaration {
             id: child_path,
             type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -975,8 +979,6 @@ fn numeric_expression_policy_scopes_do_not_copy_body_declarations() {
 
 #[test]
 fn pending_numeric_binding_is_visible_without_a_ready_declaration() {
-    use crate::compiler_frontend::ast::module_ast::scope_context::ScopeDeclarationRef;
-
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let scope = empty_scope(&mut path_fork, &mut string_table);
@@ -995,12 +997,13 @@ fn pending_numeric_binding_is_visible_without_a_ready_declaration() {
     let binding = insert_pending_binding(&context, name, &mut path_fork);
 
     let reference = context
-        .get_reference(&name)
+        .get_value_reference(&name, None)
+        .expect("ordinary pending lookup must be valid")
         .expect("a pending numeric binding must stay visible to lookup, never read as unknown");
     assert!(
         matches!(
             &reference,
-            ScopeDeclarationRef::PendingNumeric {
+            ValueDeclarationRef::PendingNumeric {
                 binding: found,
                 ..
             } if *found == binding
@@ -1043,7 +1046,7 @@ fn pending_numeric_binding_upgrades_in_place_and_keeps_its_name() {
     let declaration = Declaration {
         id: binding_path.to_owned(),
         type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
@@ -1058,7 +1061,8 @@ fn pending_numeric_binding_upgrades_in_place_and_keeps_its_name() {
     assert!(upgraded, "the pending slot must upgrade in place");
 
     let reference = context
-        .get_reference(&name)
+        .get_value_reference(&name, None)
+        .expect("ordinary value lookup must be valid")
         .expect("the upgraded name must keep resolving");
     assert_eq!(
         reference
@@ -1110,7 +1114,7 @@ fn explicit_constant_lookup_uses_content_owner_and_authored_binding_role() {
         let declaration = Declaration {
             id: path,
             type_id: builtin_type_ids::BOOL,
-            diagnostic_type: DataType::Bool,
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
