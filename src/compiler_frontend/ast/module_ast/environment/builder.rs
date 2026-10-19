@@ -35,7 +35,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerMessages, InfrastructureErrors,
 };
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PublicGenericOwnerKind};
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
     StructTypeDefinition,
@@ -1132,15 +1132,37 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Ok(resolved_bounds_by_local)
     }
 
+    /// Names a public generic declaration by its source-path component, for bound diagnostics.
+    ///
+    /// WHY: every public generic owner (function, receiver method, struct, choice) reports an
+    /// unnameable bound under this name, so all of them resolve it the same way.
+    fn public_generic_declaration_name(
+        &self,
+        header: &Header,
+        string_table: &StringTable,
+    ) -> Result<StringId, CompilerMessages> {
+        self.path_fork
+            .component(header.declaration_path)
+            .ok_or_else(|| {
+                self.error_messages(
+                    CompilerError::compiler_error(
+                        "Public generic declaration header had no source-path name.",
+                    ),
+                    string_table,
+                )
+            })
+    }
+
     pub(in crate::compiler_frontend::ast) fn validate_public_generic_bounds(
         &self,
-        owner_name: StringId,
+        header: &Header,
+        owner_kind: PublicGenericOwnerKind,
         generic_parameters: &GenericParameterList,
         resolved_bounds_by_local: &FxHashMap<TypeParameterId, Vec<TraitId>>,
-        public_root_file: &PathId,
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
+        let public_root_file = self.header_source_path(header);
         for parameter in &generic_parameters.parameters {
             let Some(resolved_bounds) = resolved_bounds_by_local.get(&parameter.id) else {
                 continue;
@@ -1160,14 +1182,18 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 // so every bound trait must be available from that same surface.
                 if self.public_trait_definition_is_nameable(
                     trait_definition,
-                    public_root_file,
+                    &public_root_file,
                     trait_environment,
                 ) {
                     continue;
                 }
 
+                // The owner name is only rendered on this failure path, so resolve it here
+                // instead of on every call.
+                let owner_name = self.public_generic_declaration_name(header, string_table)?;
                 return Err(self.diagnostic_messages(
                     CompilerDiagnostic::generic_bound_private_surface_leak(
+                        owner_kind,
                         owner_name,
                         trait_definition.name,
                         trait_bound.span,

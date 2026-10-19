@@ -26,9 +26,9 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason,
     LegacyDependencyClauseReason, MalformedTemplateReason, NameNamespace,
     NamespaceTypeValueMisuseKind, NamingConvention, OperatorOperandPosition, PathKind,
-    ProjectContextEscapeReason, RangeOperandKind, RuleDiagnosticKind, SourceSpanCapacityResource,
-    SyntaxDiagnosticKind, TypeAnnotationContext, TypeDiagnosticKind, TypeMismatchContext,
-    UnsupportedBackendFeatureReason, ValueReceiverContext,
+    ProjectContextEscapeReason, PublicGenericOwnerKind, RangeOperandKind, RuleDiagnosticKind,
+    SourceSpanCapacityResource, SyntaxDiagnosticKind, TypeAnnotationContext, TypeDiagnosticKind,
+    TypeMismatchContext, UnsupportedBackendFeatureReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -1393,7 +1393,8 @@ impl CompilerDiagnostic {
     }
 
     pub(crate) fn generic_bound_private_surface_leak(
-        function_name: StringId,
+        owner_kind: PublicGenericOwnerKind,
+        owner_name: StringId,
         trait_name: StringId,
         span: Option<SourceSpan>,
     ) -> Self {
@@ -1401,7 +1402,8 @@ impl CompilerDiagnostic {
             DiagnosticKind::Rule(RuleDiagnosticKind::GenericBoundPrivateSurfaceLeak),
             span,
             DiagnosticPayload::GenericBoundPrivateSurfaceLeak {
-                function_name,
+                owner_kind,
+                owner_name,
                 trait_name,
             },
         )

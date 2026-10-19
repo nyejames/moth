@@ -5,3 +5,11 @@ mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0048"]
 message_contains = ["Property or method 'tick' not found for 'Counter'"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0048"
+reason = "invalid_field_access.unknown_member"
+path = "input/@page.moth"
+line = 3
+column = 25
+count = 1

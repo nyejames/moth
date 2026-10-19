@@ -1,0 +1,4 @@
+@wrap identity, Label
+
+label = identity(Label("public"))
+[:public_generic_reexported_chain_bound_public_trait_success [label.text]]

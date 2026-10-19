@@ -256,10 +256,11 @@ impl DiagnosticPayload {
             }
 
             DiagnosticPayload::GenericBoundPrivateSurfaceLeak {
-                function_name,
+                owner_name,
                 trait_name,
+                ..
             } => {
-                *function_name = remap.get(*function_name);
+                *owner_name = remap.get(*owner_name);
                 *trait_name = remap.get(*trait_name);
             }
 

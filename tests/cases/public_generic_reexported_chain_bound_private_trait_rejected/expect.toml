@@ -1,0 +1,16 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0074"]
+message_contains = [
+    "Public generic function 'identity' exposes private trait bound 'LOCAL_DISPLAY'. Make the trait public in the module that declares it, or keep the function private.",
+]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0074"
+path = "input/wrap/mid/leaf/internal.moth"
+line = 5
+column = 20
+count = 1

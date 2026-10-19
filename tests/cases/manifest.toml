@@ -1875,6 +1875,48 @@ contract = "language.generics.public_receiver_bound_private_trait_rejected"
 role = "boundary"
 
 [[case]]
+id = "public_generic_reexported_struct_bound_private_trait_rejected"
+path = "public_generic_reexported_struct_bound_private_trait_rejected"
+tags = ["integration","generics","traits","dependencies","facade","diagnostics"]
+contract = "language.generics.public_nominal_bound_private_trait_rejected"
+role = "boundary"
+
+[[case]]
+id = "public_generic_reexported_function_bound_private_trait_rejected"
+path = "public_generic_reexported_function_bound_private_trait_rejected"
+tags = ["integration","generics","traits","functions","dependencies","facade","diagnostics"]
+contract = "language.generics.public_bound_private_trait_rejected"
+role = "boundary"
+
+[[case]]
+id = "public_generic_reexported_choice_bound_private_trait_rejected"
+path = "public_generic_reexported_choice_bound_private_trait_rejected"
+tags = ["integration","generics","traits","dependencies","facade","diagnostics"]
+contract = "language.generics.public_nominal_bound_private_trait_rejected"
+role = "boundary"
+
+[[case]]
+id = "public_generic_reexported_chain_bound_private_trait_rejected"
+path = "public_generic_reexported_chain_bound_private_trait_rejected"
+tags = ["integration","generics","traits","functions","dependencies","facade","diagnostics"]
+contract = "language.generics.public_bound_private_trait_rejected"
+role = "boundary"
+
+[[case]]
+id = "public_generic_reexported_chain_bound_public_trait_success"
+path = "public_generic_reexported_chain_bound_public_trait_success"
+tags = ["integration","generics","traits","functions","dependencies","facade"]
+contract = "language.generics.public_bound_public_trait"
+role = "boundary"
+
+[[case]]
+id = "public_generic_child_imported_trait_success"
+path = "public_generic_child_imported_trait_success"
+tags = ["integration","generics","traits","functions","dependencies","facade"]
+contract = "language.generics.public_bound_public_trait"
+role = "boundary"
+
+[[case]]
 id = "generic_imported_method_bound_stricter_than_nominal_rejected"
 path = "generic_imported_method_bound_stricter_than_nominal_rejected"
 tags = ["integration","generics","traits","receiver-methods","dependencies","diagnostics"]

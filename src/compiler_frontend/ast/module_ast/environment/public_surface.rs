@@ -351,10 +351,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// Whether a trait may appear in a public signature or relation, judged by its owner.
     ///
     /// WHAT: core traits and source traits marked `exported` are public at their owner. An
-    ///      unexported source trait counts only when its own module root re-exports it.
-    /// WHY: the rule follows the declaring owner, not the consumer's root, so a public generic
-    ///      may be bounded by a trait imported from a provider's public interface without the
-    ///      consumer re-exporting it. A trait private at its owner is still rejected.
+    ///      unexported source trait counts only when `public_root_file` re-exports it. Callers
+    ///      pass the root of the module that owns the declaration naming the trait.
+    /// WHY: an unexported trait belongs to the module that names it, so that module's root is its
+    ///      owner. Traits imported from a provider's public interface are marked `exported`, so a
+    ///      public generic may be bounded by them without the consumer re-exporting them. A trait
+    ///      private at its owner is still rejected.
     pub(in crate::compiler_frontend::ast) fn public_trait_definition_is_nameable(
         &self,
         trait_definition: &crate::compiler_frontend::traits::definitions::ResolvedTraitDefinition,

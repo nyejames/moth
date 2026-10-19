@@ -645,6 +645,18 @@ pub enum GenericApplicationErrorReason {
     MissingArgumentAfterComma,
     NestedApplication,
 }
+
+/// Declaration kind that owns a public generic whose trait bound is private at
+/// its owner. The diagnostic names this kind so the remediation matches the
+/// declaration the author wrote; the leak rule itself is the same for every kind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PublicGenericOwnerKind {
+    Function,
+    ReceiverMethod,
+    Struct,
+    Choice,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ParameterContractKind {
     Wire,

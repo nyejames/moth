@@ -1,0 +1,4 @@
+@consumer identity, Label
+
+label = identity(Label("public"))
+[:public_generic_child_imported_trait_success [label.text]]

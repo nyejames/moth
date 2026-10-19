@@ -31,7 +31,7 @@ use crate::compiler_frontend::ast::type_resolution::{
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticLabel, DiagnosticPayload,
-    TypeMismatchContext,
+    PublicGenericOwnerKind, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition,
@@ -650,13 +650,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let header = declaration_lanes
                 .header(declaration_id, sorted_headers)
                 .map_err(|error| self.error_messages(error, string_table))?;
-            let generic_parameters = match &header.kind {
+            let (generic_parameters, owner_kind) = match &header.kind {
                 HeaderKind::Struct {
                     generic_parameters, ..
-                }
-                | HeaderKind::Choice {
+                } => (generic_parameters, PublicGenericOwnerKind::Struct),
+                HeaderKind::Choice {
                     generic_parameters, ..
-                } => generic_parameters,
+                } => (generic_parameters, PublicGenericOwnerKind::Choice),
 
                 _ => continue,
             };
@@ -673,23 +673,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 string_table,
             )?;
 
-            if header.export_mode.is_public() {
-                let owner_name = self
-                    .path_fork
-                    .component(header.declaration_path)
-                    .ok_or_else(|| {
-                        self.error_messages(
-                            CompilerError::compiler_error(
-                                "Public nominal generic header had no source-path name.",
-                            ),
-                            string_table,
-                        )
-                    })?;
+            // The module root's surface decides which nominals are public, so a nominal
+            // re-exported from another file is checked too.
+            if self.source_path_is_public_from_root_file(
+                &header.declaration_path,
+                &self.header_source_path(header),
+            ) {
                 self.validate_public_generic_bounds(
-                    owner_name,
+                    header,
+                    owner_kind,
                     generic_parameters,
                     &resolved_bounds_by_local,
-                    &self.header_source_path(header),
                     trait_environment,
                     string_table,
                 )?;

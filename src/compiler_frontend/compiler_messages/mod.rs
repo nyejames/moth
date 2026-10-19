@@ -68,10 +68,10 @@ pub(crate) use diagnostic_payload::{
     InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason, LegacyDependencyClauseReason,
     MalformedTemplateReason, MissingWhitespace, NameNamespace, NamespaceTypeValueMisuseKind,
     NamingConvention, NonExhaustiveMatchReason, OperatorOperandPosition, ParameterContractKind,
-    PathKind, ProjectContextEscapeReason, RangeOperandKind, ReceiverCallKind, ReservedNameOwner,
-    SourceSpanCapacityResource, SymbolicSpacingConstruct, SymbolicSpacingError,
-    TypeAnnotationContext, TypeMismatchContext, UnsupportedBackendFeatureReason,
-    ValueReceiverContext,
+    PathKind, ProjectContextEscapeReason, PublicGenericOwnerKind, RangeOperandKind,
+    ReceiverCallKind, ReservedNameOwner, SourceSpanCapacityResource, SymbolicSpacingConstruct,
+    SymbolicSpacingError, TypeAnnotationContext, TypeMismatchContext,
+    UnsupportedBackendFeatureReason, ValueReceiverContext,
 };
 pub(crate) use diagnostic_severity::DiagnosticSeverity;
 pub(crate) use diagnostic_token::DiagnosticToken;

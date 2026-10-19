@@ -9,7 +9,7 @@ use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticPayload, InvalidTraitConformanceReason,
     InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, NamingConvention,
-    ProjectContextEscapeReason, ReservedNameOwner,
+    ProjectContextEscapeReason, PublicGenericOwnerKind, ReservedNameOwner,
 };
 
 pub(crate) struct RenderedPayload {
@@ -349,13 +349,24 @@ fn render_payload_message(
             diagnostic_type_name(*surface_type, context)
         ),
         DiagnosticPayload::GenericBoundPrivateSurfaceLeak {
-            function_name,
+            owner_kind,
+            owner_name,
             trait_name,
-        } => format!(
-            "Public generic function '{}' exposes private trait bound '{}'. Export the trait through the same public surface or keep the function private.",
-            string_table.resolve(*function_name),
-            string_table.resolve(*trait_name)
-        ),
+        } => {
+            let (owner_label, kept_private) = match owner_kind {
+                PublicGenericOwnerKind::Function => ("function", "the function"),
+                PublicGenericOwnerKind::ReceiverMethod => ("receiver method", "the receiver type"),
+                PublicGenericOwnerKind::Struct => ("struct", "the struct"),
+                PublicGenericOwnerKind::Choice => ("choice", "the choice"),
+            };
+            format!(
+                "Public generic {} '{}' exposes private trait bound '{}'. Make the trait public in the module that declares it, or keep {} private.",
+                owner_label,
+                string_table.resolve(*owner_name),
+                string_table.resolve(*trait_name),
+                kept_private
+            )
+        }
         DiagnosticPayload::PrivateTypeInExportedApi {
             exported_name,
             private_type,
