@@ -1,0 +1,29 @@
+export:
+    DISPLAY_TEXT must:
+        display |This| -> String
+    ;
+
+    Box type T is DISPLAY_TEXT = |
+        value T,
+    |
+
+    Label = |
+        text String,
+    |
+
+    Wrapper type T = |
+        item T,
+        name String,
+    |
+;
+
+display |this Label| -> String:
+    return this.text
+;
+
+Label must DISPLAY_TEXT
+
+caption type T |this Wrapper of T| -> String:
+    boxed = Box(Label(this.name))
+    return boxed.value.display()
+;

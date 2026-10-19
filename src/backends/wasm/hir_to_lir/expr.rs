@@ -145,6 +145,9 @@ pub(crate) fn lower_expression(
                 }
             }
         }
+        HirExpressionKind::RouteConstruct { .. } => Err(lir_transformation_error(
+            "Wasm constructor route reached expression lowering after backend feature validation",
+        )),
         HirExpressionKind::Bool(value) => {
             let dst = context.alloc_temp(WasmAbiType::I32);
             statements.push(WasmLirStmt::ConstI32 {

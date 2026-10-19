@@ -7,14 +7,73 @@
 use super::{DiagnosticRenderContext, diagnostic_type_name, token_kind_name};
 use crate::compiler_frontend::compiler_messages::{
     ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason, InvalidLoopHeaderReason,
-    InvalidMatchArmReason, InvalidStandaloneStatementReason, InvalidStatementPositionReason,
-    InvalidStringEscapeReason, InvalidThisUsageReason, InvalidTypeAnnotationReason,
-    MissingWhitespace, OperatorOperandPosition, SymbolicSpacingConstruct, SymbolicSpacingError,
+    InvalidMatchArmReason, InvalidParameterContractReason, InvalidStandaloneStatementReason,
+    InvalidStatementPositionReason, InvalidStringEscapeReason, InvalidThisUsageReason,
+    InvalidTypeAnnotationReason, MissingWhitespace, OperatorOperandPosition, ParameterContractKind,
+    SymbolicSpacingConstruct, SymbolicSpacingError,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 
+pub(crate) fn invalid_parameter_contract_message(reason: InvalidParameterContractReason) -> String {
+    let contract_name = |contract: ParameterContractKind| contract.spelling();
+
+    match reason {
+        InvalidParameterContractReason::MissingSpecification { contract } => {
+            format!(
+                "`{}` parameter contracts require an `of` specification.",
+                contract_name(contract)
+            )
+        }
+        InvalidParameterContractReason::InvalidPosition { contract } => {
+            format!(
+                "`{}` parameter contracts are only valid on function parameters.",
+                contract_name(contract)
+            )
+        }
+        InvalidParameterContractReason::WireArrowNotAllowed => {
+            "`Wire` parameter contracts do not accept an `->` input specification.".to_owned()
+        }
+        InvalidParameterContractReason::RouteOutputMissing => {
+            "`Route` parameter contracts require an output type after `->`.".to_owned()
+        }
+        InvalidParameterContractReason::RouteRepeatedArrow => {
+            "`Route` parameter contracts accept only one `->` input/output separator.".to_owned()
+        }
+        InvalidParameterContractReason::NestedContract { outer, inner } => {
+            format!(
+                "A `{}` parameter contract cannot contain a nested `{}` contract.",
+                contract_name(outer),
+                contract_name(inner)
+            )
+        }
+        InvalidParameterContractReason::MutableParameter { contract } => {
+            format!(
+                "A `{}` parameter contract cannot use the `~` mutable marker.",
+                contract_name(contract)
+            )
+        }
+        InvalidParameterContractReason::ParameterDefault { contract } => {
+            format!(
+                "A `{}` parameter contract cannot have a default value.",
+                contract_name(contract)
+            )
+        }
+        InvalidParameterContractReason::ReceiverContract { contract } => {
+            format!(
+                "A receiver parameter cannot carry a `{}` contract.",
+                contract_name(contract)
+            )
+        }
+        InvalidParameterContractReason::MultipleSpecificationTypes { contract } => {
+            format!(
+                "A `{}` parameter contract accepts one type specification.",
+                contract_name(contract)
+            )
+        }
+    }
+}
 pub(crate) fn invalid_string_escape_message(reason: InvalidStringEscapeReason) -> String {
     match reason {
         InvalidStringEscapeReason::UnsupportedEscape { escaped } => format!(

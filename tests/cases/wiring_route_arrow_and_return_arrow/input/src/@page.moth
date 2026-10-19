@@ -1,0 +1,101 @@
+FormMessage ::
+    NameChanged | value String |,
+    Submit,
+;
+
+TodoMessage ::
+    Rename | id I32, value String |,
+    Delete | id I32 |,
+;
+
+EditorMessage ::
+    Changed | value String |,
+;
+
+AppMessage ::
+    Editor | editor_id I32, message EditorMessage |,
+;
+
+OrderMessage ::
+    Event | first I32, second I32, value String |,
+;
+
+BorrowMessage ::
+    Store | source String, next String |,
+;
+
+on_click |route Route of FormMessage| -> String:
+    return "unit"
+;
+
+on_input |route Route of String -> FormMessage| -> String:
+    return "input"
+;
+
+on_rename |route Route of String -> TodoMessage| -> String:
+    return "rename"
+;
+
+on_delete |route Route of TodoMessage| -> String:
+    return "delete"
+;
+
+on_named_delete |route Route of TodoMessage| -> String:
+    return "named"
+;
+
+capture_log ~= ""
+capture_id |log ~String| -> I32:
+    log = [:[log]"x"]
+    return 42
+;
+
+record_order |label String, log ~String| -> I32:
+    log = [:[log][label]]
+    return 1
+;
+
+on_ordered |before I32, route Route of String -> OrderMessage, after I32| -> String:
+    return "ordered"
+;
+
+accept_borrow |route Route of String -> BorrowMessage| -> String:
+    return "borrowed"
+;
+
+on_captured_rename |route Route of String -> TodoMessage| -> String:
+    return "captured"
+;
+
+receive_editor |on_message Route of EditorMessage -> AppMessage| -> String:
+    return "editor"
+;
+
+forward_editor |on_message Route of EditorMessage -> AppMessage| -> String:
+    return receive_editor(on_message)
+;
+
+todo_id = 7
+unit_result = on_click(FormMessage::Submit)
+input_result = on_input(FormMessage::NameChanged)
+rename_result = on_rename(TodoMessage::Rename(todo_id))
+delete_result = on_delete(TodoMessage::Delete(todo_id))
+named_result = on_named_delete(TodoMessage::Delete(id = todo_id))
+capture_result = on_captured_rename(TodoMessage::Rename(capture_id(~capture_log)))
+forward_result = forward_editor(AppMessage::Editor(7))
+
+order_log ~= ""
+order_result = on_ordered(
+    record_order("before", ~order_log),
+    OrderMessage::Event(
+        record_order("capture-1", ~order_log),
+        record_order("capture-2", ~order_log)
+    ),
+    record_order("after", ~order_log)
+)
+
+borrow_source ~= "before"
+borrow_result = accept_borrow(BorrowMessage::Store(borrow_source))
+borrow_source = "after"
+
+[:routes unit=[unit_result] input=[input_result] rename=[rename_result] delete=[delete_result] named=[named_result] forward=[forward_result] capture=[capture_result] effect=[capture_log] order=[order_result] order_effect=[order_log] borrow=[borrow_result] source=[borrow_source]]

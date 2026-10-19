@@ -56,6 +56,7 @@ pub(crate) fn wrap_tir_node_in_wrappers_into(
                     string_table,
                     expressions,
                     const_values,
+                    external_package_registry: None,
                     allow_runtime_plans: false,
                 },
                 *wrapper_reference,

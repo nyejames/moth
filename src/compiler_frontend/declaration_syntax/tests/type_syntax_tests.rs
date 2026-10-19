@@ -11,8 +11,7 @@ use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 
 use crate::compiler_frontend::ast::type_resolution::{
-    ResolvedTypeAlias, TypeResolutionContext, resolve_diagnostic_type_to_type_id_checked,
-    resolve_diagnostic_type_to_type_id_opt, resolve_parsed_type_annotation, resolve_type,
+    ResolvedTypeAlias, TypeResolutionContext, resolve_parsed_type_annotation,
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticPayload, DiagnosticToken, GenericApplicationErrorReason,
@@ -21,11 +20,10 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::definitions::{StructTypeDefinition, TypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::generic_identity_bridge::GenericBaseType;
 use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
-use crate::compiler_frontend::datatypes::{DataType, TypeId, builtin_type_ids};
+use crate::compiler_frontend::datatypes::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
     ParsedNamedTypeReference, TypeAnnotationContext, builtin_scalar_type_name_for_tag,
@@ -170,7 +168,7 @@ fn resolve_type_annotation_error(
         &const_values,
     );
 
-    resolve_parsed_type_annotation(parsed, None, &mut resolution_context, string_table, None)
+    resolve_parsed_type_annotation(&parsed, None, &mut resolution_context, string_table, None)
         .expect_err(expected_failure)
 }
 
@@ -210,7 +208,7 @@ fn resolved_type_annotation_carries_canonical_type_id() {
     );
 
     let resolved = resolve_parsed_type_annotation(
-        ParsedTypeRef::BuiltinFixedScalar {
+        &ParsedTypeRef::BuiltinFixedScalar {
             scalar: FixedScalar::I32,
             span: None,
         },
@@ -221,10 +219,6 @@ fn resolved_type_annotation_carries_canonical_type_id() {
     )
     .expect("builtin annotation resolution should succeed");
 
-    assert_eq!(
-        resolved.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::I32)
-    );
     assert_eq!(
         resolved.type_id,
         Some(builtin_type_ids::fixed_scalar(FixedScalar::I32))
@@ -248,7 +242,7 @@ fn resolved_inferred_annotation_has_no_type_id() {
     );
 
     let resolved = resolve_parsed_type_annotation(
-        ParsedTypeRef::Inferred,
+        &ParsedTypeRef::Inferred,
         None,
         &mut resolution_context,
         &mut string_table,
@@ -256,7 +250,6 @@ fn resolved_inferred_annotation_has_no_type_id() {
     )
     .expect("inferred annotation resolution should succeed");
 
-    assert_eq!(resolved.diagnostic_type, DataType::Inferred);
     assert_eq!(resolved.type_id, None);
 }
 
@@ -778,7 +771,13 @@ fn alias_expanded_nested_optional_type_is_rejected() {
         .try_intern_portable_path("MaybeString", &mut string_table)
         .expect("test path fits");
 
-    let unresolved = DataType::Option(Box::new(DataType::NamedType(maybe_name)));
+    let unresolved = ParsedTypeRef::Optional {
+        inner: Box::new(ParsedTypeRef::Named {
+            name: maybe_name,
+            span: None,
+        }),
+        span: None,
+    };
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(
         Vec::new(),
         &PathInternerFork::empty(),
@@ -797,7 +796,6 @@ fn alias_expanded_nested_optional_type_is_rejected() {
     resolved_type_aliases.insert(
         maybe_path,
         ResolvedTypeAlias {
-            diagnostic_type: DataType::Option(Box::new(DataType::StringSlice)),
             target_type_id: type_environment.intern_option(type_environment.builtins().string),
             declaration_span: None,
         },
@@ -822,8 +820,14 @@ fn alias_expanded_nested_optional_type_is_rejected() {
         visible_trait_names: None,
     };
 
-    let error = resolve_type(&unresolved, None, &mut resolution_context, &string_table)
-        .expect_err("alias-expanded nested option should fail");
+    let error = resolve_parsed_type_annotation(
+        &unresolved,
+        None,
+        &mut resolution_context,
+        &mut string_table,
+        None,
+    )
+    .expect_err("alias-expanded nested option should fail");
 
     assert_diagnostic_payload(
         error,
@@ -845,40 +849,65 @@ fn resolves_named_types_recursively_in_composite_types() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let point_name = string_table.intern("Point");
-
-    let unresolved =
-        DataType::collection(DataType::Option(Box::new(DataType::NamedType(point_name))));
-
     let point_path = path_fork
         .try_intern_portable_path("Point", &mut string_table)
         .expect("test path fits");
+
+    let mut type_environment = TypeEnvironment::new();
+    let (_, point_type_id) = type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: point_path.to_owned(),
+        fields: Box::new([]),
+        generic_parameters: None,
+        const_record: false,
+    });
     let declarations = vec![Declaration {
         id: point_path,
-        type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        type_id: point_type_id,
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
-        value: DeclarationValue::Absent,
+        value: DeclarationValue::Shell(DeclarationShell::Struct),
         binding_span: None,
         config_qualifier: None,
     }];
-
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(declarations, &path_fork));
-    let mut type_environment = TypeEnvironment::new();
     let const_values = ConstValueStore::default();
     let mut resolution_context = TypeResolutionContext::from_declaration_table(
         &declaration_table,
         &mut type_environment,
         &const_values,
     );
+    let unresolved = ParsedTypeRef::Collection {
+        element: Box::new(ParsedTypeRef::Optional {
+            inner: Box::new(ParsedTypeRef::Named {
+                name: point_name,
+                span: None,
+            }),
+            span: None,
+        }),
+        span: None,
+        fixed_capacity: None,
+    };
 
-    let resolved = resolve_type(&unresolved, None, &mut resolution_context, &string_table)
-        .expect("named type resolution should succeed");
+    let resolved = resolve_parsed_type_annotation(
+        &unresolved,
+        None,
+        &mut resolution_context,
+        &mut string_table,
+        None,
+    )
+    .expect("named type resolution should succeed");
+    let collection_type_id = resolved.type_id.expect("collection should have a TypeId");
+    let option_type_id = resolution_context
+        .type_environment
+        .collection_element_type(collection_type_id)
+        .expect("collection should retain its option element type");
 
     assert_eq!(
-        resolved,
-        DataType::collection(DataType::Option(Box::new(DataType::FixedScalar(
-            FixedScalar::I32
-        ))))
+        resolution_context
+            .type_environment
+            .option_inner_type(option_type_id),
+        Some(point_type_id)
     );
 }
 
@@ -888,11 +917,6 @@ fn resolves_generic_instance_base_to_canonical_nominal_path() {
     let mut path_fork = PathInternerFork::empty();
     let box_name = string_table.intern("Box");
     let t_name = string_table.intern("T");
-    let unresolved = DataType::GenericInstance {
-        base: GenericBaseType::Named(box_name),
-        arguments: vec![DataType::StringSlice],
-    };
-
     let box_path = path_fork
         .try_intern_portable_path("Box", &mut string_table)
         .expect("test path fits");
@@ -902,7 +926,7 @@ fn resolves_generic_instance_base_to_canonical_nominal_path() {
     let declarations = vec![Declaration {
         id: box_path.to_owned(),
         type_id: box_type_id,
-        diagnostic_type: DataType::runtime_struct(box_path.to_owned(), box_type_id),
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Shell(DeclarationShell::Struct),
         binding_span: None,
@@ -930,17 +954,44 @@ fn resolves_generic_instance_base_to_canonical_nominal_path() {
         trait_evidence_environment: None,
         visible_trait_names: None,
     };
+    let unresolved = ParsedTypeRef::Applied {
+        base: Box::new(ParsedTypeRef::Named {
+            name: box_name,
+            span: None,
+        }),
+        arguments: vec![ParsedTypeRef::BuiltinString { span: None }],
+        span: None,
+    };
 
-    let resolved = resolve_type(&unresolved, None, &mut resolution_context, &string_table)
-        .expect("generic base should resolve");
+    let resolved = resolve_parsed_type_annotation(
+        &unresolved,
+        None,
+        &mut resolution_context,
+        &mut string_table,
+        None,
+    )
+    .expect("generic base should resolve");
+    let instance_type_id = resolved
+        .type_id
+        .expect("generic instance should have a TypeId");
+    let expected_base = resolution_context
+        .type_environment
+        .nominal_id_for_path(&box_path)
+        .expect("Box should retain its nominal identity");
+    let Some(TypeDefinition::GenericInstance(instance)) =
+        resolution_context.type_environment.get(instance_type_id)
+    else {
+        panic!("the resolved generic type should be a registered instance");
+    };
 
+    assert_eq!(instance.base, expected_base);
     assert_eq!(
-        resolved,
-        DataType::GenericInstance {
-            base: GenericBaseType::ResolvedNominal(box_path),
-            arguments: vec![DataType::StringSlice],
-        }
+        resolution_context
+            .type_environment
+            .nominal_path_by_id(instance.base),
+        Some(&box_path)
     );
+    assert_eq!(instance.arguments.as_ref(), &[builtin_type_ids::STRING]);
 }
 
 #[test]
@@ -949,12 +1000,19 @@ fn generic_instance_resolution_rejects_wrong_arity() {
     let mut path_fork = PathInternerFork::empty();
     let box_name = string_table.intern("Box");
     let t_name = string_table.intern("T");
-    let unresolved = DataType::GenericInstance {
-        base: GenericBaseType::Named(box_name),
+    let unresolved = ParsedTypeRef::Applied {
+        base: Box::new(ParsedTypeRef::Named {
+            name: box_name,
+            span: None,
+        }),
         arguments: vec![
-            DataType::StringSlice,
-            DataType::FixedScalar(FixedScalar::I32),
+            ParsedTypeRef::BuiltinString { span: None },
+            ParsedTypeRef::BuiltinFixedScalar {
+                scalar: FixedScalar::I32,
+                span: None,
+            },
         ],
+        span: None,
     };
 
     let box_path = path_fork
@@ -966,7 +1024,7 @@ fn generic_instance_resolution_rejects_wrong_arity() {
     let declarations = vec![Declaration {
         id: box_path.to_owned(),
         type_id: box_type_id,
-        diagnostic_type: DataType::runtime_struct(box_path.to_owned(), box_type_id),
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Shell(DeclarationShell::Struct),
         binding_span: None,
@@ -995,8 +1053,14 @@ fn generic_instance_resolution_rejects_wrong_arity() {
         visible_trait_names: None,
     };
 
-    let error = resolve_type(&unresolved, None, &mut resolution_context, &string_table)
-        .expect_err("wrong generic arity should fail");
+    let error = resolve_parsed_type_annotation(
+        &unresolved,
+        None,
+        &mut resolution_context,
+        &mut string_table,
+        None,
+    )
+    .expect_err("wrong generic arity should fail");
 
     assert_diagnostic_payload(
         error,
@@ -1022,7 +1086,10 @@ fn bare_generic_type_name_requires_type_arguments() {
     let mut path_fork = PathInternerFork::empty();
     let box_name = string_table.intern("Box");
     let t_name = string_table.intern("T");
-    let unresolved = DataType::NamedType(box_name);
+    let unresolved = ParsedTypeRef::Named {
+        name: box_name,
+        span: None,
+    };
 
     let box_path = path_fork
         .try_intern_portable_path("Box", &mut string_table)
@@ -1033,7 +1100,7 @@ fn bare_generic_type_name_requires_type_arguments() {
     let declarations = vec![Declaration {
         id: box_path.to_owned(),
         type_id: box_type_id,
-        diagnostic_type: DataType::runtime_struct(box_path.to_owned(), box_type_id),
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Shell(DeclarationShell::Struct),
         binding_span: None,
@@ -1062,8 +1129,14 @@ fn bare_generic_type_name_requires_type_arguments() {
         visible_trait_names: None,
     };
 
-    let error = resolve_type(&unresolved, None, &mut resolution_context, &string_table)
-        .expect_err("bare generic type name should fail");
+    let error = resolve_parsed_type_annotation(
+        &unresolved,
+        None,
+        &mut resolution_context,
+        &mut string_table,
+        None,
+    )
+    .expect_err("bare generic type name should fail");
 
     assert_diagnostic_payload(
         error,
@@ -1086,7 +1159,10 @@ fn unknown_named_type_reports_consistent_error() {
     let _path_fork = PathInternerFork::empty();
     let missing = string_table.intern("Missing");
 
-    let unresolved = DataType::NamedType(missing);
+    let unresolved = ParsedTypeRef::Named {
+        name: missing,
+        span: None,
+    };
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(
         vec![],
         &PathInternerFork::empty(),
@@ -1099,8 +1175,14 @@ fn unknown_named_type_reports_consistent_error() {
         &const_values,
     );
 
-    let error = resolve_type(&unresolved, None, &mut resolution_context, &string_table)
-        .expect_err("unknown type should fail");
+    let error = resolve_parsed_type_annotation(
+        &unresolved,
+        None,
+        &mut resolution_context,
+        &mut string_table,
+        None,
+    )
+    .expect_err("unknown type should fail");
 
     assert_diagnostic_payload(
         error,
@@ -1118,34 +1200,103 @@ fn unknown_named_type_reports_consistent_error() {
 }
 
 #[test]
-fn optional_generic_instance_conversion_rejects_unresolved_arguments() {
+fn unresolved_generic_argument_does_not_intern_instance() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut type_environment = TypeEnvironment::new();
+    let box_name = string_table.intern("Box");
+    let first_parameter = string_table.intern("T");
+    let second_parameter = string_table.intern("U");
     let box_path = path_fork
         .try_intern_portable_path("Box", &mut string_table)
         .expect("test path fits");
-    type_environment.register_nominal_struct(StructTypeDefinition {
+    let mut type_environment = TypeEnvironment::new();
+    let generic_parameters = type_environment.register_generic_parameter_list(
+        [
+            (TypeParameterId(0), first_parameter),
+            (TypeParameterId(1), second_parameter),
+        ]
+        .into_iter(),
+        &FxHashMap::default(),
+    );
+    let (_, box_type_id) = type_environment.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path: box_path.to_owned(),
         fields: Box::new([]),
-        generic_parameters: None,
+        generic_parameters: Some(generic_parameters.list_id),
         const_record: false,
     });
+    let declarations = vec![Declaration {
+        id: box_path.to_owned(),
+        type_id: box_type_id,
+        type_syntax: None,
+        value_mode: ValueMode::ImmutableOwned,
+        value: DeclarationValue::Shell(DeclarationShell::Struct),
+        binding_span: None,
+        config_qualifier: None,
+    }];
+    let mut generic_declarations = FxHashMap::default();
+    generic_declarations.insert(box_path, GenericDeclarationKind::Struct);
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(declarations, &path_fork));
+    let const_values = ConstValueStore::default();
+    let mut resolution_context = TypeResolutionContext {
+        declaration_table: &declaration_table,
+        const_values: &const_values,
+        visible_declaration_ids: None,
+        visible_external_symbols: None,
+        visible_source_bindings: None,
+        visible_type_aliases: None,
+        resolved_type_aliases: None,
+        generic_declarations_by_path: Some(&generic_declarations),
+        generic_parameters: None,
+        generic_substitutions: None,
+        resolved_struct_fields_by_path: None,
+        type_environment: &mut type_environment,
+        visible_namespace_records: None,
+        trait_environment: None,
+        trait_evidence_environment: None,
+        visible_trait_names: None,
+    };
     let missing_type = string_table.intern("Missing");
-    let generic_instance = DataType::GenericInstance {
-        base: GenericBaseType::ResolvedNominal(box_path),
-        arguments: vec![DataType::StringSlice, DataType::NamedType(missing_type)],
+    let unresolved = ParsedTypeRef::Applied {
+        base: Box::new(ParsedTypeRef::Named {
+            name: box_name,
+            span: None,
+        }),
+        arguments: vec![
+            ParsedTypeRef::BuiltinString { span: None },
+            ParsedTypeRef::Named {
+                name: missing_type,
+                span: None,
+            },
+        ],
+        span: None,
     };
 
-    let converted =
-        resolve_diagnostic_type_to_type_id_opt(&generic_instance, &mut type_environment);
-
-    assert_eq!(converted, None);
+    let error = resolve_parsed_type_annotation(
+        &unresolved,
+        None,
+        &mut resolution_context,
+        &mut string_table,
+        None,
+    )
+    .expect_err("an unresolved generic argument must fail");
+    assert_diagnostic_payload(
+        error,
+        |payload| {
+            matches!(
+                payload,
+                DiagnosticPayload::UnknownName {
+                    name,
+                    namespace: NameNamespace::Type,
+                } if *name == missing_type
+            )
+        },
+        "UnknownName(type)",
+    );
     let interned_generic_instances = (0..128)
         .filter(|id| {
             matches!(
-                type_environment.get(TypeId(*id)),
+                resolution_context.type_environment.get(TypeId(*id)),
                 Some(TypeDefinition::GenericInstance(_))
             )
         })
@@ -1153,34 +1304,6 @@ fn optional_generic_instance_conversion_rejects_unresolved_arguments() {
     assert_eq!(
         interned_generic_instances, 0,
         "unresolved generic arguments must not intern a truncated instance"
-    );
-}
-
-#[test]
-fn checked_type_id_conversion_rejects_unresolved_named_type() {
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let mut type_environment = TypeEnvironment::new();
-    let missing = string_table.intern("Missing");
-    let error = resolve_diagnostic_type_to_type_id_checked(
-        &DataType::NamedType(missing),
-        &mut type_environment,
-        None,
-    )
-    .expect_err("checked conversion should reject unresolved type names");
-
-    assert_diagnostic_payload(
-        error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::UnknownName {
-                    name,
-                    namespace: NameNamespace::Type,
-                } if *name == missing
-            )
-        },
-        "UnknownName(type)",
     );
 }
 
@@ -1627,7 +1750,7 @@ fn rejects_collection_type_missing_close_curly_with_expected_token() {
 }
 
 // -------------------------------------------------------------
-//  Map type syntax parsing tests (Phase 3)
+//  Map type syntax parsing tests
 // -------------------------------------------------------------
 
 #[test]

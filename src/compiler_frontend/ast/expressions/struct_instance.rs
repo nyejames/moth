@@ -20,7 +20,8 @@ use crate::compiler_frontend::ast::expressions::call_arguments::{
     CallArgumentSyntax, ParsedCallArguments, parse_call_arguments_typed_with_numeric_retention,
 };
 use crate::compiler_frontend::ast::expressions::call_validation::{
-    CallArgumentResolutionContext, CallDiagnosticContext, expectations_from_constructor_fields,
+    CallArgumentResolutionContext, CallDiagnosticContext, CallDiagnosticName, ParameterExpectation,
+    expectations_from_constructor_fields, expectations_from_constructor_fields_with_substitution,
     resolve_call_arguments,
 };
 use crate::compiler_frontend::ast::expressions::constructor_views::{
@@ -114,7 +115,7 @@ pub(super) fn parse_struct_constructor_expression(
     } = input;
 
     let constructor_span = Some(token_stream.current_span());
-    let struct_name_display = string_table.resolve(struct_name).to_owned();
+    let diagnostic_name = CallDiagnosticName::Interned(struct_name);
 
     // The stream is positioned on the struct symbol when called.
     // Advance past it to '(' so the shared call-argument parser can take over.
@@ -140,9 +141,10 @@ pub(super) fn parse_struct_constructor_expression(
         Some(seed_generic_nominal_constructor(
             GenericNominalConstructorContext {
                 nominal_path: struct_path,
-                display_name: &struct_name_display,
+                diagnostic_name,
                 template: GenericNominalTemplate::StructFields(&constructor_field_views),
                 span: constructor_span,
+                route_input_evidence: None,
             },
             context,
             type_interner.environment(),
@@ -176,7 +178,7 @@ pub(super) fn parse_struct_constructor_expression(
         string_table,
         &field_expectations,
         CallArgumentSyntax::Constructor {
-            callee_name: Some(struct_name),
+            callee_name: diagnostic_name,
         },
         path_fork,
     )?;
@@ -192,7 +194,7 @@ pub(super) fn parse_struct_constructor_expression(
                     let result_shape =
                         link_generic_nominal_result_shape(GenericNominalShapeInput {
                             nominal_path: struct_path,
-                            display_name: &struct_name_display,
+                            diagnostic_name,
                             declared_fields: &constructor_field_views,
                             arguments: &arguments,
                             seeded_bindings: seed.bindings(),
@@ -204,7 +206,7 @@ pub(super) fn parse_struct_constructor_expression(
                         })?;
                     DeferredGenericNominalCall {
                         nominal_path: struct_path.to_owned(),
-                        display_name: struct_name_display,
+                        diagnostic_name,
                         seed,
                         arguments,
                         result_shape,
@@ -223,6 +225,7 @@ pub(super) fn parse_struct_constructor_expression(
                         struct_name,
                         type_id,
                         fields: constructor_field_views,
+                        expectations: field_expectations,
                         arguments,
                         call_span: constructor_span,
                         struct_value_mode: struct_value_mode.as_owned(),
@@ -245,13 +248,13 @@ pub(super) fn parse_struct_constructor_expression(
         let struct_expr = complete_generic_struct_instance(
             GenericStructCompletion {
                 nominal_path: struct_path,
-                display_name: &struct_name_display,
+                diagnostic_name,
                 template_fields: &constructor_field_views,
                 struct_value_mode,
                 enforce_const_record: context.kind.allows_const_record_coercion(),
                 constructor_span,
                 seed,
-                arguments: &raw_args,
+                arguments: raw_args,
             },
             context,
             type_interner,
@@ -265,14 +268,15 @@ pub(super) fn parse_struct_constructor_expression(
 
     let struct_expr = finish_struct_instance(
         StructInstanceInput {
-            struct_name_display: &struct_name_display,
+            diagnostic_name,
+            expectations: &field_expectations,
             fields: &constructor_field_views,
             constructor_span,
             struct_value_mode,
             enforce_const_record: context.kind.allows_const_record_coercion(),
             instance_type_id: type_id,
         },
-        &raw_args,
+        raw_args,
         context,
         type_interner,
         expression_builder,
@@ -284,9 +288,9 @@ pub(super) fn parse_struct_constructor_expression(
     Ok(ParsedConstructorExpression::Value(struct_expr))
 }
 
-/// Resolved constructor facts shared by the direct and retained completion paths.
 struct StructInstanceInput<'a> {
-    struct_name_display: &'a str,
+    diagnostic_name: CallDiagnosticName<'a>,
+    expectations: &'a [ParameterExpectation],
     fields: &'a [ConstructorField],
     constructor_span: Option<SourceSpan>,
     struct_value_mode: &'a ValueMode,
@@ -303,11 +307,11 @@ struct StructInstanceInput<'a> {
 ///      two lanes share one finisher instead of a second validator that could drift.
 #[allow(
     clippy::too_many_arguments,
-    reason = "struct instance finishing keeps the input, arguments, scope, type interner, expression builder, const store, path fork, and string table as separate borrows"
+    reason = "struct instance finishing keeps the input, owned arguments, scope, type interner, expression builder, const store, path fork, and string table as separate inputs"
 )]
 fn finish_struct_instance(
     input: StructInstanceInput<'_>,
-    arguments: &[CallArgument<OwnedExpr>],
+    arguments: Vec<CallArgument<OwnedExpr>>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
@@ -316,7 +320,8 @@ fn finish_struct_instance(
     string_table: &mut StringTable,
 ) -> Result<OwnedExpr, ExpressionParseError> {
     let StructInstanceInput {
-        struct_name_display,
+        diagnostic_name,
+        expectations,
         fields,
         constructor_span,
         struct_value_mode,
@@ -327,12 +332,11 @@ fn finish_struct_instance(
     // ------------------------
     //  Validate arguments against fields
     // ------------------------
-    let expectations = expectations_from_constructor_fields(fields, path_fork);
     let type_check_context = type_interner.type_check_context();
     let resolved_args = resolve_call_arguments(
-        CallDiagnosticContext::struct_constructor(struct_name_display),
+        CallDiagnosticContext::struct_constructor(diagnostic_name),
         arguments,
-        &expectations,
+        expectations,
         constructor_span,
         CallArgumentResolutionContext {
             string_table,
@@ -357,13 +361,17 @@ fn finish_struct_instance(
             let is_placeholder_reference = {
                 let view = expression_builder.view_owned(value)?;
                 if let ExpressionOperationView::Reference(path) = view.operation() {
-                    path_fork.component(path).is_some_and(|name| {
-                        context.get_reference(&name).is_some_and(|reference| {
-                            reference.ready_declaration().is_some_and(|declaration| {
+                    path_fork
+                        .component(path)
+                        .map(|name| context.get_value_reference(&name, view.span()))
+                        .transpose()?
+                        .flatten()
+                        .and_then(|reference| {
+                            reference.ready_declaration().map(|declaration| {
                                 context.is_unresolved_constant_placeholder(declaration)
                             })
                         })
-                    })
+                        .unwrap_or(false)
                 } else {
                     false
                 }
@@ -379,6 +387,7 @@ fn finish_struct_instance(
                             &context.template_ir_store,
                             expression_builder,
                             const_values,
+                            Some(context.external_package_registry.as_ref()),
                         )
                     })?
                     .is_compile_time_value()
@@ -450,19 +459,19 @@ fn finish_struct_instance(
 ///      same inference and finisher with the same facts.
 pub(crate) struct GenericStructCompletion<'a> {
     pub(crate) nominal_path: &'a PathId,
-    pub(crate) display_name: &'a str,
+    pub(crate) diagnostic_name: CallDiagnosticName<'static>,
     pub(crate) template_fields: &'a [ConstructorField],
     pub(crate) struct_value_mode: &'a ValueMode,
     pub(crate) enforce_const_record: bool,
     pub(crate) constructor_span: Option<SourceSpan>,
     pub(crate) seed: GenericNominalConstructorSeed,
-    pub(crate) arguments: &'a [CallArgument<OwnedExpr>],
+    pub(crate) arguments: Vec<CallArgument<OwnedExpr>>,
 }
 
 /// Infer one generic struct instance from completed arguments and build its value.
 ///
-/// WHAT: infers the instance from the seed and the argument types, substitutes the declared fields
-///       with the inferred arguments, then runs the shared struct finisher.
+/// WHAT: infers the instance from the seed and argument types, substitutes declared field types
+///       into the validation expectations, then runs the shared struct finisher.
 /// WHY: the instance is selected only after every argument is concrete, so the immediate and
 ///      retained lanes both end at this one completion.
 pub(crate) fn complete_generic_struct_instance(
@@ -476,7 +485,7 @@ pub(crate) fn complete_generic_struct_instance(
 ) -> Result<OwnedExpr, ExpressionParseError> {
     let GenericStructCompletion {
         nominal_path,
-        display_name,
+        diagnostic_name,
         template_fields,
         struct_value_mode,
         enforce_const_record,
@@ -489,13 +498,13 @@ pub(crate) fn complete_generic_struct_instance(
         GenericNominalConstructorInput {
             context: GenericNominalConstructorContext {
                 nominal_path,
-                display_name,
+                diagnostic_name,
                 template: GenericNominalTemplate::StructFields(template_fields),
                 span: constructor_span,
+                route_input_evidence: None,
             },
             constructor_fields: Some(template_fields),
-            raw_args: Some(arguments),
-            path_fork,
+            raw_args: Some(&arguments),
             expression_builder,
         },
         seed,
@@ -503,26 +512,18 @@ pub(crate) fn complete_generic_struct_instance(
         type_interner,
         string_table,
     )?;
-
-    // Substitute the declared fields with the inferred arguments, as the choice lane does. The
-    // instance's cached view is not read, since an early header-stage completion can run before the
-    // base nominal's views are populated. Defaults stay with the declared field views.
-    let resolved_fields: Vec<ConstructorField> = {
-        let replacements = inference.bindings.replacement_map();
-        let type_env = type_interner.environment_mut_for_derived_types();
-        template_fields
-            .iter()
-            .map(|field| ConstructorField {
-                type_id: type_env.substitute_type_id(field.type_id, replacements),
-                ..field.clone()
-            })
-            .collect()
-    };
-
+    let replacements = inference.bindings.replacement_map();
+    let resolved_expectations = expectations_from_constructor_fields_with_substitution(
+        template_fields,
+        path_fork,
+        type_interner.environment_mut_for_derived_types(),
+        replacements,
+    );
     finish_struct_instance(
         StructInstanceInput {
-            struct_name_display: display_name,
-            fields: &resolved_fields,
+            diagnostic_name,
+            expectations: &resolved_expectations,
+            fields: template_fields,
             constructor_span,
             struct_value_mode,
             enforce_const_record,
@@ -553,6 +554,7 @@ pub(crate) struct DeferredStructCall {
     pub(crate) struct_name: StringId,
     pub(crate) type_id: TypeId,
     pub(crate) fields: Vec<ConstructorField>,
+    pub(crate) expectations: Vec<ParameterExpectation>,
     pub(crate) arguments: Vec<DeferredCallArgument>,
     pub(crate) call_span: Option<SourceSpan>,
     pub(crate) struct_value_mode: ValueMode,
@@ -579,6 +581,7 @@ pub(crate) fn complete_deferred_struct_call<
         struct_name,
         type_id,
         fields,
+        expectations,
         arguments,
         call_span,
         struct_value_mode,
@@ -599,17 +602,17 @@ pub(crate) fn complete_deferred_struct_call<
         string_table,
         path_fork,
     } = session.session_services();
-    let struct_name_display = string_table.resolve(struct_name).to_owned();
     finish_struct_instance(
         StructInstanceInput {
-            struct_name_display: &struct_name_display,
+            diagnostic_name: CallDiagnosticName::Interned(struct_name),
+            expectations: &expectations,
             fields: &fields,
             constructor_span: call_span,
             struct_value_mode: &struct_value_mode,
             enforce_const_record,
             instance_type_id: type_id,
         },
-        &completed_arguments,
+        completed_arguments,
         context,
         type_interner,
         expression_builder,

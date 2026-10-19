@@ -73,6 +73,7 @@ fn fold_context<'a>(
         const_values,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         source_scope: None,
+        external_package_registry: None,
         bindings: vec![],
     }
 }
@@ -344,7 +345,7 @@ fn build_wrapper_context_fixture(
             TemplateTirPhase::Finalized,
             empty_overlay,
         );
-        let wrapper_set_id = tir.push_or_reuse_wrapper_set(vec![wrapper_ref]);
+        let wrapper_set_id = tir.push_or_reuse_wrapper_set(&[wrapper_ref]);
         let context = allocate_wrapper_context_overlay(
             &mut tir,
             wrapper_set_id,
@@ -413,7 +414,7 @@ fn build_expression_wrapper_fixture(
             TemplateTirPhase::Finalized,
             wrapper_context,
         );
-        let wrapper_set_id = tir.push_or_reuse_wrapper_set(vec![wrapper_ref]);
+        let wrapper_set_id = tir.push_or_reuse_wrapper_set(&[wrapper_ref]);
 
         let parent_context = if let Some(outer_expression) = outer_expression {
             let wrapper_context_overlay_id = tir
@@ -516,7 +517,7 @@ fn build_slot_resolution_wrapper_fixture(
             TemplateTirPhase::Finalized,
             wrapper_context,
         );
-        let wrapper_set_id = tir.push_or_reuse_wrapper_set(vec![wrapper_ref]);
+        let wrapper_set_id = tir.push_or_reuse_wrapper_set(&[wrapper_ref]);
         let context = allocate_wrapper_context_overlay(
             &mut tir,
             wrapper_set_id,
@@ -569,12 +570,11 @@ fn build_nested_virtual_wrapper_fixture(
         let nested_child_template_id = build_text_template(&mut tir, string_table, "nested");
         let inner_wrapper_template_id =
             build_slot_wrapper_template(&mut tir, string_table, "inner-before", "inner-after");
-        let inner_wrapper_set_id =
-            tir.push_or_reuse_wrapper_set(vec![TemplateWrapperReference::new(
-                inner_wrapper_template_id,
-                TemplateTirPhase::Finalized,
-                empty_context,
-            )]);
+        let inner_wrapper_set_id = tir.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
+            inner_wrapper_template_id,
+            TemplateTirPhase::Finalized,
+            empty_context,
+        )]);
 
         let outer_expression = string_table.intern("outer-structural");
         let outer_structural_expression =
@@ -674,12 +674,11 @@ fn build_nested_virtual_wrapper_fixture(
             TemplateIrNodeKind::DynamicExpression { site_id, .. } => *site_id,
             other => panic!("expected outer dynamic-expression node, got {other:?}"),
         };
-        let outer_wrapper_set_id =
-            tir.push_or_reuse_wrapper_set(vec![TemplateWrapperReference::new(
-                outer_wrapper_template_id,
-                TemplateTirPhase::Finalized,
-                empty_context,
-            )]);
+        let outer_wrapper_set_id = tir.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
+            outer_wrapper_template_id,
+            TemplateTirPhase::Finalized,
+            empty_context,
+        )]);
 
         (
             parent_template_id,
@@ -799,6 +798,7 @@ fn prepared_fold_fixture_result(
         expressions,
         const_values,
         TemplatePreparationMode::Value,
+        None,
     )?;
     if let TemplatePreparationOutcome::Runtime(reason) = preparation.outcome {
         return Err(CompilerError::compiler_error(format!(
@@ -1012,7 +1012,7 @@ fn wrapper_context_fold_applies_inherited_wrapper_set_innermost_to_outermost() {
             TemplateTirPhase::Finalized,
             TemplateViewContext::default(),
         );
-        let wrapper_set_id = tir.push_or_reuse_wrapper_set(vec![inner_ref, outer_ref]);
+        let wrapper_set_id = tir.push_or_reuse_wrapper_set(&[inner_ref, outer_ref]);
         let context = allocate_wrapper_context_overlay(
             &mut tir,
             wrapper_set_id,
@@ -1280,6 +1280,7 @@ fn preparation_classifies_outer_override_by_const_vs_runtime_expression() {
             &expressions,
             &const_values,
             TemplatePreparationMode::Value,
+            None,
         )
         .expect("outer runtime wrapper override should be a valid runtime result")
     };
@@ -1377,6 +1378,7 @@ fn preparation_ignores_runtime_referenced_wrapper_expression_overlay() {
             &expressions,
             &const_values,
             TemplatePreparationMode::Value,
+            None,
         )
         .expect("referenced wrapper expression should be ignored by the structural transition")
     };
@@ -1476,6 +1478,7 @@ fn preparation_falls_back_for_runtime_non_injected_slot_source() {
             &expressions,
             &const_values,
             TemplatePreparationMode::Value,
+            None,
         )
         .expect("runtime slot source should be an eligible runtime result")
     };
@@ -1594,6 +1597,7 @@ fn prepared_fold_rejects_slot_insert_from_wrapper_context_set() {
         &expressions,
         &const_values,
         TemplatePreparationMode::Value,
+        None,
     )
     .expect("slot insert helper should prepare without folding");
     assert!(!matches!(
@@ -1645,6 +1649,7 @@ fn prepared_fold_rejects_slot_insert_from_effective_slot_source() {
         &expressions,
         &const_values,
         TemplatePreparationMode::Value,
+        None,
     )
     .expect("slot insert source should prepare without folding");
     assert!(!matches!(
@@ -1764,6 +1769,7 @@ fn preparation_terminates_for_cyclic_nested_wrapper_contexts() {
         &expressions,
         &const_values,
         TemplatePreparationMode::Value,
+        None,
     ) {
         Err(error) => error,
         Ok(prepared) => panic!("cyclic wrapper contexts must be CompilerError, got {prepared:?}"),

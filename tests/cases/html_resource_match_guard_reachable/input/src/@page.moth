@@ -1,0 +1,8 @@
+name = "guard"
+picked ~= "unset"
+if name is:
+    "guard" if name is @assets/guard.txt => picked = "hit"
+    else => picked = "miss"
+;
+
+[:html_resource_match_guard_reachable picked=[picked]]

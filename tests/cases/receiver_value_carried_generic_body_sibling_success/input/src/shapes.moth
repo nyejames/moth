@@ -1,0 +1,11 @@
+Square = |
+    side I32,
+|
+
+make_square || -> Square:
+    return Square(3)
+;
+
+area |this Square| -> I32:
+    return this.side * this.side
+;

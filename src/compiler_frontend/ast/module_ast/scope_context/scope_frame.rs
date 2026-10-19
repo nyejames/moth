@@ -193,9 +193,9 @@ impl ScopeArena {
     /// WHAT: `ActualScopeFrames` counts every frame allocated through the arena,
     ///       including clone-isolation frames. `ScopeArenaCapacity` records only
     ///       capacity growth, so repeated pushes without Vec growth do not inflate it.
-    /// WHY: Phase 5 tunes capacity estimates from observed frame count and storage
-    ///      pressure; these counters must be attached to the arena owner rather than
-    ///      scattered across context constructors.
+    /// WHY: these counters let benchmarks compare observed frame count and storage
+    ///      growth against the token/header capacity estimates; they live on the arena
+    ///      owner rather than scattered across context constructors.
     fn record_frame_allocation(&self, previous_capacity: usize) {
         increment_frontend_counter(FrontendCounter::ActualScopeFrames);
 

@@ -15,13 +15,13 @@ use crate::compiler_frontend::ast::expressions::call_arguments::{
     ParsedCallArguments, parse_generic_call_arguments_typed,
 };
 use crate::compiler_frontend::ast::expressions::call_validation::{
-    CallArgumentResolutionContext, CallDiagnosticContext, ExpectedParameterType,
-    ParameterExpectation, expectations_from_user_parameters, generic_template_expectations,
-    resolve_call_arguments, resolve_call_arguments_shape_and_access,
+    CallArgumentResolutionContext, CallDiagnosticContext, CallDiagnosticName,
+    ExpectedParameterType, ParameterExpectation, expectations_from_user_parameters,
+    generic_template_expectations, resolve_call_arguments, resolve_call_arguments_shape_and_access,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::{
-    AstExpressionBuilder, OwnedExpr,
+    AstExpressionBuilder, ExpressionOperationView, OwnedExpr,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::FallibleExpressionHandling;
 use crate::compiler_frontend::ast::expressions::function_calls::{
@@ -29,15 +29,15 @@ use crate::compiler_frontend::ast::expressions::function_calls::{
     retained_pending_call_operand,
 };
 use crate::compiler_frontend::ast::generic_bounds::{
-    BoundEvidenceSelection, evidence_for_type, evidence_target_is_visible,
-    generated_evidence_pair_is_selected, generic_parameter_declares_bound,
+    BoundEvidenceSelection, evidence_for_type, generic_parameter_declares_bound,
 };
 use crate::compiler_frontend::ast::generic_functions::diagnostics::{
     cannot_infer_generic_function_arguments, conflicting_generic_function_argument,
     missing_generic_function_trait_evidence, recursive_generic_function_instantiation,
 };
 use crate::compiler_frontend::ast::generic_functions::numeric_origins::{
-    GenericErrorReturn, GenericNumericSignatureInput, link_generic_numeric_signature,
+    GenericErrorReturn, GenericNumericSignatureInput, RouteArgumentInputEvidence,
+    RouteFutureInputEvidence, link_generic_numeric_signature, route_argument_future_input_evidence,
 };
 use crate::compiler_frontend::ast::generic_functions::{
     GenericFunctionInstanceKey, GenericFunctionInstantiationRequest, GenericFunctionTemplate,
@@ -53,15 +53,15 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
     parse_fallible_handling_suffix_for_call_expression,
     token_stream_starts_typed_propagation_suffix, validate_postfix_propagation_contract,
 };
-use crate::compiler_frontend::ast::statements::functions::{
-    FunctionParameter, FunctionSignature, ReturnSlot,
-};
+use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ParameterContract};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ValueReceiverContext};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, InvalidCallShapeReason, ValueReceiverContext,
+};
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_bindings::{BindingConflict, GenericTypeBindings};
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
-use crate::compiler_frontend::datatypes::{diagnostic_type_spelling, environment::TypeEnvironment};
 #[cfg(feature = "benchmark_counters")]
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::source::SourceSpan;
@@ -70,6 +70,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use rustc_hash::FxHashMap;
+use std::fmt::Write as _;
 
 /// Input bundle for generic call inference.
 pub(crate) struct GenericFunctionCallParseInput<'a, 'b, 'tokens> {
@@ -155,13 +156,23 @@ fn parse_generic_call_in_lane(
     let raw_arguments = match parsed_arguments {
         ParsedCallArguments::Ready(raw_arguments) => raw_arguments,
         ParsedCallArguments::Retained(arguments) => {
-            return retain_generic_call(input, arguments, owned_producers, lane);
+            return retain_generic_call(
+                input,
+                parameter_expectations,
+                arguments,
+                owned_producers,
+                lane,
+            );
         }
     };
 
     let expression = match lane {
-        GenericCallLane::Instance => parse_ready_instance_call(input, raw_arguments)?,
-        GenericCallLane::TemplateValidation => validate_ready_template_call(input, raw_arguments)?,
+        GenericCallLane::Instance => {
+            parse_ready_instance_call(input, raw_arguments, &parameter_expectations)?
+        }
+        GenericCallLane::TemplateValidation => {
+            validate_ready_template_call(input, raw_arguments, &parameter_expectations)?
+        }
     };
     Ok(ParsedFunctionCallExpression::Value(expression))
 }
@@ -169,12 +180,13 @@ fn parse_generic_call_in_lane(
 /// Retains one generic call whose argument values still depend on pending numeric resolution.
 ///
 /// WHAT: links the callee's numeric origins into result shapes and an error slot, settles the
-///       authored `!` against that error slot, reserves the instantiation ticket in the instance
-///       lane, and stores the call as a pending operand for body completion.
-/// WHY: the call's source position and request ticket must be fixed here, so the deferred
-///      instantiation publishes in parse order once its numeric arguments resolve.
+///       authored `!` against that error slot, reserves the instance ticket and stores the
+///       template expectations and arguments for body completion.
+/// WHY: the call's source position and ticket must be fixed here, while its unchanged template
+///      expectations can be reused for inference after numeric completion.
 fn retain_generic_call(
     input: GenericFunctionCallParseInput<'_, '_, '_>,
+    parameter_expectations: Vec<ParameterExpectation>,
     arguments: Vec<DeferredCallArgument>,
     owned_producers: std::ops::Range<usize>,
     lane: GenericCallLane,
@@ -237,7 +249,8 @@ fn retain_generic_call(
         GenericCallLane::TemplateValidation => None,
     };
     let call = DeferredCall::Generic(Box::new(DeferredGenericCall {
-        template: template.clone(),
+        template: template_for_deferred_generic_call(template),
+        parameter_expectations,
         arguments,
         call_span,
         authored_handling,
@@ -249,9 +262,25 @@ fn retain_generic_call(
     Ok(retained_pending_call_operand(call, call_span))
 }
 
+fn template_for_deferred_generic_call(
+    template: &GenericFunctionTemplate,
+) -> GenericFunctionTemplate {
+    GenericFunctionTemplate {
+        function_path: template.function_path,
+        source_file: template.source_file,
+        declaration_identity: template.declaration_identity.clone(),
+        generic_parameter_owner: template.generic_parameter_owner.clone(),
+        generic_parameter_list_id: template.generic_parameter_list_id,
+        signature: template.signature.clone(),
+        body_tokens: template.body_tokens.clone(),
+        declaration_span: template.declaration_span,
+    }
+}
+
 fn parse_ready_instance_call(
     input: GenericFunctionCallParseInput<'_, '_, '_>,
     raw_arguments: Vec<CallArgument<OwnedExpr>>,
+    parameter_expectations: &[ParameterExpectation],
 ) -> Result<OwnedExpr, ExpressionParseError> {
     let GenericFunctionCallParseInput {
         token_stream,
@@ -269,18 +298,21 @@ fn parse_ready_instance_call(
         path_fork,
     } = input;
 
-    let inference = infer_generic_function_call(GenericFunctionInferenceInput {
-        template,
-        raw_arguments: &raw_arguments,
-        expression_builder,
-        expected_context,
-        call_span,
-        known_receiver_type_id: None,
-        known_receiver_span: None,
-        type_environment: type_interner.environment_mut_for_derived_types(),
-        string_table,
-        path_fork,
-    })?;
+    let inference = infer_generic_function_call_with_expectations(
+        GenericFunctionInferenceInput {
+            template,
+            raw_arguments: &raw_arguments,
+            expression_builder,
+            expected_context,
+            call_span,
+            known_receiver_type_id: None,
+            known_receiver_span: None,
+            type_environment: type_interner.environment_mut_for_derived_types(),
+            string_table,
+            path_fork,
+        },
+        parameter_expectations,
+    )?;
     let selected_evidence = validate_generic_function_bound_evidence(
         template,
         inference.key.type_arguments.as_ref(),
@@ -297,16 +329,16 @@ fn parse_ready_instance_call(
         )
         .into());
     }
-    let callee_name = path_fork
-        .component(template.function_path)
-        .map(|name| string_table.resolve(name).to_owned())
-        .unwrap_or_else(|| String::from("<generic function>"));
+    let callee_name = CallDiagnosticName::PathComponent {
+        component: path_fork.component(template.function_path),
+        fallback: "<generic function>",
+    };
     let expectations =
         expectations_from_user_parameters(&inference.signature.parameters, path_fork);
     let type_check_context = type_interner.type_check_context();
     let arguments = resolve_call_arguments(
-        CallDiagnosticContext::function(&callee_name),
-        &raw_arguments,
+        CallDiagnosticContext::function(callee_name),
+        raw_arguments,
         &expectations,
         call_span,
         CallArgumentResolutionContext {
@@ -357,6 +389,7 @@ fn parse_ready_instance_call(
 fn validate_ready_template_call(
     input: GenericFunctionCallParseInput<'_, '_, '_>,
     raw_arguments: Vec<CallArgument<OwnedExpr>>,
+    parameter_expectations: &[ParameterExpectation],
 ) -> Result<OwnedExpr, ExpressionParseError> {
     let GenericFunctionCallParseInput {
         token_stream,
@@ -374,18 +407,21 @@ fn validate_ready_template_call(
         path_fork,
     } = input;
 
-    let inference = infer_generic_function_call(GenericFunctionInferenceInput {
-        template,
-        raw_arguments: &raw_arguments,
-        expression_builder,
-        expected_context,
-        call_span,
-        known_receiver_type_id: None,
-        known_receiver_span: None,
-        type_environment: type_interner.environment_mut_for_derived_types(),
-        string_table,
-        path_fork,
-    })?;
+    let inference = infer_generic_function_call_with_expectations(
+        GenericFunctionInferenceInput {
+            template,
+            raw_arguments: &raw_arguments,
+            expression_builder,
+            expected_context,
+            call_span,
+            known_receiver_type_id: None,
+            known_receiver_span: None,
+            type_environment: type_interner.environment_mut_for_derived_types(),
+            string_table,
+            path_fork,
+        },
+        parameter_expectations,
+    )?;
     validate_generic_function_bound_evidence(
         template,
         inference.key.type_arguments.as_ref(),
@@ -395,15 +431,15 @@ fn validate_ready_template_call(
         call_span,
     )?;
 
-    let callee_name = path_fork
-        .component(template.function_path)
-        .map(|name| string_table.resolve(name).to_owned())
-        .unwrap_or_else(|| String::from("<generic function>"));
+    let callee_name = CallDiagnosticName::PathComponent {
+        component: path_fork.component(template.function_path),
+        fallback: "<generic function>",
+    };
     let expectations =
         expectations_from_user_parameters(&inference.signature.parameters, path_fork);
     let arguments = resolve_call_arguments_shape_and_access(
-        CallDiagnosticContext::function(&callee_name),
-        &raw_arguments,
+        CallDiagnosticContext::function(callee_name),
+        raw_arguments,
         &expectations,
         call_span,
         expression_builder,
@@ -536,6 +572,7 @@ fn complete_reserved_generic_call<'env, S: DeferredExpressionCompletion<'env> + 
 ) -> Result<OwnedExpr, ExpressionParseError> {
     let DeferredGenericCall {
         template,
+        parameter_expectations,
         arguments,
         call_span,
         authored_handling,
@@ -563,18 +600,21 @@ fn complete_reserved_generic_call<'env, S: DeferredExpressionCompletion<'env> + 
         Some(type_ids) => GenericCallExpectedContext::ImmediateResult(type_ids),
         None => GenericCallExpectedContext::None,
     };
-    let inference = infer_generic_function_call(GenericFunctionInferenceInput {
-        template: &template,
-        raw_arguments: &raw_arguments,
-        expression_builder,
-        expected_context,
-        call_span,
-        known_receiver_type_id: None,
-        known_receiver_span: None,
-        type_environment: type_interner.environment_mut_for_derived_types(),
-        string_table,
-        path_fork,
-    })?;
+    let inference = infer_generic_function_call_with_expectations(
+        GenericFunctionInferenceInput {
+            template: &template,
+            raw_arguments: &raw_arguments,
+            expression_builder,
+            expected_context,
+            call_span,
+            known_receiver_type_id: None,
+            known_receiver_span: None,
+            type_environment: type_interner.environment_mut_for_derived_types(),
+            string_table,
+            path_fork,
+        },
+        &parameter_expectations,
+    )?;
     verify_completed_error_return(
         error_return,
         inference.signature.error_return_type_id(),
@@ -598,10 +638,10 @@ fn complete_reserved_generic_call<'env, S: DeferredExpressionCompletion<'env> + 
         call_span,
     )?;
 
-    let callee_name = path_fork
-        .component(template.function_path)
-        .map(|name| string_table.resolve(name).to_owned())
-        .unwrap_or_else(|| String::from("<generic function>"));
+    let callee_name = CallDiagnosticName::PathComponent {
+        component: path_fork.component(template.function_path),
+        fallback: "<generic function>",
+    };
     let expectations =
         expectations_from_user_parameters(&inference.signature.parameters, path_fork);
     // A reserved ticket marks the instance lane; template-validation calls reserve none.
@@ -616,8 +656,8 @@ fn complete_reserved_generic_call<'env, S: DeferredExpressionCompletion<'env> + 
             }
             let type_check_context = type_interner.type_check_context();
             let resolved = resolve_call_arguments(
-                CallDiagnosticContext::function(&callee_name),
-                &raw_arguments,
+                CallDiagnosticContext::function(callee_name),
+                raw_arguments,
                 &expectations,
                 call_span,
                 CallArgumentResolutionContext {
@@ -634,8 +674,8 @@ fn complete_reserved_generic_call<'env, S: DeferredExpressionCompletion<'env> + 
         }
         None => {
             let resolved = resolve_call_arguments_shape_and_access(
-                CallDiagnosticContext::function(&callee_name),
-                &raw_arguments,
+                CallDiagnosticContext::function(callee_name),
+                raw_arguments,
                 &expectations,
                 call_span,
                 expression_builder,
@@ -966,6 +1006,18 @@ impl GenericBindingEvidenceLocations {
 pub(crate) fn infer_generic_function_call(
     input: GenericFunctionInferenceInput<'_>,
 ) -> Result<GenericFunctionInference, ExpressionParseError> {
+    let expectations = generic_template_expectations(
+        &input.template.signature.parameters,
+        input.path_fork,
+        input.type_environment,
+    );
+    infer_generic_function_call_with_expectations(input, &expectations)
+}
+
+fn infer_generic_function_call_with_expectations(
+    input: GenericFunctionInferenceInput<'_>,
+    expectations: &[ParameterExpectation],
+) -> Result<GenericFunctionInference, ExpressionParseError> {
     let GenericFunctionInferenceInput {
         template,
         raw_arguments,
@@ -978,8 +1030,6 @@ pub(crate) fn infer_generic_function_call(
         string_table,
         path_fork,
     } = input;
-
-    let expectations = expectations_from_user_parameters(&template.signature.parameters, path_fork);
     let receiver_slot_offset = if known_receiver_type_id.is_some() {
         1
     } else {
@@ -995,7 +1045,7 @@ pub(crate) fn infer_generic_function_call(
     collect_call_argument_bindings(
         template,
         &routed_arguments,
-        &expectations,
+        expectations,
         known_receiver_type_id,
         known_receiver_span,
         &mut bindings,
@@ -1010,7 +1060,7 @@ pub(crate) fn infer_generic_function_call(
         bindings.concrete_arguments_for(template.generic_parameter_list_id, type_environment);
     if type_arguments.is_none()
         && let Some(expected_result_type_ids) = expected_context
-            .matching_success_results(template.signature.success_return_type_ids().len())
+            .matching_success_results(template.signature.success_return_slot_count())
     {
         collect_expected_result_bindings(
             template,
@@ -1047,6 +1097,13 @@ pub(crate) fn infer_generic_function_call(
             )
         })?;
     let signature = substitute_function_signature(&template.signature, &mapping, type_environment);
+
+    validate_substituted_route_contracts(
+        &signature,
+        &routed_arguments,
+        expression_builder,
+        type_environment,
+    )?;
     let instance_path = generic_function_instance_path(
         template.function_path,
         type_arguments.as_ref(),
@@ -1084,9 +1141,7 @@ pub(crate) fn validate_generic_function_bound_evidence(
     let mut selected_evidence = Vec::new();
     for (parameter, concrete_type_id) in parameter_list.parameters.iter().zip(type_arguments) {
         for trait_id in &parameter.trait_bounds {
-            let trait_is_visible = context.trait_id_is_visible(*trait_id);
             if context.generic_template_validation
-                && trait_is_visible
                 && generic_parameter_declares_bound(*concrete_type_id, *trait_id, type_environment)
             {
                 // A template can forward its own bound into a nested generic request. The
@@ -1094,50 +1149,15 @@ pub(crate) fn validate_generic_function_bound_evidence(
                 // evidence identity, so template validation must not manufacture a local row.
                 continue;
             }
-            // An exact generated pair the requester already transferred authorizes both halves of
-            // its own visibility, because a materialised body may call a provider-owned trait's
-            // evidence from a module that never named that trait. Every pair the requester did
-            // not select still needs ordinary trait and target visibility, and either way the
-            // real evidence row selected below remains mandatory.
-            let evidence_is_visible = generated_evidence_pair_is_selected(
+            // Names never gate this lookup. A conformance reaches this requester only through
+            // evidence its imports and declarations carried in, so the selected row decides.
+            if let Some(evidence_selection) = evidence_for_type(
                 *concrete_type_id,
                 *trait_id,
                 type_environment,
-                context.shared.generated_evidence_pairs.as_ref(),
-            ) || (trait_is_visible
-                && evidence_target_is_visible(
-                    *concrete_type_id,
-                    type_environment,
-                    context
-                        .shared
-                        .file_visibility
-                        .as_deref()
-                        .map(|visibility| &visibility.visible_source_names),
-                    context
-                        .shared
-                        .file_visibility
-                        .as_deref()
-                        .map(|visibility| &visibility.visible_type_alias_names),
-                    context
-                        .shared
-                        .file_visibility
-                        .as_deref()
-                        .map(|visibility| &visibility.visible_namespace_records),
-                    context.shared.resolved_type_aliases.as_deref(),
-                ));
-            let evidence_selection = evidence_is_visible
-                .then(|| {
-                    evidence_for_type(
-                        *concrete_type_id,
-                        *trait_id,
-                        type_environment,
-                        trait_environment,
-                        evidence_environment,
-                    )
-                })
-                .flatten();
-
-            if let Some(evidence_selection) = evidence_selection {
+                trait_environment,
+                evidence_environment,
+            ) {
                 selected_evidence.push(evidence_selection);
                 continue;
             }
@@ -1163,6 +1183,68 @@ pub(crate) fn validate_generic_function_bound_evidence(
     }
 
     Ok(selected_evidence.into_boxed_slice())
+}
+
+fn validate_substituted_route_contracts(
+    signature: &FunctionSignature,
+    routed_arguments: &[Option<&CallArgument<OwnedExpr>>],
+    expression_builder: &AstExpressionBuilder,
+    type_environment: &mut TypeEnvironment,
+) -> Result<(), ExpressionParseError> {
+    for (slot, argument) in routed_arguments.iter().enumerate() {
+        let Some(argument) = argument else {
+            continue;
+        };
+        let Some(parameter) = signature.parameters.get(slot) else {
+            return Err(CompilerError::compiler_error(
+                "a routed generic argument exceeded its substituted signature",
+            )
+            .into());
+        };
+        let ParameterContract::Route { input } = parameter.contract else {
+            continue;
+        };
+
+        let argument_view = expression_builder.view_owned(argument.value)?;
+        let actual_output_type =
+            argument_view.require_single(ValueReceiverContext::FunctionArgument)?;
+        let is_forwarded = matches!(
+            argument_view.operation(),
+            ExpressionOperationView::Reference(_)
+        );
+        if actual_output_type != parameter.type_id {
+            let reason = if is_forwarded {
+                InvalidCallShapeReason::RouteForwardingContractMismatch
+            } else {
+                InvalidCallShapeReason::RouteArgumentNotDirect
+            };
+            return Err(CompilerDiagnostic::invalid_call_shape(reason, None, argument.span).into());
+        }
+
+        if let Some(expected_input_type) = input
+            && !matches!(
+                route_argument_future_input_evidence(
+                    RouteArgumentInputEvidence::Ready {
+                        forwarded_input_type: argument.route_future_input_type,
+                        value_type_id: actual_output_type,
+                        operation: argument_view.operation(),
+                    },
+                    type_environment,
+                )?,
+                Some(RouteFutureInputEvidence::Type(actual_input_type))
+                    if actual_input_type == expected_input_type
+            )
+        {
+            let reason = if is_forwarded {
+                InvalidCallShapeReason::RouteForwardingContractMismatch
+            } else {
+                InvalidCallShapeReason::RouteInputFieldMismatch
+            };
+            return Err(CompilerDiagnostic::invalid_call_shape(reason, None, argument.span).into());
+        }
+    }
+
+    Ok(())
 }
 
 impl<'a> GenericCallExpectedContext<'a> {
@@ -1194,41 +1276,92 @@ fn collect_call_argument_bindings(
     bindings: &mut GenericTypeBindings,
     evidence_locations: &mut GenericBindingEvidenceLocations,
     expression_builder: &AstExpressionBuilder,
-    type_environment: &TypeEnvironment,
+    type_environment: &mut TypeEnvironment,
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
-    let mut evidence_context = GenericBindingEvidenceContext {
-        template,
-        bindings,
-        evidence_locations,
-        type_environment,
-        string_table,
-        path_fork,
-    };
-
     for (slot, argument) in routed_arguments.iter().enumerate() {
-        let (argument_type_id, argument_span) = match (slot, known_receiver_type_id, argument) {
-            (0, Some(receiver_type_id), _) => (receiver_type_id, known_receiver_span),
-            (_, _, Some(argument)) => (
-                expression_builder
-                    .view_owned(argument.value)?
-                    .require_single(ValueReceiverContext::FunctionArgument)?,
-                argument.span,
-            ),
-            _ => continue,
+        let routed_argument = *argument;
+        let (argument_type_id, argument_span, argument_operation) =
+            match (slot, known_receiver_type_id, routed_argument) {
+                (0, Some(receiver_type_id), _) => (receiver_type_id, known_receiver_span, None),
+                (_, _, Some(argument)) => {
+                    let argument_view = expression_builder.view_owned(argument.value)?;
+                    let argument_type_id =
+                        argument_view.require_single(ValueReceiverContext::FunctionArgument)?;
+                    (
+                        argument_type_id,
+                        argument.span,
+                        Some(argument_view.operation()),
+                    )
+                }
+                _ => continue,
+            };
+        let template_type_id = match expectations[slot].expected_type {
+            ExpectedParameterType::Known(type_id)
+            | ExpectedParameterType::GenericParameter(type_id) => type_id,
+            ExpectedParameterType::ConstructionShape(_)
+            | ExpectedParameterType::UnknownExternal => {
+                continue;
+            }
         };
-        let ExpectedParameterType::Known(template_type_id) = expectations[slot].expected_type
+
+        {
+            let mut evidence_context = GenericBindingEvidenceContext {
+                template,
+                bindings: &mut *bindings,
+                evidence_locations: &mut *evidence_locations,
+                type_environment: &*type_environment,
+                string_table: &mut *string_table,
+                path_fork,
+            };
+            collect_binding_evidence(
+                &mut evidence_context,
+                template_type_id,
+                argument_type_id,
+                argument_span,
+            )?;
+        }
+
+        let (
+            Some(argument),
+            Some(operation),
+            ParameterContract::Route {
+                input: Some(input_type),
+            },
+        ) = (
+            routed_argument,
+            argument_operation,
+            expectations[slot].contract,
+        )
         else {
             continue;
         };
-
-        collect_binding_evidence(
-            &mut evidence_context,
-            template_type_id,
-            argument_type_id,
-            argument_span,
-        )?;
+        if let Some(RouteFutureInputEvidence::Type(actual_input_type)) =
+            route_argument_future_input_evidence(
+                RouteArgumentInputEvidence::Ready {
+                    forwarded_input_type: argument.route_future_input_type,
+                    value_type_id: argument_type_id,
+                    operation,
+                },
+                type_environment,
+            )?
+        {
+            let mut evidence_context = GenericBindingEvidenceContext {
+                template,
+                bindings: &mut *bindings,
+                evidence_locations: &mut *evidence_locations,
+                type_environment: &*type_environment,
+                string_table: &mut *string_table,
+                path_fork,
+            };
+            collect_binding_evidence(
+                &mut evidence_context,
+                input_type,
+                actual_input_type,
+                argument.span,
+            )?;
+        }
     }
 
     Ok(())
@@ -1259,13 +1392,12 @@ fn collect_expected_result_bindings(
 
     for (template_return_type, expected_type) in template
         .signature
-        .success_return_type_ids()
-        .iter()
+        .success_return_type_ids_iter()
         .zip(expected_result_type_ids.iter())
     {
         collect_binding_evidence(
             &mut evidence_context,
-            *template_return_type,
+            template_return_type,
             *expected_type,
             span,
         )?;
@@ -1353,53 +1485,19 @@ pub(crate) fn substitute_function_signature(
     increment_frontend_counter(
         FrontendCounter::CensusGenericCallAndMaterialisationSignatureSubstitutions,
     );
-    FunctionSignature {
-        parameters: signature
-            .parameters
-            .iter()
-            .map(|parameter| substitute_parameter(parameter, mapping, type_environment))
-            .collect(),
-        returns: signature
-            .returns
-            .iter()
-            .map(|slot| substitute_return_slot(slot, mapping, type_environment))
-            .collect(),
+    let mut concrete = signature.clone();
+    for parameter in &mut concrete.parameters {
+        parameter.type_id = type_environment.substitute_type_id(parameter.type_id, mapping);
+        if let ParameterContract::Route { input: Some(input) } = &mut parameter.contract {
+            *input = type_environment.substitute_type_id(*input, mapping);
+        }
     }
-}
-
-fn substitute_parameter(
-    parameter: &FunctionParameter,
-    mapping: &FxHashMap<GenericParameterId, TypeId>,
-    type_environment: &mut TypeEnvironment,
-) -> FunctionParameter {
-    let mut parameter = parameter.clone();
-    let type_id = type_environment.substitute_type_id(parameter.type_id, mapping);
-    parameter.type_id = type_id;
-    parameter.diagnostic_type = diagnostic_type_spelling(type_id, type_environment);
-    // Defaults are canonical folded content, not expressions to retag for each instance.
-    parameter
-}
-
-fn substitute_return_slot(
-    slot: &ReturnSlot,
-    mapping: &FxHashMap<GenericParameterId, TypeId>,
-    type_environment: &mut TypeEnvironment,
-) -> ReturnSlot {
-    let Some(type_id) = slot
-        .type_id
-        .map(|type_id| type_environment.substitute_type_id(type_id, mapping))
-    else {
-        return slot.clone();
-    };
-
-    let data_type = diagnostic_type_spelling(type_id, type_environment);
-    let value = data_type;
-
-    ReturnSlot {
-        value,
-        type_id: Some(type_id),
-        channel: slot.channel,
+    for slot in &mut concrete.returns {
+        slot.type_id = slot
+            .type_id
+            .map(|type_id| type_environment.substitute_type_id(type_id, mapping));
     }
+    concrete
 }
 
 fn missing_generic_parameter_names(
@@ -1428,12 +1526,14 @@ pub(crate) fn generic_function_instance_path(
     // WHAT: builds an internal-only path for a concrete generic function instance.
     // WHY: instances are emitted into the consuming module's AST/HIR and are not
     //      user-visible, dependency-bindable, or namespace-exposed.
-    let argument_suffix = type_arguments
-        .iter()
-        .map(|type_id| type_id.0.to_string())
-        .collect::<Vec<_>>()
-        .join("_");
-    let component = string_table.intern(&format!("__generic_instance_{argument_suffix}"));
+    let mut component_text = String::from("__generic_instance_");
+    for (index, type_id) in type_arguments.iter().enumerate() {
+        if index > 0 {
+            component_text.push('_');
+        }
+        let _ = write!(component_text, "{}", type_id.0);
+    }
+    let component = string_table.get_or_intern(component_text);
     path_fork
         .try_intern_child(function_path, component)
         .ok_or_else(|| {

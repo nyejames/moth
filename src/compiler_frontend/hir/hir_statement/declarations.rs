@@ -633,7 +633,7 @@ impl<'a> HirBuilder<'a> {
 
         let function_id = self.allocate_function_id();
 
-        let success_returns = signature.success_returns();
+        let success_return_slot_count = signature.success_return_slot_count();
         let success_return_type_ids: Vec<Option<TypeId>> = signature
             .returns
             .iter()
@@ -645,12 +645,11 @@ impl<'a> HirBuilder<'a> {
             .iter()
             .filter(|id| id.is_some())
             .count();
-        if !success_returns.is_empty() && resolved_success_count != success_returns.len() {
+        if resolved_success_count != success_return_slot_count {
             return_hir_transformation_error!(
                 format!(
                     "HIR invariant: function signature has {} success return slots but {} resolved canonical TypeIds.",
-                    success_returns.len(),
-                    resolved_success_count
+                    success_return_slot_count, resolved_success_count
                 ),
                 self.hir_error_location(span)
             );
@@ -662,24 +661,25 @@ impl<'a> HirBuilder<'a> {
             .map(|type_id| self.lower_type_id(type_id, span))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let error_return_type_id = match (
-            signature.error_return(),
-            signature.error_return_type_id(),
-        ) {
-            (Some(_), Some(type_id)) => Some(self.lower_type_id(type_id, span)?),
-            (Some(_), None) => {
+        let has_error_return_slot = signature
+            .returns
+            .iter()
+            .any(|slot| slot.channel == ReturnChannel::Error);
+        let error_return_type_id = match (has_error_return_slot, signature.error_return_type_id()) {
+            (true, Some(type_id)) => Some(self.lower_type_id(type_id, span)?),
+            (true, None) => {
                 return_hir_transformation_error!(
                     "HIR invariant: function signature has an error return slot without a canonical TypeId.",
                     self.hir_error_location(span)
                 );
             }
-            (None, Some(_)) => {
+            (false, Some(_)) => {
                 return_hir_transformation_error!(
                     "HIR invariant: function signature has an error return TypeId without an error return slot.",
                     self.hir_error_location(span)
                 );
             }
-            (None, None) => None,
+            (false, None) => None,
         };
 
         let region_id = self.allocate_region_id();

@@ -1,0 +1,8 @@
+needs_optional |value Wire of String?| -> String:
+    return "text"
+;
+
+render || -> String:
+    local = "text"
+    return needs_optional(local)
+;

@@ -2,8 +2,8 @@
 //!
 //! WHAT: unifies then/else branch types, coerces individual expressions, and infers
 //! result types for block-form value-if and full value-match receivers.
-//! WHY: receiver sites need contextual compatibility checks on canonical `TypeId`s;
-//! `DataType` must not be used for semantic decisions once type IDs exist.
+//! WHY: receiving boundaries compare resolved semantic types through the canonical type
+//!      environment.
 
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;

@@ -1,9 +1,7 @@
 //! Tests for HTML page metadata extraction.
 
 use super::*;
-use crate::compiler_frontend::ast::const_values::facts::{
-    ConstBindingScope, ConstBindingSource, ConstFactValueKind,
-};
+use crate::compiler_frontend::ast::const_values::facts::{ConstBindingScope, ConstBindingSource};
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terminal};
 use crate::compiler_frontend::compiler_messages::{
@@ -71,7 +69,6 @@ fn add_const_fact(
             declaration_path,
             scope: ConstBindingScope::ExplicitTopLevel,
             source: ConstBindingSource::ExplicitHash,
-            value_kind: ConstFactValueKind::RenderableTemplate,
             span,
         },
     );

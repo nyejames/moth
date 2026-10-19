@@ -1,0 +1,7 @@
+List type T = |
+    items {T},
+|
+
+read |values List of Wire| -> String:
+    return "read"
+;

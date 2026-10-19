@@ -1,0 +1,13 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0038"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0038"
+reason = "invalid_parameter_contract.wire_arrow_not_allowed"
+path = "input/@page.moth"
+line = 1
+column = 28

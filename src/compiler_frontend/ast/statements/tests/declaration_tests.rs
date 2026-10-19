@@ -14,7 +14,8 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidMultiBindReason, ReservedNameOwner, RuleDiagnosticKind, TypeMismatchContext,
     ValueReceiverContext,
 };
-use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
+use crate::compiler_frontend::datatypes::display::display_type_with_resolver;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::parse_declaration_syntax;
 use crate::compiler_frontend::external_packages::{
@@ -57,15 +58,15 @@ fn parses_mutable_and_explicitly_typed_declarations() {
         panic!("expected mutable declaration");
     };
     assert_eq!(
-        count_decl.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::I32)
+        count_decl.type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
     );
     assert_eq!(count_decl.value_mode, ValueMode::MutableOwned);
 
     let NodeKind::VariableDeclaration(name_decl) = &body[1].kind else {
         panic!("expected explicit string declaration");
     };
-    assert_eq!(name_decl.diagnostic_type, DataType::StringSlice);
+    assert_eq!(name_decl.type_id, builtin_type_ids::STRING);
     let initializer = ast
         .expressions
         .view(name_decl.value.initializer().expect("fixture initializer"))
@@ -90,11 +91,8 @@ fn resolves_named_type_annotations_against_prior_structs() {
         panic!("expected typed declaration");
     };
     assert!(matches!(
-        origin_decl.diagnostic_type,
-        DataType::Struct {
-            const_record: false,
-            ..
-        }
+        ast.type_environment.get(origin_decl.type_id),
+        Some(TypeDefinition::Struct(definition)) if !definition.const_record
     ));
     let initializer = ast
         .expressions
@@ -427,8 +425,12 @@ fn shorthand_fixed_collection_declaration_infers_element_type() {
     };
 
     assert_eq!(
-        decl.diagnostic_type
-            .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
+        display_type_with_resolver(
+            decl.type_id,
+            &ast.type_environment,
+            &string_table,
+            &PathInternerBuilder::new().freeze(),
+        ),
         "{2 I32}"
     );
 }
@@ -448,8 +450,12 @@ fn fixed_collection_alias_literal_is_accepted() {
     };
 
     assert_eq!(
-        decl.diagnostic_type
-            .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
+        display_type_with_resolver(
+            decl.type_id,
+            &ast.type_environment,
+            &string_table,
+            &PathInternerBuilder::new().freeze(),
+        ),
         "{2 String}"
     );
 }
@@ -464,8 +470,12 @@ fn nested_fixed_collection_literal_is_accepted() {
     };
 
     assert_eq!(
-        decl.diagnostic_type
-            .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
+        display_type_with_resolver(
+            decl.type_id,
+            &ast.type_environment,
+            &string_table,
+            &PathInternerBuilder::new().freeze(),
+        ),
         "{2 {3 I32}}"
     );
 }
@@ -488,8 +498,12 @@ fn immutable_fixed_collection_from_function_call_is_allowed() {
     };
 
     assert_eq!(
-        decl.diagnostic_type
-            .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
+        display_type_with_resolver(
+            decl.type_id,
+            &ast.type_environment,
+            &string_table,
+            &PathInternerBuilder::new().freeze(),
+        ),
         "{2 I32}"
     );
 }
@@ -513,8 +527,12 @@ fn generic_identity_preserves_fixed_collection_shape() {
     };
 
     assert_eq!(
-        decl.diagnostic_type
-            .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
+        display_type_with_resolver(
+            decl.type_id,
+            &ast.type_environment,
+            &string_table,
+            &PathInternerBuilder::new().freeze(),
+        ),
         "{2 I32}"
     );
 }
@@ -542,8 +560,12 @@ fn mutable_empty_fixed_collection_is_allowed() {
     };
 
     assert_eq!(
-        decl.diagnostic_type
-            .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
+        display_type_with_resolver(
+            decl.type_id,
+            &ast.type_environment,
+            &string_table,
+            &PathInternerBuilder::new().freeze(),
+        ),
         "{2 I32}"
     );
 }
@@ -556,8 +578,12 @@ fn normal_collection_declaration() {
         panic!("expected declaration");
     };
     assert_eq!(
-        decl.diagnostic_type
-            .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
+        display_type_with_resolver(
+            decl.type_id,
+            &ast.type_environment,
+            &string_table,
+            &PathInternerBuilder::new().freeze(),
+        ),
         "{I32}"
     );
 }

@@ -1,0 +1,16 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0074"]
+message_contains = [
+    "Public generic receiver method 'render' exposes private trait bound 'LOCAL_DISPLAY'. Make the trait public in the module that declares it, or keep the receiver type private.",
+]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0074"
+path = "input/utils/internal.moth"
+line = 9
+column = 18
+count = 1

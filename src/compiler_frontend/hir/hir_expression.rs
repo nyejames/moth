@@ -369,8 +369,13 @@ impl<'a> HirBuilder<'a> {
         // Constant content crosses into HIR only through the constant-store visitor.
         let mut lowered = match expr.operation() {
             ExpressionOperationView::Choice { tag, fields } => {
-                self.lower_choice_expression(expr, tag, fields)
+                self.lower_choice_expression(expr, tag, fields, None)
             }
+            ExpressionOperationView::RouteConstruct {
+                tag,
+                fields,
+                future_input,
+            } => self.lower_choice_expression(expr, tag, fields, Some(future_input)),
 
             ExpressionOperationView::Constant(value) => {
                 let value = self.lower_const_store_expression(value, &expr.span())?;
@@ -441,12 +446,9 @@ impl<'a> HirBuilder<'a> {
             ExpressionOperationView::RuntimeTemplate(handoff) => self
                 .lower_runtime_template_expression_from_owned_handoff(handoff, expr, &expr.span()),
 
-            ExpressionOperationView::RuntimeSlotApplication(handoff) => self
-                .lower_runtime_slot_application_expression_from_owned_handoff(
-                    handoff,
-                    expr,
-                    &expr.span(),
-                ),
+            ExpressionOperationView::RuntimeSlotApplication(handoff) => {
+                self.lower_runtime_slot_application_template_expression(handoff, expr, &expr.span())
+            }
 
             // Lower the inner value and override the HIR type with the declared
             // coercion target. Option coercions materialize `some(value)` here so
@@ -587,12 +589,13 @@ impl<'a> HirBuilder<'a> {
         })
     }
 
-    /// Lowers an authored choice constructor into a variant carrier over its lowered fields.
+    /// Lowers an authored choice constructor or route into a variant carrier.
     fn lower_choice_expression(
         &mut self,
         expr: ExpressionView<'_>,
         tag: u32,
         fields: FieldListView<'_>,
+        route_future_input: Option<bool>,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
         let type_id = expr.value_type_id()?;
         let nominal_path = self
@@ -631,9 +634,10 @@ impl<'a> HirBuilder<'a> {
         //      instead of reaching back into AST no-store expression classification.
         //      Each field's `value_kind` is set during lowering and is the HIR-stage
         //      authority for whether that field is a compile-time constant.
-        let value_kind = if hir_fields.iter().all(|field| {
+        let fields_are_const = hir_fields.iter().all(|field| {
             self.module.expressions.expression(field.value).value_kind == ValueKind::Const
-        }) {
+        });
+        let value_kind = if route_future_input.is_none() && fields_are_const {
             ValueKind::Const
         } else {
             ValueKind::RValue
@@ -647,10 +651,18 @@ impl<'a> HirBuilder<'a> {
             prelude,
             value: self.make_expression(
                 &expr.span(),
-                HirExpressionKind::VariantConstruct {
-                    carrier: HirVariantCarrier::Choice { choice_id },
-                    variant_index: tag as usize,
-                    fields: field_range,
+                match route_future_input {
+                    Some(future_input) => HirExpressionKind::RouteConstruct {
+                        choice_id,
+                        variant_index: tag as usize,
+                        fields: field_range,
+                        future_input,
+                    },
+                    None => HirExpressionKind::VariantConstruct {
+                        carrier: HirVariantCarrier::Choice { choice_id },
+                        variant_index: tag as usize,
+                        fields: field_range,
+                    },
                 },
                 ty,
                 value_kind,
@@ -1053,7 +1065,7 @@ impl<'a> HirBuilder<'a> {
             },
             ResolvedCastEvidence::UserDefined { method_path, .. } => self
                 .lower_user_defined_cast_expression(source, cast, method_path, expr_type_id, span),
-            ResolvedCastEvidence::GenericBound { .. } => Err(CompilerError::new(
+            ResolvedCastEvidence::GenericBound => Err(CompilerError::new(
                 "Generic-bound cast evidence reached HIR lowering",
                 self.hir_error_location(span),
                 crate::compiler_frontend::compiler_errors::ErrorType::HirTransformation,
@@ -1532,13 +1544,13 @@ impl<'a> HirBuilder<'a> {
             region,
             span: *span,
         })?;
-        self.side_table.map_value(*span, id, *span);
+        self.side_table.map_value(*span, id);
         Ok(id)
     }
 
     // WHAT: returns an expression root with selected scalar metadata updated.
     // WHY: HIR rows are immutable because multiple edges may share an ID; changed metadata must
-    //      receive a new row while keeping its source mapping attached to the new identity.
+    //      receive a new row; the row's span and AST mapping then belong to the new identity.
     pub(crate) fn replace_expression_metadata(
         &mut self,
         id: HirValueId,
@@ -1564,16 +1576,12 @@ impl<'a> HirBuilder<'a> {
             .expressions
             .copy_expression_with_metadata(id, *span, ty, region)?;
         if replacement != id {
-            let (ast_span, source_span) = if previous_span == *span {
-                (
-                    self.side_table.value_ast_span(id).or(previous_span),
-                    self.side_table.value_source_span(id).or(previous_span),
-                )
+            let ast_span = if previous_span == *span {
+                self.side_table.value_ast_span(id).or(previous_span)
             } else {
-                (*span, *span)
+                *span
             };
-            self.side_table
-                .map_value(ast_span, replacement, source_span);
+            self.side_table.map_value(ast_span, replacement);
         }
         Ok(replacement)
     }

@@ -1,0 +1,9 @@
+@status Status
+
+export:
+    @status Status
+
+    make_ready || -> Status:
+        return Status::Ready
+    ;
+;

@@ -1,0 +1,10 @@
+entry = "."
+
+# A local whose numeric type is still pending is an authored runtime binding.
+# The `Wire of I32` receiver resolves its exact type, and the binding stays a
+# legal identity argument instead of collapsing into a compile-time constant.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "wire-numeric direct=1 forwarded=1"

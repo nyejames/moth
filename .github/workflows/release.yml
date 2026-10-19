@@ -125,7 +125,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          cargo build --locked --release --target "${{ matrix.target }}" --verbose
+          cargo build --locked --release -p moth-cli --bin moth --target "${{ matrix.target }}" --verbose
 
       - name: Smoke test binary
         shell: bash

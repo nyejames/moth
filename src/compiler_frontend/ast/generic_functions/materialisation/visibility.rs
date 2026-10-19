@@ -77,9 +77,14 @@ pub(super) enum StableNamespaceTypeMember {
     },
 }
 
+/// One receiver method captured from the declaring module for a materialised body.
+///
+/// WHAT: `visible_name` and `span` are set only for a method the body's file names.
+/// WHY: a value-carried method reaches the body through its receiver value, so its name must not
+/// enter file visibility.
 #[derive(Clone)]
 pub(super) struct StableReceiverMethod {
-    pub(super) visible_name: String,
+    pub(super) visible_name: Option<String>,
     pub(super) local_path: PathId,
     pub(super) target: StableFunctionTarget,
     pub(super) receiver: StableReceiverKey,
@@ -465,10 +470,15 @@ impl StableFileVisibility {
             );
         }
         for method in &self.receiver_methods {
+            // WHY: a value-carried capture has no visible name, so it stays out of file visibility
+            // and reaches the body through its receiver value alone.
+            let Some(visible_name) = &method.visible_name else {
+                continue;
+            };
             let local_path = method.local_path;
             visibility
                 .visible_receiver_methods
-                .entry(string_table.intern(&method.visible_name))
+                .entry(string_table.intern(visible_name))
                 .or_default()
                 .push(crate::compiler_frontend::headers::binding_environment::ReceiverMethodVisibility {
                     target: method.target.materialise(local_path),

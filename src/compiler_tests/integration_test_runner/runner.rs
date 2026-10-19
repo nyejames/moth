@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use super::{SEPARATOR_LINE_LENGTH, execution, fixture, reporting};
 
 /// Runs or lists the selected cases from the `tests/cases` directory.
-pub(crate) fn run_all_test_cases(
+pub fn run_all_test_cases(
     options: TestRunnerOptions,
 ) -> Result<super::IntegrationRunSummary, TestRunnerError> {
     options.validate()?;

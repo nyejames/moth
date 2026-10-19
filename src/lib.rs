@@ -81,15 +81,67 @@ mod backends {
 
 pub mod projects {
     #[cfg(feature = "boracle")]
-    pub(crate) mod boracle;
+    pub mod boracle;
+    pub mod build_command;
     pub mod check;
-    pub mod cli;
-    pub(crate) mod command_status;
     pub mod dev_server;
     pub(crate) mod html_project;
-    // Kept intentionally in pre-alpha as the future CLI entrypoint for interactive
-    // template experimentation. This remains outside the default command surface.
-    pub(crate) mod repl;
+    pub mod integration_tests;
     pub(crate) mod routing;
     pub mod settings;
+
+    pub use crate::build_system::build::ProjectBuilder;
+    pub use crate::compiler_frontend::Flag;
+    pub use crate::compiler_frontend::build_config::{
+        BuildCommandLocation, BuildConfigInputDuplicate, BuildConfigInputEntry,
+        BuildConfigInputSet, BuildConfigInputValue, BuildConfigValueLocation, BuildInputName,
+        BuildInputNameError, BuildInputValueError, PrimitiveBuildValue,
+    };
+    pub use crate::compiler_frontend::compiler_errors::CompilerError;
+    pub use crate::compiler_frontend::compiler_errors::CompilerMessages;
+    pub use crate::compiler_frontend::display_messages::{
+        print_compiler_messages, print_terse_compiler_messages,
+    };
+    pub use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
+
+    #[cfg(feature = "boracle")]
+    pub use crate::compiler_frontend::analysis::borrow_checker::{
+        BoracleDump, BoracleExperiment, BoracleReferenceRuleSet, BoracleRuleSelection,
+    };
+
+    /// Outcome of a completed build or check service call.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum ProjectCommandStatus {
+        Success,
+        Failure,
+    }
+
+    /// Source diagnostic counts retained for the command's outer presentation boundary.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct ProjectDiagnosticCounts {
+        pub errors: usize,
+        pub warnings: usize,
+    }
+
+    impl ProjectDiagnosticCounts {
+        pub(crate) fn from_messages(
+            messages: &CompilerMessages,
+        ) -> Option<ProjectDiagnosticCounts> {
+            if messages.has_infrastructure_error() {
+                return None;
+            }
+
+            Some(ProjectDiagnosticCounts {
+                errors: messages.error_count(),
+                warnings: messages.warning_count(),
+            })
+        }
+    }
+
+    /// Completion facts returned after command presentation and timing have finished.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct ProjectCommandCompletion {
+        pub status: ProjectCommandStatus,
+        pub diagnostic_counts: Option<ProjectDiagnosticCounts>,
+    }
 }

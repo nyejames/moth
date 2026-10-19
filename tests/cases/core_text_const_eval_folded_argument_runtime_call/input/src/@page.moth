@@ -1,0 +1,8 @@
+@core/text length
+
+show |n I32| -> I32:
+    return n
+;
+
+value = show(length("a😊b"))
+[:folded_argument=[value]]

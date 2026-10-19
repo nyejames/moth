@@ -13,6 +13,7 @@ use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression::FallibleHandling;
+use crate::compiler_frontend::ast::expressions::expression_store::test_support::reopen_frozen_store_for_fixture;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOp, ExpressionOperationView,
 };
@@ -140,9 +141,9 @@ fn assign_catch_provenance(
         .unwrap()
         .freeze(&mut Vec::<AstNode>::new())
         .expect("empty fixture store must freeze");
-    let mut builder = std::mem::replace(&mut ast.expressions, empty)
-        .into_builder()
-        .expect("fixture store must become a builder");
+    let mut builder =
+        reopen_frozen_store_for_fixture(std::mem::replace(&mut ast.expressions, empty))
+            .expect("fixture store must become a builder");
     let body = function_body_by_name_mut(ast, path_fork, string_table, function);
     let Some(AstNode {
         kind: NodeKind::Return(expressions),
@@ -222,9 +223,9 @@ fn assign_return_provenance(
         .unwrap()
         .freeze(&mut Vec::<AstNode>::new())
         .expect("empty fixture store must freeze");
-    let mut builder = std::mem::replace(&mut ast.expressions, empty)
-        .into_builder()
-        .expect("fixture store must become a builder");
+    let mut builder =
+        reopen_frozen_store_for_fixture(std::mem::replace(&mut ast.expressions, empty))
+            .expect("fixture store must become a builder");
     let body = function_body_by_name_mut(ast, path_fork, string_table, function);
     let Some(AstNode {
         kind: NodeKind::Return(expressions),

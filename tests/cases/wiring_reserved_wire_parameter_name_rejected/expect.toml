@@ -1,0 +1,17 @@
+entry = "."
+
+# `Wire` is a compiler-owned head, so binding it as a parameter name collides
+# with the reserved spelling. The reserved spelling also drives an incidental
+# naming-convention warning, which is not part of this contract.
+
+[backends.html]
+mode = "failure"
+warnings = "ignore"
+diagnostic_codes = ["MOTH-RULE-0039"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0039"
+path = "input/@page.moth"
+line = 1
+column = 7
+count = 1

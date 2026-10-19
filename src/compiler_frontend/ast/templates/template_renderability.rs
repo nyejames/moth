@@ -2,8 +2,7 @@
 //!
 //! WHAT: determines whether a semantic type is allowed as a non-template,
 //!       non-path expression in a template head.
-//! WHY: template-head validation must use semantic `TypeId` identity through
-//!      `TypeEnvironment`, not parse-time `DataType` representations.
+//! WHY: `TypeEnvironment` supplies semantic shape queries for each canonical `TypeId`.
 
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;

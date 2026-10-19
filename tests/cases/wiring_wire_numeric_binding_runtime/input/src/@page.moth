@@ -1,0 +1,12 @@
+read_number |value Wire of I32| -> I32:
+    return value
+;
+
+forward_number |value Wire of I32| -> I32:
+    return read_number(value)
+;
+
+n = 1
+direct = read_number(n)
+forwarded = forward_number(n)
+[:wire-numeric direct=[direct] forwarded=[forwarded]]

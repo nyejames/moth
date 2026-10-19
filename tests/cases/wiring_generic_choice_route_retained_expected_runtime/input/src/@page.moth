@@ -1,0 +1,12 @@
+Envelope type E ::
+    Wrapped | captured E, value E |,
+;
+
+receive type M, I |event Route of I -> M| -> I?:
+    return none
+;
+
+result U64? = receive(Envelope::Wrapped(7))
+if result is none:
+    io.line("none")
+;

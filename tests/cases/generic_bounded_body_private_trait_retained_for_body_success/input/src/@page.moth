@@ -1,0 +1,4 @@
+@provider Label, outer
+
+result = outer(Label("consumer"))
+[:[result]]

@@ -1,0 +1,5 @@
+project #= (
+    name = "wiring_imported_route_forwarding_runtime",
+    entry_root = "src",
+)
+html #= ()

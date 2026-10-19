@@ -7,6 +7,7 @@
 //! exactly once. Wrapper-local `$children(..)` and `$fresh` behavior belongs to
 //! site planning so repeated placeholders can replay the same source safely.
 
+use super::super::RuntimeSlotPlanningServices;
 use super::types::{RuntimeSlotContributionSourceDraft, RuntimeSlotContributionSourceId};
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
@@ -16,6 +17,7 @@ use crate::compiler_frontend::ast::templates::tir::{
     TirSlotSchema, classify_tir_contribution_node, copy_tir_subtree_with_active_slot_plan,
     tir_node_is_const_evaluable_value,
 };
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 pub(in crate::compiler_frontend::ast::templates) fn tir_contributions_need_runtime(
     schema: &TirSlotSchema,
@@ -24,6 +26,7 @@ pub(in crate::compiler_frontend::ast::templates) fn tir_contributions_need_runti
     store: &TemplateIrStore,
     expressions: &AstExpressionBuilder,
     const_values: &ConstValueStore,
+    external_package_registry: Option<&ExternalPackageRegistry>,
 ) -> Result<bool, TemplateError> {
     for target in schema.ordered_slot_keys(string_table) {
         let nodes = contributions.nodes_for_slot(&target);
@@ -39,6 +42,7 @@ pub(in crate::compiler_frontend::ast::templates) fn tir_contributions_need_runti
                 const_values,
                 *node_id,
                 string_table,
+                external_package_registry,
             )? {
                 return Ok(true);
             }
@@ -62,7 +66,7 @@ pub(in crate::compiler_frontend::ast::templates) fn tir_contributions_need_runti
 pub(in crate::compiler_frontend::ast::templates) fn build_tir_native_contribution_sources(
     schema: &TirSlotSchema,
     contributions: &TirSlotContributions,
-    string_table: &StringTable,
+    services: &RuntimeSlotPlanningServices<'_>,
     store: &mut TemplateIrStore,
     expressions: &AstExpressionBuilder,
     const_values: &ConstValueStore,
@@ -70,7 +74,7 @@ pub(in crate::compiler_frontend::ast::templates) fn build_tir_native_contributio
 ) -> Result<Vec<RuntimeSlotContributionSourceDraft>, TemplateError> {
     let mut sources = Vec::new();
 
-    for target in schema.ordered_slot_keys(string_table) {
+    for target in schema.ordered_slot_keys(services.string_table) {
         for node_id in contributions.nodes_for_slot(&target) {
             let id = RuntimeSlotContributionSourceId(sources.len());
             let source_span = store
@@ -94,7 +98,8 @@ pub(in crate::compiler_frontend::ast::templates) fn build_tir_native_contributio
                 expressions,
                 const_values,
                 render_root,
-                string_table,
+                services.string_table,
+                services.external_package_registry,
             )?;
 
             let shape = classify_tir_contribution_node(store, *node_id)?;

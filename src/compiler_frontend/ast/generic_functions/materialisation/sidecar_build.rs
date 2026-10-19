@@ -15,7 +15,7 @@ use crate::compiler_frontend::ast::module_ast::finalization::{
     AstFinalizer, MaterialisationContextRetention,
 };
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionSignature, MaterialisedFunctionSignature,
+    FunctionSignature, MaterialisedFunctionSignature, ParameterContract,
 };
 use crate::compiler_frontend::builtins::casts::evidence::builtin_cast_proves_core_trait;
 use crate::compiler_frontend::canonical_type_identity::{
@@ -178,18 +178,20 @@ where
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
         materialised_type_arguments.push(type_id);
     }
-    // Canonical reconstruction issues new definition paths. Restore the requester's existing
-    // lookup spellings from detached rows so publication retains its imported nominal aliases.
+    // Canonical reconstruction issues new definition paths, so keep the requester's own spellings
+    // for the nominals already reconstructed here: the type arguments, their members and the
+    // declaring module's installed nominals. WHY: declaring-authored names are restored by
+    // `install_closed_environment`; requester evidence and member types cross through canonical
+    // identities and the unfiltered blueprint source, so only a binding whose nominal is present
+    // here still has a spelling to restore. Interning every requester blueprint instead made each
+    // request's cost grow with the requester's blueprint count.
     for binding in &requester_context.nominal_bindings {
-        let type_id = intern_generated_canonical_type(
-            &binding.identity,
-            &mut environment.type_environment,
-            phase_context.external_package_registry.as_ref(),
-            &nominal_source,
-            string_table,
-            path_fork,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        let Some(type_id) = environment
+            .type_environment
+            .type_id_for_canonical_identity(&binding.identity)
+        else {
+            continue;
+        };
         environment
             .type_environment
             .register_nominal_path_alias(binding.local_path, type_id)
@@ -388,8 +390,8 @@ where
                     "Generated evidence trait is absent from the requester context",
                 )
             })?;
-        let generated_trait_id = if let Some(generated_target_type_id) = generated_target_type_id {
-            let generated_trait_id = install_generated_requester_bound_trait(
+        let generated_trait_id = if install_row {
+            install_generated_requester_bound_trait(
                 evidence_identity.trait_identity(),
                 requester_trait_id,
                 requester_context,
@@ -398,18 +400,7 @@ where
                 &nominal_source,
                 string_table,
                 path_fork,
-            )?;
-            let generated_evidence_pairs = Rc::make_mut(&mut environment.generated_evidence_pairs);
-            generated_evidence_pairs.insert((generated_target_type_id, generated_trait_id));
-            if let Some(TypeDefinition::GenericInstance(instance)) =
-                environment.type_environment.get(generated_target_type_id)
-                && let Some(base_type_id) = environment
-                    .type_environment
-                    .type_id_for_nominal_id(instance.base)
-            {
-                generated_evidence_pairs.insert((base_type_id, generated_trait_id));
-            }
-            generated_trait_id
+            )?
         } else {
             // The first installation already registered this canonical identity's trait here.
             environment
@@ -1252,6 +1243,27 @@ fn install_generated_requester_bound_trait<N: MaterialisationNominalSource>(
             .parameters
             .iter()
             .map(|parameter| {
+                let contract = match parameter.contract {
+                    ParameterContract::Value => ParameterContract::Value,
+                    ParameterContract::Wire => ParameterContract::Wire,
+                    ParameterContract::Route { input } => ParameterContract::Route {
+                        input: input
+                            .map(|type_id| {
+                                intern_generated_trait_requirement_slot(
+                                    type_id,
+                                    source.this_type,
+                                    this_type,
+                                    requester_context,
+                                    &mut environment.type_environment,
+                                    external_registry,
+                                    nominal_source,
+                                    string_table,
+                                    path_fork,
+                                )
+                            })
+                            .transpose()?,
+                    },
+                };
                 Ok(ResolvedTraitParameter {
                     name: parameter.name,
                     value_mode: parameter.value_mode,
@@ -1267,6 +1279,7 @@ fn install_generated_requester_bound_trait<N: MaterialisationNominalSource>(
                         path_fork,
                     )?,
                     span: parameter.span,
+                    contract,
                 })
             })
             .collect::<Result<Vec<_>, CompilerError>>()?;

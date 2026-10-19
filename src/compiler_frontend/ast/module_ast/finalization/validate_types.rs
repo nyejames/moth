@@ -2,8 +2,8 @@
 //!
 //! WHAT: validates that HIR-bound AST values carry TypeIds registered in the module
 //! `TypeEnvironment`.
-//! WHY: AST owns name/type resolution; HIR should receive canonical semantic type identity,
-//! not diagnostic-only `DataType` reconstructions.
+//! WHY: AST resolves retained authored syntax and finalises semantic nodes with `TypeId`s before
+//!      HIR lowering.
 //!
 //! Template expression payloads are validated through one required finalized
 //! `TirView` authority; there is no raw same-store fallback after normalization.
@@ -485,7 +485,9 @@ fn expand_expression<'a>(
                 push_expression(entry.value().id(), context, out);
             }
         }
-        Operation::Struct { fields } | Operation::Choice { fields, .. } => {
+        Operation::Struct { fields }
+        | Operation::Choice { fields, .. }
+        | Operation::RouteConstruct { fields, .. } => {
             for field in fields.iter() {
                 push_expression(field.value().id(), context, out);
             }

@@ -1,0 +1,30 @@
+PRIVATE_VIEW must:
+    view |This| -> Point
+;
+
+export:
+    outer type T |value T| -> I32:
+        holder ~= Holder(Point(1))
+        seen = helper(holder)
+        holder.point.x = 2
+        return seen.x
+    ;
+;
+
+Point = |
+    x I32,
+|
+
+Holder = |
+    point Point,
+|
+
+view |this Holder| -> Point:
+    return this.point
+;
+
+Holder must PRIVATE_VIEW
+
+helper type U is PRIVATE_VIEW |value U| -> Point:
+    return value.view()
+;

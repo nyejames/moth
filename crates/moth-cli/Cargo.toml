@@ -1,0 +1,37 @@
+[package]
+name = "moth-cli"
+version = "0.1.12"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "moth"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[features]
+timers = ["moth/timers"]
+detailed_timers = ["timers", "moth/detailed_timers"]
+benchmark_counters = ["moth/benchmark_counters"]
+data_layout_memory_probe = ["timers", "benchmark_counters", "moth/data_layout_memory_probe"]
+show_tokens = ["moth/show_tokens"]
+show_headers = ["moth/show_headers"]
+show_ast = ["moth/show_ast"]
+show_eval = ["moth/show_eval"]
+show_hir = ["moth/show_hir"]
+show_codegen = ["moth/show_codegen"]
+show_borrow_checker = ["moth/show_borrow_checker"]
+boracle = ["moth/boracle"]
+boracle_campaign = ["boracle", "moth/boracle_campaign"]
+checked_blocks = ["moth/checked_blocks"]
+async_blocks = ["moth/async_blocks"]
+
+[dependencies]
+lappet = { path = "../lappet" }
+moth = { path = "../.." }
+saying = "0.1.8"
+
+[dev-dependencies]
+tempfile = "3"

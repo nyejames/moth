@@ -1,0 +1,5 @@
+@core/text length
+
+export:
+    capacity #I32 = length("abcd")
+;

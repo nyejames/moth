@@ -47,6 +47,7 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::folded_value::OwnedFoldedString;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
@@ -82,6 +83,7 @@ fn build_test_fold_context<'a>(
             crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
         source_scope: None,
+        external_package_registry: None,
     }
 }
 
@@ -262,6 +264,7 @@ fn fold_final_view_fixture(
         expressions,
         const_values,
         TemplatePreparationMode::Value,
+        None,
     )?;
     if !matches!(prepared.outcome, TemplatePreparationOutcome::Foldable) {
         return Err(TemplateError::Infrastructure(
@@ -294,6 +297,7 @@ fn project_pattern_for_template(
         expressions,
         const_values,
         TemplatePreparationMode::ConstRequired,
+        None,
     )?;
     let mut fold_context = build_test_fold_context(string_table, expressions, const_values);
     Ok(fold_prepared_const_template_pattern(prepared, view, &mut fold_context)?.pieces)
@@ -362,6 +366,7 @@ fn const_template_fold_keeps_resource_as_text_run_boundary() -> Result<(), Templ
         &expressions,
         &const_values,
         TemplatePreparationMode::ConstRequired,
+        None,
     )?;
     assert!(matches!(
         prepared.outcome,
@@ -446,6 +451,7 @@ fn const_template_projection_preserves_structured_slot_order() -> Result<(), Tem
         &expressions,
         &const_values,
         TemplatePreparationMode::ConstRequired,
+        None,
     )?;
     let mut fold_context =
         build_test_fold_context(&mut string_table, &mut expressions, &mut const_values);
@@ -610,6 +616,7 @@ fn const_template_projection_repeats_slots_in_const_loops() -> Result<(), Templa
                 end: i32_expression(&mut expressions, &mut const_values, 2),
                 step: None,
                 end_kind: RangeEndKind::Exclusive,
+                domain: NumericScalar::Fixed(FixedScalar::I32),
             }),
         };
         let root = builder.push_loop_node(header, body, None, location);
@@ -689,7 +696,7 @@ fn const_template_projection_preserves_slot_in_child_wrapper() -> Result<(), Tem
             TemplateIrSummary::empty(),
             location,
         );
-        let wrapper_set = builder.store.push_or_reuse_wrapper_set(vec![
+        let wrapper_set = builder.store.push_or_reuse_wrapper_set(&[
             crate::compiler_frontend::ast::templates::tir::refs::TemplateWrapperReference::new(
                 wrapper_template_id,
                 TemplateTirPhase::Composed,
@@ -741,6 +748,7 @@ fn const_template_projection_preserves_loop_aggregate_content() -> Result<(), Te
                 end: i32_expression(&mut expressions, &mut const_values, 2),
                 step: None,
                 end_kind: RangeEndKind::Exclusive,
+                domain: NumericScalar::Fixed(FixedScalar::I32),
             }),
         };
         let aggregate_output = builder.store.push_node(TemplateIrNode::new(
@@ -853,6 +861,7 @@ fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), Te
                 end: i32_expression(&mut expressions, &mut const_values, 0),
                 step: None,
                 end_kind: RangeEndKind::Exclusive,
+                domain: NumericScalar::Fixed(FixedScalar::I32),
             }),
         };
         let root = builder.push_loop_node(header, body, None, location);
@@ -985,6 +994,7 @@ fn build_range_loop_template(
             end: i32_expression(expressions, constants, end),
             step: None,
             end_kind: RangeEndKind::Exclusive,
+            domain: NumericScalar::Fixed(FixedScalar::I32),
         }),
     };
     let root = builder.push_loop_node(header, body_root, aggregate_wrapper, None);
@@ -1023,6 +1033,7 @@ fn build_float_range_loop_template(
             end: float_expression_at(expressions, constants, scalar, end),
             step: Some(float_expression_at(expressions, constants, scalar, step)),
             end_kind: RangeEndKind::Exclusive,
+            domain: NumericScalar::Fixed(scalar),
         }),
     };
     let root = builder.push_loop_node(header, body_root, None, None);
@@ -1155,6 +1166,7 @@ fn final_view_fold_loop_binding_and_body_provenance_reach_exact_result() {
                     },
                     step: None,
                     end_kind: RangeEndKind::Exclusive,
+                    domain: NumericScalar::Fixed(FixedScalar::I32),
                 }),
             };
             let root = builder.push_loop_node(header, body, None, None);
@@ -1181,6 +1193,7 @@ fn final_view_fold_loop_binding_and_body_provenance_reach_exact_result() {
         &fixture.expressions,
         &fixture.const_values,
         TemplatePreparationMode::Value,
+        None,
     )
     .expect("range loop view should prepare");
     assert!(matches!(
@@ -1259,6 +1272,7 @@ fn final_view_fold_loop_preserves_visited_no_output_selector_provenance() {
                 end: i32_expression(expressions, constants, end),
                 step: None,
                 end_kind: RangeEndKind::Exclusive,
+                domain: NumericScalar::Fixed(FixedScalar::I32),
             }),
         };
         let root = builder.push_loop_node(header, no_output_body, None, None);
@@ -1284,6 +1298,7 @@ fn final_view_fold_loop_preserves_visited_no_output_selector_provenance() {
             &fixture.expressions,
             &fixture.const_values,
             TemplatePreparationMode::Value,
+            None,
         )
         .expect("range loop view should prepare");
         assert!(matches!(
@@ -1412,20 +1427,23 @@ fn final_view_fold_zero_iteration_loop_rejects_missing_body_authority() {
 ///
 /// WHAT: drives `ConstRangeCursor` directly so precision behaviour is pinned without
 ///       template rendering in the way.
-/// WHY: every counter keeps its range's selected precision, so this helper is the
-///      single place these tests advance a float cursor to completion.
+/// WHY: every counter keeps its range's selected precision, and the header owns that
+///      selection, so the caller supplies the domain its operand fixtures were built at
+///      and this helper is the single place these tests advance a float cursor to completion.
 fn collect_float_counters(
     expressions: &AstExpressionBuilder,
     constants: &ConstValueStore,
     start: ExprId,
     end: ExprId,
     step: Option<ExprId>,
+    scalar: FixedScalar,
 ) -> Vec<f64> {
     let range = RangeLoopSpec {
         start,
         end,
         end_kind: RangeEndKind::Exclusive,
         step,
+        domain: NumericScalar::Fixed(scalar),
     };
     let mut cursor = ConstRangeCursor::new(
         &range,
@@ -1453,7 +1471,14 @@ fn range_cursor_rounds_float32_step_accumulation() {
     let start = float32_expression(&mut expressions, &mut constants, 0.0);
     let end = float32_expression(&mut expressions, &mut constants, 1.0);
     let step = float32_expression(&mut expressions, &mut constants, 0.1);
-    let counters = collect_float_counters(&expressions, &constants, start, end, Some(step));
+    let counters = collect_float_counters(
+        &expressions,
+        &constants,
+        start,
+        end,
+        Some(step),
+        FixedScalar::F32,
+    );
 
     assert_eq!(
         counters.len(),
@@ -1481,7 +1506,14 @@ fn range_cursor_rounds_float16_step_accumulation() {
         FixedScalar::F16,
         0.099_975_585_937_5,
     );
-    let counters = collect_float_counters(&expressions, &constants, start, end, Some(step));
+    let counters = collect_float_counters(
+        &expressions,
+        &constants,
+        start,
+        end,
+        Some(step),
+        FixedScalar::F16,
+    );
 
     assert_eq!(
         counters.len(),
@@ -1522,6 +1554,7 @@ fn range_cursor_rejects_non_progressing_float32_range() {
             FixedScalar::F32,
             1.0,
         )),
+        domain: NumericScalar::Fixed(FixedScalar::F32),
     };
     let error =
         expect_non_progressing_range(&expressions, &constants, range, "a stalled F32 update");
@@ -1544,6 +1577,7 @@ fn range_cursor_rejects_non_progressing_float16_range() {
             FixedScalar::F16,
             1.0,
         )),
+        domain: NumericScalar::Fixed(FixedScalar::F16),
     };
     let error =
         expect_non_progressing_range(&expressions, &constants, range, "a stalled F16 update");
@@ -1604,7 +1638,14 @@ fn range_cursor_keeps_float64_step_accumulation() {
     let start = float_expression(&mut expressions, &mut constants, 0.0);
     let end = float_expression(&mut expressions, &mut constants, 1.0);
     let step = float_expression(&mut expressions, &mut constants, 0.1);
-    let counters = collect_float_counters(&expressions, &constants, start, end, Some(step));
+    let counters = collect_float_counters(
+        &expressions,
+        &constants,
+        start,
+        end,
+        Some(step),
+        FixedScalar::F64,
+    );
 
     assert_eq!(
         counters.len(),
@@ -1638,6 +1679,7 @@ fn collect_uint_counters(
         end,
         end_kind,
         step,
+        domain: NumericScalar::Fixed(FixedScalar::U64),
     };
     let mut cursor = ConstRangeCursor::new(
         &range,
@@ -1711,6 +1753,7 @@ fn range_cursor_rejects_zero_uint_step() {
         end: u64_expression(&mut expressions, &mut constants, 10),
         end_kind: RangeEndKind::Inclusive,
         step: Some(u64_expression(&mut expressions, &mut constants, 0)),
+        domain: NumericScalar::Fixed(FixedScalar::U64),
     };
     let error = match ConstRangeCursor::new(
         &range,
@@ -1998,6 +2041,7 @@ fn final_view_aggregate_output_outside_wrapper_classifies_as_runtime() {
         &fixture.expressions,
         &fixture.const_values,
         TemplatePreparationMode::Value,
+        None,
     )
     .expect("preparation should classify AggregateOutput outside a wrapper");
     assert!(
@@ -2146,6 +2190,7 @@ fn final_view_runtime_slot_application_requires_handoff() {
         &fixture.expressions,
         &fixture.const_values,
         TemplatePreparationMode::Value,
+        None,
     )
     .expect("runtime slot application should prepare as runtime");
     assert!(matches!(
@@ -2158,6 +2203,7 @@ fn final_view_runtime_slot_application_requires_handoff() {
         &fixture.expressions,
         &fixture.const_values,
         TemplatePreparationMode::Value,
+        None,
     )
     .expect("runtime slot application should remain a runtime result");
     assert!(matches!(

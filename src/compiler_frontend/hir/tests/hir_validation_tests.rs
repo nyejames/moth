@@ -3,7 +3,10 @@
 //! WHAT: exercises the post-lowering HIR validator against valid and intentionally broken modules.
 //! WHY: validator coverage needs focused tests that isolate invariants from the rest of lowering.
 
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, DeclarationValue, NodeKind};
+use super::{
+    append_hir_expression, function_node, minimal_lowered_hir_module, node, start_entry_block_index,
+};
+use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationValue, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
@@ -12,8 +15,10 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
-use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
+use crate::compiler_frontend::datatypes::definitions::{
+    ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
+    StructTypeDefinition,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::{
@@ -27,7 +32,8 @@ use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, Choice
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expressions::{
-    HirExpression, HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
+    HirExpression, HirExpressionKind, HirMapEntry, HirVariantCarrier, HirVariantField,
+    OPTION_SOME_VARIANT_INDEX, ValueKind,
 };
 use crate::compiler_frontend::hir::hir_builder::{
     HirTestChoiceDefinition, build_ast_with_choices, build_ast_with_registered_types, lower_ast,
@@ -54,10 +60,9 @@ use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::hir::terminators::{
     HirAssertionMessageEvaluation, HirFallibleOperation, HirJumpArgument, HirTerminator,
 };
-use crate::compiler_frontend::hir::validation::validate_expression_twice_for_tests;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tests::ast_fixture_support::{
     make_test_variable, param_with_type_id,
 };
@@ -68,23 +73,6 @@ use moth_lexical::numeric::grammar::NumericLiteralSign;
 
 use crate::compiler_frontend::value_mode::ValueMode;
 
-fn node(kind: NodeKind, span: Option<SourceSpan>) -> AstNode {
-    AstNode {
-        kind,
-        span,
-        scope: crate::compiler_frontend::symbols::path_interner::PathId::ROOT,
-    }
-}
-
-fn function_node(
-    name: PathId,
-    signature: FunctionSignature,
-    body: Vec<AstNode>,
-    span: Option<SourceSpan>,
-) -> AstNode {
-    node(NodeKind::Function(name, signature, body), span)
-}
-
 // Shared builders for the validation regressions below.
 fn generic_parameter_type_id(
     string_table: &mut StringTable,
@@ -92,49 +80,6 @@ fn generic_parameter_type_id(
 ) -> TypeId {
     let parameter_name = string_table.intern("T");
     type_environment.intern_generic_parameter(GenericParameterId(0), parameter_name)
-}
-
-pub(super) fn minimal_lowered_hir_module() -> (StringTable, HirModule, TypeEnvironment) {
-    let mut path_fork = PathInternerFork::empty();
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
-
-    let start_fn = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![node(NodeKind::Return(vec![]), None)],
-        None,
-    );
-
-    let ast = build_ast_with_registered_types(
-        vec![start_fn],
-        entry_path,
-        AstExpressionBuilder::new().unwrap(),
-        ConstValueStore::default(),
-        TypeEnvironment::new(),
-    );
-    let (module, type_environment) = lower_ast(
-        ast,
-        &mut string_table,
-        &mut path_fork,
-        &ExternalPackageRegistry::new(),
-    )
-    .expect("lowering should succeed");
-
-    (string_table, module, type_environment)
-}
-
-fn start_entry_block_index(module: &HirModule) -> usize {
-    module.functions[module
-        .start_function
-        .expect("normal test module should have start")
-        .0 as usize]
-        .entry
-        .0 as usize
 }
 
 fn add_local(module: &mut HirModule, block_id: BlockId, id: LocalId, ty: TypeId) {
@@ -275,7 +220,25 @@ fn inject_collection_expression_statement(
     };
 
     module.side_table.map_statement(span, &statement);
-    module.side_table.map_value(span, value_id, span);
+    module.side_table.map_value(span, value_id);
+    module.blocks[entry_block_index].statements.push(statement);
+}
+
+/// Appends `expression_id` as an expression statement to the start function's entry block.
+///
+/// WHAT: records the statement and its value in the side table, then pushes the statement onto
+/// the block.
+/// WHY: module validation reaches expression rows only through block statements, so a bare row
+/// would never be checked.
+fn append_expression_statement(module: &mut HirModule, expression_id: HirValueId) {
+    let entry_block_index = start_entry_block_index(module);
+    let statement = HirStatement {
+        id: HirNodeId(9004),
+        kind: HirStatementKind::Expr(expression_id),
+        span: None,
+    };
+    module.side_table.map_value(None, expression_id);
+    module.side_table.map_statement(None, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 }
 
@@ -304,7 +267,7 @@ fn int_expression(
         region,
         ValueKind::RValue,
     );
-    module.side_table.map_value(*span, expression_id, *span);
+    module.side_table.map_value(*span, expression_id);
     expression_id
 }
 
@@ -322,24 +285,8 @@ fn float_expression(
         region,
         ValueKind::RValue,
     );
-    module.side_table.map_value(*span, expression_id, *span);
+    module.side_table.map_value(*span, expression_id);
     expression_id
-}
-
-fn append_hir_expression(
-    module: &mut HirModule,
-    kind: HirExpressionKind,
-    type_id: TypeId,
-    region: RegionId,
-    value_kind: ValueKind,
-) -> HirValueId {
-    crate::compiler_frontend::tests::hir_fixture_support::expression(
-        kind,
-        type_id,
-        region,
-        value_kind,
-        &mut module.expressions,
-    )
 }
 
 fn add_validation_hir_struct(
@@ -374,7 +321,7 @@ fn append_place_load_for_validation(
         region,
         ValueKind::Place,
     );
-    module.side_table.map_value(span, value, span);
+    module.side_table.map_value(span, value);
 
     let statement = HirStatement {
         id: HirNodeId(9000),
@@ -906,7 +853,7 @@ fn validate_numeric_op_for_test_with_types(
             entry_region,
             ValueKind::RValue,
         );
-        module.side_table.map_value(span, value_id, span);
+        module.side_table.map_value(span, value_id);
         operands.push(value_id);
     }
 
@@ -1027,7 +974,7 @@ fn install_cast_invoke_for_test(
         entry_region,
         ValueKind::RValue,
     );
-    module.side_table.map_value(None, source, None);
+    module.side_table.map_value(None, source);
     let success = append_failure_block(
         module,
         entry_region,
@@ -1136,9 +1083,9 @@ fn validate_comparison_for_test(
         entry_region,
         ValueKind::RValue,
     );
-    module.side_table.map_value(span, left, span);
-    module.side_table.map_value(span, right, span);
-    module.side_table.map_value(span, expression, span);
+    module.side_table.map_value(span, left);
+    module.side_table.map_value(span, right);
+    module.side_table.map_value(span, expression);
 
     let statement = HirStatement {
         id: HirNodeId(9000),
@@ -1186,8 +1133,8 @@ fn validate_number_comparison_for_test(
         entry_region,
         ValueKind::RValue,
     );
-    module.side_table.map_value(span, number, span);
-    module.side_table.map_value(span, integer, span);
+    module.side_table.map_value(span, number);
+    module.side_table.map_value(span, integer);
     let right = if explicitly_converted {
         let converted = append_hir_expression(
             &mut module,
@@ -1202,7 +1149,7 @@ fn validate_number_comparison_for_test(
             entry_region,
             ValueKind::RValue,
         );
-        module.side_table.map_value(span, converted, span);
+        module.side_table.map_value(span, converted);
         converted
     } else {
         integer
@@ -1218,7 +1165,7 @@ fn validate_number_comparison_for_test(
         entry_region,
         ValueKind::RValue,
     );
-    module.side_table.map_value(span, expression, span);
+    module.side_table.map_value(span, expression);
 
     let statement = HirStatement {
         id: HirNodeId(9000),
@@ -1713,9 +1660,7 @@ fn validator_rejects_assertion_message_evaluation_fact_mismatch() {
         ValueKind::RValue,
     );
 
-    module
-        .side_table
-        .map_value(message_span, message, message_span);
+    module.side_table.map_value(message_span, message);
     module.blocks[entry_block_index].terminator = HirTerminator::AssertFailure {
         message,
         message_evaluation: HirAssertionMessageEvaluation::Folded,
@@ -1906,7 +1851,7 @@ fn append_expression_for_validation(
         entry_region,
         ValueKind::Const,
     );
-    module.side_table.map_value(*span, left, *span);
+    module.side_table.map_value(*span, left);
 
     let right = int_expression(7, int_type, entry_region, span, module);
     let expression = append_hir_expression(
@@ -1920,7 +1865,7 @@ fn append_expression_for_validation(
         entry_region,
         ValueKind::RValue,
     );
-    module.side_table.map_value(*span, expression, *span);
+    module.side_table.map_value(*span, expression);
     expression
 }
 
@@ -2043,7 +1988,7 @@ fn validator_rejects_plain_numeric_unary_op() {
         entry_region,
         ValueKind::RValue,
     );
-    module.side_table.map_value(span, expression, span);
+    module.side_table.map_value(span, expression);
 
     let statement = HirStatement {
         id: HirNodeId(9000),
@@ -2150,7 +2095,7 @@ fn fixed_float_source(
         entry_region,
         ValueKind::RValue,
     );
-    module.side_table.map_value(*span, expression_id, *span);
+    module.side_table.map_value(*span, expression_id);
     expression_id
 }
 
@@ -2282,7 +2227,7 @@ fn validator_rejects_validate_float_with_non_float_source() {
         entry_region,
         ValueKind::RValue,
     );
-    module.side_table.map_value(span, source, span);
+    module.side_table.map_value(span, source);
 
     inject_float_statement_with_source(
         &mut module,
@@ -3225,12 +3170,8 @@ fn validator_rejects_non_literal_match_pattern() {
         region,
         ValueKind::Place,
     );
-    module
-        .side_table
-        .map_value(value_span, scrutinee, value_span);
-    module
-        .side_table
-        .map_value(value_span, pattern_value, value_span);
+    module.side_table.map_value(value_span, scrutinee);
+    module.side_table.map_value(value_span, pattern_value);
 
     module.blocks[entry_block_id.0 as usize].terminator = HirTerminator::Match {
         scrutinee,
@@ -3274,9 +3215,7 @@ fn validator_rechecks_shared_expression_in_match_pattern_context() {
             span: Some(value_span),
         })
         .expect("shared literal expression should fit");
-    module
-        .side_table
-        .map_value(Some(value_span), shared_value, Some(value_span));
+    module.side_table.map_value(Some(value_span), shared_value);
 
     let statement = HirStatement {
         id: HirNodeId(9000),
@@ -3299,7 +3238,7 @@ fn validator_rechecks_shared_expression_in_match_pattern_context() {
         entry_region,
         ValueKind::Const,
     );
-    module.side_table.map_value(None, scrutinee, None);
+    module.side_table.map_value(None, scrutinee);
     module.blocks[entry_block_index].terminator = HirTerminator::Match {
         scrutinee,
         arms: vec![HirMatchArm {
@@ -3368,8 +3307,8 @@ fn inject_fixed_scalar_match_pattern(
         region,
         ValueKind::Const,
     );
-    module.side_table.map_value(None, scrutinee, None);
-    module.side_table.map_value(None, pattern_value, None);
+    module.side_table.map_value(None, scrutinee);
+    module.side_table.map_value(None, pattern_value);
 
     module.blocks[entry_block_index].terminator = HirTerminator::Match {
         scrutinee,
@@ -3855,7 +3794,7 @@ fn validator_rejects_expression_type_containing_generic_parameter() {
     };
 
     module.side_table.map_statement(span, &statement);
-    module.side_table.map_value(span, value_id, span);
+    module.side_table.map_value(span, value_id);
     module.blocks[entry_block_index].statements.push(statement);
 
     let error = validate_module_for_tests(
@@ -3906,7 +3845,7 @@ fn validator_rejects_anonymous_const_record_marker_on_expression() {
     };
 
     module.side_table.map_statement(span, &statement);
-    module.side_table.map_value(span, value_id, span);
+    module.side_table.map_value(span, value_id);
     module.blocks[entry_block_index].statements.push(statement);
 
     let error = validate_module_for_tests(
@@ -4146,7 +4085,7 @@ fn validator_rejects_cycle_in_expression_id_graph() {
         kind: HirStatementKind::Expr(cycle_id),
         span: None,
     };
-    module.side_table.map_value(None, cycle_id, None);
+    module.side_table.map_value(None, cycle_id);
     module.side_table.map_statement(None, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
@@ -4230,7 +4169,7 @@ fn validator_rejects_dangling_expression_child_id() {
         kind: HirStatementKind::Expr(expression_id),
         span: None,
     };
-    module.side_table.map_value(None, expression_id, None);
+    module.side_table.map_value(None, expression_id);
     module.side_table.map_statement(None, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
@@ -4244,44 +4183,6 @@ fn validator_rejects_dangling_expression_child_id() {
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("Invalid expression id"));
-}
-
-#[test]
-fn validator_clears_consecutive_not_rows_after_dangling_child_error() {
-    let (_, mut module, type_environment) = minimal_lowered_hir_module();
-    let entry_block_index = start_entry_block_index(&module);
-    let entry_region = module.blocks[entry_block_index].region;
-    let mut expression_id = HirValueId(u32::MAX);
-    for _ in 0..3 {
-        expression_id = append_hir_expression(
-            &mut module,
-            HirExpressionKind::UnaryOp {
-                op: HirUnaryOp::Not,
-                operand: expression_id,
-            },
-            builtin_type_ids::BOOL,
-            entry_region,
-            ValueKind::RValue,
-        );
-    }
-
-    let [first_result, second_result] = validate_expression_twice_for_tests(
-        &module,
-        &type_environment,
-        &ExternalPackageRegistry::new(),
-        expression_id,
-    )
-    .expect("test module definition IDs should validate");
-    let first_error = first_result
-        .expect_err("validator should reject the dangling child after entering three Not rows");
-    let second_error = second_result
-        .expect_err("retry should reach the dangling child after clearing every entered Not row");
-
-    assert_eq!(first_error.error_type, ErrorType::HirTransformation);
-    assert!(first_error.msg.contains("Invalid expression id"));
-    assert_eq!(second_error.error_type, ErrorType::HirTransformation);
-    assert!(second_error.msg.contains("Invalid expression id"));
-    assert_eq!(second_error.msg, first_error.msg);
 }
 
 #[test]
@@ -4309,7 +4210,7 @@ fn validator_rejects_dangling_index_expression_id() {
         kind: HirStatementKind::Expr(expression_id),
         span: None,
     };
-    module.side_table.map_value(None, expression_id, None);
+    module.side_table.map_value(None, expression_id);
     module.side_table.map_statement(None, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
@@ -4323,6 +4224,950 @@ fn validator_rejects_dangling_index_expression_id() {
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("Invalid expression id"));
+}
+
+#[test]
+fn validator_rejects_cycle_closing_deep_binop_chain() {
+    const DEPTH: u32 = 10_000;
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let entry_block_index = start_entry_block_index(&module);
+    let entry = module.blocks[entry_block_index].id;
+    let entry_region = module.blocks[entry_block_index].region;
+    let leaf = append_hir_expression(
+        &mut module,
+        HirExpressionKind::Bool(true),
+        builtin_type_ids::BOOL,
+        entry_region,
+        ValueKind::Const,
+    );
+    let first_chain_id = u32::try_from(module.expressions.measurements().rows.len)
+        .expect("test expression store should fit its dense ID domain");
+    // The bottom row names the top row, which is appended last, so the chain closes into a loop.
+    let mut value = HirValueId(first_chain_id + DEPTH - 1);
+    for _ in 0..DEPTH {
+        value = append_hir_expression(
+            &mut module,
+            HirExpressionKind::BinOp {
+                op: HirBinOp::And,
+                left: value,
+                right: leaf,
+            },
+            builtin_type_ids::BOOL,
+            entry_region,
+            ValueKind::RValue,
+        );
+    }
+    append_entry_statement(&mut module, entry, HirStatementKind::Expr(value));
+
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject a deep BinOp chain that loops back to its top");
+
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert!(error.msg.contains("HIR expression graph contains a cycle"));
+}
+
+#[test]
+fn validator_accepts_deep_binop_chain_on_small_stack() {
+    const STACK_BUDGET_CHILD_ENV: &str = "MOTH_HIR_VALIDATION_BINOP_STACK_BUDGET_CHILD";
+    if std::env::var_os(STACK_BUDGET_CHILD_ENV).is_none() {
+        run_stack_budgeted_child(
+            module_path!(),
+            "validator_accepts_deep_binop_chain_on_small_stack",
+            STACK_BUDGET_CHILD_ENV,
+            "deep BinOp validation must fit a 1 MiB stack",
+        );
+        return;
+    }
+
+    std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(|| {
+            let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+            let entry_block_index = start_entry_block_index(&module);
+            let entry = module.blocks[entry_block_index].id;
+            let region = module.blocks[entry_block_index].region;
+            let leaf = append_hir_expression(
+                &mut module,
+                HirExpressionKind::Bool(true),
+                builtin_type_ids::BOOL,
+                region,
+                ValueKind::Const,
+            );
+            let mut value = leaf;
+            for _ in 0..20_000 {
+                value = append_hir_expression(
+                    &mut module,
+                    HirExpressionKind::BinOp {
+                        op: HirBinOp::And,
+                        left: value,
+                        right: leaf,
+                    },
+                    builtin_type_ids::BOOL,
+                    region,
+                    ValueKind::RValue,
+                );
+            }
+            // The comparison visits the same chain twice, so the second visit starts after the
+            // first one has unwound its active rows.
+            let comparison = append_hir_expression(
+                &mut module,
+                HirExpressionKind::BinOp {
+                    op: HirBinOp::Eq,
+                    left: value,
+                    right: value,
+                },
+                builtin_type_ids::BOOL,
+                region,
+                ValueKind::RValue,
+            );
+            append_entry_statement(&mut module, entry, HirStatementKind::Expr(comparison));
+
+            validate_module_for_tests(
+                &module,
+                &string_table,
+                &type_environment,
+                &ExternalPackageRegistry::new(),
+            )
+            .expect("a deep BinOp chain with a shared revisit should validate");
+        })
+        .expect("the bounded-stack validation thread should spawn")
+        .join()
+        .expect("deep BinOp validation should finish on a 1 MiB stack");
+}
+
+#[test]
+fn validator_visits_range_start_before_end() {
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let entry_block_index = start_entry_block_index(&module);
+    let entry_region = module.blocks[entry_block_index].region;
+    let start = HirValueId(u32::MAX - 1);
+    let end = HirValueId(u32::MAX);
+    let range_id = append_hir_expression(
+        &mut module,
+        HirExpressionKind::Range { start, end },
+        builtin_type_ids::BOOL,
+        entry_region,
+        ValueKind::RValue,
+    );
+    append_expression_statement(&mut module, range_id);
+
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject a Range with dangling children");
+
+    // Both children are dangling, so the reported id shows which child the walk reached first.
+    assert!(
+        error
+            .msg
+            .contains(&format!("Invalid expression id {start:?}"))
+    );
+    assert!(
+        !error
+            .msg
+            .contains(&format!("Invalid expression id {end:?}"))
+    );
+}
+
+#[test]
+fn validator_visits_outermost_load_index_first() {
+    let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
+    let entry_block_index = start_entry_block_index(&module);
+    let entry_block_id = module.blocks[entry_block_index].id;
+    let entry_region = module.blocks[entry_block_index].region;
+    let element_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let collection_type = type_environment.intern_collection(element_type, None);
+    let local_id = LocalId(9003);
+    add_local(&mut module, entry_block_id, local_id, collection_type);
+    // Projections run root-outward, so `outer` is the outermost index and must be reported first.
+    let inner = HirValueId(u32::MAX - 1);
+    let outer = HirValueId(u32::MAX);
+    let place = HirPlace::local(local_id)
+        .with_index(inner, &mut module.expressions, None)
+        .expect("the malformed index edge can still be represented in a test row")
+        .with_index(outer, &mut module.expressions, None)
+        .expect("the malformed index edge can still be represented in a test row");
+    let load_id = append_hir_expression(
+        &mut module,
+        HirExpressionKind::Load(place),
+        element_type,
+        entry_region,
+        ValueKind::Place,
+    );
+    append_expression_statement(&mut module, load_id);
+
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject a Load with dangling indexes");
+
+    assert!(
+        error
+            .msg
+            .contains(&format!("Invalid expression id {outer:?}"))
+    );
+    assert!(
+        !error
+            .msg
+            .contains(&format!("Invalid expression id {inner:?}"))
+    );
+}
+
+#[test]
+fn validator_reports_left_chain_error_before_right_chain_error() {
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let entry_block_index = start_entry_block_index(&module);
+    let entry_region = module.blocks[entry_block_index].region;
+    let leaf = append_hir_expression(
+        &mut module,
+        HirExpressionKind::Bool(true),
+        builtin_type_ids::BOOL,
+        entry_region,
+        ValueKind::Const,
+    );
+
+    // The left chain bottoms out in a dangling operand. The right chain bottoms out in an
+    // out-of-range payload index, which only the post-check on Exit can reject.
+    let mut left = append_hir_expression(
+        &mut module,
+        HirExpressionKind::UnaryOp {
+            op: HirUnaryOp::Not,
+            operand: HirValueId(u32::MAX),
+        },
+        builtin_type_ids::BOOL,
+        entry_region,
+        ValueKind::RValue,
+    );
+    for _ in 0..1_000 {
+        left = append_hir_expression(
+            &mut module,
+            HirExpressionKind::UnaryOp {
+                op: HirUnaryOp::Not,
+                operand: left,
+            },
+            builtin_type_ids::BOOL,
+            entry_region,
+            ValueKind::RValue,
+        );
+    }
+
+    let mut right = append_hir_expression(
+        &mut module,
+        HirExpressionKind::VariantPayloadGet {
+            carrier: HirVariantCarrier::Option,
+            source: leaf,
+            variant_index: 5,
+            field_index: 0,
+        },
+        builtin_type_ids::BOOL,
+        entry_region,
+        ValueKind::RValue,
+    );
+    for _ in 0..1_000 {
+        right = append_hir_expression(
+            &mut module,
+            HirExpressionKind::UnaryOp {
+                op: HirUnaryOp::Not,
+                operand: right,
+            },
+            builtin_type_ids::BOOL,
+            entry_region,
+            ValueKind::RValue,
+        );
+    }
+
+    let root = append_hir_expression(
+        &mut module,
+        HirExpressionKind::BinOp {
+            op: HirBinOp::And,
+            left,
+            right,
+        },
+        builtin_type_ids::BOOL,
+        entry_region,
+        ValueKind::RValue,
+    );
+    append_expression_statement(&mut module, root);
+
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject the malformed left chain");
+
+    // Children are walked left to right, so the left chain's dangling operand is reported before
+    // the right chain's payload index is ever checked.
+    assert!(error.msg.contains("Invalid expression id"));
+    assert!(!error.msg.contains("VariantPayloadGet variant index"));
+}
+
+#[test]
+fn validator_checks_comparison_result_type_before_walking_operands() {
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let entry_block_index = start_entry_block_index(&module);
+    let entry_region = module.blocks[entry_block_index].region;
+    let left = append_hir_expression(
+        &mut module,
+        HirExpressionKind::UnaryOp {
+            op: HirUnaryOp::Not,
+            operand: HirValueId(u32::MAX),
+        },
+        builtin_type_ids::BOOL,
+        entry_region,
+        ValueKind::RValue,
+    );
+    let right = append_hir_expression(
+        &mut module,
+        HirExpressionKind::UnaryOp {
+            op: HirUnaryOp::Not,
+            operand: HirValueId(u32::MAX),
+        },
+        builtin_type_ids::BOOL,
+        entry_region,
+        ValueKind::RValue,
+    );
+    // An Eq row must produce Bool. Its operands are readable rows, so the result-type check fires
+    // before the walk descends into the dangling operands below them.
+    let comparison = append_hir_expression(
+        &mut module,
+        HirExpressionKind::BinOp {
+            op: HirBinOp::Eq,
+            left,
+            right,
+        },
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        entry_region,
+        ValueKind::RValue,
+    );
+    append_expression_statement(&mut module, comparison);
+
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject a comparison that does not produce Bool");
+
+    assert!(error.msg.contains("HirBinOp comparison must produce Bool"));
+    assert!(!error.msg.contains("Invalid expression id"));
+}
+
+#[test]
+fn validator_reports_invalid_load_index_before_load_type_mismatch() {
+    let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
+    let entry_block_index = start_entry_block_index(&module);
+    let entry_block_id = module.blocks[entry_block_index].id;
+    let entry_region = module.blocks[entry_block_index].region;
+    let element_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let collection_type = type_environment.intern_collection(element_type, None);
+    let local_id = LocalId(9003);
+    add_local(&mut module, entry_block_id, local_id, collection_type);
+    let place = HirPlace::local(local_id)
+        .with_index(HirValueId(u32::MAX), &mut module.expressions, None)
+        .expect("the malformed index edge can still be represented in a test row");
+    // The element is I32, so declaring the Load as BOOL would fail the type check. That check runs
+    // after the walk has validated the index, so the dangling index must be reported instead.
+    let load_id = append_hir_expression(
+        &mut module,
+        HirExpressionKind::Load(place),
+        builtin_type_ids::BOOL,
+        entry_region,
+        ValueKind::Place,
+    );
+    append_expression_statement(&mut module, load_id);
+
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject a Load with a dangling index");
+
+    assert!(error.msg.contains("Invalid expression id"));
+    assert!(
+        !error
+            .msg
+            .contains("Load expression type does not match its place type")
+    );
+}
+
+#[test]
+fn validator_accepts_deep_load_index_chain_on_small_stack() {
+    const STACK_BUDGET_CHILD_ENV: &str = "MOTH_HIR_VALIDATION_LOAD_CHAIN_STACK_BUDGET_CHILD";
+    if std::env::var_os(STACK_BUDGET_CHILD_ENV).is_none() {
+        run_stack_budgeted_child(
+            module_path!(),
+            "validator_accepts_deep_load_index_chain_on_small_stack",
+            STACK_BUDGET_CHILD_ENV,
+            "deep Load index validation must fit a 1 MiB stack",
+        );
+        return;
+    }
+
+    std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(|| {
+            let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
+            let entry_block_index = start_entry_block_index(&module);
+            let entry_region = module.blocks[entry_block_index].region;
+            let element_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+            let collection_type = type_environment.intern_collection(element_type, None);
+            let local_id = LocalId(9003);
+            // Parameters are definitely defined at entry, so the Load root satisfies the
+            // definite-definition check without needing an assignment statement.
+            add_entry_parameter(&mut module, local_id, collection_type, false);
+
+            // Each Load indexes the previous one, so the walk descends one index edge per row.
+            let mut index = int_expression(0, element_type, entry_region, &None, &mut module);
+            for _ in 0..2_000 {
+                let place = HirPlace::local(local_id)
+                    .with_index(index, &mut module.expressions, None)
+                    .expect("the index row is a valid dense expression id");
+                index = append_hir_expression(
+                    &mut module,
+                    HirExpressionKind::Load(place),
+                    element_type,
+                    entry_region,
+                    ValueKind::Place,
+                );
+            }
+            append_expression_statement(&mut module, index);
+
+            validate_module_for_tests(
+                &module,
+                &string_table,
+                &type_environment,
+                &ExternalPackageRegistry::new(),
+            )
+            .expect("a deep chain of Load index rows should validate");
+        })
+        .expect("the bounded-stack validation thread should spawn")
+        .join()
+        .expect("deep Load index validation should finish on a 1 MiB stack");
+}
+
+/// Appends a `VariantConstruct` row with one named payload field.
+///
+/// WHAT: the carrier selects a choice variant or the `Option` `some` form.
+/// WHY: every link of the deep chain builds this row shape, so one constructor owns it.
+fn append_variant_row(
+    module: &mut HirModule,
+    carrier: HirVariantCarrier,
+    variant_index: usize,
+    field_name: StringId,
+    value: HirValueId,
+    type_id: TypeId,
+    region: RegionId,
+) -> HirValueId {
+    let fields = module
+        .expressions
+        .append_variant_fields(
+            &[HirVariantField {
+                name: Some(field_name),
+                value,
+            }],
+            None,
+        )
+        .expect("one variant field should fit the expression store");
+    append_hir_expression(
+        module,
+        HirExpressionKind::VariantConstruct {
+            carrier,
+            variant_index,
+            fields,
+        },
+        type_id,
+        region,
+        ValueKind::RValue,
+    )
+}
+
+/// Appends `VariantPayloadGet` field 0. Each chain link reads the row built just before it.
+fn append_payload_get_row(
+    module: &mut HirModule,
+    carrier: HirVariantCarrier,
+    source: HirValueId,
+    variant_index: usize,
+    type_id: TypeId,
+    region: RegionId,
+) -> HirValueId {
+    append_hir_expression(
+        module,
+        HirExpressionKind::VariantPayloadGet {
+            carrier,
+            source,
+            variant_index,
+            field_index: 0,
+        },
+        type_id,
+        region,
+        ValueKind::RValue,
+    )
+}
+
+#[test]
+fn validator_accepts_deep_mixed_shape_chain_on_small_stack() {
+    // Rows per cycle: numeric 2, Bool 7, Tree 9. The phases total about 25,000 rows, past the
+    // 20,000-row depth that overflowed a recursive walk on the 1 MiB child stack.
+    const NUMERIC_CYCLES: usize = 1_000;
+    const BOOL_CYCLES: usize = 2_000;
+    const TREE_CYCLES: usize = 1_000;
+    const LEAF_VARIANT: usize = 0;
+    const HOLDER_VARIANT: usize = 1;
+    const DICT_VARIANT: usize = 2;
+
+    const STACK_BUDGET_CHILD_ENV: &str = "MOTH_HIR_VALIDATION_MIXED_SHAPE_STACK_BUDGET_CHILD";
+    if std::env::var_os(STACK_BUDGET_CHILD_ENV).is_none() {
+        run_stack_budgeted_child(
+            module_path!(),
+            "validator_accepts_deep_mixed_shape_chain_on_small_stack",
+            STACK_BUDGET_CHILD_ENV,
+            "deep mixed-shape HIR validation must fit a 1 MiB stack",
+        );
+        return;
+    }
+
+    std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(|| {
+            let (mut string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
+            let mut path_fork = PathInternerFork::empty();
+            let entry_block_index = start_entry_block_index(&module);
+            let region = module.blocks[entry_block_index].region;
+
+            // Tree and Holder reference each other through Collection and Map, so each nominal is
+            // registered empty and its members are filled once every TypeId they name exists.
+            let tree_path = super::symbol("Tree", &mut path_fork, &mut string_table);
+            let holder_path = super::symbol("Holder", &mut path_fork, &mut string_table);
+            let (_, tree_type) = type_environment.register_nominal_choice(ChoiceTypeDefinition {
+                id: NominalTypeId(0),
+                path: tree_path,
+                variants: Box::new([]),
+                generic_parameters: None,
+            });
+            let (_, holder_type) = type_environment.register_nominal_struct(StructTypeDefinition {
+                id: NominalTypeId(0),
+                path: holder_path,
+                fields: Box::new([]),
+                generic_parameters: None,
+                const_record: false,
+            });
+
+            let bool_type = builtin_type_ids::BOOL;
+            let u8_type = builtin_type_ids::fixed_scalar(FixedScalar::U8);
+            let byte_type = builtin_type_ids::fixed_scalar(FixedScalar::Byte);
+            let collection_type = type_environment.intern_collection(tree_type, None);
+            let map_type = type_environment.intern_map(bool_type, tree_type);
+            let option_bool_type = type_environment.intern_option(bool_type);
+
+            let value_name = string_table.intern("value");
+            let holder_name = string_table.intern("holder");
+            let entries_name = string_table.intern("entries");
+            let items_path = super::symbol("items", &mut path_fork, &mut string_table);
+            let value_path = super::symbol("value", &mut path_fork, &mut string_table);
+            let holder_field_path = super::symbol("holder", &mut path_fork, &mut string_table);
+            let entries_path = super::symbol("entries", &mut path_fork, &mut string_table);
+            type_environment.update_struct_fields(
+                holder_type,
+                vec![FieldDefinition {
+                    name: items_path,
+                    type_id: collection_type,
+                    span: None,
+                }]
+                .into_boxed_slice(),
+            );
+            type_environment.update_choice_variants(
+                tree_type,
+                vec![
+                    ChoiceVariantDefinition {
+                        name: string_table.intern("Leaf"),
+                        tag: LEAF_VARIANT,
+                        payload: ChoiceVariantPayloadDefinition::Record {
+                            fields: vec![FieldDefinition {
+                                name: value_path,
+                                type_id: bool_type,
+                                span: None,
+                            }]
+                            .into_boxed_slice(),
+                        },
+                        span: None,
+                    },
+                    ChoiceVariantDefinition {
+                        name: string_table.intern("Holder"),
+                        tag: HOLDER_VARIANT,
+                        payload: ChoiceVariantPayloadDefinition::Record {
+                            fields: vec![FieldDefinition {
+                                name: holder_field_path,
+                                type_id: holder_type,
+                                span: None,
+                            }]
+                            .into_boxed_slice(),
+                        },
+                        span: None,
+                    },
+                    ChoiceVariantDefinition {
+                        name: string_table.intern("Dict"),
+                        tag: DICT_VARIANT,
+                        payload: ChoiceVariantPayloadDefinition::Record {
+                            fields: vec![FieldDefinition {
+                                name: entries_path,
+                                type_id: map_type,
+                                span: None,
+                            }]
+                            .into_boxed_slice(),
+                        },
+                        span: None,
+                    },
+                ]
+                .into_boxed_slice(),
+            );
+
+            let tree_choice = ChoiceId(0);
+            let holder_struct = StructId(0);
+            let items_field = FieldId(0);
+            add_validation_hir_struct(
+                &mut module,
+                holder_struct,
+                holder_type,
+                [(items_field, collection_type)],
+            );
+            module.choices.push(HirChoice {
+                id: tree_choice,
+                frontend_type_id: tree_type,
+                variants: vec![
+                    HirChoiceVariant {
+                        name: string_table.intern("Leaf"),
+                        fields: vec![HirChoiceField {
+                            name: value_name,
+                            ty: bool_type,
+                        }],
+                    },
+                    HirChoiceVariant {
+                        name: string_table.intern("Holder"),
+                        fields: vec![HirChoiceField {
+                            name: holder_name,
+                            ty: holder_type,
+                        }],
+                    },
+                    HirChoiceVariant {
+                        name: string_table.intern("Dict"),
+                        fields: vec![HirChoiceField {
+                            name: entries_name,
+                            ty: map_type,
+                        }],
+                    },
+                ],
+            });
+            let tree_carrier = || HirVariantCarrier::Choice {
+                choice_id: tree_choice,
+            };
+
+            // Shared leaves. Later links reuse them, so the validator's active-row marks see repeated
+            // visits to rows that are already finished.
+            let leaf_u8 = append_hir_expression(
+                &mut module,
+                HirExpressionKind::FixedScalar(
+                    FixedScalarValue::unsigned(FixedScalar::U8, 1).expect("1 fits in U8"),
+                ),
+                u8_type,
+                region,
+                ValueKind::Const,
+            );
+            let leaf_bool = append_hir_expression(
+                &mut module,
+                HirExpressionKind::Bool(true),
+                bool_type,
+                region,
+                ValueKind::Const,
+            );
+            let leaf_tree = append_variant_row(
+                &mut module,
+                tree_carrier(),
+                LEAF_VARIANT,
+                value_name,
+                leaf_bool,
+                tree_type,
+                region,
+            );
+
+            // Numeric phase: U8 -> Byte -> U8. Each Cast reads the row before it, so the post-children
+            // policy and source checks run on every link.
+            let mut numeric = leaf_u8;
+            for _ in 0..NUMERIC_CYCLES {
+                let byte = append_hir_expression(
+                    &mut module,
+                    HirExpressionKind::Cast {
+                        source: numeric,
+                        policy: BuiltinCastPolicyId::U8ToByte,
+                    },
+                    byte_type,
+                    region,
+                    ValueKind::RValue,
+                );
+                numeric = append_hir_expression(
+                    &mut module,
+                    HirExpressionKind::Cast {
+                        source: byte,
+                        policy: BuiltinCastPolicyId::ByteToU8,
+                    },
+                    u8_type,
+                    region,
+                    ValueKind::RValue,
+                );
+            }
+
+            // Bridge: a U8 comparison produces the first Bool row of the spine.
+            let mut flag = append_hir_expression(
+                &mut module,
+                HirExpressionKind::BinOp {
+                    left: numeric,
+                    op: HirBinOp::Eq,
+                    right: leaf_u8,
+                },
+                bool_type,
+                region,
+                ValueKind::RValue,
+            );
+
+            // Bool phase: Not, And, Eq, then Option wrap and unwrap, then Tree.Leaf wrap and unwrap.
+            for _ in 0..BOOL_CYCLES {
+                let negated = append_hir_expression(
+                    &mut module,
+                    HirExpressionKind::UnaryOp {
+                        op: HirUnaryOp::Not,
+                        operand: flag,
+                    },
+                    bool_type,
+                    region,
+                    ValueKind::RValue,
+                );
+                let conjoined = append_hir_expression(
+                    &mut module,
+                    HirExpressionKind::BinOp {
+                        left: negated,
+                        op: HirBinOp::And,
+                        right: leaf_bool,
+                    },
+                    bool_type,
+                    region,
+                    ValueKind::RValue,
+                );
+                let compared = append_hir_expression(
+                    &mut module,
+                    HirExpressionKind::BinOp {
+                        left: conjoined,
+                        op: HirBinOp::Eq,
+                        right: leaf_bool,
+                    },
+                    bool_type,
+                    region,
+                    ValueKind::RValue,
+                );
+                let some = append_variant_row(
+                    &mut module,
+                    HirVariantCarrier::Option,
+                    OPTION_SOME_VARIANT_INDEX,
+                    value_name,
+                    compared,
+                    option_bool_type,
+                    region,
+                );
+                let unwrapped = append_payload_get_row(
+                    &mut module,
+                    HirVariantCarrier::Option,
+                    some,
+                    OPTION_SOME_VARIANT_INDEX,
+                    bool_type,
+                    region,
+                );
+                let leafed = append_variant_row(
+                    &mut module,
+                    tree_carrier(),
+                    LEAF_VARIANT,
+                    value_name,
+                    unwrapped,
+                    tree_type,
+                    region,
+                );
+                flag = append_payload_get_row(
+                    &mut module,
+                    tree_carrier(),
+                    leafed,
+                    LEAF_VARIANT,
+                    bool_type,
+                    region,
+                );
+            }
+
+            // Bridge into the Tree family. The map key is the Bool spine; the map value is the shared
+            // Tree leaf.
+            let entries = module
+                .expressions
+                .append_map_entries(
+                    &[HirMapEntry {
+                        key: flag,
+                        value: leaf_tree,
+                    }],
+                    None,
+                )
+                .expect("one map entry should fit the expression store");
+            let entries_map = append_hir_expression(
+                &mut module,
+                HirExpressionKind::MapLiteral(entries),
+                map_type,
+                region,
+                ValueKind::RValue,
+            );
+            let mut tree = append_variant_row(
+                &mut module,
+                tree_carrier(),
+                DICT_VARIANT,
+                entries_name,
+                entries_map,
+                tree_type,
+                region,
+            );
+
+            // Tree phase: Collection, StructConstruct, Holder wrap and unwrap, a MapLiteral whose value
+            // child is the spine, then Dict wrap and unwrap.
+            for _ in 0..TREE_CYCLES {
+                let items = module
+                    .expressions
+                    .append_values(&[tree], None)
+                    .expect("one collection element should fit the expression store");
+                let collection = append_hir_expression(
+                    &mut module,
+                    HirExpressionKind::Collection(items),
+                    collection_type,
+                    region,
+                    ValueKind::RValue,
+                );
+                let struct_fields = module
+                    .expressions
+                    .append_struct_fields(&[(items_field, collection)], None)
+                    .expect("one struct field should fit the expression store");
+                let holder = append_hir_expression(
+                    &mut module,
+                    HirExpressionKind::StructConstruct {
+                        struct_id: holder_struct,
+                        fields: struct_fields,
+                    },
+                    holder_type,
+                    region,
+                    ValueKind::RValue,
+                );
+                let wrapped = append_variant_row(
+                    &mut module,
+                    tree_carrier(),
+                    HOLDER_VARIANT,
+                    holder_name,
+                    holder,
+                    tree_type,
+                    region,
+                );
+                let held = append_payload_get_row(
+                    &mut module,
+                    tree_carrier(),
+                    wrapped,
+                    HOLDER_VARIANT,
+                    holder_type,
+                    region,
+                );
+                let rewrapped = append_variant_row(
+                    &mut module,
+                    tree_carrier(),
+                    HOLDER_VARIANT,
+                    holder_name,
+                    held,
+                    tree_type,
+                    region,
+                );
+                let map_entries = module
+                    .expressions
+                    .append_map_entries(
+                        &[HirMapEntry {
+                            key: leaf_bool,
+                            value: rewrapped,
+                        }],
+                        None,
+                    )
+                    .expect("one map entry should fit the expression store");
+                let map = append_hir_expression(
+                    &mut module,
+                    HirExpressionKind::MapLiteral(map_entries),
+                    map_type,
+                    region,
+                    ValueKind::RValue,
+                );
+                let dict = append_variant_row(
+                    &mut module,
+                    tree_carrier(),
+                    DICT_VARIANT,
+                    entries_name,
+                    map,
+                    tree_type,
+                    region,
+                );
+                let mapped = append_payload_get_row(
+                    &mut module,
+                    tree_carrier(),
+                    dict,
+                    DICT_VARIANT,
+                    map_type,
+                    region,
+                );
+                tree = append_variant_row(
+                    &mut module,
+                    tree_carrier(),
+                    DICT_VARIANT,
+                    entries_name,
+                    mapped,
+                    tree_type,
+                    region,
+                );
+            }
+
+            // The root reuses the deepest Tree row and the shared leaf. The second visit to `tree`
+            // starts only after the first visit has finished, so it is not a cycle.
+            let elements = module
+                .expressions
+                .append_values(&[tree, leaf_tree, tree], None)
+                .expect("collection elements should fit the expression store");
+            let root = append_hir_expression(
+                &mut module,
+                HirExpressionKind::Collection(elements),
+                collection_type,
+                region,
+                ValueKind::RValue,
+            );
+            append_expression_statement(&mut module, root);
+
+            validate_module_for_tests(
+                &module,
+                &string_table,
+                &type_environment,
+                &ExternalPackageRegistry::new(),
+            )
+            .expect("the deep mixed-shape chain should validate");
+        })
+        .expect("the bounded-stack validation thread should spawn")
+        .join()
+        .expect("deep mixed-shape validation should finish on a 1 MiB stack");
 }
 
 #[test]
@@ -4564,7 +5409,7 @@ fn hir_variant_construct_option_invalid_index_rejected() {
     };
 
     module.side_table.map_statement(span, &statement);
-    module.side_table.map_value(span, expr_id, span);
+    module.side_table.map_value(span, expr_id);
     module.blocks[entry_block_index].statements.push(statement);
 
     let error = validate_module_for_tests(
@@ -4602,7 +5447,7 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
                         .try_intern_portable_path("message", &mut string_table)
                         .expect("test path fits"),
                     type_id: builtin_type_ids::STRING,
-                    diagnostic_type: DataType::Inferred,
+                    type_syntax: None,
                     value_mode: ValueMode::ImmutableOwned,
                     value: DeclarationValue::Absent,
                     binding_span: None,
@@ -4703,8 +5548,8 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
     };
 
     module.side_table.map_statement(span, &statement);
-    module.side_table.map_value(span, expr_id, span);
-    module.side_table.map_value(span, value_id, span);
+    module.side_table.map_value(span, expr_id);
+    module.side_table.map_value(span, value_id);
     module.blocks[entry_block_index].statements.push(statement);
 
     let error = validate_module_for_tests(
@@ -4742,7 +5587,7 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
                         .try_intern_portable_path("message", &mut string_table)
                         .expect("test path fits"),
                     type_id: builtin_type_ids::STRING,
-                    diagnostic_type: DataType::Inferred,
+                    type_syntax: None,
                     value_mode: ValueMode::ImmutableOwned,
                     value: DeclarationValue::Absent,
                     binding_span: None,
@@ -4844,8 +5689,8 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
     };
 
     module.side_table.map_statement(span, &statement);
-    module.side_table.map_value(span, expr_id, span);
-    module.side_table.map_value(span, value_id, span);
+    module.side_table.map_value(span, expr_id);
+    module.side_table.map_value(span, value_id);
     module.blocks[entry_block_index].statements.push(statement);
 
     let error = validate_module_for_tests(
@@ -4859,6 +5704,128 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
     assert!(
         error.msg.contains("field type mismatch"),
         "expected 'field type mismatch' in error, got: {}",
+        error.msg
+    );
+}
+
+#[test]
+fn hir_route_construct_with_input_missing_leading_capture_rejected() {
+    let mut path_fork = super::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) =
+        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let rename_name = string_table.intern("Rename");
+    let record_field = |name: &str,
+                        type_id: TypeId,
+                        path_fork: &mut super::PathInternerFork,
+                        string_table: &mut StringTable| Declaration {
+        id: path_fork
+            .try_intern_portable_path(name, string_table)
+            .expect("test path fits"),
+        type_id,
+        type_syntax: None,
+        value_mode: ValueMode::ImmutableOwned,
+        value: DeclarationValue::Absent,
+        binding_span: None,
+        config_qualifier: None,
+    };
+    let choice_variants = vec![ChoiceVariant {
+        id: rename_name,
+        payload: ChoiceVariantPayload::Record {
+            fields: vec![
+                record_field(
+                    "id",
+                    builtin_type_ids::STRING,
+                    &mut path_fork,
+                    &mut string_table,
+                ),
+                record_field(
+                    "value",
+                    builtin_type_ids::STRING,
+                    &mut path_fork,
+                    &mut string_table,
+                ),
+            ],
+        },
+        span: None,
+    }];
+
+    let start_fn = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
+    );
+    let ast = build_ast_with_choices(
+        vec![start_fn],
+        entry_path,
+        vec![HirTestChoiceDefinition {
+            nominal_path: path_fork
+                .try_intern_portable_path("TodoMessage", &mut string_table)
+                .expect("test path fits"),
+            variants: choice_variants,
+        }],
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    let (mut module, type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("lowering should succeed");
+    let entry_block_index = module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize]
+        .entry
+        .0 as usize;
+    let region = module.blocks[entry_block_index].region;
+    let choice_type = module.choices[0].frontend_type_id;
+
+    // One future input supplies only the trailing `value`, so `id` must be captured.
+    let span = None;
+    let fields = module
+        .expressions
+        .append_variant_fields(&[], span)
+        .expect("empty capture range should fit the expression store");
+    let expr_id = append_hir_expression(
+        &mut module,
+        HirExpressionKind::RouteConstruct {
+            choice_id: ChoiceId(0),
+            variant_index: 0,
+            fields,
+            future_input: true,
+        },
+        choice_type,
+        region,
+        ValueKind::Const,
+    );
+    let statement = HirStatement {
+        id: HirNodeId(9000),
+        kind: HirStatementKind::Expr(expr_id),
+        span,
+    };
+    module.side_table.map_statement(span, &statement);
+    module.side_table.map_value(span, expr_id);
+    module.blocks[entry_block_index].statements.push(statement);
+
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject a one-input route missing a leading capture");
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert!(
+        error.msg.contains("captures must fill"),
+        "expected the capture-count error, got: {}",
         error.msg
     );
 }
@@ -4940,7 +5907,7 @@ fn validator_rejects_number_literal_scale_that_mismatches_hir_type() {
         span,
     };
 
-    module.side_table.map_value(span, value_id, span);
+    module.side_table.map_value(span, value_id);
     module.side_table.map_statement(span, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
@@ -4969,9 +5936,7 @@ fn validator_rejects_number_literal_scale_that_mismatches_hir_type() {
         .last_mut()
         .expect("injected Dec expression statement should remain in the HIR block");
     statement.kind = HirStatementKind::Expr(mismatched_expression);
-    module
-        .side_table
-        .map_value(span, mismatched_expression, span);
+    module.side_table.map_value(span, mismatched_expression);
 
     let error = validate_module_for_tests(
         &module,

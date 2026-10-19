@@ -1,0 +1,13 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0015"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0015"
+reason = "invalid_generic_application.nested_application"
+path = "input/@page.moth"
+line = 1
+column = 25

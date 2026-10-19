@@ -373,8 +373,8 @@ pub(crate) fn portable_relative_logical_path_from(
 /// path intentionally includes the actual root filename, so renaming the root file (for example
 /// `@page.moth` to `@pages.moth`) changes the owned-source identity even though the module origin
 /// remains stable.
-/// WHY: later Phase 3 slices consume this identity as the canonical logical source identity for
-/// semantic source sets, check-only orphan units and source attribution. Keeping the dense
+/// WHY: the source tree index records this identity as the logical identity of every owned source
+/// file (`SourceLogicalIdentity::Owned`). Keeping the dense
 /// build-local handles and absolute paths out prevents process-local indexes from leaking across
 /// module boundaries or into persistent artefacts. Identity changes when the module origin or the
 /// module-relative source file path changes, and is otherwise independent of checkout root.

@@ -431,6 +431,81 @@ fn stage_values_marks_a_deep_staged_chain_without_recursion() {
     );
 }
 
+/// Resolved `Bool` metadata for the staging tests, which only need distinct leaf rows.
+fn resolved_bool_metadata() -> ConstValueMetadata {
+    ConstValueMetadata::resolved(builtin_type_ids::BOOL, None, ValueMode::ImmutableOwned)
+}
+
+#[test]
+fn stage_values_commits_each_root_of_a_multi_root_candidate_and_leaves_unreachable_rows_out() {
+    let mut store = ConstValueStore::default();
+    let roots = store
+        .stage_values(|candidate| -> Result<_, ConstValueStoreError> {
+            // Staged but never selected as a root, so it is unreachable and must not be committed.
+            candidate.insert_value(resolved_bool_metadata(), ConstValuePayload::Bool(false))?;
+            let first =
+                candidate.insert_value(resolved_bool_metadata(), ConstValuePayload::Bool(true))?;
+            let second =
+                candidate.insert_value(resolved_bool_metadata(), ConstValuePayload::Bool(false))?;
+            Ok(Some(vec![first, second]))
+        })
+        .expect("multi-root candidate should stage")
+        .expect("the candidate should select its roots");
+    assert_eq!(roots.len(), 2);
+    assert!(matches!(
+        store.payload(roots[0]),
+        Some(ConstValuePayload::Bool(true))
+    ));
+    assert!(matches!(
+        store.payload(roots[1]),
+        Some(ConstValuePayload::Bool(false))
+    ));
+    // Only the two selected roots were committed, so no row exists at the next index.
+    assert!(store.value(ConstValueId(2)).is_none());
+}
+
+#[test]
+fn stage_values_discards_every_staged_row_when_a_multi_root_producer_fails() {
+    let mut store = ConstValueStore::default();
+    let failed = store.stage_values(
+        |candidate| -> Result<Option<Vec<ConstValueId>>, ConstValueStoreError> {
+            let staged =
+                candidate.insert_value(resolved_bool_metadata(), ConstValuePayload::Bool(true))?;
+            // The child belongs to no row of this candidate, so this insert fails after `staged`
+            // is already staged: the partial state that staging must throw away.
+            candidate.insert_value(
+                resolved_bool_metadata(),
+                ConstValuePayload::Collection(vec![ConstValueId(u32::MAX)]),
+            )?;
+            Ok(Some(vec![staged]))
+        },
+    );
+    assert!(failed.is_err());
+    assert!(
+        store.value(ConstValueId(0)).is_none(),
+        "a failed multi-root candidate must leave no committed row"
+    );
+}
+
+#[test]
+fn stage_values_refuses_a_root_that_names_no_row_and_commits_nothing() {
+    let mut store = ConstValueStore::default();
+    let refused = store.stage_values(
+        |candidate| -> Result<Option<Vec<ConstValueId>>, ConstValueStoreError> {
+            let staged =
+                candidate.insert_value(resolved_bool_metadata(), ConstValuePayload::Bool(false))?;
+            // Committed roots are valid without staging, so the refused root must resolve to
+            // neither a committed row nor a candidate row: index 99 does neither.
+            Ok(Some(vec![staged, ConstValueId(99)]))
+        },
+    );
+    assert!(refused.is_err());
+    assert!(
+        store.value(ConstValueId(0)).is_none(),
+        "a refused candidate must leave no committed row"
+    );
+}
+
 #[test]
 fn ingest_view_reads_a_deep_expression_chain_without_recursion() {
     on_one_mib_stack(

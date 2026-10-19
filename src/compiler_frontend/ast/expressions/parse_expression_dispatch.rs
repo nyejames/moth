@@ -17,7 +17,9 @@ use super::parse_expression::{
     create_expression_until, create_expression_with_trailing_newline_policy,
 };
 use super::parse_expression_identifiers::parse_identifier_or_call;
-use super::parse_expression_input::{ExpressionParseInput, ExpressionParseResources};
+use super::parse_expression_input::{
+    ExpressionParseInput, ExpressionParseResources, RouteArgumentContext,
+};
 use super::parse_expression_literals::{
     LiteralParseState, parse_literal_expression, typed_suffix_follows,
 };
@@ -113,6 +115,7 @@ pub(super) struct ExpressionDispatchState<'a> {
     pub(super) group_frames: &'a mut Vec<GroupFrame>,
     pub(super) expression_builder: &'a mut AstExpressionBuilder,
     pub(super) const_values: &'a mut ConstValueStore,
+    pub(super) route_argument_context: Option<RouteArgumentContext>,
 }
 
 impl ExpressionDispatchState<'_> {
@@ -667,6 +670,7 @@ fn dispatch_non_group_expression_token(
                 state.expression,
                 state.allow_boundary_catch,
                 state.allow_expected_result_evidence,
+                state.route_argument_context,
                 string_table,
                 path_fork,
             )?;

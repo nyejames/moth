@@ -1,6 +1,6 @@
 //! Zero-cost timer erasure gate, and the timer subsystem's source rules.
 //!
-//! WHAT: builds the `moth` release binary without any timer-related feature
+//! WHAT: builds the `moth` CLI release binary without any timer-related feature
 //!      and proves that timer-only implementation markers are absent from the
 //!      produced bytes. It also defines the timer source rules — runtime `cfg!`
 //!      checks, direct calls into the enabled implementation outside the
@@ -142,16 +142,20 @@ fn find_present_schema_metric_markers(bytes: &[u8]) -> Vec<String> {
         .collect()
 }
 
-/// Build the `moth` binary with no default features in an isolated target dir.
+/// Build the `moth` CLI with no default features in an isolated target dir.
 fn build_no_timer_release_binary(workspace_root: &Path) -> Result<(), String> {
     let target_dir = workspace_root.join("target").join("timers-erasure-check");
 
     let status = Command::new("cargo")
-        .arg("build")
-        .arg("--release")
-        .arg("--no-default-features")
-        .arg("--bin")
-        .arg("moth")
+        .args([
+            "build",
+            "-p",
+            "moth-cli",
+            "--bin",
+            "moth",
+            "--release",
+            "--no-default-features",
+        ])
         .env("CARGO_TARGET_DIR", &target_dir)
         .current_dir(workspace_root)
         .status()
@@ -306,7 +310,7 @@ fn is_allowed_wall_clock_source(relative: &str) -> bool {
             | "src/bin/data_layout_memory_probe.rs"
             | "src/compiler_tests/integration_test_runner/assertions/node_harness.rs"
             | "src/compiler_tests/integration_test_runner/runner.rs"
-            | "src/projects/cli.rs"
+            | "src/projects/build_command.rs"
             | "src/projects/check.rs"
             | "src/projects/dev_server/build_loop.rs"
             | "src/projects/dev_server/tests/sse_tests.rs"
@@ -428,11 +432,15 @@ mod tests {
     }
 
     #[test]
-    fn accepts_explicit_user_visible_wall_clock_owner() {
-        let failures =
-            audit_timer_source_fragment("src/projects/check.rs", "let start = Instant::now();");
+    fn accepts_build_and_check_services_as_wall_clock_owners() {
+        for owner in ["src/projects/build_command.rs", "src/projects/check.rs"] {
+            let failures = audit_timer_source_fragment(owner, "let start = Instant::now();");
 
-        assert!(failures.is_empty(), "unexpected failures: {failures:?}");
+            assert!(
+                failures.is_empty(),
+                "unexpected failures in {owner}: {failures:?}"
+            );
+        }
     }
 
     #[test]

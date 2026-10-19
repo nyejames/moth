@@ -13,7 +13,6 @@ use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::hir::blocks::HirBlock;
-use crate::compiler_frontend::hir::expression_store::HirProjection;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{
@@ -428,7 +427,7 @@ impl<'hir> JsEmitter<'hir> {
                     || self.expression_uses_maps(*end)
                     || self.expression_uses_maps(*ascending)
             }
-            HirStatementKind::RangeStepFailure { .. } | HirStatementKind::Drop(_) => false,
+            HirStatementKind::RangeStepFailure { .. } => false,
         }
     }
 
@@ -543,85 +542,39 @@ impl<'hir> JsEmitter<'hir> {
     }
 
     fn pattern_uses_maps(&self, pattern: &HirPattern) -> bool {
-        match pattern {
-            HirPattern::Literal(value)
-            | HirPattern::OptionValue { value }
-            | HirPattern::OptionRelational { value, .. }
-            | HirPattern::Relational { value, .. } => self.expression_uses_maps(*value),
-
-            HirPattern::OptionNone
-            | HirPattern::OptionPresent
-            | HirPattern::Wildcard
-            | HirPattern::ChoiceVariant { .. } => false,
-        }
+        pattern
+            .value()
+            .is_some_and(|value| self.expression_uses_maps(value))
     }
 
     fn expression_uses_maps(&self, expression_id: HirValueId) -> bool {
-        let hir = self.hir;
-        let expression = hir.expressions.expression(expression_id);
-        if self.type_environment.is_map_type(expression.ty) {
-            return true;
+        // WHAT: scans in source pre-order with an explicit work list of pending siblings.
+        // WHY: a single-child chain must not add a native frame per expression level.
+        let mut pending = Vec::new();
+        let mut next = Some(expression_id);
+        while let Some(current) = next.take().or_else(|| pending.pop()) {
+            let expression = self.hir.expressions.expression(current);
+            // A map literal is itself the map use, so its entries are never scanned separately.
+            if self.type_environment.is_map_type(expression.ty)
+                || matches!(expression.kind, HirExpressionKind::MapLiteral(_))
+            {
+                return true;
+            }
+
+            next = self.hir.expressions.push_child_values_in_source_order(
+                current,
+                &mut pending,
+                |child| child,
+            );
         }
-
-        match &expression.kind {
-            HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => {
-                self.place_uses_maps(*place)
-            }
-
-            HirExpressionKind::BinOp { left, right, .. } => {
-                self.expression_uses_maps(*left) || self.expression_uses_maps(*right)
-            }
-
-            HirExpressionKind::UnaryOp { operand, .. } => self.expression_uses_maps(*operand),
-
-            HirExpressionKind::StructConstruct { fields, .. } => hir
-                .expressions
-                .struct_fields(*fields)
-                .iter()
-                .any(|(_, field_value)| self.expression_uses_maps(*field_value)),
-
-            HirExpressionKind::Collection(elements) => hir
-                .expressions
-                .values(*elements)
-                .iter()
-                .any(|element| self.expression_uses_maps(*element)),
-
-            HirExpressionKind::MapLiteral(_) => true,
-
-            HirExpressionKind::Range { start, end } => {
-                self.expression_uses_maps(*start) || self.expression_uses_maps(*end)
-            }
-
-            HirExpressionKind::Cast { source, .. } => self.expression_uses_maps(*source),
-
-            HirExpressionKind::VariantConstruct { fields, .. } => hir
-                .expressions
-                .variant_fields(*fields)
-                .iter()
-                .any(|field| self.expression_uses_maps(field.value)),
-
-            HirExpressionKind::VariantPayloadGet { source, .. } => {
-                self.expression_uses_maps(*source)
-            }
-
-            HirExpressionKind::FixedScalar(_)
-            | HirExpressionKind::Number(_)
-            | HirExpressionKind::Bool(_)
-            | HirExpressionKind::Char(_)
-            | HirExpressionKind::StringLiteral(_)
-            | HirExpressionKind::StructuralString { .. } => false,
-        }
+        false
     }
 
     fn place_uses_maps(&self, place: HirPlace) -> bool {
         self.hir
             .expressions
-            .projections(place.projections)
-            .iter()
-            .any(|projection| match projection {
-                HirProjection::Field(_) => false,
-                HirProjection::Index(index) => self.expression_uses_maps(*index),
-            })
+            .place_index_values(place)
+            .any(|index| self.expression_uses_maps(index))
     }
 }
 
@@ -676,7 +629,7 @@ fn collect_statement_cast_policies(
             collect_expression_cast_policies(hir, *end, policies);
             collect_expression_cast_policies(hir, *ascending, policies);
         }
-        HirStatementKind::RangeStepFailure { .. } | HirStatementKind::Drop(_) => {}
+        HirStatementKind::RangeStepFailure { .. } => {}
     }
 }
 
@@ -753,17 +706,8 @@ fn collect_pattern_cast_policies(
     pattern: &HirPattern,
     policies: &mut HashSet<BuiltinCastPolicyId>,
 ) {
-    match pattern {
-        HirPattern::Literal(value)
-        | HirPattern::OptionValue { value }
-        | HirPattern::OptionRelational { value, .. }
-        | HirPattern::Relational { value, .. } => {
-            collect_expression_cast_policies(hir, *value, policies)
-        }
-        HirPattern::OptionNone
-        | HirPattern::OptionPresent
-        | HirPattern::Wildcard
-        | HirPattern::ChoiceVariant { .. } => {}
+    if let Some(value) = pattern.value() {
+        collect_expression_cast_policies(hir, value, policies);
     }
 }
 
@@ -772,56 +716,18 @@ fn collect_expression_cast_policies(
     expression_id: HirValueId,
     policies: &mut HashSet<BuiltinCastPolicyId>,
 ) {
-    let expression = hir.expressions.expression(expression_id);
-    match &expression.kind {
-        HirExpressionKind::BinOp { left, right, .. } => {
-            collect_expression_cast_policies(hir, *left, policies);
-            collect_expression_cast_policies(hir, *right, policies);
-        }
-        HirExpressionKind::UnaryOp { operand, .. } => {
-            collect_expression_cast_policies(hir, *operand, policies)
-        }
-        HirExpressionKind::StructConstruct { fields, .. } => {
-            for (_, value) in hir.expressions.struct_fields(*fields) {
-                collect_expression_cast_policies(hir, *value, policies);
-            }
-        }
-        HirExpressionKind::Collection(elements) => {
-            for element in hir.expressions.values(*elements) {
-                collect_expression_cast_policies(hir, *element, policies);
-            }
-        }
-        HirExpressionKind::Range { start, end } => {
-            collect_expression_cast_policies(hir, *start, policies);
-            collect_expression_cast_policies(hir, *end, policies);
-        }
-        HirExpressionKind::Cast { source, policy } => {
+    // WHAT: scans in source pre-order with an explicit work list of pending siblings.
+    // WHY: a single-child chain must not add a native frame per expression level.
+    let mut pending = Vec::new();
+    let mut next = Some(expression_id);
+    while let Some(current) = next.take().or_else(|| pending.pop()) {
+        if let HirExpressionKind::Cast { policy, .. } = &hir.expressions.expression(current).kind {
             policies.insert(*policy);
-            collect_expression_cast_policies(hir, *source, policies);
         }
-        HirExpressionKind::VariantConstruct { fields, .. } => {
-            for field in hir.expressions.variant_fields(*fields) {
-                collect_expression_cast_policies(hir, field.value, policies);
-            }
-        }
-        HirExpressionKind::VariantPayloadGet { source, .. } => {
-            collect_expression_cast_policies(hir, *source, policies);
-        }
-        HirExpressionKind::MapLiteral(entries) => {
-            for entry in hir.expressions.map_entries(*entries) {
-                collect_expression_cast_policies(hir, entry.key, policies);
-                collect_expression_cast_policies(hir, entry.value, policies);
-            }
-        }
-        HirExpressionKind::FixedScalar(_)
-        | HirExpressionKind::Number(_)
-        | HirExpressionKind::Bool(_)
-        | HirExpressionKind::Char(_)
-        | HirExpressionKind::StringLiteral(_)
-        | HirExpressionKind::StructuralString { .. } => {}
-        HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => {
-            collect_place_cast_policies(hir, *place, policies);
-        }
+
+        next = hir
+            .expressions
+            .push_child_values_in_source_order(current, &mut pending, |child| child);
     }
 }
 
@@ -830,9 +736,7 @@ fn collect_place_cast_policies(
     place: HirPlace,
     policies: &mut HashSet<BuiltinCastPolicyId>,
 ) {
-    for projection in hir.expressions.projections(place.projections) {
-        if let HirProjection::Index(index) = projection {
-            collect_expression_cast_policies(hir, *index, policies);
-        }
+    for index in hir.expressions.place_index_values(place) {
+        collect_expression_cast_policies(hir, index, policies);
     }
 }

@@ -576,8 +576,16 @@ impl SourceTreeIndex {
 
             for entry in entries {
                 let path = entry.path();
+                // WHY: a non-symlink entry's listed type answers the kind checks, saving a `stat`.
+                // Symlinks, and entries whose type cannot be read, keep the `Path` queries, which
+                // follow the link to its target.
+                let listed_type = entry.file_type().ok().filter(|listed| !listed.is_symlink());
+                let is_dir = match listed_type {
+                    Some(listed) => listed.is_dir(),
+                    None => path.is_dir(),
+                };
 
-                if path.is_dir() {
+                if is_dir {
                     if skip_policy.should_skip(&path) {
                         stats.dirs_skipped += 1;
                     } else {
@@ -593,7 +601,11 @@ impl SourceTreeIndex {
                     continue;
                 }
 
-                if !path.is_file() {
+                let is_file = match listed_type {
+                    Some(listed) => listed.is_file(),
+                    None => path.is_file(),
+                };
+                if !is_file {
                     continue;
                 }
                 stats.files_seen += 1;
@@ -658,12 +670,18 @@ impl SourceTreeIndex {
                     continue;
                 }
 
-                let canonical_path = fs::canonicalize(&path).map_err(|error| {
-                    CompilerError::file_error(
-                        &path,
-                        format!("Failed to canonicalize source path: {error}"),
-                    )
-                })?;
+                // WHY: `directory` is canonical, so a listed non-symlink file's path needs no
+                // resolving syscall: the joined path is already the canonical spelling.
+                let canonical_path = if listed_type.is_some() {
+                    path.clone()
+                } else {
+                    fs::canonicalize(&path).map_err(|error| {
+                        CompilerError::file_error(
+                            &path,
+                            format!("Failed to canonicalize source path: {error}"),
+                        )
+                    })?
+                };
 
                 if let Some(kind) = source_kind
                     // When the project root equals the entry root, the facade root file is
@@ -802,19 +820,13 @@ impl SourceTreeIndex {
                 }
             };
             if let Some(root) = directory_root {
-                let canonical_root_directory = fs::canonicalize(&directory).map_err(|error| {
-                    CompilerError::file_error(
-                        &directory,
-                        format!("Failed to canonicalize module root directory: {error}"),
-                    )
-                })?;
-
-                let logical_module_path =
-                    logical_module_path_from(&canonical_root_directory, &entry_root)?;
+                // WHY: `directory` is canonical (canonicalized when popped), so it is the record's
+                // identity; re-canonicalizing would repeat the same syscall for the same answer.
+                let logical_module_path = logical_module_path_from(&directory, &entry_root)?;
 
                 stats.module_roots_found += 1;
                 records.push(ModuleIdentityRecord::new(
-                    canonical_root_directory,
+                    directory,
                     root.root_file,
                     root.role,
                     logical_module_path,

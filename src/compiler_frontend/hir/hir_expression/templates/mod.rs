@@ -14,7 +14,7 @@
 
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionView;
 use crate::compiler_frontend::ast::templates::{
-    OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff,
+    OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff,
 };
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
@@ -49,19 +49,5 @@ impl<'a> HirBuilder<'a> {
                 self.lower_runtime_template_render_expression(node, anchor, span_ref)
             }
         }
-    }
-
-    // WHAT: Lowers a runtime slot application after AST has already routed the
-    // wrapper, contribution sources, and slot-site render plan into owned data.
-    // WHY: this is the direct HIR entry point for the final expression variant.
-    // It keeps slot lowering on the same accumulator path as the owned runtime
-    // template handoff without exposing TIR identities.
-    pub(crate) fn lower_runtime_slot_application_expression_from_owned_handoff(
-        &mut self,
-        handoff: &OwnedRuntimeSlotApplicationHandoff,
-        anchor: ExpressionView<'_>,
-        span_ref: &Option<SourceSpan>,
-    ) -> Result<LoweredExpression, HirConstructionFailure> {
-        self.lower_runtime_slot_application_template_expression(handoff, anchor, span_ref)
     }
 }

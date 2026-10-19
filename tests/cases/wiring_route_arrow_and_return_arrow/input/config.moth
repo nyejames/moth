@@ -1,0 +1,5 @@
+project #= (
+    name = "wiring_route_arrow_and_return_arrow",
+    entry_root = "src",
+)
+html #= ()

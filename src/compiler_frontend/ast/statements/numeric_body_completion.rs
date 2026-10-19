@@ -84,7 +84,6 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidAssignmentTargetReason, TypeMismatchContext, ValueReceiverContext,
 };
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -313,6 +312,7 @@ impl Completion<'_, '_> {
 
         for intake in intakes {
             if let Some(slot) = intake.position.range_operand_slot() {
+                // Range slots are registered with their containing header and group.
                 let (header, group) = intake.range_header.expect("retained range operand handle");
                 let value = self.complete_items_with_suffix(
                     intake.items,
@@ -526,12 +526,7 @@ impl Completion<'_, '_> {
                         accept_forward_binding_result(&mut state, binding, computed, recipe_span)?;
                     }
                     let value = self.coerce_to_binding_annotation(binding, value)?;
-                    let declaration = declaration_for(
-                        &row,
-                        value,
-                        self.expression_builder,
-                        self.type_interner.environment(),
-                    )?;
+                    let declaration = declaration_for(&row, value, self.expression_builder)?;
                     ResolvedBinding::new(
                         self.expression_builder.view_owned(value)?.value_type_id()?,
                         declaration,
@@ -564,12 +559,7 @@ impl Completion<'_, '_> {
                         accept_forward_binding_result(&mut state, binding, computed, recipe_span)?;
                     }
                     let value = self.coerce_to_binding_annotation(binding, value)?;
-                    let declaration = declaration_for(
-                        &row,
-                        value,
-                        self.expression_builder,
-                        self.type_interner.environment(),
-                    )?;
+                    let declaration = declaration_for(&row, value, self.expression_builder)?;
                     ResolvedBinding::new(
                         self.expression_builder.view_owned(value)?.value_type_id()?,
                         declaration,
@@ -577,17 +567,17 @@ impl Completion<'_, '_> {
                     )?
                 }
                 NumericRecipe::RangeCounter { range } => {
-                    // The counter's type is the iteration domain of its own completed operands, so
-                    // it resolves here in the binding pass, before any later row that reads it,
-                    // and never by resuming the loop construct (its body may read the counter).
+                    // The counter's type is the iteration domain selected by its own completed
+                    // operands. The shared range policy selected it while building the spec, so it
+                    // resolves here in the binding pass, before any later row that reads it, and
+                    // never by resuming the loop construct (its body may read the counter).
                     let recipe_span = range.span.or(row.binding_span);
                     let spec = self.complete_range_spec(*range)?;
                     let computed =
                         crate::compiler_frontend::ast::statements::loop_headers::range_binding_type(
                             &spec,
                             self.type_interner.environment(),
-                            self.expression_builder,
-                        )?;
+                        );
                     {
                         let mut state = self.state.borrow_mut();
                         accept_forward_binding_result(&mut state, binding, computed, recipe_span)?;
@@ -595,7 +585,7 @@ impl Completion<'_, '_> {
                     self.range_specs[binding.as_usize()] = Some(spec);
                     let resolved = ResolvedBinding::new(
                         computed,
-                        absent_declaration(&row, computed, self.type_interner.environment()),
+                        absent_declaration(&row, computed),
                         self.expression_builder,
                     )?;
                     // A template range header bound to this counter installs its finished spec
@@ -608,7 +598,7 @@ impl Completion<'_, '_> {
                     let type_id = self.resolve_multi_bind_slot(binding, producers)?;
                     ResolvedBinding::new(
                         type_id,
-                        absent_declaration(&row, type_id, self.type_interner.environment()),
+                        absent_declaration(&row, type_id),
                         self.expression_builder,
                     )?
                 }
@@ -628,12 +618,7 @@ impl Completion<'_, '_> {
                         )?
                     };
                     let value = self.coerce_to_binding_annotation(binding, value)?;
-                    let declaration = declaration_for(
-                        &row,
-                        value,
-                        self.expression_builder,
-                        self.type_interner.environment(),
-                    )?;
+                    let declaration = declaration_for(&row, value, self.expression_builder)?;
                     ResolvedBinding::new(
                         self.expression_builder.view_owned(value)?.value_type_id()?,
                         declaration,
@@ -655,7 +640,7 @@ impl Completion<'_, '_> {
                     };
                     ResolvedBinding::new(
                         type_id,
-                        absent_declaration(&row, type_id, self.type_interner.environment()),
+                        absent_declaration(&row, type_id),
                         self.expression_builder,
                     )?
                 }
@@ -675,7 +660,7 @@ impl Completion<'_, '_> {
                     };
                     ResolvedBinding::new(
                         type_id,
-                        absent_declaration(&row, type_id, self.type_interner.environment()),
+                        absent_declaration(&row, type_id),
                         self.expression_builder,
                     )?
                 }
@@ -2421,15 +2406,24 @@ impl Completion<'_, '_> {
         &mut self,
         deferred: DeferredSourceCall,
     ) -> Result<OwnedExpr, ExpressionParseError> {
-        let mut arguments = Vec::with_capacity(deferred.arguments.len());
-        for argument in deferred.arguments {
-            arguments.push(self.complete_call_argument(argument)?);
+        let DeferredSourceCall {
+            function_path,
+            success_result_type_ids,
+            error_return_type_id,
+            expectations,
+            arguments,
+            call_span,
+            authored_handling,
+        } = deferred;
+        let mut completed_arguments = Vec::with_capacity(arguments.len());
+        for argument in arguments {
+            completed_arguments.push(self.complete_call_argument(argument)?);
         }
         let args = crate::compiler_frontend::ast::expressions::function_calls::resolve_user_function_call_arguments(
-            &deferred.function_path,
-            &arguments,
-            &deferred.signature.parameters,
-            deferred.call_span,
+            &function_path,
+            completed_arguments,
+            &expectations,
+            call_span,
             self.string_table,
             self.type_interner,
             self.expression_builder,
@@ -2437,21 +2431,19 @@ impl Completion<'_, '_> {
             self.path_fork,
         )?;
         let call = HandledFallibleCall {
-            name: deferred.function_path,
-            result_type_ids: deferred.signature.success_return_type_ids(),
+            name: function_path,
+            result_type_ids: success_result_type_ids,
             args,
-            call_span: deferred.call_span,
+            call_span,
         };
-        match deferred.authored_handling {
-            DeferredCallHandling::Unhandled => {
-                self.finish_handled_call(call, deferred.signature.error_return_type_id())
-            }
+        match authored_handling {
+            DeferredCallHandling::Unhandled => self.finish_handled_call(call, error_return_type_id),
             DeferredCallHandling::Propagate { span } => {
                 // Replay the authored `!` through the same constructor the completed call path
                 // uses; the retention site already validated the callee's error slot and the
                 // authored value requirement, so no second decision exists here.
-                let propagation_span = span.or(deferred.call_span);
-                let error_type = deferred.signature.error_return_type_id().ok_or_else(|| {
+                let propagation_span = span.or(call_span);
+                let error_type = error_return_type_id.ok_or_else(|| {
                     CompilerError::compiler_error(
                         "retained propagated call lost its declared error slot",
                     )
@@ -2730,15 +2722,11 @@ impl<'a, 'env> DeferredExpressionCompletion<'env> for Completion<'a, 'env> {
 /// WHY: range counters and inferred multi-bind targets are visible before their owning
 ///      continuation is emitted, but their values are either implicit or installed at another
 ///      authored position; neither needs a fabricated initializer.
-fn absent_declaration(
-    row: &PendingBindingRow,
-    type_id: TypeId,
-    environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
-) -> Declaration {
+fn absent_declaration(row: &PendingBindingRow, type_id: TypeId) -> Declaration {
     Declaration {
         id: row.path,
         type_id,
-        diagnostic_type: diagnostic_type_spelling(type_id, environment),
+        type_syntax: None,
         value_mode: row.value_mode,
         value: DeclarationValue::Absent,
         binding_span: row.binding_span,
@@ -2750,7 +2738,6 @@ fn declaration_for(
     row: &PendingBindingRow,
     value: OwnedExpr,
     expressions: &mut AstExpressionBuilder,
-    environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
 ) -> Result<Declaration, ExpressionParseError> {
     // Reuse unchanged occurrence metadata; changed access belongs to an isolated replacement.
     let expression = expressions.view_owned(value)?;
@@ -2765,7 +2752,7 @@ fn declaration_for(
     Ok(Declaration {
         id: row.path,
         type_id,
-        diagnostic_type: diagnostic_type_spelling(type_id, environment),
+        type_syntax: None,
         value_mode: row.value_mode,
         value: DeclarationValue::Initializer(value.id()),
         binding_span: row.binding_span,

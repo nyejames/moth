@@ -1,0 +1,5 @@
+@provider Kind, KIND_LABEL, Maker, make_maker, show
+
+maker = make_maker()
+chosen = maker.kind()
+[:[show(chosen)]]

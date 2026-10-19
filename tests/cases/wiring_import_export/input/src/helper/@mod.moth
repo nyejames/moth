@@ -1,0 +1,13 @@
+export:
+    Message ::
+        Done,
+    ;
+
+    read_text |value Wire of String| -> String:
+        return value
+    ;
+
+    accept_route |route Route of String -> Message| -> String:
+        return "route received"
+    ;
+;

@@ -1,0 +1,13 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0044"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0044"
+reason = "invalid_assignment_target.immutable_binding"
+path = "input/@page.moth"
+line = 2
+column = 11

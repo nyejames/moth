@@ -20,7 +20,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 
 /// Run the feature-gated Boracle source service for one single-file entry.
-pub(crate) fn run_boracle(
+pub fn run_boracle(
     path: &str,
     dump: BoracleDump,
     rule_selection: BoracleRuleSelection,
@@ -51,7 +51,7 @@ fn compile_boracle_input(
     let valid_path = check_if_valid_path(normalized_path)
         .map_err(|error| CompilerMessages::from_error(error, StringTable::new()))?;
 
-    let project_builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let project_builder = ProjectBuilder::new(HtmlProjectBuilder::new());
     let BuildBootstrap {
         config,
         style_directives,

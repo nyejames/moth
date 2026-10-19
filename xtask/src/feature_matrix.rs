@@ -199,6 +199,63 @@ pub const FEATURE_LANES: &[FeatureLane] = &[
         owns: "the developer stage-dump branches, which no other lane compiles",
     },
     FeatureLane {
+        name: "cli-default",
+        package: "moth-cli",
+        features: &[],
+        kind: FeatureLaneKind::Standard,
+        owns: "the shipped CLI configuration and argument parsing",
+    },
+    FeatureLane {
+        name: "cli-timers",
+        package: "moth-cli",
+        features: &["timers"],
+        kind: FeatureLaneKind::Standard,
+        owns: "CLI feature forwarding and timer-aware command rendering",
+    },
+    FeatureLane {
+        name: "cli-detailed-timers",
+        package: "moth-cli",
+        features: &["detailed_timers"],
+        kind: FeatureLaneKind::Standard,
+        owns: "CLI feature forwarding for detailed timer output",
+    },
+    FeatureLane {
+        name: "cli-counters",
+        package: "moth-cli",
+        features: &["benchmark_counters"],
+        kind: FeatureLaneKind::Standard,
+        owns: "CLI feature forwarding for counter-only compiler builds",
+    },
+    FeatureLane {
+        name: "cli-timers-counters",
+        package: "moth-cli",
+        features: &["timers", "benchmark_counters", "data_layout_memory_probe"],
+        kind: FeatureLaneKind::Standard,
+        owns: "CLI forwarding for collector-backed counters and retained-layout planning",
+    },
+    FeatureLane {
+        name: "cli-scoped-blocks",
+        package: "moth-cli",
+        features: &["checked_blocks", "async_blocks"],
+        kind: FeatureLaneKind::Standard,
+        owns: "CLI feature forwarding for the scoped-block diagnostics",
+    },
+    FeatureLane {
+        name: "cli-dev-output",
+        package: "moth-cli",
+        features: &[
+            "show_tokens",
+            "show_headers",
+            "show_ast",
+            "show_eval",
+            "show_hir",
+            "show_codegen",
+            "show_borrow_checker",
+        ],
+        kind: FeatureLaneKind::Standard,
+        owns: "CLI feature forwarding for all developer stage-dump options",
+    },
+    FeatureLane {
         name: "moth-lexical",
         package: "moth-lexical",
         features: &[],
@@ -229,6 +286,15 @@ pub const FEATURE_LANES: &[FeatureLane] = &[
         owns: "the deterministic Boracle developer gate",
     },
     FeatureLane {
+        name: "cli-boracle",
+        package: "moth-cli",
+        features: &["boracle"],
+        kind: FeatureLaneKind::OptIn {
+            command: "just boracle",
+        },
+        owns: "CLI parsing and dispatch for Boracle developer commands",
+    },
+    FeatureLane {
         name: "boracle-campaign",
         package: "moth",
         features: &["boracle", "boracle_campaign"],
@@ -236,6 +302,15 @@ pub const FEATURE_LANES: &[FeatureLane] = &[
             command: "just boracle-campaign",
         },
         owns: "the measured generated Boracle differential stress campaign",
+    },
+    FeatureLane {
+        name: "cli-boracle-campaign",
+        package: "moth-cli",
+        features: &["boracle", "boracle_campaign"],
+        kind: FeatureLaneKind::OptIn {
+            command: "just boracle-campaign",
+        },
+        owns: "CLI feature forwarding for the generated Boracle campaign",
     },
 ];
 
@@ -254,6 +329,11 @@ const PACKAGE_SOURCES: &[(&str, &str, &[&str])] = &[
         "moth-mon",
         "crates/moth-mon/Cargo.toml",
         &["crates/moth-mon/src", "crates/moth-mon/tests"],
+    ),
+    (
+        "moth-cli",
+        "crates/moth-cli/Cargo.toml",
+        &["crates/moth-cli/src", "crates/moth-cli/tests"],
     ),
     ("xtask", "xtask/Cargo.toml", &["xtask/src"]),
 ];

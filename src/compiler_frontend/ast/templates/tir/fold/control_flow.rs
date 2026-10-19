@@ -2,7 +2,8 @@
 
 use crate::compiler_frontend::ast::ast_nodes::RangeLoopSpec;
 use crate::compiler_frontend::ast::const_eval::{
-    BindingFold, ConstantFoldOutcome, constant_fold, fold_expression_with_bindings,
+    BindingFold, ConstantFoldError, ConstantFoldOutcome, ConstantFoldRefusalReason,
+    FoldRequirement, FoldServices, constant_fold, fold_expression_with_bindings,
 };
 use crate::compiler_frontend::ast::const_values::{
     ConstValueId, ConstValuePayload, ConstValueStore,
@@ -16,8 +17,8 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
     build_collection_iteration_bindings, build_range_iteration_bindings, const_collection_items,
 };
 use crate::compiler_frontend::ast::templates::template_folding::{
-    TemplateEmission, TemplateFoldResult, TirFoldContext, fold_bool_condition_with_provenance,
-    fold_conditional_loop_const_condition, resolve_fold_bindings_in_expression,
+    FoldedCondition, TemplateEmission, TemplateFoldResult, TirFoldContext,
+    fold_condition_with_provenance, resolve_fold_bindings_in_expression,
     selected_option_capture_payload_with_provenance,
 };
 use crate::compiler_frontend::ast::templates::tir::ids::{ExpressionSiteId, TemplateIrNodeId};
@@ -68,18 +69,41 @@ fn range_operand_provenance(
     Ok(SyntheticInterfaceProvenance::union_all(&provenances))
 }
 
+/// One range header's resolved bounds and the refusal that kept them dynamic.
+///
+/// WHAT: `spec` replaces the authored bounds when resolution changed at least one operand, while
+///       `refusal` reports an operation that refused to produce a constant operand.
+struct ResolvedRangeOperands {
+    spec: Option<RangeLoopSpec>,
+    refusal: Option<ConstantFoldRefusalReason>,
+}
+
 fn resolve_range_constant_operands(
     range: &RangeLoopSpec,
     fold_context: &mut TirFoldContext<'_>,
-) -> Result<Option<RangeLoopSpec>, TemplateError> {
+) -> Result<ResolvedRangeOperands, TemplateError> {
     let start = resolve_range_constant_operand(range.start, fold_context)?;
     let end = resolve_range_constant_operand(range.end, fold_context)?;
     let step = range
         .step
         .map(|step| resolve_range_constant_operand(step, fold_context))
-        .transpose()?
-        .flatten();
+        .transpose()?;
 
+    let refusal = start
+        .refusal
+        .clone()
+        .or_else(|| end.refusal.clone())
+        .or_else(|| step.as_ref().and_then(|resolved| resolved.refusal.clone()));
+    if refusal.is_some() {
+        return Ok(ResolvedRangeOperands {
+            spec: None,
+            refusal,
+        });
+    }
+
+    let start = start.bound;
+    let end = end.bound;
+    let step = step.and_then(|resolved| resolved.bound);
     let start_unchanged = start.is_none_or(|id| id == range.start);
     let end_unchanged = end.is_none_or(|id| id == range.end);
     let step_unchanged = match (range.step, step) {
@@ -88,7 +112,10 @@ fn resolve_range_constant_operands(
         (Some(_), None) => true,
     };
     if start_unchanged && end_unchanged && step_unchanged {
-        return Ok(None);
+        return Ok(ResolvedRangeOperands {
+            spec: None,
+            refusal: None,
+        });
     }
 
     let mut resolved = range.clone();
@@ -101,21 +128,72 @@ fn resolve_range_constant_operands(
     if let Some(step) = step {
         resolved.step = Some(step);
     }
-    Ok(Some(resolved))
+    Ok(ResolvedRangeOperands {
+        spec: Some(resolved),
+        refusal: None,
+    })
+}
+
+/// One resolved range operand.
+struct ResolvedRangeOperand {
+    /// A replacement bound, or `None` when the operand is already the folded form it needs.
+    bound: Option<ExprId>,
+    refusal: Option<ConstantFoldRefusalReason>,
 }
 
 fn resolve_range_constant_operand(
     expression: ExprId,
     fold_context: &mut TirFoldContext<'_>,
-) -> Result<Option<ExprId>, TemplateError> {
-    let bound = resolve_fold_bindings_in_expression(expression, fold_context)?;
-    Ok(
-        resolve_source_constant_references(bound, fold_context)?.or(if bound != expression {
-            Some(bound)
-        } else {
-            None
+) -> Result<ResolvedRangeOperand, TemplateError> {
+    let resolved = resolve_fold_bindings_in_expression(expression, fold_context)?;
+    if let Some(reason) = resolved.refusal {
+        return Ok(ResolvedRangeOperand {
+            bound: None,
+            refusal: Some(reason),
+        });
+    }
+    let resolved = resolved.expression;
+    if let Some(substituted) = resolve_source_constant_references(resolved, fold_context)? {
+        return Ok(ResolvedRangeOperand {
+            bound: Some(substituted),
+            refusal: None,
+        });
+    }
+    // A registered Core call in a bound folds through the shared engine like any other operand,
+    // so a refusal keeps the whole loop dynamic instead of failing as non-constant bounds.
+    match constant_fold(
+        resolved,
+        fold_context.expression_builder,
+        fold_context.const_values,
+        FoldServices::new(
+            &mut *fold_context.string_table,
+            fold_context.source_scope,
+            fold_context.external_package_registry,
+        ),
+        FoldRequirement::Opportunistic,
+    ) {
+        Ok(ConstantFoldOutcome::Folded(expression)) => Ok(ResolvedRangeOperand {
+            bound: Some(expression),
+            refusal: None,
         }),
-    )
+        Ok(ConstantFoldOutcome::Refused { reason, .. }) => Ok(ResolvedRangeOperand {
+            bound: None,
+            refusal: Some(reason),
+        }),
+        Ok(ConstantFoldOutcome::NotConstant(_)) => Ok(ResolvedRangeOperand {
+            bound: None,
+            refusal: None,
+        }),
+        Err(ConstantFoldError::Diagnostic(diagnostic))
+            if !diagnostic.is_compiler_capacity_exceeded() =>
+        {
+            Ok(ResolvedRangeOperand {
+                bound: None,
+                refusal: None,
+            })
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// WHAT: folds module-constant references inside a range bound or step through
@@ -173,14 +251,18 @@ fn resolve_source_constant_references(
         fold_context.expression_builder,
         fold_context.const_values,
         fold_context.string_table,
-        BindingFold::strict(fold_context.source_scope),
+        BindingFold::strict(
+            fold_context.source_scope,
+            fold_context.external_package_registry,
+        ),
         |path| {
             substitutions
                 .iter()
                 .find(|(candidate, _)| *candidate == path)
                 .map(|(_, replacement)| *replacement)
         },
-    )?;
+    )?
+    .expression;
     let folded = if matches!(
         fold_context
             .expression_builder
@@ -194,11 +276,15 @@ fn resolve_source_constant_references(
             substituted,
             fold_context.expression_builder,
             fold_context.const_values,
-            fold_context.string_table,
-            fold_context.source_scope,
+            FoldServices::new(
+                &mut *fold_context.string_table,
+                fold_context.source_scope,
+                fold_context.external_package_registry,
+            ),
+            FoldRequirement::Opportunistic,
         )? {
             ConstantFoldOutcome::Folded(id) => id,
-            ConstantFoldOutcome::NotConstant(_) | ConstantFoldOutcome::TextUnavailable { .. } => {
+            ConstantFoldOutcome::NotConstant(_) | ConstantFoldOutcome::Refused { .. } => {
                 return Ok(None);
             }
         }
@@ -215,8 +301,8 @@ fn resolve_source_constant_references(
 
 /// WHAT: gates source-constant folding to operator trees whose leaves are all
 /// numeric constants or resolvable module-constant references.
-/// WHY: the old recursive initializer fold only accepted numeric recipes; a
-/// shared gate here keeps that refusal shape without rebuilding dead RPN.
+/// WHY: the gate inspects the operator tree in place, so refusing a tree needs no
+/// RPN rebuild.
 fn source_constant_tree_is_numeric(
     expression: ExprId,
     fold_context: &TirFoldContext<'_>,
@@ -312,8 +398,20 @@ pub(super) fn fold_tir_conditional_with_insertion(
 
     match selector {
         TemplateBranchSelector::Bool(_) => {
-            let (selected, condition_provenance) =
-                fold_bool_condition_with_provenance(effective_expression, node_span, fold_context)?;
+            let condition = fold_condition_with_provenance(
+                effective_expression,
+                node_span,
+                InvalidTemplateStructureReason::TemplateIfConditionNotConst,
+                fold_context,
+            )?;
+            let (selected, condition_provenance) = match condition {
+                FoldedCondition::Selected { value, provenance } => (value, provenance),
+                FoldedCondition::Refused { reason, provenance } => {
+                    output_state.provenance.merge(&provenance);
+                    output_state.refusal = Some(reason);
+                    return Ok(());
+                }
+            };
             output_state.provenance.merge(&condition_provenance);
 
             if selected {
@@ -397,8 +495,23 @@ pub(super) fn fold_tir_loop(
                 fold_context.expression_builder.view(condition_ref)?,
             ));
 
-            let condition_value =
-                fold_conditional_loop_const_condition(condition_ref, loop_span, fold_context)?;
+            let condition = fold_condition_with_provenance(
+                condition_ref,
+                loop_span,
+                InvalidTemplateStructureReason::TemplateLoopConditionNotConst,
+                fold_context,
+            )?;
+            let condition_value = match condition {
+                FoldedCondition::Selected { value, provenance } => {
+                    output_state.provenance.merge(&provenance);
+                    value
+                }
+                FoldedCondition::Refused { reason, provenance } => {
+                    output_state.provenance.merge(&provenance);
+                    output_state.refusal = Some(reason);
+                    return Ok(());
+                }
+            };
             if !condition_value {
                 return Ok(());
             }
@@ -465,8 +578,12 @@ pub(super) fn fold_tir_loop(
             } else {
                 range.as_ref()
             };
-            let source_resolved_range = resolve_range_constant_operands(range_ref, fold_context)?;
-            let range_ref = source_resolved_range.as_ref().unwrap_or(range_ref);
+            let resolved_operands = resolve_range_constant_operands(range_ref, fold_context)?;
+            if let Some(reason) = resolved_operands.refusal {
+                output_state.refusal = Some(reason);
+                return Ok(());
+            }
+            let range_ref = resolved_operands.spec.as_ref().unwrap_or(range_ref);
             let mut cursor = ConstRangeCursor::new(
                 range_ref,
                 &*fold_context.expression_builder,
@@ -495,6 +612,9 @@ pub(super) fn fold_tir_loop(
                     fold_input,
                     insertion,
                 )?;
+                if aggregate_state.refusal.is_some() {
+                    break;
+                }
             }
 
             (aggregate_state, estimated_aggregate)
@@ -515,7 +635,7 @@ pub(super) fn fold_tir_loop(
                 .effective_expression_for_site(&*fold_context.expression_builder, site_id)?;
             let iterable_ref = effective_iterable.unwrap_or(*iterable);
             let resolved_iterable =
-                resolve_fold_bindings_in_expression(iterable_ref, fold_context)?;
+                resolve_fold_bindings_in_expression(iterable_ref, fold_context)?.expression;
             output_state.provenance.merge(&expression_provenance(
                 fold_context.expression_builder.view(iterable_ref)?,
             ));
@@ -550,7 +670,8 @@ pub(super) fn fold_tir_loop(
                     )
                     .into());
                 }
-                let resolved_item = resolve_fold_bindings_in_expression(*item, fold_context)?;
+                let resolved_item =
+                    resolve_fold_bindings_in_expression(*item, fold_context)?.expression;
                 let resolved_item = if resolved_item != *item {
                     let item_provenance =
                         expression_provenance(fold_context.expression_builder.view(*item)?);
@@ -586,6 +707,9 @@ pub(super) fn fold_tir_loop(
                     fold_input,
                     insertion,
                 )?;
+                if aggregate_state.refusal.is_some() {
+                    break;
+                }
             }
 
             (aggregate_state, estimated_aggregate)
@@ -594,6 +718,10 @@ pub(super) fn fold_tir_loop(
 
     // Visited bodies can contribute provenance even when they emit no output.
     output_state.provenance.merge(&aggregate_state.provenance);
+    if let Some(reason) = aggregate_state.refusal.take() {
+        output_state.refusal = Some(reason);
+        return Ok(());
+    }
 
     if !aggregate_state.emitted_output {
         return Ok(());
@@ -641,7 +769,12 @@ fn fold_tir_loop_iteration(
         emission,
         provenance,
         projection_pieces,
+        refusal,
     } = emission;
+    if let Some(reason) = refusal {
+        aggregate_state.refusal = Some(reason);
+        return Ok(());
+    }
 
     aggregate_state.provenance.merge(&provenance);
     if aggregate_state.projection_pieces.is_some() {

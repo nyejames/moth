@@ -1,0 +1,16 @@
+entry = "."
+
+# A `Wire` underlying type is exact: an ordinary `String` binding must not be
+# contextually wrapped into `String?`, because wrapping would create a new
+# optional value rather than transmit the binding's identity.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+path = "input/@page.moth"
+line = 7
+count = 1

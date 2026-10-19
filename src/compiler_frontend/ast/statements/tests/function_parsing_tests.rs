@@ -24,7 +24,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidReceiverCallReason, InvalidReceiverDeclarationReason, InvalidThisUsageReason,
     NameNamespace, TypeMismatchContext, ValueReceiverContext,
 };
-use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::tests::ast_fixture_support::{
@@ -263,14 +263,10 @@ fn parses_function_parameters_and_return_types() {
     );
     assert_eq!(signature.returns.len(), 1);
     assert_eq!(
-        signature.returns[0].value,
-        DataType::FixedScalar(FixedScalar::I32)
+        signature.returns[0].type_id,
+        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32))
     );
     assert_eq!(signature.returns[0].channel, ReturnChannel::Success);
-    assert!(
-        signature.returns[0].type_id.is_some(),
-        "return type_id should be resolved"
-    );
 }
 
 #[test]
@@ -282,21 +278,20 @@ fn parses_final_error_return_slot_in_function_signature() {
 
     assert_eq!(signature.returns.len(), 2);
     assert_eq!(
-        signature.returns[0].value,
-        DataType::FixedScalar(FixedScalar::I32)
+        signature.returns[0].type_id,
+        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32))
     );
     assert_eq!(signature.returns[0].channel, ReturnChannel::Success);
     assert!(
-        signature.returns[0].type_id.is_some(),
-        "success return type_id should be resolved"
-    );
-    assert!(
-        matches!(&signature.returns[1].value, DataType::Struct { .. }),
-        "builtin Error should resolve to a struct-shaped diagnostic type"
-    );
-    assert!(
-        signature.returns[1].type_id.is_some(),
-        "error return type_id should be resolved"
+        matches!(
+            ast.type_environment.get(
+                signature.returns[1]
+                    .type_id
+                    .expect("Error return type should be resolved")
+            ),
+            Some(TypeDefinition::Struct(_))
+        ),
+        "builtin Error should resolve to a struct type"
     );
     assert_eq!(signature.returns[1].channel, ReturnChannel::Error);
 }
@@ -310,14 +305,14 @@ fn parses_optional_final_error_return_slot() {
 
     assert_eq!(signature.returns.len(), 2);
     assert_eq!(
-        signature.returns[1].value,
-        DataType::Option(Box::new(DataType::StringSlice))
+        ast.type_environment.option_inner_type(
+            signature.returns[1]
+                .type_id
+                .expect("optional error return should be resolved")
+        ),
+        Some(ast.type_environment.builtins().string)
     );
     assert_eq!(signature.returns[1].channel, ReturnChannel::Error);
-    assert!(
-        signature.returns[1].type_id.is_some(),
-        "optional error return type_id should be resolved"
-    );
 }
 
 #[test]
@@ -444,8 +439,8 @@ fn same_file_generic_calls_emit_requests_without_eager_function_bodies() {
         Some(SourceSpan::new(SourceId::COMPILATION_ROOT, call_span))
     );
     assert_eq!(
-        declaration.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::I32)
+        declaration.type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
     );
 }
 
@@ -875,11 +870,8 @@ fn resolves_named_struct_type_in_function_parameters() {
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "show");
     assert!(matches!(
-        signature.parameters[0].diagnostic_type,
-        DataType::Struct {
-            const_record: false,
-            ..
-        }
+        ast.type_environment.get(signature.parameters[0].type_id),
+        Some(TypeDefinition::Struct(definition)) if !definition.const_record
     ));
 }
 
@@ -890,12 +882,14 @@ fn resolves_named_struct_type_in_function_returns() {
     );
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "clone");
+    assert_eq!(
+        signature.returns[0].type_id,
+        Some(signature.parameters[0].type_id),
+        "the named return should resolve to the parameter's semantic type"
+    );
     assert!(matches!(
-        signature.returns[0].value,
-        DataType::Struct {
-            const_record: false,
-            ..
-        }
+        ast.type_environment.get(signature.parameters[0].type_id),
+        Some(TypeDefinition::Struct(definition)) if !definition.const_record
     ));
 }
 
@@ -1634,14 +1628,10 @@ fn parses_valid_single_return_without_trailing_comma() {
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "compute");
     assert_eq!(signature.returns.len(), 1);
     assert_eq!(
-        signature.returns[0].value,
-        DataType::FixedScalar(FixedScalar::I32)
+        signature.returns[0].type_id,
+        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32))
     );
     assert_eq!(signature.returns[0].channel, ReturnChannel::Success);
-    assert!(
-        signature.returns[0].type_id.is_some(),
-        "return type_id should be resolved"
-    );
 }
 
 #[test]
@@ -1652,20 +1642,15 @@ fn parses_valid_multiple_returns_without_trailing_comma() {
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "compute");
     assert_eq!(signature.returns.len(), 2);
     assert_eq!(
-        signature.returns[0].value,
-        DataType::FixedScalar(FixedScalar::I32)
+        signature.returns[0].type_id,
+        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32))
     );
     assert_eq!(signature.returns[0].channel, ReturnChannel::Success);
-    assert!(
-        signature.returns[0].type_id.is_some(),
-        "return type_id should be resolved"
+    assert_eq!(
+        signature.returns[1].type_id,
+        Some(ast.type_environment.builtins().string)
     );
-    assert_eq!(signature.returns[1].value, DataType::StringSlice);
     assert_eq!(signature.returns[1].channel, ReturnChannel::Success);
-    assert!(
-        signature.returns[1].type_id.is_some(),
-        "return type_id should be resolved"
-    );
 }
 
 #[test]
@@ -1721,8 +1706,8 @@ fn optional_present_default_preserves_function_parameter_type() {
         "a present default must keep the declared String? parameter identity"
     );
     assert_eq!(
-        defaulted.diagnostic_type, required.diagnostic_type,
-        "declared spelling must survive a present default"
+        defaulted.type_id, required.type_id,
+        "declared spelling must preserve the same semantic type through a present default"
     );
     assert_optional_string_default(
         &ast.const_values,
@@ -1751,10 +1736,9 @@ greet |name String? = FALLBACK_TEXT, required String?| -> String:\n\
         "a constant-backed present default must keep the declared String? parameter identity"
     );
     assert_eq!(
-        defaulted.diagnostic_type, required.diagnostic_type,
-        "the declared String? spelling must survive a constant-backed default"
+        defaulted.type_id, required.type_id,
+        "the declared String? type must be unchanged by a constant-backed default"
     );
-
     assert_optional_string_default(
         &ast.const_values,
         defaulted.default.expect("present parameter default"),
@@ -1785,8 +1769,8 @@ greet |this Holder, name String? = FALLBACK_TEXT, required String?| -> String:\n
         "a receiver method's present default must keep its declared String? identity"
     );
     assert_eq!(
-        defaulted.diagnostic_type, required.diagnostic_type,
-        "the receiver method must retain the declared String? spelling"
+        defaulted.type_id, required.type_id,
+        "the receiver method must retain the declared String? semantic type"
     );
 }
 
@@ -1830,8 +1814,8 @@ result = choose(7, required = none)\n";
             "the generic function's independent default must remain String?"
         );
         assert_eq!(
-            defaulted.diagnostic_type, required.diagnostic_type,
-            "the generic function must retain the declared String? spelling"
+            defaulted.type_id, required.type_id,
+            "the generic function must retain the declared String? semantic type"
         );
         assert_optional_string_default(
             &build_result.ast.const_values,

@@ -3,15 +3,23 @@
 //! WHAT: groups the HIR test suites and exposes common naming and relationship helpers for them.
 //! WHY: HIR tests should discover one another through a single module entry.
 
+use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
+use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::expression_store::HirProjection;
-use crate::compiler_frontend::hir::expressions::HirExpression;
+use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
+use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
+use crate::compiler_frontend::hir::ids::{BlockId, HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::{HirJumpArgument, HirTerminator};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
@@ -153,4 +161,85 @@ pub(super) fn place_outermost_projection_is_index(module: &HirModule, place: &Hi
         .projections(place.projections)
         .last()
         .is_some_and(|projection| matches!(projection, HirProjection::Index(_)))
+}
+
+fn node(kind: NodeKind, span: Option<SourceSpan>) -> AstNode {
+    AstNode {
+        kind,
+        span,
+        scope: PathId::ROOT,
+    }
+}
+
+fn function_node(
+    name: PathId,
+    signature: FunctionSignature,
+    body: Vec<AstNode>,
+    span: Option<SourceSpan>,
+) -> AstNode {
+    node(NodeKind::Function(name, signature, body), span)
+}
+
+/// Lowers a module whose only item is the implicit start function.
+///
+/// WHAT: returns the string table, the lowered module, and its type environment so a test can append its own rows.
+/// WHY: normal-entry validation tests and the same-instance walk tests share this fixture, so both start from an identical lowering path.
+pub(super) fn minimal_lowered_hir_module() -> (StringTable, HirModule, TypeEnvironment) {
+    let mut path_fork = PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_path_and_start_name(&mut path_fork, &mut string_table);
+
+    let start_fn = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
+    );
+
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    let (module, type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("lowering should succeed");
+
+    (string_table, module, type_environment)
+}
+
+/// Returns the entry block index of the start function in a lowered test module.
+pub(super) fn start_entry_block_index(module: &HirModule) -> usize {
+    module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize]
+        .entry
+        .0 as usize
+}
+
+/// Appends one expression row to the module's expression store.
+pub(super) fn append_hir_expression(
+    module: &mut HirModule,
+    kind: HirExpressionKind,
+    type_id: TypeId,
+    region: RegionId,
+    value_kind: ValueKind,
+) -> HirValueId {
+    crate::compiler_frontend::tests::hir_fixture_support::expression(
+        kind,
+        type_id,
+        region,
+        value_kind,
+        &mut module.expressions,
+    )
 }

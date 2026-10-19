@@ -91,7 +91,7 @@ Cross-module interfaces use **canonical type identities**, not donor-local index
 
 Why refuse donor-local indexes at the boundary? Because module-local numbering is an implementation accident. Stable meaning must survive recompilation order, re-exports and parallel workers.
 
-`DataType` spellings after resolution are parse or diagnostic helpers. They must not drive executable AST, HIR or backend decisions.
+Authored type syntax resolves straight to a `TypeId`. Declarations and signatures keep that syntax only where deferred resolution or an authored-name diagnostic needs it, and diagnostics render types from the `TypeId`.
 
 Access classification stays separate from type identity. Mutability and exclusive access do not manufacture fake type shapes.
 

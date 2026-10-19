@@ -13,9 +13,13 @@
 //! WHY: these are construction invariants owned by `compiler_frontend::public_interface::export_projection`,
 //! so they own a focused test beside the module rather than an end-to-end case.
 
+use crate::builder_surface::core_packages::register_core_text_package;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::compiler_errors::ErrorType;
-use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::external_packages::{
+    ExternalConstEvalOp, ExternalFunctionDef, ExternalFunctionLowerings, ExternalPackageRegistry,
+    ExternalSymbolId, TextConstEvalOp,
+};
 use crate::compiler_frontend::headers::module_symbols::{
     ModuleSymbols, PublicExportEntry, PublicExportTarget,
 };
@@ -507,6 +511,94 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
     assert_eq!(
         provenance.span, None,
         "synthetic provider fixtures carry no authored source span",
+    );
+}
+
+#[test]
+fn external_binding_export_identity_resolves_in_independent_registry() {
+    // Both registries start from the same builtin set, so the donor's Core Text `length` takes
+    // the first id after the builtins.
+    let mut donor_registry = ExternalPackageRegistry::new();
+    register_core_text_package(&mut donor_registry);
+    let (donor_length, _) = donor_registry
+        .resolve_package_function("@core/text", "length")
+        .expect("donor should register Core Text length");
+
+    // The consumer registers a same-named function in another package first, so its id for
+    // Core Text `length` differs from the donor's, and the donor's raw id names the decoy.
+    let mut consumer_registry = ExternalPackageRegistry::new();
+    let decoy_id = consumer_registry
+        .register_function(ExternalFunctionDef {
+            name: "length".to_owned(),
+            parameters: Vec::new(),
+            returns: Vec::new(),
+            error_return_type: None,
+            const_eval: None,
+            lowerings: ExternalFunctionLowerings::default(),
+        })
+        .expect("decoy test function should register");
+    register_core_text_package(&mut consumer_registry);
+    // The name lookup below is the test oracle for the expected consumer id. Production
+    // resolution goes through the canonical identity only.
+    let (consumer_length, _) = consumer_registry
+        .resolve_package_function("@core/text", "length")
+        .expect("consumer should register Core Text length");
+    assert_eq!(
+        donor_length, decoy_id,
+        "precondition: the donor's raw id names the consumer's decoy",
+    );
+    assert_ne!(consumer_length, decoy_id);
+
+    let mut fixture = build_reexport_fixture(
+        &[("src/@page.moth", "placeholder #= 1\n")],
+        "external-binding-reexport",
+    );
+    let export_name = fixture.string_table.intern("PublicLength");
+    fixture.module_symbols.module_root_public_exports.insert(
+        fixture.module_root,
+        [PublicExportEntry {
+            export_name,
+            target: PublicExportTarget::External(ExternalSymbolId::Function(donor_length)),
+        }]
+        .into_iter()
+        .collect(),
+    );
+    let seed = build_direct_export_seed(
+        &fixture.source_module_origins,
+        fixture.active_root_file_id,
+        &fixture.headers,
+        &fixture.module_symbols,
+        &SourceProviderDependencySet::default(),
+        &donor_registry,
+        &fixture.string_table,
+        &fixture.path_fork,
+    )
+    .expect("external binding re-export projection should succeed");
+    let binding_exports = seed.into_parts().binding_exports;
+
+    let [export] = binding_exports.as_slice() else {
+        panic!("exactly one binding export should be projected");
+    };
+    assert_eq!(export.public_name, "PublicLength");
+
+    // Identity resolves to the consumer's own function; the donor's raw id does not cross.
+    assert_eq!(
+        consumer_registry.resolve_canonical_symbol(&export.target),
+        Some(ExternalSymbolId::Function(consumer_length)),
+    );
+    let resolved = consumer_registry
+        .get_function_by_id(consumer_length)
+        .expect("consumer Core Text length should be registered");
+    assert_eq!(
+        resolved.const_eval,
+        Some(ExternalConstEvalOp::Text(TextConstEvalOp::Length)),
+    );
+    // A donor-local id used directly would dispatch to the decoy, which has no const-eval op.
+    assert_eq!(
+        consumer_registry
+            .get_function_by_id(donor_length)
+            .and_then(|function| function.const_eval),
+        None,
     );
 }
 

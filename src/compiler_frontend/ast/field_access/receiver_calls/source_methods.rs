@@ -24,7 +24,7 @@ use crate::compiler_frontend::ast::expressions::call_arguments::{
     parse_call_arguments_typed_with_numeric_retention,
 };
 use crate::compiler_frontend::ast::expressions::call_validation::{
-    CallArgumentResolutionContext, CallDiagnosticContext,
+    CallArgumentResolutionContext, CallDiagnosticContext, CallDiagnosticName, ParameterExpectation,
     expectations_from_receiver_method_signature, resolve_call_arguments,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
@@ -209,7 +209,6 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
     let member_span = member_span.or_else(|| Some(token_stream.current_span()));
     token_stream.advance();
 
-    let method_name = string_table.resolve(member_name).to_owned();
     validate_receiver_access(
         receiver_node,
         &*expression_builder,
@@ -279,6 +278,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
                 member_span,
                 authored_marker_span,
                 source_method: &source_method,
+                expectations: initial_expectations,
                 arguments,
                 allow_boundary_catch,
             });
@@ -373,12 +373,15 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         }
     };
 
-    let expectations =
-        expectations_from_receiver_method_signature(&call_signature.parameters[1..], path_fork);
+    let expectations = if arguments_are_resumable {
+        initial_expectations
+    } else {
+        expectations_from_receiver_method_signature(&call_signature.parameters[1..], path_fork)
+    };
     let type_check_context = type_interner.type_check_context();
     let args = resolve_call_arguments(
-        CallDiagnosticContext::receiver_method(&method_name),
-        &raw_args,
+        CallDiagnosticContext::receiver_method(CallDiagnosticName::Interned(member_name)),
+        raw_args,
         &expectations,
         member_span,
         CallArgumentResolutionContext {
@@ -488,8 +491,8 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
 
 /// Everything the retention site must photograph before the token stream moves past the call.
 ///
-/// WHAT: the authored receiver, the resolved method target, the retained argument list and the
-///       boundary catch permission, all read at the one place that still owns them.
+/// WHAT: the authored receiver, resolved method target, intake expectations, retained arguments
+///       and boundary catch permission, all read at the place that still owns them.
 /// WHY: the retained record and the shared suffix decision share one site, so grouping them keeps
 ///      the receiver value, argument routing and handling decision in a single resumable record
 ///      instead of threading each resource separately.
@@ -506,6 +509,7 @@ struct RetainedReceiverCallInput<'a, 'interner, 'tokens> {
     member_span: Option<SourceSpan>,
     authored_marker_span: Option<SourceSpan>,
     source_method: &'a SourceReceiverMethodTarget<'a>,
+    expectations: Vec<ParameterExpectation>,
     arguments: Vec<DeferredCallArgument>,
     allow_boundary_catch: bool,
 }
@@ -573,8 +577,8 @@ pub(crate) struct ReservedGenericRequest {
 /// The resolved identity and authored call-site facts of one retained receiver method call.
 ///
 /// WHAT: carries the already-resolved method identity and signature, the receiver value source,
-///       the ordered argument list (each argument completed or retained), the call-site handling
-///       decision and the resolved failure-lane fact.
+///       the intake expectation view when its signature is unchanged, ordered arguments and call
+///       handling plus the resolved failure-lane fact.
 /// WHY: a numeric-dependent argument cannot be validated before its origin's single static type is
 ///      selected. Keeping the resolved call facts means the body root resumes the exact authored
 ///      receiver call through the ordinary constructor: no member lookup, no argument re-parse and
@@ -591,6 +595,11 @@ pub(crate) struct DeferredReceiverCall {
     pub(crate) receiver_mutable: bool,
     pub(crate) authored_marker_span: Option<SourceSpan>,
     pub(crate) arguments: Vec<DeferredCallArgument>,
+    /// Reuses intake expectations when the retained call already has a concrete signature.
+    ///
+    /// Generic receiver instantiation substitutes that signature, so its final expectations are
+    /// built only after substitution and this field stays `None`.
+    pub(crate) unchanged_expectations: Option<Vec<ParameterExpectation>>,
     pub(crate) call_span: Option<SourceSpan>,
     /// A concrete generic method instance selected from the retained receiver type, paired with
     /// the ledger slot reserved at its authored position. `None` for every other call, including
@@ -637,6 +646,7 @@ impl DeferredReceiverCall {
             receiver_mutable,
             authored_marker_span,
             arguments,
+            unchanged_expectations: None,
             call_span,
             generic_request: None,
             private_failure_candidate,
@@ -743,6 +753,7 @@ fn retain_numeric_receiver_call(
         member_span,
         authored_marker_span,
         source_method,
+        expectations,
         arguments,
         allow_boundary_catch,
     } = input;
@@ -832,6 +843,7 @@ fn retain_numeric_receiver_call(
             method_path,
             member_name,
             signature,
+            Some(expectations),
             receiver_expression,
             receiver_mutable,
             authored_marker_span,
@@ -853,6 +865,7 @@ fn retained_receiver_call_record(
     method_path: PathId,
     method_name: StringId,
     signature: FunctionSignature,
+    unchanged_expectations: Option<Vec<ParameterExpectation>>,
     receiver_expression: ExprId,
     receiver_mutable: bool,
     authored_marker_span: Option<SourceSpan>,
@@ -868,6 +881,7 @@ fn retained_receiver_call_record(
         receiver: DeferredCallReceiver::Ready(receiver_expression),
         receiver_mutable,
         authored_marker_span,
+        unchanged_expectations,
         arguments,
         call_span,
         private_failure_candidate,
@@ -938,6 +952,7 @@ fn complete_reserved_receiver_call<'env, S: DeferredExpressionCompletion<'env> +
         receiver_mutable,
         authored_marker_span,
         arguments,
+        unchanged_expectations,
         call_span,
         generic_request,
         private_failure_candidate,
@@ -1037,12 +1052,13 @@ fn complete_reserved_receiver_call<'env, S: DeferredExpressionCompletion<'env> +
         ),
     };
 
-    let callee_name = string_table.resolve(method_name).to_owned();
     let type_check_context = type_interner.type_check_context();
     let args = resolve_call_arguments(
-        CallDiagnosticContext::receiver_method(&callee_name),
-        &completed_arguments,
-        &expectations_from_receiver_method_signature(&signature.parameters[1..], path_fork),
+        CallDiagnosticContext::receiver_method(CallDiagnosticName::Interned(method_name)),
+        completed_arguments,
+        &unchanged_expectations.unwrap_or_else(|| {
+            expectations_from_receiver_method_signature(&signature.parameters[1..], path_fork)
+        }),
         call_span,
         CallArgumentResolutionContext {
             string_table,

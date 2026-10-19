@@ -6,6 +6,7 @@ use super::evaluator::expression_from_resolved_items;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -14,6 +15,7 @@ fn group_marker_reaching_construction_is_an_infrastructure_error() {
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let mut string_table = StringTable::new();
+    let path_fork = PathInternerFork::empty();
 
     let result = expression_from_resolved_items(
         vec![ExpressionRpnItem::GroupOpen { anchor_span: None }],
@@ -21,6 +23,7 @@ fn group_marker_reaching_construction_is_an_infrastructure_error() {
         &mut const_values,
         &mut string_table,
         None,
+        &path_fork,
         ValueMode::ImmutableOwned,
     );
 

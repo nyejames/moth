@@ -1,0 +1,21 @@
+@core/text length, contains, is_empty
+
+read_len |x I32 = length("a😊b")| -> I32:
+    return x
+;
+
+label |s String| -> String:
+    if contains(s, "b"):
+        return "has b"
+    ;
+    return "no b"
+;
+
+result ~= "none"
+if is_empty(""):
+    result = "live"
+else
+    result = label("abc")
+;
+
+[:defaults_static_if default=[read_len()] branch=[result]]

@@ -182,6 +182,7 @@ fn generate_module_glue_rejects_missing_js_lowering_but_accepts_nonmodule_loweri
                 parameters: Vec::new(),
                 returns: Vec::new(),
                 error_return_type: None,
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: lowering,
                     wasm: None,
@@ -1448,6 +1449,7 @@ fn create_registry_with_export(
                     FixedScalar::I32,
                 ))],
                 error_return_type: None,
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::ExternalModuleExport {
                         export_name: export_name.to_owned(),

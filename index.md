@@ -1,10 +1,12 @@
 # Moth codebase index for quick navigation
 
-Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compiler_frontend](src/compiler_frontend/) → tokenizer → headers → module_dependencies → ast → hir → borrow_checker → backends/projects.
+Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_system](src/build_system/) → [compiler_frontend](src/compiler_frontend/) → tokenizer → headers → module_dependencies → ast → hir → borrow_checker → backends/projects.
 
 ## Root
 
-- [moth CLI entry](src/main.rs)
+- [moth CLI package](crates/moth-cli/Cargo.toml) and [entry](crates/moth-cli/src/main.rs): owns the `moth` executable and depends on the compiler library and Lappet.
+    - [command dispatch](crates/moth-cli/src/cli.rs), [status presentation](crates/moth-cli/src/command_status.rs) and [HTML scaffolding](crates/moth-cli/src/scaffold/).
+    - [parser tests](crates/moth-cli/src/tests/cli_tests.rs) and [subprocess contracts](crates/moth-cli/tests/cli_exit_status.rs).
 - [crate module surface](src/lib.rs), including the public convenience re-export `moth::mon` for the standalone [moth-mon crate](crates/moth-mon/) (owned values, prepared schemas, literal-only encode/decode)
 - [timing facade](src/timing.rs), [typed timing schema](src/timing/enabled/schema.rs), [collector](src/timing/enabled/collector.rs), and [summary](src/timing/enabled/summary.rs): compile-erasing timing/counter entry points, schema-v1 metric ownership, immutable process configuration, command/raw session channels, aggregate snapshots and inactive fast-path policy.
 - [Moth source packages](packages/): compiler-shipped source-backed packages.
@@ -36,12 +38,11 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 
 ## Project/build shell
 
-- [user commands and project modes](src/projects/): kw — cli, check, build, dev, new, routing.
-    - [cli.rs](src/projects/cli.rs): dispatches commands.
+- [compiler-backed project services](src/projects/): kw — check, build, dev, routing.
+    - [build_command.rs](src/projects/build_command.rs): owns build execution, output planning/writing and timing around the CLI's completed-outcome presentation.
     - [check.rs](src/projects/check.rs): frontend-only diagnostics.
     - [routing.rs](src/projects/routing.rs): path/origin rules.
     - [settings.rs](src/projects/settings.rs): Config/defaults/known paths.
-    - [repl.rs](src/projects/repl.rs): template-focused REPL placeholder.
     - [dev_server](src/projects/dev_server/): HTTP/SSE/watch rebuild loop, injected dev client and bounded runtime entry-error reports kept separate from build state. kw: serve, hot reload, runtime report.
         - [runtime_report_tests.rs](src/projects/dev_server/tests/runtime_report_tests.rs), [dev_client_tests.rs](src/projects/dev_server/tests/dev_client_tests.rs): socket-level runtime-report validation and served dev-client observable behaviour.
     - [html_project](src/projects/html_project/): HTML builder and HTML-Wasm integration. kw: shell, assets, wasm.
@@ -100,7 +101,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [builtins](src/compiler_frontend/builtins/): compiler-owned types/ops/casts/runtime error metadata.
     - [member_rules.rs](src/compiler_frontend/builtins/member_rules.rs): shared allocation-free collection/map argument, success-slot and fallibility rules for AST construction and HIR validation.
 - [style_directives](src/compiler_frontend/style_directives/): frontend+builder template directive registry.
-- [datatypes](src/compiler_frontend/datatypes/): DataType parse spelling + TypeEnvironment/TypeId semantic identity.
+- [datatypes](src/compiler_frontend/datatypes/): TypeEnvironment/TypeId semantic identity; authored type syntax lives in [parsed.rs](src/compiler_frontend/datatypes/parsed.rs).
     - [number.rs](src/compiler_frontend/datatypes/number.rs): immutable `NumberValue` Dec coefficients, exact receiving materialisation, arbitrary-precision arithmetic and integer/rescale conversion. Shared scale and allocation-free decimal text facts live in `moth-lexical`.
     - [numeric_power.rs](src/compiler_frontend/datatypes/numeric_power.rs): portable binary64 power for constant folding.
 - [type_coercion](src/compiler_frontend/type_coercion/): compatibility/contextual/string coercion.
@@ -131,7 +132,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
         - [lookup.rs](src/compiler_frontend/ast/module_ast/scope_context/lookup.rs): visible declaration lookup, shared new-binding collision checks for bound external symbols and namespaces and reserved-receiver resolution for expressions, statements and place roots.
 - [type_resolution](src/compiler_frontend/ast/type_resolution/): parsed type syntax → TypeId.
     - [context.rs](src/compiler_frontend/ast/type_resolution/context.rs): state.
-    - [resolve_type.rs](src/compiler_frontend/ast/type_resolution/resolve_type.rs): orchestration + diagnostic TypeId bridge.
+    - [resolve_type.rs](src/compiler_frontend/ast/type_resolution/resolve_type.rs): direct authored-syntax → TypeId orchestration.
     - [lookup.rs](src/compiler_frontend/ast/type_resolution/lookup.rs): names/namespaces/trait-name rejection.
     - [aliases.rs](src/compiler_frontend/ast/type_resolution/aliases.rs): completed alias lookup and use-site projection.
     - [collections.rs](src/compiler_frontend/ast/type_resolution/collections.rs): fixed capacity.
@@ -248,7 +249,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
         - [@web/canvas](src/projects/html_project/binding_packages/web/canvas/): Canvas 2D asset (`canvas.js`). Used by the `@html` canvas helpers.
         - [@web/graphics](src/projects/html_project/binding_packages/web/graphics/): WebGL2 package, registered with no public symbols yet.
 - [moth_template](src/projects/html_project/moth_template/): direct .mtf request normalization, content-source discovery and output packaging around the compiler's [Moth template service](src/compiler_frontend/single_source_compilation/moth_template.rs), retaining per-document source contexts with warnings.
-- [new_html_project](src/projects/html_project/new_html_project/): scaffold command.
+- [HTML scaffold](crates/moth-cli/src/scaffold/): CLI-owned project creation and terminal prompts.
 
 ## Tests/tooling
 
@@ -271,7 +272,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [compiler design overview](docs/compiler-design-overview.md)
 - [build system design overview](docs/build-system-design.md)
 - [language semantics reference index](docs/src/developer-docs/language/overview.mtf)
-- [Wiring](docs/src/docs/wiring/@page.moth), Basic lessons and the sole canonical reference [wiring.mtf](docs/src/docs/wiring/wiring.mtf): accepted parameter contracts; Wire and Route source syntax remains unsupported until Phase 6, as recorded in the progress matrix.
+- [Wiring](docs/src/docs/wiring/@page.moth), Basic lessons and the sole canonical reference [wiring.mtf](docs/src/docs/wiring/wiring.mtf): accepted parameter contracts and the bounded Wire/Route foundation; current support status lives in the progress matrix.
 - [general directives](docs/src/docs/directives/directives.mtf); [directive contributor routing](docs/src/docs/directives/overview.mtf)
 - [entry metadata and page directives](docs/src/docs/project-structure/entry-config.mtf)
 - [memory management design](docs/src/developer-docs/memory-management/overview.mtf)
@@ -280,4 +281,3 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [docs website source](docs/src/docs/); [developer docs source](docs/src/developer-docs/); [generated output](docs/release/)
 - [language support progress matrix](docs/src/docs/progress/@page.moth)
 - [planned work and implementation plans](docs/roadmap/)
-- [typed semantic expression and dense compiler foundation plan](docs/roadmap/plans/typed-semantic-expressions-plan.md): exact-numeric representation, lifetime, native result, Wiring and Core evaluation work.

@@ -6,6 +6,6 @@ warnings = "forbid"
 rendered_output_exact = "len_empty=0 len_ascii=3 len_bmp=1 len_combining=2 len_emoji=1 len_mixed=3 len_namespace=3 len_lowest_pair=1 len_highest_lead=1 len_highest_trail=1 empty_yes=true empty_no=false empty_space=false contains_empty_text=true contains_empty_both=true contains_in_empty=false contains_emoji=true contains_decomposed_in_precomposed=false contains_metachar=false starts_empty_text=true starts_empty_both=true starts_in_empty=false starts_emoji=true starts_decomposed_in_precomposed=false ends_empty_text=true ends_empty_both=true ends_in_empty=false ends_emoji=true ends_decomposed_in_precomposed=false"
 
 [backends.html_wasm]
-mode = "failure"
+mode = "success"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-RULE-0058"]
+rendered_output_exact = "len_empty=0 len_ascii=3 len_bmp=1 len_combining=2 len_emoji=1 len_mixed=3 len_namespace=3 len_lowest_pair=1 len_highest_lead=1 len_highest_trail=1 empty_yes=true empty_no=false empty_space=false contains_empty_text=true contains_empty_both=true contains_in_empty=false contains_emoji=true contains_decomposed_in_precomposed=false contains_metachar=false starts_empty_text=true starts_empty_both=true starts_in_empty=false starts_emoji=true starts_decomposed_in_precomposed=false ends_empty_text=true ends_empty_both=true ends_in_empty=false ends_emoji=true ends_decomposed_in_precomposed=false"

@@ -1,5 +1,0 @@
-@widget DISPLAY_TEXT
-@widget PublicLabel, make_label
-
-value PublicLabel = make_label("fallback")
-value.display()

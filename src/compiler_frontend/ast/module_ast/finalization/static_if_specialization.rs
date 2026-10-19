@@ -32,6 +32,7 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -53,6 +54,7 @@ impl StaticIfCandidate {
         template_ir_store: Rc<RefCell<TemplateIrStore>>,
         string_table: &mut StringTable,
         type_environment: &TypeEnvironment,
+        external_package_registry: Option<&ExternalPackageRegistry>,
     ) -> Result<Self, TemplateNormalizationError> {
         let mut ast = authored_ast.to_vec();
         let specialization = StaticIfSpecialization::run(
@@ -62,6 +64,7 @@ impl StaticIfCandidate {
             template_ir_store,
             string_table,
             type_environment,
+            external_package_registry,
         )?;
 
         Ok(Self {
@@ -132,6 +135,7 @@ impl StaticIfSpecialization {
         template_ir_store: Rc<RefCell<TemplateIrStore>>,
         string_table: &mut StringTable,
         type_environment: &TypeEnvironment,
+        external_package_registry: Option<&ExternalPackageRegistry>,
     ) -> Result<Self, TemplateNormalizationError> {
         let module_environment = module_const_environment(const_values);
         let resolver = ConstValueResolver::new(
@@ -140,6 +144,7 @@ impl StaticIfSpecialization {
             expression_builder,
             template_ir_store,
             type_environment,
+            external_package_registry,
         );
         let mut specializer = StaticIfSpecializer {
             resolver,

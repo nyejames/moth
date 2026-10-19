@@ -51,7 +51,6 @@ use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleHandlingReason,
 };
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::type_coercion::parse_context::{
@@ -1127,7 +1126,6 @@ fn bind_catch_error(
     handler_context: &mut ScopeContext,
     error: &ParsedCatchErrorBinding,
     error_return: GenericErrorReturn,
-    type_interner: &AstTypeInterner<'_>,
     path_fork: &mut PathInternerFork,
 ) -> Result<CatchErrorBinding, ExpressionParseError> {
     let error_binding = path_fork
@@ -1136,13 +1134,11 @@ fn bind_catch_error(
 
     match error_return {
         GenericErrorReturn::Concrete(error_type_id) => {
-            let error_data_type =
-                diagnostic_type_spelling(error_type_id, type_interner.environment());
             handler_context.add_var(
                 Declaration {
                     id: error_binding,
                     type_id: error_type_id,
-                    diagnostic_type: error_data_type,
+                    type_syntax: None,
                     value_mode: ValueMode::ImmutableOwned,
                     value: DeclarationValue::Absent,
                     binding_span: error.span,
@@ -1211,15 +1207,7 @@ fn parse_catch_fallible_handler_body(
     handler_context.active_value_target = Some(site.success_contract.handler_target());
 
     let error = error
-        .map(|parsed| {
-            bind_catch_error(
-                &mut handler_context,
-                &parsed,
-                site.error_return,
-                type_interner,
-                path_fork,
-            )
-        })
+        .map(|parsed| bind_catch_error(&mut handler_context, &parsed, site.error_return, path_fork))
         .transpose()?;
 
     let handler_scope = handler_context.scope;
@@ -1424,15 +1412,7 @@ fn parse_inline_catch_handler_body(
     handler_context.active_value_target = Some(active_target.clone());
 
     let error = error
-        .map(|parsed| {
-            bind_catch_error(
-                &mut handler_context,
-                &parsed,
-                site.error_return,
-                type_interner,
-                path_fork,
-            )
-        })
+        .map(|parsed| bind_catch_error(&mut handler_context, &parsed, site.error_return, path_fork))
         .transpose()?;
 
     // The target owns the receiving contract, one entry per produced value (a known site's resolved

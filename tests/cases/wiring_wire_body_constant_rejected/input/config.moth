@@ -1,0 +1,5 @@
+project #= (
+    name = "wiring_wire_body_constant_rejected",
+    entry_root = "src",
+)
+html #= ()

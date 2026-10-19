@@ -1,0 +1,3 @@
+CONSUMER must:
+    consume |This Wire of String| -> String
+;

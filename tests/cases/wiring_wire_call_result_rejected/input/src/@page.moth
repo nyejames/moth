@@ -1,0 +1,11 @@
+produce || -> String:
+    return "result"
+;
+
+needs_wire |value Wire of String| -> String:
+    return value
+;
+
+render || -> String:
+    return needs_wire(produce())
+;

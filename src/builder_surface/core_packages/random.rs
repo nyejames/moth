@@ -30,6 +30,7 @@ pub fn register_core_random_package(registry: &mut ExternalPackageRegistry) {
                     ExternalReturnAlias::Fresh,
                 ),
                 error_return_type: None,
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
                         "__moth_random_float".to_owned(),
@@ -56,6 +57,7 @@ pub fn register_core_random_package(registry: &mut ExternalPackageRegistry) {
                     ExternalReturnAlias::Fresh,
                 ),
                 error_return_type: None,
+                const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
                         "__moth_random_int".to_owned(),

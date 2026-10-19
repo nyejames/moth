@@ -1,0 +1,9 @@
+TextBox = |text String|
+
+needs_wire |value Wire of TextBox| -> TextBox:
+    return value
+;
+
+render || -> TextBox:
+    return needs_wire(TextBox("constructed"))
+;

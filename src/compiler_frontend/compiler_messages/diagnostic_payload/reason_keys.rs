@@ -86,6 +86,13 @@ macro_rules! define_reasoned_diagnostic_registry {
                 remap: {}
                 descriptor: { "MOTH-SYNTAX-0015", "Invalid generic application", Error }
             },
+            Syntax::InvalidParameterContract => {
+                payload: InvalidParameterContract;
+                fields: { reason: InvalidParameterContractReason }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-SYNTAX-0038", "Invalid parameter contract", Error }
+            },
             Syntax::InvalidDependencyClause => {
                 payload: InvalidDependencyClause;
                 fields: { clause_kind: DependencyClauseKind, reason: InvalidDependencyClauseReason }
@@ -242,15 +249,14 @@ macro_rules! define_reasoned_diagnostic_registry {
                 remap: {
                     if let InvalidReceiverDeclarationReason::GenericReceiverType {
                         function_name,
-                        type_name,
+                        ..
                     }
                     | InvalidReceiverDeclarationReason::UnsupportedType {
                         function_name,
-                        type_name,
+                        ..
                     } = reason
                     {
                         *function_name = remap.get(*function_name);
-                        *type_name = remap.get(*type_name);
                     }
                 }
                 descriptor: { "MOTH-RULE-0041", "Invalid receiver declaration", Error }
@@ -483,6 +489,16 @@ macro_rules! define_reasoned_diagnostic_registry {
                 }
                 descriptor: { "MOTH-TYPE-0005", "Incompatible choice comparison", Error }
             },
+            Type::InvalidRouteOutput => {
+                payload: InvalidRouteOutput;
+                fields: {
+                    reason: InvalidRouteOutputReason,
+                    output: TypeId
+                }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-TYPE-0006", "Invalid route output type", Error }
+            },
             Rule::InvalidCallShape => {
                 payload: InvalidCallShape;
                 fields: {
@@ -523,7 +539,13 @@ macro_rules! define_reasoned_diagnostic_registry {
                         }
                         InvalidCallShapeReason::ExtraPositionalArgument { .. }
                         | InvalidCallShapeReason::PositionalAfterNamed
-                        | InvalidCallShapeReason::NamedArgumentsNotSupported => {}
+                        | InvalidCallShapeReason::NamedArgumentsNotSupported
+                        | InvalidCallShapeReason::WireArgumentOrigin
+                        | InvalidCallShapeReason::WireArgumentMutableMarker
+                        | InvalidCallShapeReason::RouteArgumentNotDirect
+                        | InvalidCallShapeReason::RouteForwardingContractMismatch
+                        | InvalidCallShapeReason::RouteParameterRead
+                        | InvalidCallShapeReason::RouteInputFieldMismatch => {}
                         InvalidCallShapeReason::NamedArgumentNotFound {
                             name,
                             known_parameters,
@@ -845,6 +867,7 @@ define_stable_reason_keys! {
     },
 
     UnsupportedBackendFeatureReason => {
+    &UnsupportedBackendFeatureReason::ConstructorRoutes => "unsupported_backend_feature.constructor_routes",
     &UnsupportedBackendFeatureReason::HashmapConstruction => "unsupported_backend_feature.hashmap_construction",
     &UnsupportedBackendFeatureReason::HashmapOperation => "unsupported_backend_feature.hashmap_operation",
     &UnsupportedBackendFeatureReason::RuntimeCasts => "unsupported_backend_feature.runtime_casts",
@@ -890,6 +913,18 @@ define_stable_reason_keys! {
     &GenericApplicationErrorReason::EmptyArgumentList => "invalid_generic_application.empty_argument_list",
     &GenericApplicationErrorReason::MissingArgumentAfterComma => "invalid_generic_application.missing_argument_after_comma",
     &GenericApplicationErrorReason::NestedApplication => "invalid_generic_application.nested_application",
+    },
+    InvalidParameterContractReason => {
+    &InvalidParameterContractReason::MissingSpecification { .. } => "invalid_parameter_contract.missing_specification",
+    &InvalidParameterContractReason::InvalidPosition { .. } => "invalid_parameter_contract.invalid_position",
+    &InvalidParameterContractReason::WireArrowNotAllowed => "invalid_parameter_contract.wire_arrow_not_allowed",
+    &InvalidParameterContractReason::RouteOutputMissing => "invalid_parameter_contract.route_output_missing",
+    &InvalidParameterContractReason::RouteRepeatedArrow => "invalid_parameter_contract.route_repeated_arrow",
+    &InvalidParameterContractReason::NestedContract { .. } => "invalid_parameter_contract.nested_contract",
+    &InvalidParameterContractReason::MutableParameter { .. } => "invalid_parameter_contract.mutable_parameter",
+    &InvalidParameterContractReason::ParameterDefault { .. } => "invalid_parameter_contract.parameter_default",
+    &InvalidParameterContractReason::ReceiverContract { .. } => "invalid_parameter_contract.receiver_contract",
+    &InvalidParameterContractReason::MultipleSpecificationTypes { .. } => "invalid_parameter_contract.multiple_specification_types",
     },
 
     InvalidDependencyClauseReason => {
@@ -1203,6 +1238,7 @@ define_stable_reason_keys! {
     &InvalidTraitConformanceReason::ReceiverMutabilityMismatch { .. } => "invalid_trait_conformance.receiver_mutability_mismatch",
     &InvalidTraitConformanceReason::ParameterCountMismatch { .. } => "invalid_trait_conformance.parameter_count_mismatch",
     &InvalidTraitConformanceReason::ParameterModeMismatch { .. } => "invalid_trait_conformance.parameter_mode_mismatch",
+    &InvalidTraitConformanceReason::ParameterContractMismatch { .. } => "invalid_trait_conformance.parameter_contract_mismatch",
     &InvalidTraitConformanceReason::ParameterTypeMismatch { .. } => "invalid_trait_conformance.parameter_type_mismatch",
     &InvalidTraitConformanceReason::ReturnCountMismatch { .. } => "invalid_trait_conformance.return_count_mismatch",
     &InvalidTraitConformanceReason::ReturnTypeMismatch { .. } => "invalid_trait_conformance.return_type_mismatch",
@@ -1231,6 +1267,7 @@ define_stable_reason_keys! {
     &InvalidMultiBindReason::MissingRightHandExpression => "invalid_multi_bind.missing_right_hand_expression",
     &InvalidMultiBindReason::MultipleRightHandExpressions => "invalid_multi_bind.multiple_right_hand_expressions",
     &InvalidMultiBindReason::MutableTargetNeedsExplicitType => "invalid_multi_bind.mutable_target_needs_explicit_type",
+    &InvalidMultiBindReason::CompileTimeMarkerOnTarget => "invalid_multi_bind.compile_time_marker_on_target",
     &InvalidMultiBindReason::DuplicateTarget => "invalid_multi_bind.duplicate_target",
     &InvalidMultiBindReason::UnsupportedRhs => "invalid_multi_bind.unsupported_rhs",
     &InvalidMultiBindReason::ExistingTargetMutableMarker => "invalid_multi_bind.existing_target_mutable_marker",
@@ -1401,12 +1438,12 @@ define_stable_reason_keys! {
     &CompileTimeEvaluationErrorReason::SameFileForwardConstantReference => "compile_time_evaluation_error.same_file_forward_constant_reference",
     &CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable => "compile_time_evaluation_error.constant_initializer_not_foldable",
     &CompileTimeEvaluationErrorReason::ExternalNonScalarConstantInConstantContext => "compile_time_evaluation_error.external_non_scalar_constant_in_constant_context",
-    &CompileTimeEvaluationErrorReason::ExternalFunctionCallInConstantContext => "compile_time_evaluation_error.external_function_call_in_constant_context",
     &CompileTimeEvaluationErrorReason::NonCompileTimeFieldInConstantContext => "compile_time_evaluation_error.non_compile_time_field_in_constant_context",
     &CompileTimeEvaluationErrorReason::NoneLiteralRequiresOptionalTypeContext => "compile_time_evaluation_error.none_literal_requires_optional_type_context",
     &CompileTimeEvaluationErrorReason::ExternalTypeConstructionNotSupported => "compile_time_evaluation_error.external_type_construction_not_supported",
     &CompileTimeEvaluationErrorReason::StructFieldDefaultNotFoldable => "compile_time_evaluation_error.struct_field_default_not_foldable",
     &CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText => "compile_time_evaluation_error.structural_string_requires_final_text",
+    &CompileTimeEvaluationErrorReason::EvaluationOutputBoundExceeded => "compile_time_evaluation_error.evaluation_output_bound_exceeded",
     },
 
 
@@ -1414,6 +1451,10 @@ define_stable_reason_keys! {
     &IncompatibleChoiceComparisonReason::DifferentChoiceTypes => "incompatible_choice_comparison.different_choice_types",
     &IncompatibleChoiceComparisonReason::ChoiceWithNonChoice => "incompatible_choice_comparison.choice_with_non_choice",
     &IncompatibleChoiceComparisonReason::PayloadEqualityNotSupported { .. } => "incompatible_choice_comparison.payload_equality_not_supported",
+    },
+
+    InvalidRouteOutputReason => {
+    &InvalidRouteOutputReason::NotChoiceOrGeneric => "invalid_route_output.not_choice_or_generic",
     },
 
     InvalidCallShapeReason => {
@@ -1428,6 +1469,12 @@ define_stable_reason_keys! {
     &InvalidCallShapeReason::MutableAccessOnNonPlace { .. } => "invalid_call_shape.mutable_access_on_non_place",
     &InvalidCallShapeReason::MutableAccessOnImmutablePlace { .. } => "invalid_call_shape.mutable_access_on_immutable_place",
     &InvalidCallShapeReason::ImmutablePlaceMutableAccessRequired { .. } => "invalid_call_shape.immutable_place_mutable_access_required",
+    &InvalidCallShapeReason::WireArgumentOrigin => "invalid_call_shape.wire_argument_origin",
+    &InvalidCallShapeReason::WireArgumentMutableMarker => "invalid_call_shape.wire_argument_mutable_marker",
+    &InvalidCallShapeReason::RouteArgumentNotDirect => "invalid_call_shape.route_argument_not_direct",
+    &InvalidCallShapeReason::RouteForwardingContractMismatch => "invalid_call_shape.route_forwarding_contract_mismatch",
+    &InvalidCallShapeReason::RouteParameterRead => "invalid_call_shape.route_parameter_read",
+    &InvalidCallShapeReason::RouteInputFieldMismatch => "invalid_call_shape.route_input_field_mismatch",
     },
 
     InvalidReturnShapeReason => {

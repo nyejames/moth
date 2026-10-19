@@ -244,6 +244,7 @@ fn register_io_console_function(
         ],
         returns: external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
         error_return_type: None,
+        const_eval: None,
         lowerings: ExternalFunctionLowerings {
             js: Some(ExternalJsLowering::RuntimeFunction(
                 spec.js_helper.to_owned(),
@@ -293,6 +294,7 @@ fn register_io_input_function(
             .collect(),
         returns: spec.returns,
         error_return_type: spec.error_return_type,
+        const_eval: None,
         lowerings: ExternalFunctionLowerings {
             js: Some(ExternalJsLowering::RuntimeFunction(
                 spec.id.name().to_owned(),

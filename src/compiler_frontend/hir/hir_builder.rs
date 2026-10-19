@@ -58,7 +58,7 @@ mod metadata;
 // Entry Point
 // -----------
 pub(in crate::compiler_frontend) fn lower_module(
-    ast: Ast,
+    mut ast: Ast,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     function_origin_lookup: HirFunctionOriginLookup,
@@ -66,7 +66,9 @@ pub(in crate::compiler_frontend) fn lower_module(
     capacity_estimate: FrontendArenaCapacityEstimate,
     external_packages: &ExternalPackageRegistry,
 ) -> Result<HirLoweringResult, CompilerMessages> {
-    let type_environment = ast.type_environment.clone();
+    // The builder owns the module environment for lowering and publication; `build_hir_module`
+    // never reads the AST copy, so take it instead of cloning every module-local type table.
+    let type_environment = std::mem::take(&mut ast.type_environment);
     let mut ctx = HirBuilder::new(
         string_table,
         path_fork,

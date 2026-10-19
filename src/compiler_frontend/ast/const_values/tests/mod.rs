@@ -1,6 +1,5 @@
 //! Resolver tests use one explicit phase expression/content pair.
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationValue};
-use crate::compiler_frontend::ast::const_values::facts::ConstFactValueKind;
 use crate::compiler_frontend::ast::const_values::resolver::{
     ConstResolutionError, ConstValueEnvironment, ConstValueResolver,
 };
@@ -10,11 +9,8 @@ use crate::compiler_frontend::ast::const_values::store::{
 use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
-use crate::compiler_frontend::ast::expressions::expression_types::{
-    ConstRecordState, ConstValueKind,
-};
+use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -53,6 +49,7 @@ impl Fixture {
             &mut self.builder,
             Rc::new(RefCell::new(TemplateIrStore::new())),
             &self.type_environment,
+            None,
         )
     }
     fn path(&mut self, name: &str) -> PathId {
@@ -117,7 +114,7 @@ impl Fixture {
         Declaration {
             id: self.path("local"),
             type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            type_syntax: None,
             value_mode: if mutable {
                 ValueMode::MutableOwned
             } else {
@@ -291,31 +288,16 @@ fn function_call_fails_const_resolution() {
 }
 
 #[test]
-fn mutable_declaration_fails_private_const_resolution() {
+fn mutable_declaration_fails_const_resolution() {
     let mut fixture = Fixture::default();
     let value = fixture.integer(1);
     let declaration = fixture.declaration(value, true);
     assert_eq!(
         fixture
             .resolver()
-            .resolve_private_top_level_declaration(&declaration, &ConstValueEnvironment::default())
+            .resolve_declaration(&declaration, &ConstValueEnvironment::default())
             .expect_err("mutable"),
         ConstResolutionError::MutableDeclaration
-    );
-}
-
-#[test]
-fn fact_value_kind_from_literal_is_literal() {
-    assert_eq!(
-        ConstFactValueKind::from_const_value_kind(ConstValueKind::Literal),
-        ConstFactValueKind::Literal
-    );
-}
-#[test]
-fn fact_value_kind_from_runtime_is_non_const() {
-    assert_eq!(
-        ConstFactValueKind::from_const_value_kind(ConstValueKind::NonConst),
-        ConstFactValueKind::NonConst
     );
 }
 
@@ -360,15 +342,14 @@ fn runtime_operation_with_unresolved_reference_fails() {
 }
 
 #[test]
-fn body_local_immutable_literal_resolves() {
+fn immutable_literal_declaration_resolves() {
     let mut fixture = Fixture::default();
     let value = fixture.integer(99);
     let declaration = fixture.declaration(value, false);
     let result = fixture
         .resolver()
-        .resolve_body_local_declaration(&declaration, &ConstValueEnvironment::default())
+        .resolve_declaration(&declaration, &ConstValueEnvironment::default())
         .expect("immutable local");
-    assert_eq!(result.value_kind, ConstFactValueKind::Literal);
     fixture.assert_integer(result.value, 99);
     assert_eq!(
         fixture
@@ -377,20 +358,6 @@ fn body_local_immutable_literal_resolves() {
             .expect("metadata")
             .span,
         None
-    );
-}
-
-#[test]
-fn body_local_mutable_declaration_fails() {
-    let mut fixture = Fixture::default();
-    let value = fixture.integer(99);
-    let declaration = fixture.declaration(value, true);
-    assert_eq!(
-        fixture
-            .resolver()
-            .resolve_body_local_declaration(&declaration, &ConstValueEnvironment::default())
-            .expect_err("mutable"),
-        ConstResolutionError::MutableDeclaration
     );
 }
 

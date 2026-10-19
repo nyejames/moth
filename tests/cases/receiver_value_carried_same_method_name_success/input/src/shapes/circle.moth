@@ -1,0 +1,7 @@
+Circle = |
+    radius I32,
+|
+
+area |this Circle| -> I32:
+    return this.radius
+;

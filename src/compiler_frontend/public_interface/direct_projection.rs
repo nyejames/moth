@@ -250,6 +250,9 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
             string_table,
             path_fork,
             folded_value_context: &folded_value_context,
+            generic_function_templates,
+            trait_source_facts: &root_table.trait_source_facts,
+            public_source_trait_origins,
         };
         let receiver_method_signatures = project_receiver_method_signatures(
             &callable_seeds,

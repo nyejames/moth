@@ -353,7 +353,6 @@ impl<'a> HirDisplayContext<'a> {
                 out
             }
             HirStatementKind::Expr(expr) => self.render_expression(expressions, *expr),
-            HirStatementKind::Drop(local) => format!("drop {}", self.local_label(*local)),
             HirStatementKind::PushRuntimeFragment { vec_local, value } => {
                 format!(
                     "push_fragment {} <- {}",
@@ -762,6 +761,39 @@ impl<'a> HirDisplayContext<'a> {
                     format!(", fields=[{}]", rendered.join(", "))
                 };
                 format!("variant_construct({carrier_label}, tag={variant_index}){fields_str}")
+            }
+            HirExpressionKind::RouteConstruct {
+                choice_id,
+                variant_index,
+                fields,
+                future_input,
+            } => {
+                let carrier_label = self.variant_carrier_label(&HirVariantCarrier::Choice {
+                    choice_id: *choice_id,
+                });
+                let fields = expressions.variant_fields(*fields);
+                let fields_str = if fields.is_empty() {
+                    String::new()
+                } else {
+                    let rendered: Vec<String> = fields
+                        .iter()
+                        .map(|field| {
+                            let name_str = field
+                                .name
+                                .map(|name| self.string_table.resolve(name))
+                                .unwrap_or("?");
+                            format!(
+                                "{}: {}",
+                                name_str,
+                                self.render_expression(expressions, field.value)
+                            )
+                        })
+                        .collect();
+                    format!(", fields=[{}]", rendered.join(", "))
+                };
+                format!(
+                    "route_construct({carrier_label}, tag={variant_index}, future_input={future_input}){fields_str}"
+                )
             }
             HirExpressionKind::VariantPayloadGet {
                 carrier,

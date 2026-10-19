@@ -292,7 +292,7 @@ pub(super) fn parse_collection_builtin_member_typed(
                     member_name: collection_builtin_op_source_name(member.op),
                     member_span,
                 },
-                &arguments,
+                arguments,
                 &expectations,
                 scope_context,
                 type_interner,

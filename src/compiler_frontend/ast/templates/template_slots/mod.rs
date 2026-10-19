@@ -8,6 +8,14 @@
 //! planner writes side-tables into the module-scoped TIR store, then returns
 //! neutral owned handoff shapes defined in `runtime_handoff.rs`.
 
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+
+pub(in crate::compiler_frontend::ast::templates) struct RuntimeSlotPlanningServices<'a> {
+    pub(in crate::compiler_frontend::ast::templates) string_table: &'a StringTable,
+    pub(in crate::compiler_frontend::ast::templates) external_package_registry:
+        Option<&'a ExternalPackageRegistry>,
+}
 // -------------------------
 //  Submodules
 // -------------------------

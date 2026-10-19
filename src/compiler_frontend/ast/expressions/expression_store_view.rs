@@ -246,6 +246,11 @@ pub(crate) enum ExpressionOperationView<'a> {
         tag: u32,
         fields: FieldListView<'a>,
     },
+    RouteConstruct {
+        tag: u32,
+        fields: FieldListView<'a>,
+        future_input: bool,
+    },
     ValueBlock(&'a ValueBlock),
     RuntimeTemplate(&'a OwnedRuntimeTemplateHandoff),
     RuntimeSlotApplication(&'a OwnedRuntimeSlotApplicationHandoff),
@@ -420,6 +425,15 @@ impl ExpressionStore {
             ExpressionOp::Choice { tag, fields } => V::Choice {
                 tag,
                 fields: o.fields_view(fields),
+            },
+            ExpressionOp::RouteConstruct {
+                tag,
+                fields,
+                future_input,
+            } => V::RouteConstruct {
+                tag,
+                fields: o.fields_view(fields),
+                future_input,
             },
             ExpressionOp::ValueBlock(id) => V::ValueBlock(&o.value_blocks[id.index()]),
             ExpressionOp::RuntimeTemplate(id) => {

@@ -499,7 +499,6 @@ impl<'a> FunctionProblemBuilder<'a> {
                 let args = self.module.expressions.values(*args).to_vec();
                 self.lower_map_call(*op, *receiver, &args, *result, &source, event_ids)?;
             }
-            HirStatementKind::Drop(_) => {}
             HirStatementKind::FormatFloat {
                 source: value,
                 result,
@@ -735,6 +734,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             | HirExpressionKind::Collection(_)
             | HirExpressionKind::Range { .. }
             | HirExpressionKind::VariantConstruct { .. }
+            | HirExpressionKind::RouteConstruct { .. }
             | HirExpressionKind::MapLiteral(_) => ExpressionPlan::Aggregate,
             HirExpressionKind::Number(_)
             | HirExpressionKind::FixedScalar(_)
@@ -766,7 +766,8 @@ impl<'a> FunctionProblemBuilder<'a> {
             }
             HirExpressionKind::Range { start, end } => [*start, *end].get(index).copied(),
             HirExpressionKind::VariantPayloadGet { source, .. } => (index == 0).then_some(*source),
-            HirExpressionKind::VariantConstruct { fields, .. } => expressions
+            HirExpressionKind::VariantConstruct { fields, .. }
+            | HirExpressionKind::RouteConstruct { fields, .. } => expressions
                 .variant_fields(*fields)
                 .get(index)
                 .map(|field| field.value),
@@ -811,7 +812,8 @@ impl<'a> FunctionProblemBuilder<'a> {
                     .get(index)
                     .copied()
             }
-            HirExpressionKind::VariantConstruct { fields, .. } => (index
+            HirExpressionKind::VariantConstruct { fields, .. }
+            | HirExpressionKind::RouteConstruct { fields, .. } => (index
                 < expressions.variant_fields(*fields).len())
             .then_some(ProjectionElem::FixedIndex(index as u32)),
             HirExpressionKind::MapLiteral(entries) => (index
@@ -2429,12 +2431,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         let expression = self.module.expressions.expression(expression_id);
         EventSource {
             hir_node: None,
-            span: self
-                .module
-                .side_table
-                .value_source_span(expression_id)
-                .or(expression.span)
-                .or(fallback.span),
+            span: expression.span.or(fallback.span),
         }
     }
 

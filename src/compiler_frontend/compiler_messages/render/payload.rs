@@ -9,7 +9,7 @@ use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticPayload, InvalidTraitConformanceReason,
     InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, NamingConvention,
-    ProjectContextEscapeReason, ReservedNameOwner,
+    ProjectContextEscapeReason, PublicGenericOwnerKind, ReservedNameOwner,
 };
 
 pub(crate) struct RenderedPayload {
@@ -238,6 +238,9 @@ fn render_payload_message(
         DiagnosticPayload::InvalidGenericApplication { reason } => {
             invalid_generic_application_message(*reason).to_owned()
         }
+        DiagnosticPayload::InvalidParameterContract { reason } => {
+            invalid_parameter_contract_message(*reason)
+        }
         DiagnosticPayload::UnexpectedEndOfFile { expected_delimiter } => {
             if let Some(expected_delimiter) = expected_delimiter {
                 format!(
@@ -346,13 +349,24 @@ fn render_payload_message(
             diagnostic_type_name(*surface_type, context)
         ),
         DiagnosticPayload::GenericBoundPrivateSurfaceLeak {
-            function_name,
+            owner_kind,
+            owner_name,
             trait_name,
-        } => format!(
-            "Public generic function '{}' exposes private trait bound '{}'. Export the trait through the same public surface or keep the function private.",
-            string_table.resolve(*function_name),
-            string_table.resolve(*trait_name)
-        ),
+        } => {
+            let (owner_label, kept_private) = match owner_kind {
+                PublicGenericOwnerKind::Function => ("function", "the function"),
+                PublicGenericOwnerKind::ReceiverMethod => ("receiver method", "the receiver type"),
+                PublicGenericOwnerKind::Struct => ("struct", "the struct"),
+                PublicGenericOwnerKind::Choice => ("choice", "the choice"),
+            };
+            format!(
+                "Public generic {} '{}' exposes private trait bound '{}'. Make the trait public in the module that declares it, or keep {} private.",
+                owner_label,
+                string_table.resolve(*owner_name),
+                string_table.resolve(*trait_name),
+                kept_private
+            )
+        }
         DiagnosticPayload::PrivateTypeInExportedApi {
             exported_name,
             private_type,
@@ -406,6 +420,7 @@ fn render_payload_message(
                 ReservedNameOwner::Keyword => "keyword",
                 ReservedNameOwner::CoreTrait => "core trait",
                 ReservedNameOwner::ImplicitStart => "compiler-owned entry point",
+                ReservedNameOwner::ParameterContract => "compiler-owned parameter contract",
             };
             format!(
                 "Reserved name collision: '{}' is a reserved {}",
@@ -417,7 +432,7 @@ fn render_payload_message(
             invalid_this_usage_message(*reason, string_table)
         }
         DiagnosticPayload::InvalidReceiverDeclaration { reason } => {
-            invalid_receiver_declaration_message(*reason, string_table)
+            invalid_receiver_declaration_message(*reason, context)
         }
         DiagnosticPayload::InvalidControlFlowStatement { reason } => {
             invalid_control_flow_statement_message(*reason)
@@ -522,6 +537,9 @@ fn render_payload_message(
         }
         DiagnosticPayload::IncompatibleChoiceComparison { reason, lhs, rhs } => {
             incompatible_choice_comparison_message(reason, *lhs, *rhs, context)
+        }
+        DiagnosticPayload::InvalidRouteOutput { reason, output } => {
+            invalid_route_output_message(reason, *output, context)
         }
         DiagnosticPayload::InvalidCallShape {
             reason,
@@ -756,6 +774,15 @@ fn invalid_trait_conformance_message(
         } => {
             format!(
                 "'{target}' cannot conform{trait_text} because parameter {parameter_index} of '{}' has a different value mode.",
+                string_table.resolve(*requirement_name)
+            )
+        }
+        InvalidTraitConformanceReason::ParameterContractMismatch {
+            requirement_name,
+            parameter_index,
+        } => {
+            format!(
+                "'{target}' cannot conform{trait_text} because parameter {parameter_index} of '{}' uses a different parameter contract; a Wire, Route or value parameter must match the trait requirement exactly.",
                 string_table.resolve(*requirement_name)
             )
         }

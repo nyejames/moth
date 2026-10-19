@@ -4,16 +4,17 @@
 //! WHY: host metadata feeds both AST lowering and borrow-check call summaries, so small
 //! regressions here can break multiple frontend stages at once.
 
-use crate::compiler_frontend::datatypes::DataType;
+use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::{
-    CanonicalBindingSymbolIdentity, ExternalAbiType, ExternalAccessKind, ExternalConstantDef,
-    ExternalConstantId, ExternalConstantRawValue, ExternalConstantValue, ExternalFunctionDef,
-    ExternalFunctionId, ExternalFunctionLowerings, ExternalHirReturnAlias, ExternalJsLowering,
-    ExternalPackageRegistry, ExternalParameter, ExternalReturnAlias, ExternalReturnSlot,
-    ExternalSignatureType, ExternalSymbolCategory, ExternalSymbolId, ExternalSymbolPath,
-    ExternalTypeDef, ExternalTypeId, IO_INPUT_EXTERNAL_TYPE_ID, external_success_returns,
+    CanonicalBindingSymbolIdentity, ExternalAbiType, ExternalAccessKind, ExternalConstEvalOp,
+    ExternalConstantDef, ExternalConstantId, ExternalConstantRawValue, ExternalConstantValue,
+    ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings, ExternalHirReturnAlias,
+    ExternalJsLowering, ExternalPackageRegistry, ExternalParameter, ExternalReturnAlias,
+    ExternalReturnSlot, ExternalSignatureType, ExternalSymbolCategory, ExternalSymbolId,
+    ExternalSymbolPath, ExternalTypeDef, ExternalTypeId, IO_INPUT_EXTERNAL_TYPE_ID,
+    TextConstEvalOp, external_success_returns,
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -54,6 +55,7 @@ fn return_slots_preserve_alias_metadata() {
             vec![1],
         )],
         error_return_type: None,
+        const_eval: None,
         lowerings: ExternalFunctionLowerings::default(),
     };
 
@@ -117,6 +119,7 @@ fn register_function_rejects_duplicates() {
             parameters: Vec::new(),
             returns: external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
             error_return_type: None,
+            const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .unwrap();
@@ -126,10 +129,240 @@ fn register_function_rejects_duplicates() {
         parameters: Vec::new(),
         returns: external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
         error_return_type: None,
+        const_eval: None,
         lowerings: ExternalFunctionLowerings::default(),
     });
 
     assert!(result.is_err());
+}
+
+#[test]
+fn const_eval_registration_requires_trusted_core_origin_and_exact_signature() {
+    #[derive(Clone, Copy)]
+    enum SignatureChange {
+        None,
+        MutableParameter,
+        AliasArgsSlot,
+        ErrorSlot,
+        WrongReturnType,
+        WrongParameterCount,
+        OptionalParameter,
+        OptionalReturn,
+        NestedOptionalReturn,
+        ExtraReturnSlot,
+        MissingReturnSlot,
+    }
+
+    struct Scenario {
+        name: &'static str,
+        package_path: &'static str,
+        origin: PackageOrigin,
+        signature_change: SignatureChange,
+        accepted: bool,
+    }
+
+    let scenarios = [
+        Scenario {
+            name: "Builder origin",
+            package_path: "@test/constant-eval",
+            origin: PackageOrigin::Builder,
+            signature_change: SignatureChange::None,
+            accepted: false,
+        },
+        Scenario {
+            name: "Dependency origin",
+            package_path: "@test/constant-eval",
+            origin: PackageOrigin::Dependency,
+            signature_change: SignatureChange::None,
+            accepted: false,
+        },
+        Scenario {
+            name: "ProjectLocal origin",
+            package_path: "@test/constant-eval",
+            origin: PackageOrigin::ProjectLocal,
+            signature_change: SignatureChange::None,
+            accepted: false,
+        },
+        Scenario {
+            name: "Core-looking path with Builder origin",
+            package_path: "@core/fake",
+            origin: PackageOrigin::Builder,
+            signature_change: SignatureChange::None,
+            accepted: false,
+        },
+        Scenario {
+            name: "Mutable parameter",
+            package_path: "@test/constant-eval",
+            origin: PackageOrigin::Core,
+            signature_change: SignatureChange::MutableParameter,
+            accepted: false,
+        },
+        Scenario {
+            name: "AliasArgs success slot",
+            package_path: "@test/constant-eval",
+            origin: PackageOrigin::Core,
+            signature_change: SignatureChange::AliasArgsSlot,
+            accepted: false,
+        },
+        Scenario {
+            name: "error slot",
+            package_path: "@test/constant-eval",
+            origin: PackageOrigin::Core,
+            signature_change: SignatureChange::ErrorSlot,
+            accepted: false,
+        },
+        Scenario {
+            name: "wrong return type",
+            package_path: "@test/constant-eval",
+            origin: PackageOrigin::Core,
+            signature_change: SignatureChange::WrongReturnType,
+            accepted: false,
+        },
+        Scenario {
+            name: "wrong parameter count",
+            package_path: "@test/constant-eval",
+            origin: PackageOrigin::Core,
+            signature_change: SignatureChange::WrongParameterCount,
+            accepted: false,
+        },
+        Scenario {
+            name: "optional parameter",
+            package_path: "@test/constant-eval",
+            origin: PackageOrigin::Core,
+            signature_change: SignatureChange::OptionalParameter,
+            accepted: false,
+        },
+        Scenario {
+            name: "optional return",
+            package_path: "@test/constant-eval",
+            origin: PackageOrigin::Core,
+            signature_change: SignatureChange::OptionalReturn,
+            accepted: false,
+        },
+        Scenario {
+            name: "nested optional return",
+            package_path: "@test/constant-eval",
+            origin: PackageOrigin::Core,
+            signature_change: SignatureChange::NestedOptionalReturn,
+            accepted: false,
+        },
+        Scenario {
+            name: "extra return slot",
+            package_path: "@test/constant-eval",
+            origin: PackageOrigin::Core,
+            signature_change: SignatureChange::ExtraReturnSlot,
+            accepted: false,
+        },
+        Scenario {
+            name: "missing return slot",
+            package_path: "@test/constant-eval",
+            origin: PackageOrigin::Core,
+            signature_change: SignatureChange::MissingReturnSlot,
+            accepted: false,
+        },
+        Scenario {
+            name: "valid Core registration",
+            package_path: "@test/constant-eval",
+            origin: PackageOrigin::Core,
+            signature_change: SignatureChange::None,
+            accepted: true,
+        },
+    ];
+
+    for (index, scenario) in scenarios.iter().enumerate() {
+        let mut registry = ExternalPackageRegistry::default();
+        let package_id = match registry.register_package(scenario.package_path, scenario.origin) {
+            Ok(package_id) => package_id,
+            Err(error) => panic!("scenario package registration failed: {error:?}"),
+        };
+        let mut function = ExternalFunctionDef {
+            name: "contains".to_owned(),
+            parameters: vec![
+                ExternalParameter {
+                    language_type: ExternalSignatureType::Abi(ExternalAbiType::Utf8Str),
+                    access_kind: ExternalAccessKind::Shared,
+                },
+                ExternalParameter {
+                    language_type: ExternalSignatureType::Abi(ExternalAbiType::Utf8Str),
+                    access_kind: ExternalAccessKind::Shared,
+                },
+            ],
+            returns: vec![ExternalReturnSlot::fresh(ExternalAbiType::Bool)],
+            error_return_type: None,
+            const_eval: Some(ExternalConstEvalOp::Text(TextConstEvalOp::Contains)),
+            lowerings: ExternalFunctionLowerings::default(),
+        };
+
+        match scenario.signature_change {
+            SignatureChange::None => {}
+            SignatureChange::MutableParameter => {
+                function.parameters[0].access_kind = ExternalAccessKind::Mutable;
+            }
+            SignatureChange::AliasArgsSlot => {
+                function.returns = vec![ExternalReturnSlot::alias_args(
+                    ExternalAbiType::Bool,
+                    vec![0],
+                )];
+            }
+            SignatureChange::ErrorSlot => {
+                function.error_return_type = Some(ExternalSignatureType::BuiltinError);
+            }
+            SignatureChange::WrongReturnType => {
+                function.returns = vec![ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str)];
+            }
+            SignatureChange::WrongParameterCount => {
+                function.parameters.truncate(1);
+            }
+            SignatureChange::OptionalParameter => {
+                function.parameters[0].language_type = ExternalSignatureType::Optional(Box::new(
+                    ExternalSignatureType::Abi(ExternalAbiType::Utf8Str),
+                ));
+            }
+            SignatureChange::OptionalReturn => {
+                function.returns =
+                    vec![ExternalReturnSlot::fresh(ExternalSignatureType::Optional(
+                        Box::new(ExternalSignatureType::Abi(ExternalAbiType::Bool)),
+                    ))];
+            }
+            SignatureChange::NestedOptionalReturn => {
+                function.returns = vec![ExternalReturnSlot::fresh(
+                    ExternalSignatureType::Optional(Box::new(ExternalSignatureType::Optional(
+                        Box::new(ExternalSignatureType::Abi(ExternalAbiType::Bool)),
+                    ))),
+                )];
+            }
+            SignatureChange::ExtraReturnSlot => {
+                function
+                    .returns
+                    .push(ExternalReturnSlot::fresh(ExternalAbiType::Bool));
+            }
+            SignatureChange::MissingReturnSlot => {
+                function.returns.clear();
+            }
+        }
+
+        let symbol_path = ExternalSymbolPath::from_single("contains");
+        let result = registry.register_function_at_path(
+            package_id,
+            symbol_path.clone(),
+            ExternalFunctionId::Synthetic(20_000 + index as u32),
+            function,
+        );
+        assert_eq!(
+            result.is_ok(),
+            scenario.accepted,
+            "{}: registration result was {result:?}",
+            scenario.name
+        );
+        assert_eq!(
+            registry
+                .resolve_package_function_by_path(scenario.package_path, &symbol_path)
+                .is_some(),
+            scenario.accepted,
+            "{}: package lookup must reflect only successful installation",
+            scenario.name
+        );
+    }
 }
 
 #[test]
@@ -395,7 +628,7 @@ fn virtual_package_detection_uses_symbol_suffixes() {
 }
 
 // ------------------------------------------------------------------
-// Phase 1.1 path-aware external package surface tests
+// Path-aware external package surface tests
 // ------------------------------------------------------------------
 
 fn empty_void_function(name: &str) -> ExternalFunctionDef {
@@ -404,6 +637,7 @@ fn empty_void_function(name: &str) -> ExternalFunctionDef {
         parameters: Vec::new(),
         returns: external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
         error_return_type: None,
+        const_eval: None,
         lowerings: ExternalFunctionLowerings::default(),
     }
 }
@@ -1042,14 +1276,6 @@ fn package_surface_iteration_exposes_one_component_paths_only() {
 // ------------------------------------------------------------------
 
 #[test]
-fn string_content_resolves_to_string_datatype() {
-    assert_eq!(
-        ExternalSignatureType::StringContent.to_datatype(),
-        Some(DataType::StringSlice)
-    );
-}
-
-#[test]
 fn fixed_numeric_signatures_project_to_exact_fixed_scalar_ids() {
     let mut type_environment = TypeEnvironment::new();
     let builtin_error_type_id = type_environment.builtins().none;
@@ -1064,7 +1290,6 @@ fn fixed_numeric_signatures_project_to_exact_fixed_scalar_ids() {
     ] {
         let fixed = ExternalSignatureType::Abi(ExternalAbiType::Fixed(scalar));
         let source_type_id = builtin_type_ids::fixed_scalar(scalar);
-        assert_eq!(fixed.to_datatype(), Some(DataType::FixedScalar(scalar)));
         assert_eq!(
             fixed.to_type_id(&mut type_environment, builtin_error_type_id),
             Some(source_type_id),
@@ -1281,8 +1506,8 @@ fn core_io_console_functions_return_void() {
 /// Verifies that every Core IO V1 function is JS-backed and intentionally unsupported on Wasm.
 /// WHAT: backend validation only needs lowering metadata; unsupported targets are represented by
 ///       an absent lowering entry rather than a hand-written IO special case.
-/// WHY: Phase 5 depends on this metadata shape so reachable HTML-Wasm IO calls fail before
-///      lowering while HTML-JS continues to emit runtime helpers.
+/// WHY: external-package support validation depends on this metadata shape so reachable
+///      HTML-Wasm IO calls fail before lowering while HTML-JS continues to emit runtime helpers.
 #[test]
 fn core_io_functions_have_js_lowerings_and_no_wasm_lowerings() {
     let registry = ExternalPackageRegistry::new();
@@ -1364,23 +1589,6 @@ fn prelude_registers_io_namespace_alias_to_core_io() {
 // ------------------------------------------------------------------
 // Optional external signature tests
 // ------------------------------------------------------------------
-
-/// Verifies that an external `String?` signature maps to the diagnostic option datatype.
-///
-/// WHAT: `ExternalSignatureType::Optional` carries the inner type through the same
-///       conversion path as scalar signatures.
-/// WHY: host boundaries must describe optional returns without inventing backend sentinels.
-#[test]
-fn optional_external_resolves_to_option_datatype() {
-    let optional_string = ExternalSignatureType::Optional(Box::new(ExternalSignatureType::Abi(
-        ExternalAbiType::Utf8Str,
-    )));
-
-    assert_eq!(
-        optional_string.to_datatype(),
-        Some(DataType::Option(Box::new(DataType::StringSlice)))
-    );
-}
 
 /// Verifies that an external `String?` signature interns the canonical option TypeId.
 ///

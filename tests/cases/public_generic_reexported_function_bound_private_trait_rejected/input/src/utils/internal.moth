@@ -1,0 +1,7 @@
+LOCAL_DISPLAY must:
+    display |This| -> String
+;
+
+identity type T is LOCAL_DISPLAY |value T| -> T:
+    return value
+;

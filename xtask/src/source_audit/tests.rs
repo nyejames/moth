@@ -138,6 +138,8 @@ fn reports_violations_in_extracted_crate_sources_and_tests() {
         "crates/moth-lexical/src/tests/violation.rs",
         "crates/moth-mon/src/tests/violation.rs",
         "crates/moth-mon/tests/violation.rs",
+        "crates/moth-cli/src/tests/violation.rs",
+        "crates/moth-cli/tests/violation.rs",
     ] {
         let path = workspace.path().join(relative);
         fs::create_dir_all(path.parent().expect("fixture parent")).expect("fixture directory");
@@ -163,6 +165,14 @@ fn reports_violations_in_extracted_crate_sources_and_tests() {
             ),
             (
                 "crates/moth-mon/tests/violation.rs",
+                SourceRule::RemovedLegacyConversionName,
+            ),
+            (
+                "crates/moth-cli/src/tests/violation.rs",
+                SourceRule::RemovedLegacyConversionName,
+            ),
+            (
+                "crates/moth-cli/tests/violation.rs",
                 SourceRule::RemovedLegacyConversionName,
             ),
         ]

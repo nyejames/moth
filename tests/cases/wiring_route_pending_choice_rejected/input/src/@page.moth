@@ -1,0 +1,11 @@
+Message ::
+    Update | id I32, text String |,
+;
+
+receive |route Route of String -> Message| -> String:
+    return "received"
+;
+
+todo_id = 7
+already = Message::Update(todo_id, "done")
+receive(already)

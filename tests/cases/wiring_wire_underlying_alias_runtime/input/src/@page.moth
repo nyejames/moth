@@ -1,0 +1,12 @@
+Text as String
+
+read_text |value Wire of Text| -> Text:
+    return value
+;
+
+render || -> String:
+    value = "aliased"
+    return read_text(value)
+;
+
+[:alias wire=[render()]]

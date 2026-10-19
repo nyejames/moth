@@ -1,0 +1,17 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["core_text_const_eval_resource_runtime_retained resource_length="]
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["function __moth_text_length("]
+must_not_contain = [
+    "function __moth_text_is_empty(",
+    "function __moth_text_contains(",
+    "function __moth_text_starts_with(",
+    "function __moth_text_ends_with(",
+]

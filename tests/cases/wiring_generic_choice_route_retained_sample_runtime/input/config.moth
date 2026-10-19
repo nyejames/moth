@@ -1,0 +1,5 @@
+project #= (
+    name = "wiring_generic_choice_route_retained_sample_runtime",
+    entry_root = "src",
+)
+html #= ()

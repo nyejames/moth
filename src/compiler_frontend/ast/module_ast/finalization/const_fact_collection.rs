@@ -12,7 +12,6 @@ use std::rc::Rc;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
 use crate::compiler_frontend::ast::const_values::facts::{
     AstConstDeclarationFact, AstConstFacts, ConstBindingScope, ConstBindingSource,
-    ConstFactValueKind,
 };
 use crate::compiler_frontend::ast::const_values::resolver::{
     ConstResolutionError, ConstValueEnvironment, ConstValueResolver,
@@ -25,6 +24,7 @@ use crate::compiler_frontend::ast::expressions::expression_types::FallibleHandli
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, add_ast_counter, increment_ast_counter,
 };
@@ -55,6 +55,7 @@ impl<'a> ConstFactCollector<'a> {
         expression_builder: &'a mut AstExpressionBuilder,
         template_ir_store: Rc<RefCell<TemplateIrStore>>,
         type_environment: &'a TypeEnvironment,
+        external_package_registry: Option<&'a ExternalPackageRegistry>,
     ) -> Self {
         Self {
             resolver: ConstValueResolver::new(
@@ -63,6 +64,7 @@ impl<'a> ConstFactCollector<'a> {
                 expression_builder,
                 template_ir_store,
                 type_environment,
+                external_package_registry,
             ),
             facts: AstConstFacts::default(),
             module_explicit_env: ConstValueEnvironment::default(),
@@ -108,7 +110,7 @@ impl<'a> ConstFactCollector<'a> {
         let mut module_base = FxHashMap::default();
 
         for row in self.resolver.const_values().iter_module_constant_views() {
-            let (path, value_id, metadata) = (row.path, row.id, row.metadata);
+            let (path, value_id) = (row.path, row.id);
 
             // Lexical environments refer to the sole constant content owner.
             module_base.insert(*path, value_id);
@@ -119,7 +121,6 @@ impl<'a> ConstFactCollector<'a> {
                     declaration_path: *path,
                     scope: ConstBindingScope::ExplicitTopLevel,
                     source: ConstBindingSource::ExplicitHash,
-                    value_kind: ConstFactValueKind::from_const_value_kind(metadata.value_kind),
                     // Explicit module values stay owned by the store; the fact is
                     // metadata only and carries no authored initializer span.
                     span: None,
@@ -197,10 +198,7 @@ impl<'a> ConstFactCollector<'a> {
         declaration: &Declaration,
         env: &mut ConstValueEnvironment,
     ) -> Result<(), TemplateNormalizationError> {
-        match self
-            .resolver
-            .resolve_private_top_level_declaration(declaration, env)
-        {
+        match self.resolver.resolve_declaration(declaration, env) {
             Ok(resolved) => {
                 let span = declaration.value.initializer().and_then(|id| {
                     self.resolver
@@ -216,7 +214,6 @@ impl<'a> ConstFactCollector<'a> {
                         declaration_path: declaration.id,
                         scope: ConstBindingScope::PrivateTopLevel,
                         source: ConstBindingSource::InferredImmutable,
-                        value_kind: resolved.value_kind,
                         span,
                     },
                 );
@@ -394,10 +391,7 @@ impl<'a> ConstFactCollector<'a> {
         declaration: &Declaration,
         env: &mut ConstValueEnvironment,
     ) -> Result<(), TemplateNormalizationError> {
-        match self
-            .resolver
-            .resolve_body_local_declaration(declaration, env)
-        {
+        match self.resolver.resolve_declaration(declaration, env) {
             Ok(resolved) => {
                 let span = declaration.value.initializer().and_then(|id| {
                     self.resolver
@@ -413,7 +407,6 @@ impl<'a> ConstFactCollector<'a> {
                         declaration_path: declaration.id,
                         scope: ConstBindingScope::BodyLocal,
                         source: ConstBindingSource::InferredImmutable,
-                        value_kind: resolved.value_kind,
                         span,
                     },
                 );

@@ -44,13 +44,13 @@ use crate::compiler_frontend::compiler_messages::{
     BuiltinFailureOriginKind, BuiltinFailureWitness, CompilerDiagnostic,
     InvalidFallibleHandlingReason,
 };
-use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
+use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, add_ast_counter, increment_ast_counter,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 /// A classifier binds roots in their issuing phase or frozen AST owner. TIR is only
 /// readable in the phase case; frozen payloads have already become neutral handoffs.
@@ -1127,7 +1127,8 @@ fn enter_expression<'a>(
             Ok(None)
         }
         ExpressionOperationView::Struct { fields }
-        | ExpressionOperationView::Choice { fields, .. } => {
+        | ExpressionOperationView::Choice { fields, .. }
+        | ExpressionOperationView::RouteConstruct { fields, .. } => {
             open_expression_frame(
                 template_ir_store,
                 state,
@@ -1588,14 +1589,7 @@ fn classify_nodes(
             }
             NodeKind::LexicalScope { body } => classify_nodes(body, template_ir_store, state)?,
             NodeKind::RangeLoop { range, body, .. } => {
-                if let Some(effect) = classify_range_failure(
-                    state
-                        .expression_builder
-                        .view(range.start)?
-                        .value_type_id()?,
-                    node.span,
-                    state,
-                ) {
+                if let Some(effect) = classify_range_failure(range.domain, node.span, state) {
                     return Ok(Some(effect));
                 }
                 let mut effect = classify_expression(
@@ -1818,14 +1812,7 @@ fn classify_loop_header(
                 None => None,
             }
             .or(state.expression_builder.view(range.start)?.span());
-            if let Some(effect) = classify_range_failure(
-                state
-                    .expression_builder
-                    .view(range.start)?
-                    .value_type_id()?,
-                span,
-                state,
-            ) {
+            if let Some(effect) = classify_range_failure(range.domain, span, state) {
                 return Ok(Some(effect));
             }
             if let Some(effect) = classify_expression(
@@ -1860,7 +1847,7 @@ fn classify_loop_header(
 }
 
 fn classify_range_failure(
-    type_id: TypeId,
+    domain: NumericScalar,
     span: Option<SourceSpan>,
     state: &mut TraversalState<'_>,
 ) -> Option<EnclosingExitEffect> {
@@ -1877,12 +1864,9 @@ fn classify_range_failure(
         _ => {}
     }
 
-    let binary_float = [FixedScalar::F16, FixedScalar::F32, FixedScalar::F64]
-        .into_iter()
-        .any(|scalar| type_id == builtin_type_ids::fixed_scalar(scalar));
     // Range loops fail on overflow plus their step guards: zero step (306) in every domain and
     // no progress (307) when floating rounding leaves the candidate unchanged.
-    let codes: &'static [BuiltinErrorCode] = if binary_float {
+    let codes: &'static [BuiltinErrorCode] = if domain.is_binary_float() {
         &[
             BuiltinErrorCode::FloatNonFinite,
             BuiltinErrorCode::InvalidRangeStep,

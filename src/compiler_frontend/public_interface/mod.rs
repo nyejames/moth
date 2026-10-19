@@ -97,9 +97,10 @@ pub(crate) use model::{
     ConcreteCallSummaryRecord, PublicChoiceSemantics, PublicConstantSemantics,
     PublicDeclarationRecord, PublicDeclarationSemantics, PublicEvidenceRecord,
     PublicFunctionCategory, PublicGenericParameterSurface, PublicInterfaceDraft,
-    PublicParameterTypeSlot, PublicReceiverMethodCategory, PublicReceiverMethodSemantics,
-    PublicReturnTypeSlot, PublicSemanticInterface, PublicStructSemantics,
-    PublicTraitReceiverAccess, PublicTraitRequirementSurface, TraitSurfaceTypeIdentity,
+    PublicParameterContract, PublicParameterTypeSlot, PublicReceiverMethodCategory,
+    PublicReceiverMethodSemantics, PublicReturnTypeSlot, PublicSemanticInterface,
+    PublicStructSemantics, PublicTraitParameterContract, PublicTraitReceiverAccess,
+    PublicTraitRequirementSurface, TraitSurfaceTypeIdentity,
 };
 pub(crate) use receiver_projection::CallableSeed;
 

@@ -1,0 +1,31 @@
+LOCAL_DISPLAY must:
+    display |This| -> String
+;
+
+export:
+    PUBLIC_LABEL must:
+        label |This| -> String
+    ;
+
+    Label = |
+        text String,
+    |
+
+    outer type T |value T| -> String:
+        return private_render(Label("private evidence retained only for body"))
+    ;
+;
+
+display |this Label| -> String:
+    return this.text
+;
+
+label |this Label| -> String:
+    return this.text
+;
+
+Label must LOCAL_DISPLAY, PUBLIC_LABEL
+
+private_render type T is LOCAL_DISPLAY |value T| -> String:
+    return value.display()
+;

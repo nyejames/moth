@@ -1,0 +1,10 @@
+Envelope type E ::
+    Wrapped | captured E, value E |,
+;
+
+receive type M, I |event Route of I -> M, sample I| -> String:
+    return "ok"
+;
+
+sample U64 = 7
+io.line(receive(Envelope::Wrapped(7), sample))

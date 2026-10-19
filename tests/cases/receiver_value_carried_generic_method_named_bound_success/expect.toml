@@ -1,0 +1,4 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "receiver_value_carried_generic_method_named_bound_success result=outer-only"

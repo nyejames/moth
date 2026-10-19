@@ -63,8 +63,7 @@ pub enum HirTerminator {
     /// Internal placeholder for blocks that have not yet received a real terminator.
     ///
     /// WHAT: marks a block as incomplete during HIR construction.
-    /// WHY: the old panic terminator was previously overloaded as both a placeholder and a real
-    ///      runtime stop. This dedicated variant removes that ambiguity.
+    /// WHY: a dedicated variant keeps construction placeholders distinct from real runtime stops.
     /// MUST NOT survive to validated HIR or backend lowering.
     Uninitialized,
 

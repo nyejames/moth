@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::ast::const_eval::FoldServices;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
@@ -22,6 +23,7 @@ fn finalization_fold_composed_tir_root_folds_view_text() {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
                 template_ir_store: &template_ir_store,
+                external_package_registry: None,
                 expression_builder: &mut expressions,
                 const_values: &mut constants,
             },
@@ -101,6 +103,7 @@ fn finalization_normalizes_dynamic_expression_payloads_into_expression_overlay()
             const_values: &mut constants,
             string_table: &mut string_table,
             template_ir_store: Rc::clone(&template_ir_store),
+            external_package_registry: None,
             module_resources: None,
             expression_pending: Vec::new(),
             expression_results: Vec::new(),
@@ -166,7 +169,7 @@ fn finalization_normalizes_dynamic_expression_payloads_into_expression_overlay()
     };
     assert!(
         structural_expression_is_unchanged,
-        "Phase 10 dynamic-expression normalization should layer the normalized payload through an overlay"
+        "dynamic-expression normalization should layer the normalized payload through an overlay"
     );
 }
 
@@ -250,6 +253,7 @@ fn finalization_merges_expression_overrides_without_duplicate_sites() {
             const_values: &mut constants,
             string_table: &mut string_table,
             template_ir_store: Rc::clone(&template_ir_store),
+            external_package_registry: None,
             module_resources: None,
             expression_pending: Vec::new(),
             expression_results: Vec::new(),
@@ -328,6 +332,7 @@ fn finalization_does_not_mark_parsed_expression_overlay_reference_finalized() {
             const_values: &mut constants,
             string_table: &mut string_table,
             template_ir_store: Rc::clone(&template_ir_store),
+            external_package_registry: None,
             module_resources: None,
             expression_pending: Vec::new(),
             expression_results: Vec::new(),
@@ -460,6 +465,7 @@ fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collecti
             const_values: &mut constants,
             string_table: &mut string_table,
             template_ir_store: Rc::clone(&template_ir_store),
+            external_package_registry: None,
             module_resources: None,
             expression_pending: Vec::new(),
             expression_results: Vec::new(),
@@ -554,6 +560,7 @@ fn finalization_normalizes_conditional_selector_payloads_into_expression_overlay
             const_values: &mut constants,
             string_table: &mut string_table,
             template_ir_store: Rc::clone(&template_ir_store),
+            external_package_registry: None,
             module_resources: None,
             expression_pending: Vec::new(),
             expression_results: Vec::new(),
@@ -614,7 +621,7 @@ fn finalization_normalizes_conditional_selector_payloads_into_expression_overlay
     };
     assert!(
         structural_selector_is_unchanged,
-        "Phase 10 conditional-selector normalization should layer the normalized payload through an overlay"
+        "conditional-selector normalization should layer the normalized payload through an overlay"
     );
 }
 
@@ -686,6 +693,7 @@ fn finalization_normalizes_loop_header_payloads_into_expression_overlay() {
             const_values: &mut constants,
             string_table: &mut string_table,
             template_ir_store: Rc::clone(&template_ir_store),
+            external_package_registry: None,
             module_resources: None,
             expression_pending: Vec::new(),
             expression_results: Vec::new(),
@@ -746,7 +754,7 @@ fn finalization_normalizes_loop_header_payloads_into_expression_overlay() {
     };
     assert!(
         structural_header_is_unchanged,
-        "Phase 10 loop-header normalization should layer the normalized payload through an overlay"
+        "loop-header normalization should layer the normalized payload through an overlay"
     );
 }
 
@@ -844,6 +852,7 @@ fn finalization_fold_uses_finalized_expression_overlay_view() {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
                 template_ir_store: &template_ir_store,
+                external_package_registry: None,
                 expression_builder: &mut expressions,
                 const_values: &mut constants,
             },
@@ -1062,6 +1071,7 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
                 template_ir_store: &template_ir_store,
+                external_package_registry: None,
                 expression_builder: &mut expressions,
                 const_values: &mut constants,
             },
@@ -1204,6 +1214,7 @@ fn finalization_ignores_parsed_child_overlay_before_later_composed_descendant() 
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
                 template_ir_store: &template_ir_store,
+                external_package_registry: None,
                 expression_builder: &mut expressions,
                 const_values: &mut constants,
             },
@@ -1237,6 +1248,7 @@ fn finalization_rejects_nested_runtime_wrapper_in_exact_wrapper_overlay() {
             string_table: &mut string_table,
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             template_ir_store: &template_ir_store,
+            external_package_registry: None,
             expression_builder: &mut expressions,
             const_values: &mut constants,
         },
@@ -1279,6 +1291,7 @@ fn finalization_keeps_valid_runtime_slot_plan_out_of_folded_string() {
             string_table: &mut string_table,
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             template_ir_store: &template_ir_store,
+            external_package_registry: None,
             expression_builder: &mut expressions,
             const_values: &mut constants,
         },
@@ -1335,6 +1348,7 @@ fn finalization_replaces_renderable_runtime_slot_plan_with_owned_handoff() {
             const_values: &mut constants,
             string_table: &mut string_table,
             template_ir_store: Rc::clone(&template_ir_store),
+            external_package_registry: None,
             module_resources: None,
             expression_pending: Vec::new(),
             expression_results: Vec::new(),
@@ -1403,6 +1417,7 @@ fn runtime_handoff_shape_uses_root_slot_plan_not_preparation_reason() {
             &expressions,
             &constants,
             TemplatePreparationMode::Value,
+            None,
         )
         .expect("runtime-slot preparation should succeed")
     };
@@ -1417,6 +1432,7 @@ fn runtime_handoff_shape_uses_root_slot_plan_not_preparation_reason() {
         const_values: &mut constants,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
+        external_package_registry: None,
         module_resources: None,
         expression_pending: Vec::new(),
         expression_results: Vec::new(),
@@ -1479,7 +1495,7 @@ fn module_constant_normalization_rejects_runtime_slot_plan_with_structured_diagn
         &template_ir_store.borrow(),
         &mut expressions,
         &mut constants,
-        &mut string_table,
+        FoldServices::new(&mut string_table, None, None),
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         None,
     )
@@ -1521,6 +1537,7 @@ fn finalization_accepts_supported_nested_wrapper_exact_view() {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
                 template_ir_store: &template_ir_store,
+                external_package_registry: None,
                 expression_builder: &mut expressions,
                 const_values: &mut constants,
             },
@@ -1633,6 +1650,7 @@ fn finalization_fold_uses_resolved_slot_view_context() {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
                 template_ir_store: &template_ir_store,
+                external_package_registry: None,
                 expression_builder: &mut expressions,
                 const_values: &mut constants,
             },
@@ -1697,6 +1715,7 @@ fn finalization_fold_composed_root_with_unfilled_slot_emits_no_slot_output() {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
                 template_ir_store: &template_ir_store,
+                external_package_registry: None,
                 expression_builder: &mut expressions,
                 const_values: &mut constants,
             },
@@ -1764,6 +1783,7 @@ fn finalization_fold_formatted_root_with_unfilled_slot_emits_no_slot_output() {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
                 template_ir_store: &template_ir_store,
+                external_package_registry: None,
                 expression_builder: &mut expressions,
                 const_values: &mut constants,
             },

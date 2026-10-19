@@ -261,6 +261,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
                     parameters,
                     returns,
                     error_return_type: function.error_return_type.cloned(),
+                    const_eval: None,
                     lowerings: ExternalFunctionLowerings {
                         js: Some(js_lowering),
                         wasm: None,

@@ -1,13 +1,18 @@
 //! Result shape, checked receiving and immutable handling invariants in the expression owner.
 
 use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
+use crate::compiler_frontend::ast::expressions::eval_expression::result_type::resolved_operation;
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExpressionOp, ExpressionOperationView, SuccessShape,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::FallibleExpressionHandling;
+use crate::compiler_frontend::ast::expressions::failure_facts::ExpressionFailureFacts;
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, ValueReceiverContext};
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 #[test]
 fn slots_preserve_zero_one_and_multiple_shapes() {
@@ -175,34 +180,81 @@ fn handling_keeps_success_slots_and_failure_evidence_but_closes_own_error_channe
 fn occurrence_replacements_are_immutable_and_reuse_unchanged_roots() {
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut values = ConstValueStore::default();
+    let left = expressions
+        .fixed_scalar(
+            &mut values,
+            FixedScalarValue::signed(FixedScalar::I32, 7).expect("test literal fits I32"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("left literal");
+    let right = expressions
+        .fixed_scalar(
+            &mut values,
+            FixedScalarValue::signed(FixedScalar::I32, 2).expect("test literal fits I32"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("right literal");
+    let operand_type = expressions
+        .view_owned(left)
+        .expect("left view")
+        .value_type_id()
+        .expect("left literal has one value type");
+    let Ok(divide) = resolved_operation(
+        Operator::Divide,
+        None,
+        operand_type,
+        operand_type,
+        Some(operand_type),
+        &TypeEnvironment::new(),
+    ) else {
+        panic!("i32 division should resolve");
+    };
     let original = expressions
-        .bool(&mut values, true, None, ValueMode::ImmutableOwned)
-        .expect("literal");
-    let row_count = expressions.len();
-    let unchanged = expressions
-        .with_regular_division_provenance(original, false)
-        .expect("unchanged fact");
-    assert_eq!(unchanged, original);
-    assert_eq!(expressions.len(), row_count);
-
-    let replacement = expressions
-        .with_regular_division_provenance(original, true)
-        .expect("scratch replacement");
-    assert_ne!(replacement, original);
+        .resolved_operation(left, Some(right), divide, ValueMode::ImmutableOwned)
+        .expect("division should construct");
     assert!(
-        !expressions
+        expressions
             .view_owned(original)
             .expect("original view")
             .classification()
             .contains_regular_division
     );
-    assert!(
+
+    let authored_failure = expressions
+        .view_owned(original)
+        .expect("original view")
+        .failure_facts()
+        .cloned();
+    let replacement_facts = ExpressionFailureFacts::default();
+    let replacement = expressions
+        .with_failure_facts(original, replacement_facts.clone())
+        .expect("scratch replacement");
+    assert_ne!(replacement, original);
+    assert_eq!(
+        expressions
+            .view_owned(original)
+            .expect("original view")
+            .failure_facts()
+            .cloned(),
+        authored_failure,
+        "a replacement must leave the authored row untouched"
+    );
+    assert_eq!(
         expressions
             .view_owned(replacement)
             .expect("replacement view")
-            .classification()
-            .contains_regular_division
+            .failure_facts(),
+        Some(&replacement_facts)
     );
+
+    let row_count = expressions.len();
+    let unchanged = expressions
+        .with_failure_facts(replacement, replacement_facts)
+        .expect("unchanged facts");
+    assert_eq!(unchanged, replacement);
+    assert_eq!(expressions.len(), row_count);
     assert_eq!(
         expressions
             .view_owned(original)

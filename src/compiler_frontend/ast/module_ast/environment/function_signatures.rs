@@ -24,14 +24,14 @@ use crate::compiler_frontend::ast::statements::functions::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::{
-    collect_type_parameter_ids_from_type, intern_resolved_function_signature,
-    resolve_function_signature, validate_generic_parameters_used,
+    intern_resolved_function_signature, resolve_function_signature,
+    validate_generic_parameters_used,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidReceiverDeclarationReason,
+    CompilerDiagnostic, InvalidReceiverDeclarationReason, PublicGenericOwnerKind,
 };
-use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::{
@@ -83,23 +83,20 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 trait_environment,
                 string_table,
             )?;
-            if header.export_mode.is_public() {
-                let function_name = self
-                    .path_fork
-                    .component(header.declaration_path)
-                    .ok_or_else(|| {
-                        self.error_messages(
-                            CompilerError::compiler_error(
-                                "Public generic function header had no source-path name.",
-                            ),
-                            string_table,
-                        )
-                    })?;
+            // The module root's surface decides which functions are public, so a function
+            // re-exported from another file is checked too. Receiver methods are never exported;
+            // the receiver gate below checks their bounds once the receiver type is known.
+            if !generic_parameters.is_empty()
+                && self.source_path_is_public_from_root_file(
+                    &header.declaration_path,
+                    &self.header_source_path(header),
+                )
+            {
                 self.validate_public_generic_bounds(
-                    function_name,
+                    header,
+                    PublicGenericOwnerKind::Function,
                     generic_parameters,
                     &resolved_bounds_by_local,
-                    &self.header_source_path(header),
                     trait_environment,
                     string_table,
                 )?;
@@ -133,11 +130,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             //  Parse unresolved signature
             // ---------------------------------
 
+            let signature_context = self
+                .environment_header_scope(header, string_table)
+                .with_file_visibility(Arc::clone(&visibility))
+                .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants));
             let unresolved_signature = {
-                let signature_context = self
-                    .environment_header_scope(header, string_table)
-                    .with_file_visibility(Arc::clone(&visibility))
-                    .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants));
                 let owner_tokens = self.token_owner(header.tokens.source()).ok_or_else(|| {
                     self.error_messages(
                         CompilerError::compiler_error(
@@ -208,22 +205,31 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 // for its type environment; the path fork is not mutated by signature resolution.
                 unsafe { &*path_fork },
                 string_table,
+                Some(&signature_context),
             )
             .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
+            // Release the scope's declaration-table `Rc` before the builder mutates it below.
+            drop(signature_context);
+            // Receiver methods are never exported, so the export gate above never reaches them.
+            // Their bounds still project onto a public nominal, so a public receiver checks them
+            // here, before any projection can publish them.
+            if let Some(ReceiverKey::Struct(receiver_path) | ReceiverKey::Choice(receiver_path)) =
+                &resolved_signature.receiver
+            {
+                let public_root_file = self.header_source_path(header);
+                if self.source_path_is_public_from_root_file(receiver_path, &public_root_file) {
+                    self.validate_public_generic_bounds(
+                        header,
+                        PublicGenericOwnerKind::ReceiverMethod,
+                        generic_parameters,
+                        &resolved_bounds_by_local,
+                        trait_environment,
+                        string_table,
+                    )?;
+                }
+            }
 
             let mut used_generic_parameters = rustc_hash::FxHashSet::default();
-            for parameter in &resolved_signature.signature.parameters {
-                collect_type_parameter_ids_from_type(
-                    &parameter.diagnostic_type,
-                    &mut used_generic_parameters,
-                );
-            }
-            for return_slot in &resolved_signature.signature.returns {
-                collect_type_parameter_ids_from_type(
-                    return_slot.data_type(),
-                    &mut used_generic_parameters,
-                );
-            }
             if let Some(registered_generic_parameters) = registered_generic_parameters.as_ref() {
                 collect_type_parameter_ids_from_signature_type_ids(
                     &resolved_signature.signature,
@@ -259,7 +265,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 receiver: resolved_signature.receiver.clone(),
                             });
                         function_declaration.type_id = function_type_id;
-                        function_declaration.diagnostic_type = DataType::Inferred;
                         Ok(())
                     } else {
                         Err(CompilerError::compiler_error(
@@ -387,6 +392,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .parameters
                     .first()
                     .is_some_and(|parameter| parameter.value_mode.is_mutable()),
+                value_carried: true,
                 signature: resolved.signature.clone(),
             };
 
@@ -514,12 +520,14 @@ fn collect_type_parameter_ids_from_signature_type_ids(
     used_parameters: &mut rustc_hash::FxHashSet<TypeParameterId>,
 ) {
     for parameter in &signature.parameters {
-        collect_type_parameter_ids_from_type_id(
-            parameter.type_id,
-            type_environment,
-            canonical_by_local,
-            used_parameters,
-        );
+        for type_id in parameter.semantic_type_ids() {
+            collect_type_parameter_ids_from_type_id(
+                type_id,
+                type_environment,
+                canonical_by_local,
+                used_parameters,
+            );
+        }
     }
 
     for return_slot in &signature.returns {

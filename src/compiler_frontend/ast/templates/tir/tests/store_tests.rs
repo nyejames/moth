@@ -220,8 +220,8 @@ fn out_of_bounds_lookup_returns_none() {
 fn push_or_reuse_wrapper_set_reuses_equivalent_empty_set() {
     let mut store = TemplateIrStore::new();
 
-    let id_a = store.push_or_reuse_wrapper_set(vec![]);
-    let id_b = store.push_or_reuse_wrapper_set(vec![]);
+    let id_a = store.push_or_reuse_wrapper_set(&[]);
+    let id_b = store.push_or_reuse_wrapper_set(&[]);
 
     assert_eq!(id_a, id_b, "empty wrapper vectors should be reused");
     assert_eq!(store.wrapper_set_count(), 1);
@@ -233,8 +233,8 @@ fn push_or_reuse_wrapper_set_creates_new_for_different_lengths() {
 
     let wrapper_id = build_finalized_tir_template(&mut store);
 
-    let id_a = store.push_or_reuse_wrapper_set(vec![]);
-    let id_b = store.push_or_reuse_wrapper_set(vec![TemplateWrapperReference::new(
+    let id_a = store.push_or_reuse_wrapper_set(&[]);
+    let id_b = store.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
         wrapper_id,
         TemplateTirPhase::Finalized,
         TemplateViewContext::default(),
@@ -252,12 +252,12 @@ fn push_or_reuse_wrapper_set_reuses_same_template_id() {
     let mut store = TemplateIrStore::new();
     let template_id = build_finalized_tir_template(&mut store);
 
-    let id_a = store.push_or_reuse_wrapper_set(vec![TemplateWrapperReference::new(
+    let id_a = store.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
         template_id,
         TemplateTirPhase::Finalized,
         TemplateViewContext::default(),
     )]);
-    let id_b = store.push_or_reuse_wrapper_set(vec![TemplateWrapperReference::new(
+    let id_b = store.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
         template_id,
         TemplateTirPhase::Finalized,
         TemplateViewContext::default(),
@@ -277,12 +277,12 @@ fn push_or_reuse_wrapper_set_does_not_reuse_different_template_ids() {
     let wrapper_a = build_finalized_tir_template(&mut store);
     let wrapper_b = build_finalized_tir_template(&mut store);
 
-    let id_a = store.push_or_reuse_wrapper_set(vec![TemplateWrapperReference::new(
+    let id_a = store.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
         wrapper_a,
         TemplateTirPhase::Finalized,
         TemplateViewContext::default(),
     )]);
-    let id_b = store.push_or_reuse_wrapper_set(vec![TemplateWrapperReference::new(
+    let id_b = store.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
         wrapper_b,
         TemplateTirPhase::Finalized,
         TemplateViewContext::default(),
@@ -529,7 +529,7 @@ fn active_slot_conversion_publishes_derived_child_and_rewrites_reference() {
         );
         (template_id, root)
     };
-    let wrapper_set = store.push_or_reuse_wrapper_set(Vec::new());
+    let wrapper_set = store.push_or_reuse_wrapper_set(&[]);
     store
         .set_conditional_child_wrapper_set(child_template_id, wrapper_set)
         .expect("child wrapper metadata should attach");
@@ -703,7 +703,7 @@ fn derived_publication_preserves_source_metadata() {
         TemplateIrSummary::default(),
         None,
     ));
-    let wrapper_set = store.push_or_reuse_wrapper_set(vec![TemplateWrapperReference::new(
+    let wrapper_set = store.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
         source,
         TemplateTirPhase::Finalized,
         TemplateViewContext::default(),

@@ -1,0 +1,16 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0074"]
+message_contains = [
+    "Public generic choice 'Pick' exposes private trait bound 'PRIVATE_DISPLAY'. Make the trait public in the module that declares it, or keep the choice private.",
+]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0074"
+path = "input/sub/@mod.moth"
+line = 4
+column = 20
+count = 1

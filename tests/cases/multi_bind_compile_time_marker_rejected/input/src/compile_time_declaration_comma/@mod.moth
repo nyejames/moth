@@ -1,0 +1,4 @@
+run ||:
+    name #= "hi", other = 1
+    io.line(name)
+;

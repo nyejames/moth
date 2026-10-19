@@ -8,6 +8,10 @@
 //! The reducer owns exact-view entry points, node dispatch and output assembly.
 //! Branch/loop semantics and virtual wrapper insertion live in sibling modules.
 
+use crate::compiler_frontend::ast::const_eval::{
+    ConstantFoldError, ConstantFoldOutcome, ConstantFoldRefusalReason, FoldRequirement,
+    FoldServices, constant_fold,
+};
 use crate::compiler_frontend::ast::const_values::store::{ConstStringPiece, ConstStringValue};
 use crate::compiler_frontend::ast::const_values::{ConstValuePayload, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::expression_store::{
@@ -154,6 +158,8 @@ pub(super) struct FoldOutputState {
     pub(super) emitted_output: bool,
     pub(super) provenance: SyntheticInterfaceProvenance,
     pub(super) projection_pieces: Option<Vec<FoldedConstTemplatePiece>>,
+    /// Set when a nested fold refused to produce text; every later node then stops folding.
+    pub(super) refusal: Option<ConstantFoldRefusalReason>,
     structural_pieces: Option<Vec<ConstStringPiece>>,
 }
 
@@ -164,6 +170,7 @@ impl FoldOutputState {
             emitted_output: false,
             provenance: SyntheticInterfaceProvenance::empty(),
             projection_pieces: None,
+            refusal: None,
             structural_pieces: None,
         }
     }
@@ -181,6 +188,7 @@ impl FoldOutputState {
             emitted_output: false,
             provenance,
             projection_pieces: None,
+            refusal: None,
             structural_pieces: None,
         }
     }
@@ -473,7 +481,11 @@ pub(crate) fn fold_prepared_const_template_pattern(
         .into());
     }
 
-    let result = fold_exact_view_with_projection(&view, fold_context, true, Some(view.root_ref()))?;
+    let mut result =
+        fold_exact_view_with_projection(&view, fold_context, true, Some(view.root_ref()))?;
+    if let Some(diagnostic) = result.take_required_diagnostic() {
+        return Err(diagnostic.into());
+    }
     let pieces = result.projection_pieces.ok_or_else(|| {
         CompilerError::compiler_error(
             "TIR const-template projection completed without structured output pieces.",
@@ -585,6 +597,9 @@ fn fold_tir_template_with_view(
     )?;
 
     let emission = build_emission_from_buffer(output_state, estimated_bytes, fold_context);
+    if emission.refusal.is_some() {
+        return Ok(emission);
+    }
 
     let wrapper_references = match template.conditional_child_wrapper_set {
         Some(wrapper_set_id) => store
@@ -599,6 +614,7 @@ fn fold_tir_template_with_view(
         emission,
         provenance,
         projection_pieces,
+        ..
     } = emission;
     fold_conditional_child_wrappers_around_emission(
         wrapper_references,
@@ -651,6 +667,9 @@ pub(super) fn fold_tir_node_into_buffer(
     fold_input: &FoldTraversalInput<'_, '_>,
     insertion: FoldInsertion<'_>,
 ) -> Result<(), TemplateError> {
+    if output_state.refusal.is_some() {
+        return Ok(());
+    }
     let store = fold_input.view.store();
     add_ast_counter(AstCounter::TirFoldNodesVisited, 1);
 
@@ -876,7 +895,11 @@ fn fold_tir_dynamic_expression(
     fold_input: &FoldTraversalInput<'_, '_>,
 ) -> Result<(), TemplateError> {
     let store = fold_input.view.store();
-    let resolved = resolve_fold_bindings_in_expression(expression, fold_context)?;
+    let resolved_expression = resolve_fold_bindings_in_expression(expression, fold_context)?;
+    // Binding substitution already folded this root speculatively, so its refusal is the one a
+    // second fold would report. Reading it here keeps that work from being repeated.
+    let substitution_refusal = resolved_expression.refusal;
+    let resolved = resolved_expression.expression;
 
     // This is the exact selected dynamic-expression payload. Binding
     // substitution has already happened, so its metadata includes any
@@ -919,7 +942,7 @@ fn fold_tir_dynamic_expression(
         fold_context.expression_builder,
         fold_context.const_values,
     )? {
-        for piece in &pieces {
+        for piece in pieces {
             match piece {
                 ConstStringPiece::Text(text) => {
                     output_state.append_text(fold_context.string_table.resolve(*text));
@@ -933,8 +956,40 @@ fn fold_tir_dynamic_expression(
         return Ok(());
     }
 
+    let folded = if let Some(reason) = substitution_refusal {
+        output_state.refusal = Some(reason);
+        return Ok(());
+    } else {
+        match constant_fold(
+            resolved,
+            fold_context.expression_builder,
+            fold_context.const_values,
+            FoldServices::new(
+                &mut *fold_context.string_table,
+                fold_context.source_scope,
+                fold_context.external_package_registry,
+            ),
+            FoldRequirement::Opportunistic,
+        ) {
+            Ok(
+                ConstantFoldOutcome::Folded(expression)
+                | ConstantFoldOutcome::NotConstant(expression),
+            ) => expression,
+            Ok(ConstantFoldOutcome::Refused { reason, .. }) => {
+                output_state.refusal = Some(reason);
+                return Ok(());
+            }
+            Err(ConstantFoldError::Diagnostic(diagnostic))
+                if !diagnostic.is_compiler_capacity_exceeded() =>
+            {
+                resolved
+            }
+            Err(error) => return Err(error.into()),
+        }
+    };
+
     match fold_expression_to_string(
-        fold_context.expression_builder.view(resolved)?,
+        fold_context.expression_builder.view(folded)?,
         &*fold_context.const_values,
         &*fold_context.string_table,
     )? {
@@ -956,16 +1011,16 @@ fn fold_tir_dynamic_expression(
 /// scalar string-coercion helper to render unresolved anchors.
 /// WHY: structural strings and scalar values share the language-level `String` type, but only the
 /// TIR reducer owns ordered template output and can preserve anchor boundaries.
-fn structural_string_pieces(
+fn structural_string_pieces<'constants>(
     expression: ExprId,
     expressions: &mut AstExpressionBuilder,
-    constants: &ConstValueStore,
-) -> Result<Option<Vec<ConstStringPiece>>, TemplateError> {
+    constants: &'constants ConstValueStore,
+) -> Result<Option<&'constants [ConstStringPiece]>, TemplateError> {
     let view = expressions.view(expression)?;
     match view.operation() {
         ExpressionOperationView::Constant(id) => match constants.payload(id) {
             Some(ConstValuePayload::String(value)) => match value {
-                ConstStringValue::Pieces(pieces) => Ok(Some(pieces.clone())),
+                ConstStringValue::Pieces(pieces) => Ok(Some(pieces.as_slice())),
                 ConstStringValue::Text(_) => Ok(None),
             },
             Some(ConstValuePayload::Coerced(inner)) => {
@@ -1066,7 +1121,6 @@ fn fold_child_template_with_insertion(
     let store = fold_input.view.store();
     let child_template = store
         .get_template(reference.root)
-        .cloned()
         .ok_or_else(|| missing_template_diagnostic(reference.root))?;
     reject_slot_insert_template(&child_template.kind)?;
 
@@ -1164,6 +1218,14 @@ pub(super) fn build_emission_from_buffer(
     estimated_bytes: usize,
     fold_context: &mut TirFoldContext<'_>,
 ) -> TemplateFoldResult {
+    if let Some(reason) = output_state.refusal.take() {
+        return TemplateFoldResult::with_projection(
+            TemplateEmission::NoOutput,
+            output_state.provenance,
+            output_state.projection_pieces,
+        )
+        .with_refusal(Some(reason));
+    }
     if !output_state.emitted_output {
         return TemplateFoldResult::with_projection(
             TemplateEmission::NoOutput,
@@ -1188,7 +1250,6 @@ pub(super) fn build_emission_from_buffer(
         projection_pieces,
     )
 }
-
 // -------------------------
 //  Internal diagnostics
 // -------------------------

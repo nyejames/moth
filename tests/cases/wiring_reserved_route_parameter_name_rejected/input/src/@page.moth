@@ -1,0 +1,3 @@
+send |Route String| -> String:
+    return "text"
+;

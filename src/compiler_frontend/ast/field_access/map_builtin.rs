@@ -306,7 +306,7 @@ pub(super) fn parse_map_builtin_member_typed(
                     member_name: member.op.source_name(),
                     member_span,
                 },
-                &arguments,
+                arguments,
                 &expectations,
                 scope_context,
                 type_interner,

@@ -177,7 +177,7 @@ fn finalize_receiver_method_summaries(
                     hir_module,
                 )?;
             }
-            PublicReceiverMethodCategory::GenericTemplate => {
+            PublicReceiverMethodCategory::GenericTemplate(_) => {
                 validate_generic_template_callable(
                     &method.method_origin,
                     concrete_call_summaries,

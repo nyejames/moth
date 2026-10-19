@@ -43,13 +43,13 @@ ACTIVE_PLAN: docs/roadmap/plans/compiler-diagnostics-improvement-plan.md
 STATUS: paused
 NEXT_SLICE: Phase 4.2, catch-recovery type context
 BLOCKERS: delivered compact diagnostic records, frozen type-display snapshots and failure-lane migration
-TRANSFERRED: pending 4.1c and 4.4 belong to the typed semantic expression and native result cutover
+TRANSFERRED: 4.1c and 4.4 belong to the compact typed-expression and native result-channel work, recorded as delivered below
 NUMERIC_CATCH_HANDOFF: exact-receiver conflict/default-range, narrow-operation and authored safety-catch diagnostics are delivered with primary tests; consume their facts through the final schema without duplicating coverage
 RESUME_ACTION: reload routed authorities and current source, refresh producers/schema APIs and confirm the transferred capabilities are delivered before starting Phase 4.2
 ```
 
-The native-result transfers below remain pending implementation. Their implementation, coverage
-and source-visible messages belong to the typed semantic expression and native result cutover.
+The native-result transfers below are recorded as delivered. Their coverage and source-visible
+messages belong to the compact typed-expression and native result-channel work.
 This plan retains their design record and owns the remaining diagnostic improvements after the
 layout migration.
 
@@ -637,14 +637,14 @@ replacing the umbrella `NotResultExpression` path. Error-type mismatches use
 `InvalidBuiltinCallReason::UnhandledFallibleCall`. The discontinued bang-handler recognisers and
 their dedicated diagnostic reasons have been removed.
 
-The native-channel cutover also deleted `InvalidFallibleOperand`, its payload and reason family
+The native result-channel work also deleted `InvalidFallibleOperand`, its payload and reason family
 and `MOTH-TYPE-0004`. Unhandled error-returning operands use
 `InvalidFallibleHandlingReason::UnhandledErrorReturn` under `MOTH-RULE-0051`.
 The `result_operand_without_handler_in_operator` fixture expects that code and the
 `invalid_fallible_handling.unhandled_error_return` reason at `input/@page.moth:5:9`.
 
-**Phase 4.1c transfer, delivered in `7f87109d9`:** the typed semantic expression and native result
-cutover supplies one enclosing callable/entry contract fact for postfix `?` and `!`, including
+**Phase 4.1c transfer, delivered in `7f87109d9`:** the compact typed-expression and native result
+channel work supplies one enclosing callable/entry contract fact for postfix `?` and `!`, including
 nested branches. Consumers don't guess from the immediate `ContextKind` or rebuild signatures.
 Postfix `?` requires exactly one compatible optional success slot. Its
 `invalid_fallible_handling.function_has_multiple_success_returns` reason carries the authored
@@ -723,8 +723,8 @@ Tests need:
 
 **Original finding:** DIAG-031
 
-**Disposition: transferred and delivered in `00e4ad555`.** The typed semantic expression and native
-result cutover enforces receiver arity before coercion or lowering through `InvalidValueReceiver`
+**Disposition: transferred and delivered in `00e4ad555`.** The compact typed-expression and native
+result-channel work enforces receiver arity before coercion or lowering through `InvalidValueReceiver`
 under `MOTH-RULE-0087`, without using `InvalidMultiBind` for source that has no multi-bind.
 The payload records receiver kind, target count, produced success-slot count and authored producer
 location. Guidance asks for one target per success slot without `_`, implicit discards, fabricated

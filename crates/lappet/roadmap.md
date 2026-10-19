@@ -8,10 +8,13 @@ available.
 
 ## Current state
 
-- Status: initial dependency-free crate and design documents only.
-- Current slice: design review and workspace integration.
-- Blockers: the checkpoints below, then the relevant delivered compiler APIs.
-- Next action: review the CLI separation checkpoint before code-bearing work.
+- Status: CLI separation delivered. The runtime crate remains dependency-free
+  and contains documentation only.
+- Current checkpoint: native binding and artefact handoff.
+- Blockers: approve that handoff and the execution checkpoints below, then consume
+  the relevant delivered compiler APIs.
+- Next action: review milestone 2 before implementing native adapters. Package
+  management remains deferred.
 
 [Runtime design](docs/design.md), [package-manager design](docs/package-manager.md)
 and [Wasm optimisation](../../docs/src/developer-docs/wasm-optimisation/overview.mtf)
@@ -40,24 +43,52 @@ game-engine and server use cases at every public runtime/API decision.
 
 ## 1. Separate the CLI from the compiler library
 
-This is the first code-bearing milestone.
+Completed on 18 October 2026. This milestone changes package and command
+ownership without implementing a native runtime.
 
-**Checkpoint.** Fix the Cargo dependency direction and physical package layout.
-The CLI package produces `moth` and depends on the compiler and Lappet. The
-compiler library never depends on Lappet or Wasmtime. Decide which existing
-command helpers belong to the CLI and which are genuine compiler services.
-Preserve the documented public builder and host facades without forwarding
-libraries that only hide a cycle.
+**Decision.** The root `moth` package retains the compiler library.
+`crates/moth-cli` owns the `moth` executable, depends on `moth` and `lappet` and
+is the workspace default. Compiler features forward through matching CLI
+features, including their implications. The compiler has no Lappet or Wasmtime
+dependency. [The runtime design](docs/design.md#users-and-workspace-dependencies)
+records the package and service boundary.
 
-**Delivery.** Move the executable and its command ownership. Update workspace
-membership, lockfile, default command selection, installation, packaging and
-all executable-discovery callers together. Include the integration runner,
-benchmark tools, scaffolds and CI recipes. Add no runtime dependency yet.
+**Delivered.** Argument parsing, terminal presentation and scaffolding belong
+to the CLI. Compiler services retain compilation, output planning/writing,
+diagnostic contexts, instrumentation, dev execution, Boracle and the integration
+runner. The concrete builder constructor keeps its backend private. Installation,
+release packaging, benchmark/profiling discovery, feature lanes and source and
+dependency checks use the new owner. The index and validation references match.
+No runtime dependency or package-manager command was added.
 
-**Evidence.** Existing `moth` commands behave identically, the compiler remains
-usable as a library and Cargo metadata proves the acyclic dependency graph.
-Run command tests and affected packaging/benchmark-discovery checks. Update the
-index and validation command references when the package selectors change.
+**Evidence.** Local macOS AArch64 checks used Rust 1.99.0 and Node 24.21.0:
+
+- `just validate` passed after the final coverage correction: 6013 compiler unit
+  tests, 102 CLI unit tests, 19 subprocess tests, 855 xtask tests and the remaining
+  workspace tests passed. All 2787 canonical integration results were correct,
+  and docs source checking, Clippy, formatting and architecture checks passed.
+- Focused compiler project tests passed with default features and timers. CLI
+  tests passed with default features, timers/counters and Boracle. The existing
+  help test failed with campaign-only features before the implication fix and
+  passed afterwards. The restored terse-summary assertion passed.
+- Locked Cargo metadata verified package direction, default selection, binary
+  ownership and all 15 feature forwards. A separate Rust client compiled valid
+  Moth and retained a missing-input failure. Negative client probes rejected
+  access to the raw backend method, field, trait and test-only constructor.
+- `cargo install --path crates/moth-cli --locked --offline` with a local install
+  root produced `moth`. Its version/help, scaffold, check and build commands passed.
+- `just bench-validate` passed all 150 shared preflights without recording results.
+- `just timers-erasure-check` built and inspected the isolated no-timer release
+  executable successfully. The documentation release build produced 81 outputs,
+  and the generated Lappet policy states Cranelift-only V1 and future Winch.
+
+**Slice review.** Independent architecture and tooling reviews checked ownership,
+public handoffs, migrated coverage and consumers. The architecture review found
+one omitted terse-summary test, restored at its CLI owner and verified by a
+focused run and the repeated routine gate. No production correction remained.
+
+These local checks do not claim hosted platform coverage, profiling execution or
+`just validate-full` merge readiness.
 
 ## 2. Freeze the native binding and artefact handoff
 

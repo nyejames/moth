@@ -1,6 +1,5 @@
 //! Unit tests for generic parameter metadata and TypeId-native generic helpers.
 
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::{StructTypeDefinition, TypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -890,43 +889,6 @@ fn type_id_to_type_identity_key_preserves_growable_collection() {
     let round_tripped =
         type_identity_key_to_type_id(&key, &mut type_environment).expect("should round-trip");
     assert_eq!(round_tripped, growable);
-}
-
-#[test]
-fn data_type_fixed_collection_bridge_preserves_capacity() {
-    use crate::compiler_frontend::datatypes::generic_identity_bridge::{
-        data_type_to_type_identity_key, type_identity_key_to_type_id,
-    };
-
-    let data_type = DataType::fixed_collection(DataType::FixedScalar(FixedScalar::I32), 64);
-    let key = data_type_to_type_identity_key(&data_type).expect("fixed collection should bridge");
-
-    match &key {
-        TypeIdentityKey::Collection {
-            fixed_capacity,
-            element,
-        } => {
-            assert_eq!(*fixed_capacity, Some(64));
-            assert_eq!(
-                element.as_ref(),
-                &TypeIdentityKey::Builtin(BuiltinTypeKey::FixedScalar(FixedScalar::I32))
-            );
-        }
-        _ => panic!("expected Collection key"),
-    }
-
-    let mut type_environment = TypeEnvironment::new();
-    let type_id =
-        type_identity_key_to_type_id(&key, &mut type_environment).expect("key should resolve");
-    let shape = type_environment
-        .collection_shape(type_id)
-        .expect("resolved type should be a collection");
-
-    assert_eq!(
-        shape.element_type,
-        builtin_type_ids::fixed_scalar(FixedScalar::I32)
-    );
-    assert_eq!(shape.fixed_capacity, Some(64));
 }
 
 #[test]

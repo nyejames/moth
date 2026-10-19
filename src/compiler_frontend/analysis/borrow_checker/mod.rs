@@ -41,10 +41,11 @@ pub(crate) type BorrowFacts = BorrowAnalysis;
 #[allow(unused_imports)]
 pub(crate) use boracle::solve_hir_module;
 #[cfg(feature = "boracle")]
+pub use boracle::{BoracleDump, BoracleExperiment, BoracleReferenceRuleSet, BoracleRuleSelection};
+#[cfg(feature = "boracle")]
 #[allow(unused_imports)]
 pub(crate) use boracle::{
-    BoracleDump, BoracleExperiment, BoracleExperimentMetadata, BoracleModuleReport,
-    BoracleReferencePromotionStatus, BoracleReferenceRuleSet, BoracleRuleSelection,
+    BoracleExperimentMetadata, BoracleModuleReport, BoracleReferencePromotionStatus,
     BoracleServiceOptions, OriginOverlapDecision, run_hir_module,
 };
 #[cfg(feature = "boracle")]

@@ -28,7 +28,7 @@ fn fixture_workspace() -> TempDir {
             fs::create_dir_all(workspace.path().join(root)).expect("required fixture source root");
         }
 
-        let contents = if *package == "moth" {
+        let contents = if matches!(*package, "moth" | "moth-cli") {
             MOTH_MANIFEST.to_string()
         } else {
             format!("[package]\nname = \"{package}\"\nversion = \"0.1.0\"\n")
@@ -63,6 +63,12 @@ fn extracted_source_and_test_owners_report_exact_undeclared_cfg_features() {
             "moth-mon",
             "crates/moth-mon/tests/public_api.rs",
             "public_coddec",
+        ),
+        ("moth-cli", "crates/moth-cli/src/cli.rs", "cli_optionz"),
+        (
+            "moth-cli",
+            "crates/moth-cli/tests/cli_exit_status.rs",
+            "cli_exit_statuus",
         ),
     ];
 
@@ -107,6 +113,8 @@ fn extracted_source_and_test_owners_report_exact_undeclared_cfg_features() {
             "crates/moth-lexical/src",
             "crates/moth-mon/src",
             "crates/moth-mon/tests",
+            "crates/moth-cli/src",
+            "crates/moth-cli/tests",
             "xtask/src",
         ]
     );
@@ -143,6 +151,41 @@ fn lane_names_are_unique() {
     names.dedup();
 
     assert_eq!(names.len(), total, "duplicate lane names in the matrix");
+}
+
+#[test]
+fn cli_lanes_mirror_compiler_feature_sets_without_unifying_lanes() {
+    let compiler_lanes: Vec<_> = FEATURE_LANES
+        .iter()
+        .filter(|lane| lane.package == "moth" && lane.kind == FeatureLaneKind::Standard)
+        .collect();
+    let cli_lanes: Vec<_> = FEATURE_LANES
+        .iter()
+        .filter(|lane| lane.package == "moth-cli" && lane.kind == FeatureLaneKind::Standard)
+        .collect();
+
+    assert_eq!(cli_lanes.len(), compiler_lanes.len());
+    for (compiler_lane, cli_lane) in compiler_lanes.iter().zip(cli_lanes) {
+        assert_eq!(cli_lane.name, format!("cli-{}", compiler_lane.name));
+        assert_eq!(cli_lane.features, compiler_lane.features);
+    }
+
+    for (name, features) in [
+        ("cli-boracle", &["boracle"][..]),
+        ("cli-boracle-campaign", &["boracle", "boracle_campaign"][..]),
+    ] {
+        let lane = FEATURE_LANES
+            .iter()
+            .find(|lane| lane.name == name)
+            .expect("CLI opt-in lane should exist");
+        assert_eq!(lane.package, "moth-cli");
+        assert_eq!(lane.features, features);
+        assert!(matches!(lane.kind, FeatureLaneKind::OptIn { .. }));
+        assert!(
+            super::validate_opt_in_lane(lane, ROOT_JUSTFILE).is_ok(),
+            "the declared CLI opt-in owner must remain connected to its Just recipe"
+        );
+    }
 }
 
 #[test]
@@ -448,13 +491,15 @@ fn the_standard_execution_set_excludes_every_boracle_lane() {
 
     assert!(!standard_names.contains(&"boracle"));
     assert!(!standard_names.contains(&"boracle-campaign"));
+    assert!(!standard_names.contains(&"cli-boracle"));
+    assert!(!standard_names.contains(&"cli-boracle-campaign"));
 
     let opt_in_count = FEATURE_LANES
         .iter()
         .filter(|lane| matches!(lane.kind, FeatureLaneKind::OptIn { .. }))
         .count();
 
-    assert_eq!(opt_in_count, 2);
+    assert_eq!(opt_in_count, 4);
     assert_eq!(standard_names.len(), FEATURE_LANES.len() - opt_in_count);
 }
 

@@ -425,7 +425,7 @@ fn run_frontend_benchmark_with_owner_internal(
     // Reset at the benchmark command boundary, before bootstrap/config compilation. The
     // compilation module itself must not reset here because bootstrap owns measured preparation.
     crate::compiler_frontend::instrumentation::reset_memory_ledger();
-    let project_builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let project_builder = ProjectBuilder::new(HtmlProjectBuilder::new());
     let requested_inputs = build_config_inputs_from_options(&options.build_config_inputs)?;
 
     let path = options.entry_path.to_str().ok_or_else(|| {

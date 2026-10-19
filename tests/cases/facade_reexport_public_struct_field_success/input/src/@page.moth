@@ -1,0 +1,4 @@
+@sub Label, Box
+
+boxed = Box(Label("public"))
+[:facade_reexport_public_struct_field_success [boxed.value.text]]

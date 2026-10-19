@@ -19,9 +19,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::datatypes::numeric_operators::{
-    NumericOperator, range_iteration_domain,
-};
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::blocks::HirLocal;
@@ -239,7 +237,7 @@ impl<'a> HirBuilder<'a> {
         // zero-step guard -> magnitude normalization -> bounds-safe candidate update.
         let parent_region = self.current_region_or_error(span_ref)?;
         let blocks = self.create_range_loop_blocks(parent_region, span_ref)?;
-        let types = self.resolve_range_loop_types(expressions, bindings, range, span_ref)?;
+        let types = self.resolve_range_loop_types(range, span_ref)?;
         let locals = self.allocate_range_loop_locals(types)?;
         let runtime = RangeLoopRuntime {
             blocks,
@@ -384,22 +382,20 @@ impl<'a> HirBuilder<'a> {
         Ok(())
     }
 
+    /// Resolves the selected range-loop domain and its derived types.
+    ///
+    /// WHAT: reads the iteration domain the AST range policy selected for this header, then
+    ///       derives the counter/local type, the boolean flag type and the exact `I32`
+    ///       positional-index type from it.
+    /// WHY: domain selection consumes the operands' canonical types, which exist only at AST
+    ///      construction. Reusing that selected fact keeps HIR from re-deriving the same domain
+    ///      from operand result types.
     fn resolve_range_loop_types(
         &mut self,
-        expressions: &ExpressionStore,
-        bindings: &LoopBindings,
         range: &RangeLoopSpec,
         span_ref: &Option<SourceSpan>,
     ) -> Result<RangeLoopTypes, HirConstructionFailure> {
-        let binding = self.range_iteration_type(expressions, bindings, range, span_ref)?;
-        let domain = NumericScalar::from_type_id(binding, &self.type_environment);
-
-        let Some(domain) = domain else {
-            return_hir_transformation_error!(
-                "Range-loop item binding must use a numeric scalar type",
-                self.hir_error_location(span_ref)
-            );
-        };
+        let domain = range.domain;
         if matches!(domain, NumericScalar::Number(_)) {
             return_hir_transformation_error!(
                 "Range-loop Dec item bindings are unsupported",
@@ -408,20 +404,13 @@ impl<'a> HirBuilder<'a> {
         }
 
         Ok(RangeLoopTypes {
-            binding,
+            binding: domain.type_id(&self.type_environment),
             domain,
             bool_type: builtin_type_ids::BOOL,
             // The automatically supplied iteration index uses the language's exact I32
             // positional-index identity; it never follows the range counter's domain.
             int_type: builtin_type_ids::fixed_scalar(FixedScalar::I32),
         })
-    }
-
-    fn numeric_op_for_binding(&self, binding: TypeId, operator: NumericOperator) -> HirNumericOp {
-        let domain = NumericScalar::from_type_id(binding, &self.type_environment)
-            .expect("range-loop binding is validated as a numeric scalar before lowering");
-
-        HirNumericOp { operator, domain }
     }
 
     fn allocate_range_loop_locals(
@@ -709,7 +698,10 @@ impl<'a> HirBuilder<'a> {
             abs_negate_region,
         )?;
         let abs_zero = self.range_loop_zero_literal(types, span_ref, abs_negate_region)?;
-        let abs_sub_op = self.numeric_op_for_binding(types.binding, NumericOperator::Subtract);
+        let abs_sub_op = HirNumericOp {
+            operator: NumericOperator::Subtract,
+            domain: types.domain,
+        };
         self.emit_checked_numeric_assignment(
             HirLocalDestination::Update(locals.step),
             abs_sub_op,
@@ -1361,7 +1353,10 @@ impl<'a> HirBuilder<'a> {
         } else {
             (current, end)
         };
-        let subtract = self.numeric_op_for_binding(types.binding, NumericOperator::Subtract);
+        let subtract = HirNumericOp {
+            operator: NumericOperator::Subtract,
+            domain: types.domain,
+        };
         self.emit_checked_numeric_assignment(
             HirLocalDestination::Define(distance_local),
             subtract,
@@ -1397,7 +1392,10 @@ impl<'a> HirBuilder<'a> {
         } else {
             NumericOperator::Subtract
         };
-        let operation = self.numeric_op_for_binding(types.binding, operator);
+        let operation = HirNumericOp {
+            operator,
+            domain: types.domain,
+        };
         self.emit_checked_numeric_assignment(
             HirLocalDestination::Define(locals.next_value),
             operation,
@@ -1880,63 +1878,6 @@ impl<'a> HirBuilder<'a> {
         )?;
 
         Ok((binding.id, local_id))
-    }
-
-    fn range_iteration_type(
-        &mut self,
-        expressions: &ExpressionStore,
-        bindings: &LoopBindings,
-        range: &RangeLoopSpec,
-        span_ref: &Option<SourceSpan>,
-    ) -> Result<TypeId, HirConstructionFailure> {
-        if let Some(item_binding) = &bindings.item {
-            return self.lower_type_id(item_binding.type_id, span_ref);
-        }
-
-        let start_ty =
-            self.lower_type_id(expressions.view(range.start)?.value_type_id()?, span_ref)?;
-        let end_ty = self.lower_type_id(expressions.view(range.end)?.value_type_id()?, span_ref)?;
-        let step_ty = range
-            .step
-            .as_ref()
-            .map(|step| self.lower_type_id(expressions.view(*step)?.value_type_id()?, span_ref))
-            .transpose()?;
-
-        let Some(start_domain) = NumericScalar::from_type_id(start_ty, &self.type_environment)
-        else {
-            return_hir_transformation_error!(
-                "Range loop start did not lower to a numeric scalar type",
-                self.hir_error_location(span_ref)
-            );
-        };
-        let Some(end_domain) = NumericScalar::from_type_id(end_ty, &self.type_environment) else {
-            return_hir_transformation_error!(
-                "Range loop end did not lower to a numeric scalar type",
-                self.hir_error_location(span_ref)
-            );
-        };
-        let step_domain = match step_ty {
-            Some(step_ty) => {
-                let Some(step_domain) =
-                    NumericScalar::from_type_id(step_ty, &self.type_environment)
-                else {
-                    return_hir_transformation_error!(
-                        "Range loop step did not lower to a numeric scalar type",
-                        self.hir_error_location(span_ref)
-                    );
-                };
-                Some(step_domain)
-            }
-            None => None,
-        };
-        let Some(domain) = range_iteration_domain(start_domain, end_domain, step_domain) else {
-            return_hir_transformation_error!(
-                "Range loop operands have no common numeric promotion domain",
-                self.hir_error_location(span_ref)
-            );
-        };
-
-        Ok(domain.type_id(&self.type_environment))
     }
 
     fn collection_iteration_types(

@@ -36,13 +36,13 @@ own Phase 2 (`@core/text` v1) has not started, and its capability prerequisites 
 The main roadmap makes this programme active in parallel. That scheduling state
 supersedes the earlier programme-wide pause recorded during MON and data-layout
 integration. MON syntax, Rust tooling v1 and the exact numeric implementation
-are delivered. Expression work remains paused pending reassessment and explicit
-resumption. Package slices consume exact numeric, dense HIR, native result,
-bounded Wire/Route and Core constant-evaluation capabilities where required
-and delivered, without obsolete numeric sequencing or implied expression resumption.
+are delivered. The compact typed-expression foundation, its native result channels, its later type and
+folding reductions and trusted Core constant evaluation are delivered. Package
+slices consume exact numeric, dense HIR, native result, bounded Wire/Route and Core constant-evaluation
+capabilities where required and merged, without obsolete numeric sequencing or assumed capability merges.
 
 Parallel status does not remove a package's own capability gate. Text v1 and any
-slice requiring result slots or Core folding still wait for those deliveries.
+slice requiring Core folding still wait for that merge.
 Numeric-sensitive slices coordinate with the shared numeric and binding owners
 rather than independently extending legacy i32/f64-only representations. A sync
 adopts a completed shared shape directly and runs the complete package gate.
@@ -96,9 +96,9 @@ The accepted collection sorting plan lives at
 implementation companion for sorting and do not reconstruct its contract from this umbrella.
 
 The compiler-owned native result-slot and Core constant-evaluation checkpoints are hard prerequisites
-before the first Text implementation phase. The typed semantic expression foundation owns their
-delivery. Package work consumes the merged
-compiler capability and its canonical documentation rather than preserving
+before the first Text implementation phase. Native result slots are merged. Core constant evaluation
+is delivered. Package work consumes that compiler capability
+and its canonical documentation rather than preserving
 transient shapes from a short-lived plan file.
 
 ## Scope

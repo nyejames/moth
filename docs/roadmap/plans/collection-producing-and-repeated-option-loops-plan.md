@@ -539,7 +539,7 @@ If the exact HIR vocabulary changes before activation, preserve this boundary ra
 
 It is acceptable and expected for AST to retain explicit source meaning.
 
-Extend the delivered typed semantic expression store's closed value-producing control-flow form
+Extend the delivered compact typed-expression store's closed value-producing control-flow form
 with a loop-specific payload. Use child IDs and typed ranges under its existing owner rather than
 restoring the old owned `ExpressionKind::ValueBlock` tree.
 

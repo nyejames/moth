@@ -373,7 +373,9 @@ fn aggregate_value_constructors_union_child_provenance() {
 fn provenance_unioned_through_constant_folding() {
     // Binary constant folding must produce a result whose provenance is the sorted, duplicate-free
     // union of both operands' provenance.
-    use crate::compiler_frontend::ast::const_eval::{ConstantFoldOutcome, constant_fold};
+    use crate::compiler_frontend::ast::const_eval::{
+        ConstantFoldOutcome, FoldRequirement, FoldServices, constant_fold,
+    };
     use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
     use crate::compiler_frontend::symbols::string_interning::StringTable;
     use crate::compiler_frontend::tests::type_id_fixture_support::{
@@ -423,12 +425,18 @@ fn provenance_unioned_through_constant_folding() {
     );
 
     let mut string_table = StringTable::new();
-    let folded = match constant_fold(root, &mut builder, &mut constants, &mut string_table, None)
-        .expect("folding should succeed")
+    let folded = match constant_fold(
+        root,
+        &mut builder,
+        &mut constants,
+        FoldServices::new(&mut string_table, None, None),
+        FoldRequirement::Opportunistic,
+    )
+    .expect("folding should succeed")
     {
         ConstantFoldOutcome::Folded(root) => root,
         ConstantFoldOutcome::NotConstant(_) => panic!("expected a fully folded stack"),
-        ConstantFoldOutcome::TextUnavailable { .. } => {
+        ConstantFoldOutcome::Refused { .. } => {
             panic!("expected folded text to remain available")
         }
     };

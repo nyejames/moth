@@ -22,7 +22,7 @@ fn html_project_directives_fail_when_builder_does_not_register_them() {
         let entry_file = root.join(format!("{directive_name}.moth"));
         fs::write(&entry_file, source).expect("should write source file");
 
-        let builder = ProjectBuilder::new(Box::new(NoDirectiveBuilder));
+        let builder = ProjectBuilder::new(NoDirectiveBuilder);
         let result = build_project(
             &builder,
             entry_file
@@ -62,7 +62,7 @@ fn frontend_builtin_directives_work_without_builder_registered_project_directive
     )
     .expect("should write source file");
 
-    let builder = ProjectBuilder::new(Box::new(NoDirectiveBuilder));
+    let builder = ProjectBuilder::new(NoDirectiveBuilder);
     let result = build_project(
         &builder,
         entry_file

@@ -1,0 +1,9 @@
+AppMessage ::
+    Child | value String |,
+;
+
+make type T |event Route of String -> AppMessage| -> T?:
+    return none
+;
+
+result = make(AppMessage::Child)

@@ -1,0 +1,3 @@
+read |value Wire of Route of Message|:
+    return
+;

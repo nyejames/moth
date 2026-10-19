@@ -8,7 +8,7 @@
 
 use crate::compiler_frontend::builtins::casts::traits::is_core_cast_trait_name;
 use crate::compiler_frontend::builtins::error_type::{
-    is_reserved_builtin_symbol, register_builtin_error_types,
+    is_reserved_builtin_symbol, is_reserved_parameter_contract_symbol, register_builtin_error_types,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
@@ -131,6 +131,13 @@ fn validate_declared_name(
         return Some(diagnostic);
     }
 
+    if is_reserved_parameter_contract_symbol(symbol_name_text) {
+        return Some(CompilerDiagnostic::reserved_name_collision(
+            symbol_name,
+            ReservedNameOwner::ParameterContract,
+            header.name_span,
+        ));
+    }
     if is_reserved_builtin_symbol(symbol_name_text) {
         return Some(CompilerDiagnostic::reserved_name_collision(
             symbol_name,

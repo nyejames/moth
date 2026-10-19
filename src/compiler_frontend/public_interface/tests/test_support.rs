@@ -165,6 +165,7 @@ pub(crate) fn receiver_entry(
         receiver,
         source_file: PathId::ROOT,
         receiver_mutable: false,
+        value_carried: true,
         signature,
     }
 }

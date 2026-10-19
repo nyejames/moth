@@ -41,21 +41,21 @@ validate-full:
     just cache-maintain
 
 fmt:
-    cargo fmt -p moth -p moth-lexical -p moth-mon
+    cargo fmt -p moth -p moth-cli -p moth-lexical -p moth-mon
 
 fmt-check:
-    cargo fmt --check -p moth -p moth-lexical -p moth-mon
+    cargo fmt --check -p moth -p moth-cli -p moth-lexical -p moth-mon
 
 fmt-workspace-check:
     cargo fmt --all --check
 
 clippy:
-    cargo clippy -p moth -p moth-lexical -p moth-mon
+    cargo clippy -p moth -p moth-cli -p moth-lexical -p moth-mon
 
 # Broader coverage is named explicitly rather than hidden inside ordinary `cargo clippy`.
 # The manifest's shared warning policy applies here and to direct commands alike.
 clippy-features:
-    cargo clippy --workspace --all-targets --features moth/timers,moth/detailed_timers,moth/benchmark_counters,moth/show_tokens,moth/show_headers,moth/show_ast,moth/show_eval,moth/show_hir,moth/show_codegen,moth/show_borrow_checker,moth/checked_blocks,moth/async_blocks
+    cargo clippy --workspace --all-targets --features moth/timers,moth/detailed_timers,moth/benchmark_counters,moth/data_layout_memory_probe,moth/show_tokens,moth/show_headers,moth/show_ast,moth/show_eval,moth/show_hir,moth/show_codegen,moth/show_borrow_checker,moth/checked_blocks,moth/async_blocks,moth-cli/timers,moth-cli/detailed_timers,moth-cli/benchmark_counters,moth-cli/data_layout_memory_probe,moth-cli/show_tokens,moth-cli/show_headers,moth-cli/show_ast,moth-cli/show_eval,moth-cli/show_hir,moth-cli/show_codegen,moth-cli/show_borrow_checker,moth-cli/checked_blocks,moth-cli/async_blocks
 
 validate-unit-tests:
     cargo test --workspace --quiet -- --format terse
@@ -67,10 +67,10 @@ cache-maintain:
 # Explicit maintenance only. Stop editors/agents running Cargo in this target directory first.
 # This discards current workspace artifacts too, and therefore costs a subsequent rebuild.
 cache-evict-preview:
-    cargo clean --profile dev --package moth --package moth-lexical --package moth-mon --package xtask --dry-run --verbose
+    cargo clean --profile dev --package moth --package moth-cli --package moth-lexical --package moth-mon --package xtask --dry-run --verbose
 
 cache-evict:
-    cargo clean --profile dev --package moth --package moth-lexical --package moth-mon --package xtask
+    cargo clean --profile dev --package moth --package moth-cli --package moth-lexical --package moth-mon --package xtask
 
 ship:
     cargo fmt --all
@@ -136,25 +136,29 @@ feature-lane-check:
     cargo run --quiet --package xtask --bin xtask -- feature-lane-check
 
 boracle:
-    cargo fmt --check
+    cargo fmt --check -p moth -p moth-cli
     cargo clippy -p moth --all-targets --features boracle
+    cargo clippy -p moth-cli --all-targets --features boracle
     cargo test -p moth --quiet borrow_problem -- --format terse
     cargo test -p moth --quiet last_use -- --format terse
     # Static solver, source service and bounded operational oracle. The measured campaign is separate.
     cargo test -p moth --quiet --features boracle boracle -- --format terse
+    cargo test -p moth-cli --quiet --features boracle -- --format terse
 
 boracle-campaign:
     cargo clippy -p moth --all-targets --features boracle,boracle_campaign
+    cargo clippy -p moth-cli --all-targets --features boracle,boracle_campaign
     cargo test -p moth --quiet --features boracle,boracle_campaign boracle_generated_differential_campaign -- --format terse
+    cargo test -p moth-cli --quiet --features boracle,boracle_campaign -- --format terse
 
 # Refresh integration inventory before the composed honesty audit reads it.
 test-honesty-audit:
-    cargo run --quiet -- tests --audit
+    cargo run --quiet -p moth-cli --bin moth -- tests --audit
     cargo run --quiet --package xtask --bin xtask -- honesty-audit
 
 # Deliberate evidence refresh, never part of a read-only validation gate.
 test-honesty-evidence:
-    cargo run --quiet -- tests --audit
+    cargo run --quiet -p moth-cli --bin moth -- tests --audit
     cargo run --quiet --package xtask --bin xtask -- honesty-audit --update-evidence
 
 # Independent CI results preserve coverage beyond the routine local gate.
@@ -172,10 +176,10 @@ ci-gate-feature-matrix:
     just test-feature-matrix
 
 ci-gate-integration:
-    cargo run --quiet -- tests --terse
+    cargo run --quiet -p moth-cli --bin moth -- tests --terse
 
 ci-gate-docs:
-    cargo run --quiet -- check docs --terse
+    cargo run --quiet -p moth-cli --bin moth -- check docs --terse
 
 ci-gate-benchmarks:
     just bench-ci
@@ -214,8 +218,8 @@ profile-case-symbolicated case filter="terse":
 # Profiling intentionally needs symbols and frame pointers. It uses the same Rust toolchain.
 [unix]
 profile-build:
-    RUSTFLAGS="-C force-frame-pointers=yes" cargo build --profile profiling --features detailed_timers --bin moth
+    RUSTFLAGS="-C force-frame-pointers=yes" cargo build -p moth-cli --bin moth --profile profiling --features detailed_timers
 
 [windows]
 profile-build:
-    $env:RUSTFLAGS = "-C force-frame-pointers=yes"; cargo build --profile profiling --features detailed_timers --bin moth
+    $env:RUSTFLAGS = "-C force-frame-pointers=yes"; cargo build -p moth-cli --bin moth --profile profiling --features detailed_timers

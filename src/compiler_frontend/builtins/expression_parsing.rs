@@ -13,7 +13,6 @@ use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionB
 use crate::compiler_frontend::ast::statements::collections::{CurlyLiteral, new_curly_literal};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, TypeMismatchContext};
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::parse_context::{
@@ -52,14 +51,6 @@ pub(crate) fn parse_curly_literal_expression(
                 ExpectedCurlyLiteralContext::Map(ExpectedMapContext {
                     key_type_id: map_shape.key_type,
                     value_type_id: map_shape.value_type,
-                    key_diagnostic_type: diagnostic_type_spelling(
-                        map_shape.key_type,
-                        type_environment,
-                    ),
-                    value_diagnostic_type: diagnostic_type_spelling(
-                        map_shape.value_type,
-                        type_environment,
-                    ),
                     map_type_id: Some(*type_id),
                 })
             } else if let Some(shape) = type_environment.collection_shape(*type_id) {

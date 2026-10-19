@@ -1,0 +1,5 @@
+export:
+    echo_wire type T |value Wire of T| -> T:
+        return value
+    ;
+;

@@ -1,0 +1,17 @@
+Request ::
+    Query,
+;
+
+Message ::
+    Done,
+;
+
+HANDLER must:
+    handle |This, request Route of Request -> Message| -> String
+;
+
+export:
+    show type T |value T| -> T:
+        return value
+    ;
+;

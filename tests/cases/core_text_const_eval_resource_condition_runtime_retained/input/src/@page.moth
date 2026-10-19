@@ -1,0 +1,3 @@
+@core/text
+
+[:core_text_const_eval_resource_condition_runtime_retained condition=[if text.length(@assets/value.txt) is 18: yes] equality=[if @assets/value.txt is "abc": matched]]

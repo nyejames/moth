@@ -43,6 +43,9 @@ pub(super) fn apply_wrapper_context_overlay_to_child_emission(
     fold_input: &FoldTraversalInput<'_, '_>,
     context: Option<&TirWrapperContext>,
 ) -> Result<TemplateFoldResult, TemplateError> {
+    if result.refusal.is_some() {
+        return Ok(result);
+    }
     let Some(context) = context else {
         return Ok(result);
     };
@@ -63,6 +66,7 @@ pub(super) fn apply_wrapper_context_overlay_to_child_emission(
         emission,
         provenance,
         projection_pieces,
+        ..
     } = result;
 
     let wrapper_set = store.get_wrapper_set(wrapper_set_ref).ok_or_else(|| {
@@ -91,8 +95,13 @@ pub(super) fn append_template_result_to_buffer(
     let TemplateFoldResult {
         emission,
         projection_pieces,
+        refusal,
         ..
     } = result;
+    if let Some(reason) = refusal {
+        output_state.refusal = Some(reason);
+        return Ok(());
+    }
 
     match emission {
         TemplateEmission::NoOutput => Ok(()),
@@ -178,7 +187,16 @@ pub(super) fn fold_conditional_child_wrappers_around_emission(
             emission,
             provenance,
             projection_pieces,
+            refusal,
         } = wrapper_result;
+        if let Some(reason) = refusal {
+            return Ok(TemplateFoldResult::with_projection(
+                emission,
+                provenance,
+                projection_pieces,
+            )
+            .with_refusal(Some(reason)));
+        }
         current_output = match emission {
             TemplateEmission::Output(output) => output,
             TemplateEmission::NoOutput => {
@@ -288,6 +306,13 @@ fn fold_tir_wrapper_with_input(
             wrapper_fold_input,
             FoldInsertion::None,
         )?;
+        if output_state.refusal.is_some() {
+            return Ok(super::reducer::build_emission_from_buffer(
+                output_state,
+                estimated_bytes,
+                fold_context,
+            ));
+        }
 
         if wrapper_fold_input.projection_enabled {
             output_state.append_pieces(child_projection)?;
@@ -314,6 +339,13 @@ fn fold_tir_wrapper_with_input(
             wrapper_fold_input,
             insertion,
         )?;
+        if output_state.refusal.is_some() {
+            return Ok(super::reducer::build_emission_from_buffer(
+                output_state,
+                estimated_bytes,
+                fold_context,
+            ));
+        }
 
         if fill_target_key.is_none() {
             if wrapper_fold_input.projection_enabled {
@@ -381,6 +413,10 @@ pub(super) fn fold_tir_aggregate_wrapper(
             projection: aggregate_projection,
         },
     )?;
+    if let Some(reason) = wrapper_state.refusal.take() {
+        output_state.refusal = Some(reason);
+        return Ok(());
+    }
 
     output_state.provenance.merge(&wrapper_state.provenance);
 

@@ -48,3 +48,22 @@ pub enum HirPattern {
         variant_index: usize,
     },
 }
+
+impl HirPattern {
+    /// The single expression this pattern compares against, if it has one.
+    ///
+    /// WHY: every value-carrying pattern holds exactly one value, so consumers that walk
+    /// pattern operands share this owner instead of repeating the variant match.
+    pub fn value(&self) -> Option<HirValueId> {
+        match self {
+            HirPattern::Literal(value)
+            | HirPattern::OptionValue { value }
+            | HirPattern::OptionRelational { value, .. }
+            | HirPattern::Relational { value, .. } => Some(*value),
+            HirPattern::OptionNone
+            | HirPattern::OptionPresent
+            | HirPattern::Wildcard
+            | HirPattern::ChoiceVariant { .. } => None,
+        }
+    }
+}

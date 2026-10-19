@@ -48,8 +48,9 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidExternalModuleReason, InvalidGenericParameterReason, InvalidImportPathReason,
     InvalidMapLiteralReason, InvalidMapTypeReason, InvalidMutableAccessReason,
     InvalidOutputFolderReason, InvalidPageMetadataReason, InvalidRangeOperandReason,
-    InvalidTemplateDirectiveReason, MalformedTemplateReason, NameNamespace,
-    NamespaceTypeValueMisuseKind, PathKind, RangeOperandKind, SourceSpanCapacityResource,
+    InvalidRouteOutputReason, InvalidTemplateDirectiveReason, MalformedTemplateReason,
+    NameNamespace, NamespaceTypeValueMisuseKind, PathKind, RangeOperandKind,
+    SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::compiler_messages::{DiagnosticToken, TokenDescriptorPayload};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
@@ -672,6 +673,19 @@ pub(crate) fn incompatible_choice_comparison_message(
                 "Choice payload equality is not supported because field '{field_name}' has type '{field_type_name}', which does not support equality."
             )
         }
+    }
+}
+
+pub(crate) fn invalid_route_output_message(
+    reason: &InvalidRouteOutputReason,
+    output: TypeId,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    let output_name = diagnostic_type_name(output, context);
+    match reason {
+        InvalidRouteOutputReason::NotChoiceOrGeneric => format!(
+            "`Route` output type '{output_name}' must be a choice type or a generic parameter."
+        ),
     }
 }
 

@@ -46,7 +46,6 @@ use crate::compiler_frontend::compiler_messages::{
     ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::queries::TypeKind;
@@ -160,17 +159,12 @@ pub(crate) fn parse_scrutinee_until_is(
 /// binding so the matched branch can reference the unwrapped value.
 /// WHY: statement `if`, template `if`, full matches and value single predicates
 /// share one capture-scope construction rule.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "capture-scope construction keeps the match context, capture identity, binding and pattern spans, inner type, and mutable interner/string/path state as separate borrows"
-)]
 pub(crate) fn build_option_present_capture_scope_and_pattern(
     match_context: &ScopeContext,
     capture_name: StringId,
     binding_span: Option<SourceSpan>,
     inner_type_id: TypeId,
     pattern_span: Option<SourceSpan>,
-    type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<(ScopeContext, MatchPattern)> {
@@ -196,11 +190,10 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
         .try_intern_child(arm_scope.scope, capture_name)
         .expect("path table exhausted while creating match capture scope");
 
-    let capture_data_type = diagnostic_type_spelling(inner_type_id, type_interner.environment());
     let declaration = Declaration {
         id: binding_path,
         type_id: inner_type_id,
-        diagnostic_type: capture_data_type,
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span,
@@ -479,13 +472,8 @@ fn parse_match_pattern_header(
         )?;
         let matched_choice_variant = Some(parsed.variant);
         let pattern_span = parsed.span;
-        let (arm_scope, pattern) = build_arm_scope_with_choice_captures(
-            match_context,
-            parsed,
-            type_environment,
-            string_table,
-            path_fork,
-        )?;
+        let (arm_scope, pattern) =
+            build_arm_scope_with_choice_captures(match_context, parsed, string_table, path_fork)?;
         (
             DeferredArmPattern::Ready(pattern),
             matched_choice_variant,
@@ -534,7 +522,6 @@ fn parse_match_pattern_header(
                     *binding_span,
                     *capture_inner_type_id,
                     *parsed_pattern_span,
-                    type_interner,
                     string_table,
                     path_fork,
                 )?
@@ -642,7 +629,6 @@ fn option_pattern_constructor_like(token_stream: &AstCursor) -> bool {
 fn build_arm_scope_with_choice_captures(
     match_context: &ScopeContext,
     parsed_pattern: ParsedChoicePattern,
-    type_environment: &TypeEnvironment,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<(ScopeContext, MatchPattern)> {
@@ -678,7 +664,7 @@ fn build_arm_scope_with_choice_captures(
         let declaration = Declaration {
             id: binding_path,
             type_id: capture.type_id,
-            diagnostic_type: diagnostic_type_spelling(capture.type_id, type_environment),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: capture.binding_span,
@@ -1047,7 +1033,7 @@ fn choice_variants_for_type(type_id: TypeId, env: &TypeEnvironment) -> Vec<Choic
                 .iter()
                 .map(|variant| ChoiceVariant {
                     id: variant.name,
-                    payload: convert_choice_payload(&variant.payload, env),
+                    payload: convert_choice_payload(&variant.payload),
                     span: variant.span,
                 })
                 .collect()
@@ -1055,10 +1041,7 @@ fn choice_variants_for_type(type_id: TypeId, env: &TypeEnvironment) -> Vec<Choic
         .unwrap_or_default()
 }
 
-fn convert_choice_payload(
-    payload: &ChoiceVariantPayloadDefinition,
-    type_environment: &TypeEnvironment,
-) -> ChoiceVariantPayload {
+fn convert_choice_payload(payload: &ChoiceVariantPayloadDefinition) -> ChoiceVariantPayload {
     match payload {
         ChoiceVariantPayloadDefinition::Unit => ChoiceVariantPayload::Unit,
         ChoiceVariantPayloadDefinition::Record { fields } => ChoiceVariantPayload::Record {
@@ -1067,7 +1050,7 @@ fn convert_choice_payload(
                 .map(|field| Declaration {
                     id: field.name,
                     type_id: field.type_id,
-                    diagnostic_type: diagnostic_type_spelling(field.type_id, type_environment),
+                    type_syntax: None,
                     value_mode: ValueMode::ImmutableOwned,
                     value: DeclarationValue::Absent,
                     binding_span: field.span,

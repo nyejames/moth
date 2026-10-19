@@ -18,12 +18,15 @@ use crate::compiler_frontend::declaration_syntax::declaration_shell::{
     DeclarationSyntax, parse_declaration_syntax,
 };
 use crate::compiler_frontend::declaration_syntax::generic_parameters::parse_generic_parameter_list_after_type_keyword;
-use crate::compiler_frontend::declaration_syntax::signature_members::parse_function_signature_syntax;
+use crate::compiler_frontend::declaration_syntax::signature_members::{
+    SignatureMemberSyntax, parse_function_signature_syntax,
+};
 
 use crate::compiler_frontend::declaration_syntax::r#struct::parse_struct_shell;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
-    ParsedNamedTypeReference, TypeAnnotationContext, collect_capacity_references_in_parsed_ref,
-    for_each_named_type_in_parsed_ref, parse_type_annotation_cursor,
+    ParsedNamedTypeReference, ParsedParameterContractSyntax, TypeAnnotationContext,
+    collect_capacity_references_in_parsed_ref, for_each_named_type_in_parsed_ref,
+    parse_type_annotation_cursor,
 };
 
 use super::trait_headers::{
@@ -337,8 +340,8 @@ pub(super) fn create_header(
             // Collect local declaration-ordering hints from requirement signatures.
             for requirement in &declaration.requirements {
                 for param in &requirement.signature.parameters {
-                    collect_type_ordering_hints(
-                        &param.type_annotation,
+                    collect_signature_member_ordering_hints(
+                        param,
                         &generic_parameters,
                         full_name,
                         context,
@@ -445,10 +448,11 @@ pub(super) fn create_header(
                 "function signature cursor handoff exceeded its source owner",
             )?;
 
-            // Local declaration-ordering hints: parameter + return type references only.
+            // Local declaration-ordering hints: parameter (including `Route` inputs) + return
+            // type references only.
             for param in &signature.parameters {
-                collect_type_ordering_hints(
-                    &param.type_annotation,
+                collect_signature_member_ordering_hints(
+                    param,
                     &generic_parameters,
                     full_name,
                     context,
@@ -806,6 +810,44 @@ fn collect_type_ordering_hints(
         return Err(error);
     }
     collect_capacity_references_in_parsed_ref(type_ref, capacity_references);
+    Ok(())
+}
+
+/// Collect ordering hints for one signature member.
+///
+/// WHAT: walks the member's ordinary type reference and any type syntax inside a `Route`
+///       contract's input.
+/// WHY: a signature that names a type only as a `Route` input still depends on that type's
+///      declaration, so ordering must see the same type syntax resolution later resolves.
+fn collect_signature_member_ordering_hints(
+    member: &SignatureMemberSyntax,
+    generic_parameters: &GenericParameterList,
+    current_header_path: PathId,
+    context: &mut HeaderBuildContext<'_>,
+    local_ordering_hints: &mut HashSet<LocalDeclarationOrderingHint>,
+    capacity_references: &mut Vec<InitializerReference>,
+) -> Result<(), CompilerError> {
+    collect_type_ordering_hints(
+        &member.type_annotation,
+        generic_parameters,
+        current_header_path,
+        context,
+        local_ordering_hints,
+        capacity_references,
+    )?;
+    if let ParsedParameterContractSyntax::Route {
+        input: Some(input), ..
+    } = &member.contract
+    {
+        collect_type_ordering_hints(
+            input,
+            generic_parameters,
+            current_header_path,
+            context,
+            local_ordering_hints,
+            capacity_references,
+        )?;
+    }
     Ok(())
 }
 

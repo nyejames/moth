@@ -19,7 +19,7 @@ proposal notes are design material only, not current implementation work.
 
 ### Compiler foundation handoff
 
-The typed semantic expression foundation owns the mechanical Boracle migration to dense HIR
+The compact typed-expression foundation owns the mechanical Boracle migration to dense HIR
 value/place stores and native zero/one/multiple success slots with a separate error channel. That
 work updates extraction and source replay without promoting a solver experiment, changing reference
 acceptance or adding per-result alias precision. It also retires Reactivity V1 events and fixtures
@@ -29,7 +29,7 @@ Future research consumes those merged capabilities and the current normalized ev
 not rebuild recursive HIR or introduce tuple/fallible wrapper bridges. A static expression ID is
 neither a runtime generation nor a binding instance; a distinct result position proves neither
 freshness nor disjointness. Preserve exact producer and receiving-write order, success/error edge
-availability and conservative provenance in the representation cutover.
+availability and conservative provenance in the representation change.
 
 Packages 3 through 6 remain inactive. Merging the relevant foundation checkpoint satisfies only
 that capability prerequisite. Their explicit activation, current reproduction and individual proof

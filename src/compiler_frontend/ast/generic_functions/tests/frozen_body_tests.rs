@@ -26,9 +26,7 @@ use crate::compiler_frontend::ast::const_values::store::{
     ConstStringPiece, ConstStringValue, ConstValueId, ConstValuePayload, ConstValueStore,
 };
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView;
-use crate::compiler_frontend::ast::generic_bounds::{
-    evidence_for_type, generated_evidence_pair_is_selected,
-};
+use crate::compiler_frontend::ast::generic_bounds::evidence_for_type;
 use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::values::materialize_owned_folded_string;
 use crate::compiler_frontend::ast::module_ast::scope_context::{
     FrozenResolvedFileReference, FrozenResolvedFileReferenceOutcome,
@@ -93,11 +91,10 @@ use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TestSourceTokensBuilder, TokenIndex, TokenRange, TokenTag, TokenViewError,
     TokenizerEntryMode,
 };
-use crate::compiler_frontend::traits::ids::TraitId;
 use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend, FrontendBuildProfile};
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use moth_lexical::numeric::grammar::{NumericExponentSign, NumericLiteralKind, NumericLiteralSign};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::path::Path;
 use std::path::PathBuf;
@@ -1882,10 +1879,7 @@ fn published_siblings_materialise_independently_and_leave_the_retained_context_f
                     identity,
                     requester_context: &fixture.preparation,
                     requester_call_span: None,
-                    external_package_registry: fixture
-                        .preparation
-                        .external_package_registry
-                        .as_ref(),
+                    external_package_registry: &fixture.preparation.external_package_registry,
                     string_table: &mut live_strings,
                     path_fork: &mut path_fork,
                     style_directives: &fixture.preparation.style_directives,
@@ -2456,7 +2450,7 @@ fn frozen_resource_parameter_default_materialises_into_a_sidecar_local_table() {
                 identity: &fixture.identity,
                 requester_context: &fixture.preparation,
                 requester_call_span: None,
-                external_package_registry: fixture.preparation.external_package_registry.as_ref(),
+                external_package_registry: &fixture.preparation.external_package_registry,
                 string_table: &mut live_strings,
                 path_fork: &mut path_fork,
                 style_directives: &fixture.preparation.style_directives,
@@ -2811,7 +2805,7 @@ fn frozen_resource_body_materialises_into_a_sidecar_local_table() {
                 identity: &fixture.identity,
                 requester_context: &fixture.preparation,
                 requester_call_span: None,
-                external_package_registry: fixture.preparation.external_package_registry.as_ref(),
+                external_package_registry: &fixture.preparation.external_package_registry,
                 string_table: &mut live_strings,
                 path_fork: &mut path_fork,
                 style_directives: &fixture.preparation.style_directives,
@@ -2902,10 +2896,7 @@ fn repeated_frozen_resource_body_materialisations_preserve_stable_origin() {
                     identity: &fixture.identity,
                     requester_context: &fixture.preparation,
                     requester_call_span: None,
-                    external_package_registry: fixture
-                        .preparation
-                        .external_package_registry
-                        .as_ref(),
+                    external_package_registry: &fixture.preparation.external_package_registry,
                     string_table: &mut live_strings,
                     path_fork: &mut path_fork,
                     style_directives: &fixture.preparation.style_directives,
@@ -3075,10 +3066,7 @@ fn repeated_frozen_resource_default_materialisations_preserve_stable_origin_acro
                     identity: &fixture.identity,
                     requester_context: &fixture.preparation,
                     requester_call_span: None,
-                    external_package_registry: fixture
-                        .preparation
-                        .external_package_registry
-                        .as_ref(),
+                    external_package_registry: &fixture.preparation.external_package_registry,
                     string_table: &mut live_strings,
                     path_fork: &mut path_fork,
                     style_directives: &fixture.preparation.style_directives,
@@ -3340,26 +3328,6 @@ fn stale_in_range_template_row_fails_declaration_identity_validation() {
         error.msg.contains("declaration identity"),
         "unexpected declaration identity error: {error:?}"
     );
-}
-
-#[test]
-fn generated_evidence_authorization_requires_the_selected_trait_pair() {
-    let type_environment = TypeEnvironment::new();
-    let selected =
-        FxHashSet::from_iter([(builtin_type_ids::fixed_scalar(FixedScalar::I32), TraitId(7))]);
-
-    assert!(generated_evidence_pair_is_selected(
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        TraitId(7),
-        &type_environment,
-        &selected,
-    ));
-    assert!(!generated_evidence_pair_is_selected(
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        TraitId(8),
-        &type_environment,
-        &selected,
-    ));
 }
 
 #[test]

@@ -147,10 +147,6 @@ impl<'hir> JsEmitter<'hir> {
                 self.emit_line(&format!("{expression};"));
             }
 
-            HirStatementKind::Drop(_) => {
-                // No-op for GC backend.
-            }
-
             HirStatementKind::PushRuntimeFragment { vec_local, value } => {
                 // WHAT: lower a fragment push into a JS vec push call against the unwrapped array.
                 // WHY: locals are stored as binding wrappers `{ value: ... }` so `.push` cannot be

@@ -40,23 +40,7 @@ pub(crate) enum ParsedConstructorExpression {
 pub(crate) struct ConstructorField {
     pub name: PathId,
     pub type_id: TypeId,
-    pub access_mode: ConstructorFieldAccessMode,
     pub default_value: Option<ParameterDefault>,
-}
-
-/// Access mode expected when initializing a constructor field.
-///
-/// Constructor calls initialize fresh nominal values, so current struct and choice
-/// fields are shared at the call boundary. The enum is kept on the view rather
-/// than baked into call validation so future constructor surfaces do not have to
-/// recover this information from declarations again.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum ConstructorFieldAccessMode {
-    Shared,
-
-    #[allow(dead_code)]
-    // Planned only if constructor fields gain source-visible mutable initialization.
-    Mutable,
 }
 
 impl ConstructorField {
@@ -73,7 +57,6 @@ impl ConstructorField {
             .map(|declaration| ConstructorField {
                 name: declaration.id,
                 type_id: declaration.type_id,
-                access_mode: ConstructorFieldAccessMode::Shared,
                 // Presence comes from the declaration; fold state only chooses the representation.
                 default_value: match &declaration.value {
                     DeclarationValue::Default(value) => Some(ParameterDefault::Folded(*value)),
@@ -103,7 +86,6 @@ impl ConstructorField {
             .map(|field_definition| ConstructorField {
                 name: field_definition.name,
                 type_id: field_definition.type_id,
-                access_mode: ConstructorFieldAccessMode::Shared,
                 default_value: None,
             })
             .collect()

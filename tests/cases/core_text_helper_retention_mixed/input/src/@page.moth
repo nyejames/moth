@@ -1,0 +1,15 @@
+@core/text length, contains, is_empty, starts_with, ends_with
+
+measure |s String| -> I32:
+    return length(s)
+;
+
+has_b |s String| -> Bool:
+    return contains(s, "b")
+;
+
+ready #Bool = is_empty("")
+prefix #Bool = starts_with("abc", "a")
+suffix #Bool = ends_with("abc", "c")
+
+[:len=[measure("a😊b")] has_b=[has_b("abc")] ready=[ready] prefix=[prefix] suffix=[suffix]]

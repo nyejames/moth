@@ -1,0 +1,11 @@
+@contracts LABELED
+
+Item = |
+    text String,
+|
+
+label |this Item| -> String:
+    return this.text
+;
+
+Item must LABELED

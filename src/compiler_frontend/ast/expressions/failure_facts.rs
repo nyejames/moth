@@ -503,7 +503,7 @@ impl ExpressionFailureFacts {
                     facts.merge_child(entry.value(), true);
                 }
             }
-            V::Struct { fields } | V::Choice { fields, .. } => {
+            V::Struct { fields } | V::Choice { fields, .. } | V::RouteConstruct { fields, .. } => {
                 for field in fields.iter() {
                     facts.merge_child(field.value(), false);
                 }

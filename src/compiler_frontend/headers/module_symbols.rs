@@ -27,10 +27,9 @@ use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, Declaration, DeclarationShell, DeclarationValue,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
-use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
-use crate::compiler_frontend::declaration_syntax::type_syntax::parsed_ref_to_data_type;
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 
 use crate::compiler_frontend::headers::parse_file_headers::{
@@ -424,18 +423,15 @@ fn declaration_from_header(
     path_fork: &mut PathInternerFork,
 ) -> Option<Declaration> {
     match &header.kind {
-        HeaderKind::Function { .. } => {
-            let diagnostic_type = DataType::Inferred;
-            Some(Declaration {
-                id: header.declaration_path,
-                type_id: builtin_type_ids::NONE,
-                diagnostic_type,
-                value_mode: ValueMode::ImmutableReference,
-                value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
-                binding_span: header.name_span,
-                config_qualifier: None,
-            })
-        }
+        HeaderKind::Function { .. } => Some(Declaration {
+            id: header.declaration_path,
+            type_id: builtin_type_ids::NONE,
+            type_syntax: None,
+            value_mode: ValueMode::ImmutableReference,
+            value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
+            binding_span: header.name_span,
+            config_qualifier: None,
+        }),
         HeaderKind::Constant { declaration, .. } => Some(constant_declaration_placeholder(
             &header.declaration_path,
             declaration,
@@ -444,10 +440,7 @@ fn declaration_from_header(
         HeaderKind::Struct { .. } => Some(Declaration {
             id: header.declaration_path,
             type_id: builtin_type_ids::NONE,
-            diagnostic_type: DataType::runtime_struct(
-                header.declaration_path,
-                builtin_type_ids::NONE,
-            ),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableReference,
             value: DeclarationValue::Shell(DeclarationShell::Struct),
             binding_span: header.name_span,
@@ -456,11 +449,7 @@ fn declaration_from_header(
         HeaderKind::Choice { .. } => Some(Declaration {
             id: header.declaration_path,
             type_id: builtin_type_ids::NONE,
-            diagnostic_type: DataType::Choices {
-                nominal_path: header.declaration_path,
-                type_id: builtin_type_ids::NONE,
-                generic_instance_key: None,
-            },
+            type_syntax: None,
             value_mode: ValueMode::ImmutableReference,
             value: DeclarationValue::Shell(DeclarationShell::Choice),
             binding_span: header.name_span,
@@ -472,11 +461,10 @@ fn declaration_from_header(
             let start_name = path_fork
                 .try_intern_child(source_file, string_table.intern(IMPLICIT_START_FUNC_NAME))
                 .expect("path table exhausted while interning implicit start path");
-            let diagnostic_type = DataType::Inferred;
             Some(Declaration {
                 id: start_name,
                 type_id: builtin_type_ids::NONE,
-                diagnostic_type,
+                type_syntax: None,
                 value_mode: ValueMode::ImmutableReference,
                 value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
                 binding_span: None,
@@ -497,7 +485,6 @@ fn constant_declaration_placeholder(
     name_span: Option<SourceSpan>,
 ) -> Declaration {
     let semantic_type = declaration.semantic_type();
-    let diagnostic_type = parsed_ref_to_data_type(&semantic_type);
     // Seeded scalar annotations are already exact and remain visible to early constant
     // references. Environment-owned annotations wait for AST type resolution.
     let type_id = match semantic_type {
@@ -510,7 +497,7 @@ fn constant_declaration_placeholder(
     Declaration {
         id: *path,
         type_id,
-        diagnostic_type,
+        type_syntax: Some(semantic_type.clone()),
         value_mode: declaration.value_mode(),
         value: DeclarationValue::PendingConstant,
         binding_span: name_span,

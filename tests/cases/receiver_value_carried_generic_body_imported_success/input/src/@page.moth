@@ -1,0 +1,7 @@
+@helper make_square
+
+wrap type T |value T| -> I32:
+    return make_square().edge()
+;
+
+[:receiver_value_carried_generic_body_imported_success edge=[wrap(1)]]

@@ -269,7 +269,7 @@ impl LaneInstaller<'_> {
                 Vec::new(),
                 Some(result),
             ),
-            // Range guards always fail. Their former Bool scratch is not a success slot.
+            // Range guards always fail, so they define no success result.
             HirStatementKind::RangeStepFailure { cause, .. } => (
                 HirFallibleOperation::RangeStepFailure { cause },
                 Vec::new(),

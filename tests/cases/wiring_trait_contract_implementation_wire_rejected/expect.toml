@@ -1,0 +1,16 @@
+entry = "."
+
+# The requirement is an ordinary value read; the implementation promises a
+# `Wire` contract the requirement never asked for and callers cannot satisfy.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0073"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0073"
+reason = "invalid_trait_conformance.parameter_contract_mismatch"
+path = "input/@page.moth"
+line = 13
+count = 1

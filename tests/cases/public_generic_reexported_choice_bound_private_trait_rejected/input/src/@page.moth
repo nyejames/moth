@@ -1,0 +1,9 @@
+@utils Maybe
+
+chosen Maybe of String = Maybe::Some("private")
+chosen_text String = if chosen is:
+    Some(value as payload) => then payload
+    Empty => then "empty"
+;
+
+[:[chosen_text]]

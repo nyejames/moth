@@ -1,0 +1,9 @@
+entry = "."
+
+# `Request` is reachable only through the imported `Route` input, so importing
+# `accept` alone must still project its contract-owned type.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "route-input-only-imported accepted"

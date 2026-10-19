@@ -1,7 +1,5 @@
 A Route parameter describes a known choice constructor and the payload it will
-receive later. Routes are parameter contracts, not callable values. The
-following Wire/Route forms teach accepted design and are unsupported by the
-current compiler until Phase 6.
+receive later. Routes are parameter contracts, not callable values.
 
 [codeblock, $code("moth"):
     TodoMessage ::
@@ -84,5 +82,4 @@ leading field:
 
 This uses one Route. It does not compose routes or call one from another. A
 compatible Route parameter can be forwarded unchanged; route invocation and
-composition remain unsupported. These examples teach accepted future contracts
-and are unsupported by the current compiler until Phase 6.
+composition remain unsupported.

@@ -13,7 +13,7 @@
 //! `ModuleSemanticResult`, `Module`, or a cross-module interface.
 
 use crate::compiler_frontend::ast::module_ast::environment::resolved_public_type_roots::ResolvedPublicTypeRootTable;
-use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
+use crate::compiler_frontend::ast::statements::functions::{ParameterContract, ReturnChannel};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
@@ -55,6 +55,7 @@ pub(crate) struct ResolvedTraitParameterFact {
     pub(crate) name: PathId,
     pub(crate) value_mode: ValueMode,
     pub(crate) type_id: TypeId,
+    pub(crate) contract: ParameterContract,
 }
 
 /// One requirement return slot, location-free.
@@ -277,6 +278,7 @@ fn build_trait_requirement_fact(
             name: parameter.name,
             value_mode: parameter.value_mode,
             type_id: parameter.type_id,
+            contract: parameter.contract,
         })
         .collect();
 

@@ -1,0 +1,3 @@
+@core/text length
+
+[:template_fold n=[length("a😊b")] combining=[length("é")]]
