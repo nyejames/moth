@@ -18,6 +18,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
 use crate::compiler_frontend::datatypes::{BuiltinScalarReceiver, ReceiverKey, builtin_type_ids};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -112,6 +113,51 @@ fn lookup_receiver_method_prefers_exact_source_file_before_catalog_fallback() {
     assert_eq!(
         resolved.function_path, local_entry.function_path,
         "same-file receiver methods should be preferred when file visibility is omitted"
+    );
+}
+
+#[test]
+fn production_lookup_rejects_provider_private_entry_through_value_carried_fallback() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let method_name = string_table.intern("reset");
+    let receiver = ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Char);
+    let key = (receiver.to_owned(), method_name);
+    let source_file = interned_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let function_path = interned_path(&["src", "reset"], &mut string_table, &mut path_fork);
+
+    let public_entry = empty_receiver_entry(function_path, source_file, receiver.to_owned());
+    let mut private_entry = empty_receiver_entry(function_path, source_file, receiver.to_owned());
+    private_entry.value_carried = false;
+
+    // Production always attaches file visibility, so lookup takes the name-visible walk and then
+    // the value-carried fallback. The name-visible set is empty here, so only the value-carried
+    // filter decides whether an entry dispatches.
+    let mut public_catalog = ReceiverMethodCatalog::default();
+    public_catalog
+        .by_receiver_and_name
+        .insert(key.to_owned(), vec![public_entry]);
+    let public_context = context_for_source_file(source_file, public_catalog, &path_fork)
+        .with_file_visibility(Arc::new(FileVisibility::default()));
+    let resolved = public_context
+        .lookup_receiver_method(&receiver, method_name)
+        .expect("value-carried receiver method should dispatch through the fallback");
+    assert_eq!(
+        resolved.function_path, function_path,
+        "the value-carried entry should be the one that dispatches"
+    );
+
+    let mut private_catalog = ReceiverMethodCatalog::default();
+    private_catalog
+        .by_receiver_and_name
+        .insert(key, vec![private_entry]);
+    let private_context = context_for_source_file(source_file, private_catalog, &path_fork)
+        .with_file_visibility(Arc::new(FileVisibility::default()));
+    assert!(
+        private_context
+            .lookup_receiver_method(&receiver, method_name)
+            .is_none(),
+        "provider-private receiver methods must not dispatch through the value-carried fallback"
     );
 }
 

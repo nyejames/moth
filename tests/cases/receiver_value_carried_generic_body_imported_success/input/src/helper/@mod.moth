@@ -1,0 +1,13 @@
+export:
+    Square = |
+        side I32,
+    |
+
+    make_square || -> Square:
+        return Square(3)
+    ;
+;
+
+edge |this Square| -> I32:
+    return this.side
+;

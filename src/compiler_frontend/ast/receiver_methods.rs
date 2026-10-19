@@ -48,9 +48,11 @@ pub(crate) struct ReceiverMethodEntry {
     pub(crate) receiver_mutable: bool,
     /// Whether a value of `receiver` carries this method into the owning module.
     ///
-    /// WHAT: true for the module's own receiver methods and for public methods projected from
-    /// imported nominals. False for provider-internal methods installed only so materialised
-    /// generic bodies can dispatch them by function path.
+    /// WHAT: true for the module's own receiver methods, for public methods projected from imported
+    /// nominals, and for methods a materialised body captured, by name or through a value; every
+    /// captured method was value-carried where the body was declared. False for
+    /// provider-internal methods installed only so materialised generic bodies can dispatch them by
+    /// function path.
     /// WHY: value-carried lookup must not expose a provider-private method just because a
     /// materialised body calls it. Name-keyed lookup still uses file visibility.
     pub(crate) value_carried: bool,
@@ -71,6 +73,29 @@ pub(crate) struct ReceiverMethodCatalog {
     /// WHY: file visibility resolves source receiver methods by function path, so a path-keyed
     /// index lets lookups avoid scanning the whole catalog.
     pub(crate) by_function_path: FxHashMap<PathId, ReceiverMethodEntry>,
+}
+
+impl ReceiverMethodCatalog {
+    /// Function paths of the value-carried methods whose bare name satisfies `is_referenced`.
+    ///
+    /// WHAT: walks the receiver-and-name index that value-carried dispatch reads.
+    /// WHY: `by_method_name` is diagnostic-only, so it cannot decide which methods a value
+    /// carries. Paths are sorted so the captured artefact order stays deterministic.
+    pub(crate) fn value_carried_paths_named(
+        &self,
+        is_referenced: impl Fn(StringId) -> bool,
+    ) -> Vec<PathId> {
+        let mut paths = self
+            .by_receiver_and_name
+            .iter()
+            .filter(|((_, name), _)| is_referenced(*name))
+            .flat_map(|(_, entries)| entries.iter())
+            .filter(|entry| entry.value_carried)
+            .map(|entry| entry.function_path)
+            .collect::<Vec<_>>();
+        paths.sort();
+        paths
+    }
 }
 
 /// Inputs required to build the receiver-method catalog.

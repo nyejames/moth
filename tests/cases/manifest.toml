@@ -8127,6 +8127,55 @@ contract = "language.structs.receiver_method_nonlocal_value_carried_rejected"
 role = "primary"
 
 [[case]]
+id = "receiver_value_carried_generic_body_sibling_success"
+path = "receiver_value_carried_generic_body_sibling_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.generics.receiver_method_value_carried_acceptance"
+role = "primary"
+
+[[case]]
+id = "receiver_value_carried_generic_body_imported_success"
+path = "receiver_value_carried_generic_body_imported_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.generics.receiver_method_value_carried_acceptance"
+role = "boundary"
+
+[[case]]
+id = "receiver_value_carried_generic_method_sibling_success"
+path = "receiver_value_carried_generic_method_sibling_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.generics.receiver_method_value_carried_generic_acceptance"
+role = "primary"
+
+[[case]]
+id = "receiver_value_carried_generic_method_imported_success"
+path = "receiver_value_carried_generic_method_imported_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.generics.receiver_method_value_carried_generic_acceptance"
+role = "boundary"
+
+[[case]]
+id = "receiver_value_carried_generic_method_body_sibling_success"
+path = "receiver_value_carried_generic_method_body_sibling_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.generics.receiver_method_value_carried_generic_body_acceptance"
+role = "primary"
+
+[[case]]
+id = "receiver_value_carried_generic_method_body_imported_success"
+path = "receiver_value_carried_generic_method_body_imported_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.generics.receiver_method_value_carried_generic_body_acceptance"
+role = "boundary"
+
+[[case]]
+id = "receiver_value_carried_generic_method_unnamed_bound_success"
+path = "receiver_value_carried_generic_method_unnamed_bound_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.generics.receiver_method_value_carried_generic_body_acceptance"
+role = "boundary"
+
+[[case]]
 id = "receiver_same_method_name_different_receivers_success"
 path = "receiver_same_method_name_different_receivers_success"
 tags = ["integration", "receiver-methods", "dependencies"]

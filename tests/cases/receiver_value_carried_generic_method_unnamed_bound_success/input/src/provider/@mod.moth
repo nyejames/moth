@@ -1,0 +1,45 @@
+@contracts PUBLIC_LABEL
+
+LOCAL_DISPLAY must:
+    display |This| -> String
+;
+
+export:
+    Label = |
+        text String,
+    |
+
+    Box type T = |
+        value T,
+    |
+
+    make_box || -> Box of Label:
+        return Box(Label("outer-only"))
+    ;
+
+    outer type T |value T| -> String:
+        return Box(Label("outer-only")).render()
+    ;
+;
+
+display |this Label| -> String:
+    return this.text
+;
+
+label |this Label| -> String:
+    return this.text
+;
+
+Label must LOCAL_DISPLAY, PUBLIC_LABEL
+
+private_render type T is LOCAL_DISPLAY |value T| -> String:
+    return value.display()
+;
+
+identity type T is PUBLIC_LABEL |value T| -> String:
+    return value.label()
+;
+
+render type T is PUBLIC_LABEL |this Box of T| -> String:
+    return identity(this.value)
+;

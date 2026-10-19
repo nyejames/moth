@@ -1,0 +1,7 @@
+@shapes make_square
+
+wrap type T |value T| -> I32:
+    return make_square().area()
+;
+
+[:receiver_value_carried_generic_body_sibling_success area=[wrap(1)]]

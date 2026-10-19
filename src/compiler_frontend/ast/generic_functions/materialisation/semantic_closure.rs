@@ -902,6 +902,9 @@ impl ModuleMaterialisationCapture {
                 selected.extend(methods.iter().map(|method| *method.target.local_path()));
             }
         }
+        // WHY: a value-carried method reaches the body through its receiver value, so a referenced
+        // name selects it whether or not the name is visible in the body's file.
+        selected.extend(self.value_carried_paths_for_names(referenced_names));
         for (name, record) in &visibility.visible_namespace_records {
             if referenced_names.contains(self.string_table.resolve(*name)) {
                 collect_namespace_source_paths(record, &mut selected);
@@ -910,22 +913,53 @@ impl ModuleMaterialisationCapture {
         Ok(selected)
     }
 
+    /// Function paths of the value-carried receiver methods that a body's referenced names select.
+    ///
+    /// WHAT: a referenced name selects each value-carried method with that name, whether or not the
+    /// name is visible in the body's file.
+    /// WHY: a value-carried method reaches a body through its receiver value, so file visibility
+    /// must not decide whether it is captured.
+    pub(super) fn value_carried_paths_for_names(
+        &self,
+        referenced_names: &FxHashSet<String>,
+    ) -> Vec<PathId> {
+        self.receiver_methods.value_carried_paths_named(|name| {
+            referenced_names.contains(self.string_table.resolve(name))
+        })
+    }
+
+    /// Stable target of a function reached through a visible name or a value-carried method.
+    ///
+    /// WHAT: a source target that carries its own identity wins; otherwise the path decides.
+    /// WHY: a visible-name entry already carries its target, while a value-carried entry is known
+    /// only by its path.
     pub(super) fn stable_target_for_path(
         &self,
         target: &SourceFunctionTarget,
     ) -> Option<StableFunctionTarget> {
-        if let Some(stable) = StableFunctionTarget::capture(target) {
-            return Some(stable);
-        }
-        if let Some(contract) = self
+        StableFunctionTarget::capture(target)
+            .or_else(|| self.stable_target_for_local_path(target.local_path()))
+    }
+
+    /// Stable target of the function at one canonical path.
+    ///
+    /// WHAT: a retained executable contract wins; otherwise a generic template resolves through its
+    /// declaration identity.
+    /// WHY: the contract owns the identity of every concrete executable, including same-module
+    /// methods, so it is consulted before the template.
+    pub(super) fn stable_target_for_local_path(
+        &self,
+        local_path: &PathId,
+    ) -> Option<StableFunctionTarget> {
+        if let Some(stable) = self
             .imported_functions_by_local_path
-            .get(target.local_path())
-            && let Some(stable) = StableFunctionTarget::capture(&contract.target)
+            .get(local_path)
+            .and_then(|contract| StableFunctionTarget::capture(&contract.target))
         {
             return Some(stable);
         }
         self.generic_function_templates_by_path
-            .get(target.local_path())
+            .get(local_path)
             .and_then(|template| match template.declaration_identity.as_ref()? {
                 GeneratedDeclarationIdentity::Public(origin) => {
                     Some(StableFunctionTarget::Imported(origin.clone()))

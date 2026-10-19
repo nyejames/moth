@@ -781,13 +781,25 @@ impl GenericTemplateArtefact {
                     signature: signature.clone(),
                 },
             );
-            register_materialised_receiver_method(
-                lookups,
-                method_path,
-                receiver,
-                signature.clone(),
-                path_fork,
-            )?;
+            // WHY: the import projection can already hold this imported concrete method by path,
+            // and the catalog rejects a second entry for one path. The declaration, signature,
+            // and contract installs around this call are idempotent, so only the catalog entry is
+            // skipped.
+            let projected = matches!(method.target, StableFunctionTarget::Imported(_))
+                && lookups
+                    .receiver_methods
+                    .by_function_path
+                    .contains_key(&method_path);
+            if !projected {
+                register_materialised_receiver_method(
+                    lookups,
+                    method_path,
+                    receiver,
+                    signature.clone(),
+                    path_fork,
+                    true,
+                )?;
+            }
             Rc::make_mut(&mut lookups.declaration_semantics)
                 .register_materialised_function(method_path);
             lookups.imported_functions_by_local_path.insert(
@@ -1070,12 +1082,21 @@ impl GenericTemplateArtefact {
                 },
             );
             if let Some(receiver) = receiver.clone() {
+                // WHY: a nested method is value-carried only when this materialisation captured it
+                // through a receiver value. Every other nested method stays reachable by path alone,
+                // so a provider-private method cannot widen value lookup in the consumer.
+                let value_carried = self
+                    .visibility
+                    .receiver_methods
+                    .iter()
+                    .any(|method| method.local_path == nested_path);
                 register_materialised_receiver_method(
                     lookups,
                     nested_path,
                     receiver,
                     signature.clone(),
                     path_fork,
+                    value_carried,
                 )?;
             }
             if lookups
@@ -1240,16 +1261,19 @@ pub(super) fn materialised_receiver_key(
 
 /// Installs a materialised receiver method so generic bodies can dispatch it by function path.
 ///
-/// WHAT: the entry is indexed for name and path lookups but is not value-carried, so the
-/// consumer's value surface stays limited to its own methods and projected public methods.
-/// WHY: a materialised body may call provider-private methods. Admitting them to value-carried
-/// lookup would make those private methods callable from consumer files.
+/// WHAT: `value_carried` decides whether a value of `receiver` also reaches the method. Callers
+/// pass true only for a method the materialised body captured, by name or through a value; every
+/// captured method was value-carried where the body was declared.
+/// WHY: a materialised body may call provider-private methods that no receiver value carries.
+/// Admitting those to value-carried lookup would make them callable from any file holding such
+/// a value.
 fn register_materialised_receiver_method(
     lookups: &mut AstModuleLookups,
     function_path: PathId,
     receiver: ReceiverKey,
     signature: FunctionSignature,
     path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
+    value_carried: bool,
 ) -> Result<(), CompilerError> {
     let method_name = path_fork.component(function_path).ok_or_else(|| {
         CompilerError::compiler_error(
@@ -1264,7 +1288,7 @@ fn register_materialised_receiver_method(
             .parameters
             .first()
             .is_some_and(|parameter| parameter.value_mode.is_mutable()),
-        value_carried: false,
+        value_carried,
         signature,
     };
     let receiver_methods = Rc::make_mut(&mut lookups.receiver_methods);

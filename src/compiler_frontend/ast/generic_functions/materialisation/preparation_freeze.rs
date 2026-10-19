@@ -7,7 +7,7 @@ use super::semantic_closure::{StableSemanticClosure, stable_body_symbol_names};
 use super::sidecar_build::bootstrap_call_summary_from_signature;
 use super::stable_types::{
     GenericTemplateArtefact, MaterialisationNominalOriginResolver, MaterialisationNominalSource,
-    StableCallableBinding, StableFunctionParameter, StableFunctionSignature,
+    StableCallableBinding, StableFunctionParameter, StableFunctionSignature, StableFunctionTarget,
     StableGenericCallableContract, StableGenericParameter, StableNominalBinding,
     StableParameterContract, StableReceiverKey,
 };
@@ -23,6 +23,7 @@ use crate::compiler_frontend::ast::module_ast::environment::{
     AstModuleLookups, ResolvedPublicTraitRoot,
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::Stage0ResolutionFacts;
+use crate::compiler_frontend::ast::receiver_methods::ReceiverMethodCatalog;
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ParameterContract};
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, ResolvedTypeAlias,
@@ -85,6 +86,8 @@ pub(crate) struct ModuleMaterialisationCapture {
     pub(crate) frozen_identity_handle: FrozenIdentityHandle,
     pub(crate) type_environment: TypeEnvironment,
     pub(crate) binding_environment: Rc<HeaderBindingEnvironment>,
+    /// Value-carried receiver methods that generated bodies reach through their receiver values.
+    pub(crate) receiver_methods: Rc<ReceiverMethodCatalog>,
     pub(crate) imported_functions_by_local_path: FxHashMap<PathId, AstImportedFunctionContract>,
     pub(super) default_const_templates_by_path:
         FxHashMap<PathId, (PublicConstTemplate, Option<OwnedFoldedString>)>,
@@ -1032,12 +1035,14 @@ impl ModuleMaterialisationCapture {
     /// Retains the trait spellings that generic declarations selected for the body need in the
     /// body's file. Generic callees and generic nominal constructors are both covered.
     ///
-    /// Checking a declaration's bounds needs the spellings its bounds were written with, in the
-    /// file of the body that uses it. Those spellings sit in the declaration's header, outside the
-    /// retained body tokens, so they are retained here. Referenced names over-approximate the uses:
-    /// a shadowing local, or a field with the same name, can select a declaration the body never
-    /// uses, and that declaration's bound may be unnamed in this file. Such bounds are skipped, not
-    /// rejected, because a use the body really makes had to name its bound in the original file.
+    /// Bound-provided dispatch checks name visibility in the body's file, and bound names sit in
+    /// the declaration header, outside the retained body tokens. So each spelling that the
+    /// declaring file gives a selected bound's trait is retained here. Referenced names
+    /// over-approximate the uses: a shadowing local, or a field with the same name, can select a
+    /// declaration the body never uses. Such a declaration's bound may have no spelling in its
+    /// declaring file, and rejecting it would fail a body for a declaration it does not call, so
+    /// such bounds are skipped, not rejected. A call that satisfies a bound does not check names,
+    /// so only bound-provided dispatch needs the spelling in the body's file.
     ///
     /// `selected_paths` is the selection taken before these spellings were added. Bound spellings
     /// name traits, which carry no generic bounds of their own, so one reselection by the caller
@@ -1253,58 +1258,45 @@ impl ModuleMaterialisationCapture {
                 continue;
             }
             for method in methods {
-                let local_path = method.target.local_path();
                 let Some(target) = self.stable_target_for_path(&method.target) else {
                     continue;
                 };
-                let resolved = self
-                    .resolved_function_signatures_by_path
-                    .get(local_path)
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(
-                            "Visible receiver method has no resolved function signature",
-                        )
-                    })?;
-                let receiver = resolved
-                    .receiver
-                    .as_ref()
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(
-                            "Visible receiver method has no receiver signature",
-                        )
-                    })
-                    .and_then(|receiver| {
-                        StableReceiverKey::capture(receiver, &self.string_table)
-                    })?;
-                let generic_template = self.generic_function_templates_by_path.get(local_path);
-                let parameter_slots = generic_template
-                    .map(|template| self.generic_parameter_slots(template))
-                    .transpose()?
-                    .unwrap_or_default();
-                let generic_parameters = generic_template
-                    .map(|template| self.stable_generic_parameters(template))
-                    .transpose()?
-                    .unwrap_or_default();
                 receiver_methods.push(StableReceiverMethod {
-                    visible_name: self.string_table.resolve(*name).to_owned(),
-                    local_path: *local_path,
-                    target,
-                    receiver,
-                    signature: self.stable_function_signature(
+                    visible_name: Some(self.string_table.resolve(*name).to_owned()),
+                    span: method.span,
+                    ..self.stable_receiver_method(
+                        method.target.local_path(),
+                        target,
                         const_values,
-                        &resolved.signature,
-                        &parameter_slots,
                         resources,
                         path_fork,
-                    )?,
-                    summary: self
-                        .imported_functions_by_local_path
-                        .get(local_path)
-                        .map(|contract| contract.summary.clone()),
-                    generic_parameters,
-                    span: method.span,
+                    )?
                 });
             }
+        }
+        // WHY: a value-carried method reaches a body through its receiver value, so a body that
+        // names it captures it without the name entering the body's file visibility. Paths already
+        // captured through a visible name keep that entry, which also carries the span.
+        for local_path in self.value_carried_paths_for_names(referenced_names) {
+            if receiver_methods
+                .iter()
+                .any(|method| method.local_path == local_path)
+            {
+                continue;
+            }
+            // WHY: the receiver catalog and the executable contracts come from separate import
+            // projections, so an entry can lack a target. Leaving it out keeps that failure at the
+            // body's call site.
+            let Some(target) = self.stable_target_for_local_path(&local_path) else {
+                continue;
+            };
+            receiver_methods.push(self.stable_receiver_method(
+                &local_path,
+                target,
+                const_values,
+                resources,
+                path_fork,
+            )?);
         }
         let mut namespace_records = visibility
             .visible_namespace_records
@@ -1329,6 +1321,62 @@ impl ModuleMaterialisationCapture {
             external_symbols: external_symbols.into_boxed_slice(),
             namespace_records: namespace_records.into_boxed_slice(),
             receiver_methods: receiver_methods.into_boxed_slice(),
+        })
+    }
+
+    /// Freeze the function-level facts of one receiver method that a generated body may reach.
+    ///
+    /// WHAT: name visibility and span belong to the caller, so this helper leaves both unset.
+    /// WHY: name-visible and value-carried captures share one owner for the signature, receiver,
+    /// and generic facts, so the two capture paths cannot drift apart.
+    fn stable_receiver_method(
+        &self,
+        local_path: &PathId,
+        target: StableFunctionTarget,
+        const_values: &ConstValueStore,
+        resources: &ModuleResourceTable,
+        path_fork: &PathInternerFork,
+    ) -> Result<StableReceiverMethod, CompilerError> {
+        let resolved = self
+            .resolved_function_signatures_by_path
+            .get(local_path)
+            .ok_or_else(|| {
+                CompilerError::compiler_error("Receiver method has no resolved function signature")
+            })?;
+        let receiver = resolved
+            .receiver
+            .as_ref()
+            .ok_or_else(|| {
+                CompilerError::compiler_error("Receiver method has no receiver signature")
+            })
+            .and_then(|receiver| StableReceiverKey::capture(receiver, &self.string_table))?;
+        let generic_template = self.generic_function_templates_by_path.get(local_path);
+        let parameter_slots = generic_template
+            .map(|template| self.generic_parameter_slots(template))
+            .transpose()?
+            .unwrap_or_default();
+        let generic_parameters = generic_template
+            .map(|template| self.stable_generic_parameters(template))
+            .transpose()?
+            .unwrap_or_default();
+        Ok(StableReceiverMethod {
+            visible_name: None,
+            local_path: *local_path,
+            target,
+            receiver,
+            signature: self.stable_function_signature(
+                const_values,
+                &resolved.signature,
+                &parameter_slots,
+                resources,
+                path_fork,
+            )?,
+            summary: self
+                .imported_functions_by_local_path
+                .get(local_path)
+                .map(|contract| contract.summary.clone()),
+            generic_parameters,
+            span: None,
         })
     }
 
@@ -1789,6 +1837,7 @@ impl ModuleMaterialisationCapture {
             frozen_identity_handle,
             type_environment: type_environment.fork_for_generated(),
             binding_environment: Rc::clone(&lookups.binding_environment),
+            receiver_methods: Rc::clone(&lookups.receiver_methods),
             imported_functions_by_local_path: lookups.imported_functions_by_local_path.clone(),
             default_const_templates_by_path,
             // Completed immutable tables keep the environment's existing `Rc` owner.
