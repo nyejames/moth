@@ -6352,6 +6352,7 @@ old; below 1 is faster.
 | Template summary paths and whitespace cursors | docs wall 0.92x |
 | Requester aliases for reconstructed nominals only | generic scaling 160 materialise 0.39x, now linear |
 | Source tree walk uses listed entry types | docs build directory inventory 0.83x |
+| Follow-up branch qualification | no row above +5% against `a24230c87`; docs check 0.74x |
 
 ### Signature member contract merge
 
@@ -6715,3 +6716,49 @@ ratios with bootstrap CI95, beside an A/A null of the base binary against a copy
 Docs build wall time reads 0.957 (0.952-0.978) against a null of 0.990
 (0.946-1.004); small-project wall times do not move beyond noise. Exit codes,
 stdout and output files match across the 74 CLI cases.
+
+### Follow-up branch qualification
+
+The follow-up tree `a08f2f6f3` repeats the final qualification above against
+`a24230c87` with the same protocol, scripts and baseline binaries (digests
+unchanged). All 68 timed `check` cases ran five alternating pairs; the eleven
+rows the screen marked slower, and the main headline cases, reran at 15 pairs.
+Load averages stayed between 4.7 and 7.2. Stdout and stderr match on every
+case. Raw logs stay under `tmp/followups/qual/`.
+
+| Case | check total (ms) | Ratio | Pairs |
+|---|---:|---:|---:|
+| docs | 216.59 → 160.67 | 0.742 | 15 |
+| type stress | 6.30 → 5.71 | 0.906 | 5 |
+| fold stress | 6.70 → 5.21 | 0.778 | 5 |
+| template stress | 7.83 → 5.52 | 0.704 | 5 |
+| generic scaling 20 | 24.33 → 13.89 | 0.571 | 5 |
+| generic scaling 160 | 351.37 → 111.72 | 0.318 | 5 |
+| nominal scaling 320 | 11.60 → 10.65 | 0.919 | 15 |
+| default parameters 32 | 4.74 → 4.44 | 0.937 | 5 |
+| aggregate forwarding 512 | 665.53 → 110.71 | 0.166 | 5 |
+| mutable cycles 512 | 2,805.25 → 131.59 | 0.047 | 15 |
+| narrow chains 512 | 1,811.75 → 149.15 | 0.082 | 5 |
+
+All eleven rescreened rows are faster at 15 pairs. The five-pair copy-chain
+flags, ×1.27 and ×1.32, read 0.938 and 0.870 at 15 pairs. Three stage rows
+below 1 ms read up to ×1.066 at five pairs and were not rescreened, since the
+protocol's flag floor is 1 ms.
+
+`just bench-scaling` passes all 14 series on both trees. Generic
+instantiation now fits `n^1.06` (baseline `n^1.40`), and nominal members fit
+`n^0.95` (baseline `n^0.93`). Main-thread stack floors match the baseline and
+the earlier round: 120 KB for `check` on grouped `not` 2048, and 168 KB for the
+entry-project build on JS and HTML-Wasm.
+
+No max-RSS ratio exceeds 1.05. Generic scaling 160 peak footprint falls from
+371.2 to 122.8 MiB. At 15 pairs, peak footprint reads +3.1% for nominal
+scaling 320 and +3.3% for default parameters 32 while requested bytes fall by
+about 120 KB and 41 KB, so the offset is not retained compiler data. Requested
+peaks fall in 32 of 33 probe fixtures; docs rises by 17 KB (+0.04%).
+
+Counters are deterministic on both trees and the four rows of the earlier
+round match. External symbol path clones fall from 540,675 to 450 on generic
+scaling 160. Nominal scaling 320 makes 50% more type resolution calls
+(16,324 → 24,484) and 24% more scope contexts, the latter from the retained
+constructor-shell scope noted above, while its check total still falls.
