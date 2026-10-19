@@ -53,7 +53,7 @@ use crate::compiler_frontend::compiler_messages::{
     SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::compiler_messages::{DiagnosticToken, TokenDescriptorPayload};
-use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
+use crate::compiler_frontend::datatypes::display::TypeDisplayView;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -529,10 +529,9 @@ fn exactly_one_operand_is_plain_string(lhs: TypeId, rhs: TypeId) -> bool {
 
 fn generic_parameter_name(type_id: TypeId, context: DiagnosticRenderContext<'_>) -> Option<String> {
     let type_environment = context.type_environment?;
-    match type_environment.get(type_id) {
-        Some(TypeDefinition::GenericParameter(_)) => Some(diagnostic_type_name(type_id, context)),
-        _ => None,
-    }
+    type_environment
+        .is_generic_parameter(type_id)
+        .then(|| diagnostic_type_name(type_id, context))
 }
 
 fn namespace_name(namespace: NameNamespace) -> &'static str {

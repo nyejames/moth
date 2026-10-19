@@ -108,7 +108,10 @@ ACTIVE_PLAN:
 - Execution order: Phase 4 runs as the steps in `PHASE_4_EXECUTION_ORDER` below. The slice
   checklists remain the acceptance contract. Only their order and grouping changed, under the
   architecture document's repository-discovered corrections rule.
-- NEXT_SUBSTEP: P4.1, the diagnostic vocabulary, compact storage and pilot families (4A/4B).
+- NEXT_SUBSTEP: P4.1, the diagnostic vocabulary, compact storage and pilot families (4A/4B). P4.2
+  (4C) is accepted in the checkpoint "Phase 4 P4.2: type-display snapshots and shared formatter";
+  it landed first because it does not depend on P4.1. Render equivalence for that checkpoint was
+  checked by rendering every diagnosed integration case (1,655 cases) before and after: identical.
 - Phase 4 non-goals: `CompilationOutcome::Success`, typed failure lanes and `compiler_bug!`
   (Phase 5), frozen tooling sessions (Phase 6) and user-facing diagnostic prose changes (paused
   diagnostics plan).
@@ -120,7 +123,7 @@ PHASE_4_EXECUTION_ORDER:
 
 | Step | Slices | Content |
 |---|---|---|
-| P4.1 | 4A vocabulary, 4B | `compiler_messages/diagnostics/`: code, record, draft, facts and codecs, labels, extras, place, list ranges, store, compaction with the type-rewrite hook, capacity policy, foreign-site cold store, the `diagnostic_schema!` vocabulary, the registry, per-group declaration files and ten pilot families |
+| P4.1 | 4A vocabulary, 4B | `compiler_messages/diagnostics/`: code, record, draft, facts and codecs, labels, extras, place, list ranges, store, compaction with the type-rewrite hook, capacity policy, foreign-site cold store, the `diagnostic_family!` vocabulary, the registry, per-group declaration files, identity rows for every family and twelve pilot families |
 | P4.2 | 4C | `compiler_messages/diagnostic_types/` snapshot store and builder; one shared formatter in `datatypes/display.rs` over live and snapshot views |
 | P4.3 | 4H render side | view renderers and per-diagnostic dual dispatch: migrated families convert through the private Phase 4 legacy adapter, compact with a type snapshot and render through the view renderer; pilot renderers are ported |
 | P4.4 | 4G1–4G8 family groups | per group: schema declarations, mirror constructors, durable views, reason codecs, adapter arms, a renderer port that deletes the old payload arms, and tests |
@@ -133,10 +136,14 @@ PHASE_4_MIGRATION_STATE:
   conversion code, private to `compiler_messages`. P4.3 introduces it for per-diagnostic render
   dispatch, P4.5 moves it to bag entry and P4.6 (Slice 4I) deletes it. It never crosses the
   Phase 4 boundary.
-- Unconsumed new items: declarations added by P4.1 and P4.2 that have no production consumer until
-  P4.3 carry item-level `cfg_attr(not(test), allow(dead_code, reason = "..."))` attributes that
-  name P4.3 render dispatch as the consumer. No module-level suppression is used, and P4.3 removes
-  every one of these attributes.
+- Unconsumed new items: declarations added by P4.1 and P4.2 that have no production consumer yet
+  carry item-level `cfg_attr(not(test), allow(dead_code, reason = "..."))` attributes naming the
+  slice that consumes them (P4.3 render dispatch, P4.5 capture and merge, or P4.6). No
+  module-level suppression is used. Each slice removes the attributes that name it.
+- Type-display fallback: the live `diagnostic_type_name` still renders `TypeId(N)` when a render
+  context has no type environment, no path table, or an environment without the type. P4.3
+  reproduces that at render time with one transitional snapshot record created only by the render
+  adapter; P4.5 deletes it once every capture point snapshots types with their owning environment.
 - Infrastructure errors keep their current carrier until P4.5. Any transitional infrastructure
   lane beside `DiagnosticReportSet` must be named here, with its Phase 5 deletion slice and caller
   list, before P4.5 lands.
@@ -1148,10 +1155,10 @@ result model early.
 No later preparation or compaction slice may depend on an undefined type-display representation;
 this slice defines it before 4D.
 
-- [ ] **4C1 — shared display/query view:** inventory every renderer query against
+- [x] **4C1 — shared display/query view:** inventory every renderer query against
   `TypeEnvironment`, define the smallest frozen query surface beyond spelling and extract one
   read-only view from `datatypes/display.rs` so live and frozen types share one formatter
-- [ ] **4C2 — compact store:** implement `TypeDisplayId`, fixed records and typed child ranges for
+- [x] **4C2 — compact store:** implement `TypeDisplayId`, fixed records and typed child ranges for
   every currently rendered builtin, nominal, choice, generic, function, option, collection, map,
   genuine aggregate and external type. Represent callable zero/one/multiple success slots and
   independent error channels as signature facts with typed slot ranges, without recreating a tuple
@@ -1164,7 +1171,7 @@ this slice defines it before 4D.
   contract exists. Earlier expression-store disposal does not prove the complete environment can
   be released. Cover rendering after expression/TIR disposal and preserve every still-live report
   dependency until this migration captures it
-- [ ] **4C5 — equivalence and dedup policy:** add exhaustive live/snapshot formatting and
+- [x] **4C5 — equivalence and dedup policy:** add exhaustive live/snapshot formatting and
   query-equivalence tests; a valid frozen report never falls back to a raw internal ID.
   `TypeId` -> `TypeDisplayId` memoization is mandatory; cross-identity structural deduplication is
   benchmark-gated and stays off until measured evidence justifies it (R10d)

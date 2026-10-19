@@ -23,6 +23,7 @@ pub(crate) mod diagnostic_label;
 pub(crate) mod diagnostic_payload;
 pub(crate) mod diagnostic_severity;
 pub(crate) mod diagnostic_token;
+pub(crate) mod diagnostic_types;
 pub(crate) mod display_messages;
 pub(crate) mod module_diagnostics;
 pub(crate) mod render;

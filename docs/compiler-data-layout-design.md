@@ -1426,6 +1426,11 @@ struct DiagnosticTypeRecord {
 
 Typed side ranges supply variable arguments and choice-variant summaries.
 
+The store and its record layout live in `diagnostic_types/type_display_snapshot.rs`, and the builder
+lives in `diagnostic_types/type_display_snapshot_builder.rs`. One formatter in
+`datatypes/display.rs` renders spellings for both the live and snapshot paths, so user-visible
+text stays identical.
+
 The store must represent every current user-visible type spelling:
 
 - builtins
@@ -1453,15 +1458,17 @@ For each diagnostic draft produced with a module-local `TypeEnvironment`:
 1. Inspect the schema and collect every fact marked as a source `TypeId`.
 2. Reserve a `TypeDisplayId` for each newly visited type before recursing, so recursive display graphs
    cannot loop.
-3. Copy only display-relevant facts into `DiagnosticTypeStoreBuilder`.
+3. Copy only display-relevant facts into `TypeDisplaySnapshotBuilder`.
 4. Recursively intern referenced child types and typed lists.
 5. Rewrite the draft fact from `TypeId` to `TypeDisplayId`.
 6. Validate that every type-marked fact was rewritten.
 7. Freeze the type display store before rendering.
 8. Release the complete `TypeEnvironment` when no semantic artefact owner still needs it.
 
-The store deduplicates equivalent display records inside one compilation context. It does not claim
-cross-build type identity.
+The builder memoizes by source `TypeId` inside one compilation context, so each type is encoded
+once and recursive graphs terminate. It does not merge distinct `TypeId`s that share a spelling,
+such as two generic parameters both named `T`, because each `TypeId` keeps its own identity. It
+does not claim cross-build type identity.
 
 A renderer receiving an unknown `TypeDisplayId` or an unrewritten source `TypeId` is observing a
 compiler invariant violation and invokes `compiler_bug!`. It does not fall back to printing an
@@ -2325,9 +2332,8 @@ src/compiler_frontend/compiler_messages/
     diagnostic_types/
         mod.rs
         id.rs
-        record.rs
-        builder.rs
-        render.rs
+        type_display_snapshot.rs
+        type_display_snapshot_builder.rs
         tests/
     infrastructure/
         mod.rs
