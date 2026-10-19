@@ -249,7 +249,7 @@ impl BorrowState {
 
     /// Whether `root_index` is in `effective_roots(local_index)`, without building that set.
     /// WHY: alias conflict scans ask this for every local on every access; building the set
-    /// allocates once per call.
+    /// can allocate a word buffer per call.
     pub(super) fn effective_root_contains(&self, local_index: usize, root_index: usize) -> bool {
         let (includes_self, includes_value_roots) = self.effective_root_sources(local_index);
         (includes_self && root_index == local_index)
@@ -432,17 +432,25 @@ impl RootSet {
 
     pub(super) fn full(bit_len: usize) -> Self {
         let word_len = bit_len.div_ceil(64);
-        let mut words = vec![u64::MAX; word_len];
-        if !bit_len.is_multiple_of(64) {
-            let remainder = bit_len % 64;
-            let mask = (1u64 << remainder) - 1;
-            if let Some(last) = words.last_mut() {
-                *last = mask;
-            }
-        }
+        let tail = match bit_len % 64 {
+            0 => u64::MAX,
+            remainder => (1u64 << remainder) - 1,
+        };
         Self {
             // WHY: a zero-width universe has no bits, and every set without bits is `None`.
-            words: (word_len != 0).then(|| Rc::from(words)),
+            // An exact-length iterator collects straight into the shared buffer, so the words
+            // are written once instead of being built in a `Vec` and copied.
+            words: (word_len != 0).then(|| {
+                (0..word_len)
+                    .map(|index| {
+                        if index + 1 == word_len {
+                            tail
+                        } else {
+                            u64::MAX
+                        }
+                    })
+                    .collect()
+            }),
             bit_len,
         }
     }
