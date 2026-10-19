@@ -6351,6 +6351,7 @@ old; below 1 is faster.
 | HIR concrete type checks without a set | `frontend.hir` 0.91-0.97x |
 | Template summary paths and whitespace cursors | docs wall 0.92x |
 | Requester aliases for reconstructed nominals only | generic scaling 160 materialise 0.39x, now linear |
+| Source tree walk uses listed entry types | docs build directory inventory 0.83x |
 
 ### Signature member contract merge
 
@@ -6682,4 +6683,35 @@ Per-request materialisation, in µs:
 The stage exponent falls from 1.34 to 0.99. A prototype that filtered bindings
 by a type-argument reachability set ran at the same speed (ratio 1.002,
 0.980-1.027) but allocated a set per request, so it was not kept. Exit codes,
+stdout and output files match across the 74 CLI cases.
+
+### Source tree walk uses listed entry types
+
+The build-path review profiled `build` workloads, which earlier reviews had not
+covered. Backend feature validation does no work on the JS target, the JS path
+showed no sort or dedup cost, and per-page metadata and emitter formatting were
+below 1 ms. The one owner above the bar was the source tree walk in
+`source_tree_index.rs`: it called `Path::is_dir` and `Path::is_file` on every
+listed entry, each a `stat`, and `fs::canonicalize` on every recognised file and
+again on every module-root directory. On docs these syscalls cost about 3.8 ms
+per build.
+
+Each popped directory is already canonicalised, so a listed non-symlink entry's
+type comes from the directory listing and its joined path is already canonical.
+Symlinks, and entries whose type cannot be read, keep the old queries and
+canonicalisation, so link targets, the skip policy and cycle protection are
+unchanged. A file deleted between listing and loading now fails when it is
+loaded rather than when it is canonicalised.
+
+Paired interleaved rounds against `9d490beb1`, 25 rounds, median of per-round
+ratios with bootstrap CI95, beside an A/A null of the base binary against a copy:
+
+| Case · `stage0.directory.inventory` | Ratio | CI95 | Null CI95 |
+|---|---:|---|---|
+| docs build | 0.832 | 0.811-0.838 | 0.972-1.004 |
+| import fanout build | 0.839 | 0.764-0.875 | 0.895-1.005 |
+| module root stress build | 0.876 | 0.833-0.918 | 0.870-1.188 |
+
+Docs build wall time reads 0.957 (0.952-0.978) against a null of 0.990
+(0.946-1.004); small-project wall times do not move beyond noise. Exit codes,
 stdout and output files match across the 74 CLI cases.
