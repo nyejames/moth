@@ -12,11 +12,16 @@ use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayId
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::extras::ExtraDataKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
-    CharFact, CountFact, FactCapacityError, FactCodec, OptCountFact, OptStringFact, OptTokenFact,
-    OptTypeFact, PathFact, PlaceFact, StoredPlace, StringFact, TokenFact, TypeFact, UnitCode,
-    UnitFact, type_display_from_word, type_display_word,
+    CharFact, CountFact, FactCapacityError, FactCodec, FactCursor, OptCountFact, OptStringFact,
+    OptTokenFact, OptTypeFact, PathFact, PlaceFact, StoredPlace, StringFact, TokenFact, TypeFact,
+    UnitCode, UnitFact, type_display_from_word, type_display_word,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
+    GenericInstantiationFact, GenericInstantiationShape, INVALID_GENERIC_INSTANTIATION,
+    decode_generic_instantiation_extra,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::CapacityResourceFact;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::TYPE_MISMATCH;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::{
     DraftLabel, DraftSubstitution, DraftType, LabelMessageCode, SecondaryDiagnosticLabel,
     encode_label,
@@ -25,8 +30,8 @@ use crate::compiler_frontend::compiler_messages::diagnostics::record::Diagnostic
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::{FactDescriptor, FamilyRow};
 use crate::compiler_frontend::compiler_messages::{
     AstCapacityResource, CapacityResource, DiagnosticCapacityResource, DiagnosticLabelMessage,
-    DiagnosticPlace, DiagnosticToken, GenericSubstitutionDiagnostic, HirCapacityResource, TokenTag,
-    TypeMismatchContext,
+    DiagnosticPlace, DiagnosticToken, GenericInferenceSubject, GenericSubstitutionDiagnostic,
+    HirCapacityResource, TokenTag, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -522,4 +527,171 @@ fn optional_type_fact_rewrites_a_present_type_through_capture() {
         OptTypeFact::decode(&draft.core.facts[..1]).map(|id| id.map(|id| id.index())),
         Some(Some(3))
     );
+}
+
+#[test]
+fn generic_instantiation_shapes_capture_only_their_type_words() {
+    let type_name_id = StringId::from_index(20);
+    let type_name = Some(type_name_id);
+    let parameter_name = StringId::from_index(30);
+    let trait_name = StringId::from_index(31);
+    let cases = [
+        (
+            GenericInstantiationShape::WrongArgumentCount {
+                type_name,
+                expected: 2,
+                found: 3,
+            },
+            vec![],
+            0,
+        ),
+        (
+            GenericInstantiationShape::TypeDoesNotAcceptArguments { type_name },
+            vec![],
+            0,
+        ),
+        (
+            GenericInstantiationShape::OptionTypeSyntaxNotSupported { type_name },
+            vec![],
+            0,
+        ),
+        (
+            GenericInstantiationShape::ResultTypeSyntaxNotSupported { type_name },
+            vec![],
+            0,
+        ),
+        (
+            GenericInstantiationShape::ExternalTypeArgumentsUnsupported { type_name },
+            vec![],
+            0,
+        ),
+        (
+            GenericInstantiationShape::MissingTypeArguments { type_name },
+            vec![],
+            0,
+        ),
+        (
+            GenericInstantiationShape::CannotInferArguments { type_name },
+            vec![parameter_name],
+            0,
+        ),
+        (
+            GenericInstantiationShape::CannotInferArguments { type_name },
+            vec![parameter_name, trait_name],
+            0,
+        ),
+        (
+            GenericInstantiationShape::CannotInferFunctionArguments { type_name },
+            vec![parameter_name],
+            0,
+        ),
+        (
+            GenericInstantiationShape::ConflictingInference {
+                subject: GenericInferenceSubject::Function,
+                existing_type: TypeId(40),
+                replacement_type: TypeId(41),
+            },
+            vec![parameter_name, type_name_id],
+            0b1100,
+        ),
+        (
+            GenericInstantiationShape::ConflictingInference {
+                subject: GenericInferenceSubject::NominalType,
+                existing_type: TypeId(44),
+                replacement_type: TypeId(45),
+            },
+            vec![parameter_name],
+            0b1100,
+        ),
+        (
+            GenericInstantiationShape::MissingTraitEvidence {
+                type_name,
+                concrete_type: TypeId(42),
+            },
+            vec![parameter_name, trait_name],
+            0b0100,
+        ),
+        (
+            GenericInstantiationShape::MissingNominalTraitEvidence {
+                type_name,
+                concrete_type: TypeId(43),
+            },
+            vec![parameter_name, trait_name],
+            0b0100,
+        ),
+        (
+            GenericInstantiationShape::RecursiveFunctionInstantiation { type_name },
+            vec![],
+            0,
+        ),
+        (
+            GenericInstantiationShape::ExplicitCallTypeArgumentsUnsupported { type_name },
+            vec![],
+            0,
+        ),
+        (
+            GenericInstantiationShape::GenericFunctionValueDeferred { type_name },
+            vec![],
+            0,
+        ),
+    ];
+
+    for (shape, extra, pending_mask) in cases {
+        assert!(
+            decode_generic_instantiation_extra(shape.code(), &extra).is_some(),
+            "each reason code accepts its StringIds suffix"
+        );
+        assert_eq!(GenericInstantiationFact::pending_mask(&shape), pending_mask);
+        let mut draft =
+            DiagnosticDraft::with_facts(&INVALID_GENERIC_INSTANTIATION, None, |cursor| {
+                cursor.push::<GenericInstantiationFact>(&shape)
+            })
+            .with_string_ids(extra);
+        assert_eq!(draft.core.pending_facts, pending_mask);
+        let before = draft.core.facts;
+        let mut rewritten = Vec::new();
+        draft
+            .capture_types(&mut |type_id| {
+                rewritten.push(type_id);
+                TypeDisplayId::from_index(type_id.0 as usize)
+            })
+            .expect("test type ids fit the display id space");
+
+        assert_eq!(rewritten.len(), pending_mask.count_ones() as usize);
+        for (index, (before, after)) in before
+            .iter()
+            .zip(draft.core.facts.iter())
+            .enumerate()
+            .take(GenericInstantiationFact::WORDS)
+        {
+            if pending_mask & (1 << index) != 0 {
+                assert_eq!(*after, *before + 1);
+            } else {
+                assert_eq!(*after, *before);
+            }
+        }
+        assert!(
+            GenericInstantiationFact::decode(&draft.core.facts[..4]).is_some(),
+            "every encoded generic-instantiation shape decodes after capture"
+        );
+    }
+}
+
+#[test]
+#[should_panic(expected = "every required pending type word is present")]
+fn static_rows_reject_a_missing_pending_type_word() {
+    let expected = 2usize;
+    let found = TypeId(3);
+    let context = TypeMismatchContext::General;
+    let mut cursor = FactCursor::new();
+    cursor
+        .push::<CountFact>(&expected)
+        .expect("the deliberately wrong count fact encodes");
+    cursor
+        .push::<TypeFact>(&found)
+        .expect("the found type fact encodes");
+    cursor
+        .push::<UnitFact<TypeMismatchContext>>(&context)
+        .expect("the context code encodes");
+    cursor.finish_for(&TYPE_MISMATCH);
 }

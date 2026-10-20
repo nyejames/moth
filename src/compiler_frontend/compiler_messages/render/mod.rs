@@ -47,6 +47,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_da
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
     InvalidChoiceVariantView, invalid_choice_variant_available_variants,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
+    InvalidGenericApplicationView, InvalidGenericParameterView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::DeferredFeatureView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
     InvalidPageMetadataView, UnsupportedBuilderPackageView,
@@ -224,6 +227,19 @@ pub(crate) fn invalid_generic_application_message(
     }
 }
 
+/// WHAT: renders an invalid generic application from its unit reason.
+/// WHY: the compact row stores the same reason used by the legacy message helper.
+pub(crate) fn render_invalid_generic_application(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidGenericApplicationView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_generic_application_message(facts.reason).to_owned(),
+        guidance: Vec::new(),
+    }
+}
+
 pub(crate) fn invalid_collection_type_message(reason: InvalidCollectionTypeReason) -> &'static str {
     match reason {
         InvalidCollectionTypeReason::NegativeCapacity => {
@@ -383,6 +399,23 @@ fn invalid_generic_parameter_static_message(
             "Generic parameter lists must stay with the declaration header."
         }
         InvalidGenericParameterReason::InvalidToken { .. } => "Invalid generic parameter token.",
+    }
+}
+
+/// WHAT: renders an invalid generic parameter from its reason code and optional token.
+/// WHY: the code determines whether the token fact is required.
+pub(crate) fn render_invalid_generic_parameter(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidGenericParameterView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = facts
+        .code
+        .to_reason(facts.found)
+        .expect("an invalid generic parameter code stores its required token");
+    RenderedPayload {
+        message: invalid_generic_parameter_message(&reason, context.string_table),
+        guidance: Vec::new(),
     }
 }
 

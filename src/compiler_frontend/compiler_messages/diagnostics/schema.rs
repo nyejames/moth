@@ -22,14 +22,18 @@ use crate::compiler_frontend::compiler_messages::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct FactDescriptor {
     pub(super) words: u8,
-    pub(super) pending: bool,
+    /// Relative words that every value of this codec must leave as raw type ids.
+    pub(super) required_pending_mask: u8,
+    /// Relative words that some value of this codec may leave as raw type ids.
+    pub(super) possible_pending_mask: u8,
 }
 
 impl FactDescriptor {
     pub(super) const fn of<C: FactCodec>() -> Self {
         Self {
             words: C::WORDS as u8,
-            pending: C::PENDING,
+            required_pending_mask: C::REQUIRED_PENDING_MASK,
+            possible_pending_mask: C::PENDING_MASK,
         }
     }
 }
@@ -71,7 +75,7 @@ impl FamilyRow {
         total
     }
 
-    /// Bit `n` is set when fact word `n` holds a raw type id.
+    /// Bit `n` is set when fact word `n` may hold a raw type id for this family.
     pub(super) const fn pending_mask(&self) -> u8 {
         let mut mask = 0;
         let mut word = 0;
@@ -81,7 +85,27 @@ impl FamilyRow {
             let words = fact.words as usize;
             let mut offset = 0;
             while offset < words {
-                if fact.pending {
+                if fact.possible_pending_mask & (1 << offset) != 0 {
+                    mask |= 1 << (word + offset);
+                }
+                offset += 1;
+            }
+            word += words;
+            index += 1;
+        }
+        mask
+    }
+    /// Bit `n` is set when fact word `n` must hold a raw type id for every value of this family.
+    pub(super) const fn required_pending_mask(&self) -> u8 {
+        let mut mask = 0;
+        let mut word = 0;
+        let mut index = 0;
+        while index < self.layout.len() {
+            let fact = self.layout[index];
+            let words = fact.words as usize;
+            let mut offset = 0;
+            while offset < words {
+                if fact.required_pending_mask & (1 << offset) != 0 {
                     mask |= 1 << (word + offset);
                 }
                 offset += 1;

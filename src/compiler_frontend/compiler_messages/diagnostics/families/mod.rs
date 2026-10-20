@@ -16,8 +16,8 @@ pub(crate) mod templates;
 pub(crate) mod token_lexical;
 pub(crate) mod types_borrows_targets;
 
-/// The compact draft for a legacy diagnostic, from whichever group owns its kind. `None` when no pilot family
-/// carries the diagnostic, so the caller keeps the legacy payload.
+/// The compact draft for a legacy diagnostic, from whichever group owns its kind. `None` when no
+/// compact family carries it, so the caller keeps the legacy payload.
 pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticDraft> {
     token_lexical::from_legacy(diagnostic)
         .or_else(|| imports::from_legacy(diagnostic))

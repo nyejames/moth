@@ -12,6 +12,10 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_da
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
     InvalidFallibleHandlingCode, InvalidLoopHeaderCode,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
+    InvalidFunctionSignatureCode, InvalidGenericInstantiationCode, InvalidGenericParameterCode,
+    InvalidParameterContractCode, InvalidReceiverDeclarationCode, InvalidThisUsageCode,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
     InvalidExternalModuleCode, InvalidImportPathCode,
 };
@@ -973,16 +977,19 @@ define_stable_reason_keys! {
     &GenericApplicationErrorReason::NestedApplication => "invalid_generic_application.nested_application",
     },
     InvalidParameterContractReason => {
-    &InvalidParameterContractReason::MissingSpecification { .. } => "invalid_parameter_contract.missing_specification",
-    &InvalidParameterContractReason::InvalidPosition { .. } => "invalid_parameter_contract.invalid_position",
-    &InvalidParameterContractReason::WireArrowNotAllowed => "invalid_parameter_contract.wire_arrow_not_allowed",
-    &InvalidParameterContractReason::RouteOutputMissing => "invalid_parameter_contract.route_output_missing",
-    &InvalidParameterContractReason::RouteRepeatedArrow => "invalid_parameter_contract.route_repeated_arrow",
-    &InvalidParameterContractReason::NestedContract { .. } => "invalid_parameter_contract.nested_contract",
-    &InvalidParameterContractReason::MutableParameter { .. } => "invalid_parameter_contract.mutable_parameter",
-    &InvalidParameterContractReason::ParameterDefault { .. } => "invalid_parameter_contract.parameter_default",
-    &InvalidParameterContractReason::ReceiverContract { .. } => "invalid_parameter_contract.receiver_contract",
-    &InvalidParameterContractReason::MultipleSpecificationTypes { .. } => "invalid_parameter_contract.multiple_specification_types",
+        @delegate(reason => InvalidParameterContractCode::of(reason).stable_reason_key());
+    },
+    InvalidParameterContractCode => {
+        &InvalidParameterContractCode::MissingSpecification => "invalid_parameter_contract.missing_specification",
+        &InvalidParameterContractCode::InvalidPosition => "invalid_parameter_contract.invalid_position",
+        &InvalidParameterContractCode::WireArrowNotAllowed => "invalid_parameter_contract.wire_arrow_not_allowed",
+        &InvalidParameterContractCode::RouteOutputMissing => "invalid_parameter_contract.route_output_missing",
+        &InvalidParameterContractCode::RouteRepeatedArrow => "invalid_parameter_contract.route_repeated_arrow",
+        &InvalidParameterContractCode::NestedContract => "invalid_parameter_contract.nested_contract",
+        &InvalidParameterContractCode::MutableParameter => "invalid_parameter_contract.mutable_parameter",
+        &InvalidParameterContractCode::ParameterDefault => "invalid_parameter_contract.parameter_default",
+        &InvalidParameterContractCode::ReceiverContract => "invalid_parameter_contract.receiver_contract",
+        &InvalidParameterContractCode::MultipleSpecificationTypes => "invalid_parameter_contract.multiple_specification_types",
     },
 
     InvalidDependencyClauseReason => {
@@ -1098,10 +1105,13 @@ define_stable_reason_keys! {
     },
 
     InvalidGenericParameterReason => {
-    &InvalidGenericParameterReason::EmptyParameterList => "invalid_generic_parameter.empty_parameter_list",
-    &InvalidGenericParameterReason::BoundsMustUseIs => "invalid_generic_parameter.bounds_must_use_is",
-    &InvalidGenericParameterReason::ListMustStayWithHeader => "invalid_generic_parameter.list_must_stay_with_header",
-    &InvalidGenericParameterReason::InvalidToken { .. } => "invalid_generic_parameter.invalid_token",
+        @delegate(reason => InvalidGenericParameterCode::of(reason).stable_reason_key());
+    },
+    InvalidGenericParameterCode => {
+        &InvalidGenericParameterCode::EmptyParameterList => "invalid_generic_parameter.empty_parameter_list",
+        &InvalidGenericParameterCode::BoundsMustUseIs => "invalid_generic_parameter.bounds_must_use_is",
+        &InvalidGenericParameterCode::ListMustStayWithHeader => "invalid_generic_parameter.list_must_stay_with_header",
+        &InvalidGenericParameterCode::InvalidToken => "invalid_generic_parameter.invalid_token",
     },
 
     InvalidTemplateDirectiveReason => {
@@ -1202,20 +1212,23 @@ define_stable_reason_keys! {
     },
 
     InvalidFunctionSignatureReason => {
-    &InvalidFunctionSignatureReason::MissingArrowOrColon { .. } => "invalid_function_signature.missing_arrow_or_colon",
-    &InvalidFunctionSignatureReason::UnexpectedEndAfterParameters => "invalid_function_signature.unexpected_end_after_parameters",
-    &InvalidFunctionSignatureReason::MissingReturnType => "invalid_function_signature.missing_return_type",
-    &InvalidFunctionSignatureReason::MissingTraitRequirementReturnType => "invalid_function_signature.missing_trait_requirement_return_type",
-    &InvalidFunctionSignatureReason::TrailingCommaInReturns => "invalid_function_signature.trailing_comma_in_returns",
-    &InvalidFunctionSignatureReason::UnexpectedEndAfterComma => "invalid_function_signature.unexpected_end_after_comma",
-    &InvalidFunctionSignatureReason::UnexpectedEndInReturns => "invalid_function_signature.unexpected_end_in_returns",
-    &InvalidFunctionSignatureReason::MissingColonAfterReturns => "invalid_function_signature.missing_colon_after_returns",
-    &InvalidFunctionSignatureReason::UnexpectedArrowInReturns => "invalid_function_signature.unexpected_arrow_in_returns",
-    &InvalidFunctionSignatureReason::MissingCommaOrColon { .. } => "invalid_function_signature.missing_comma_or_colon",
-    &InvalidFunctionSignatureReason::VoidNotAllowed => "invalid_function_signature.void_not_allowed",
-    &InvalidFunctionSignatureReason::MultipleErrorReturnSlots => "invalid_function_signature.multiple_error_return_slots",
-    &InvalidFunctionSignatureReason::ErrorSlotNotLast => "invalid_function_signature.error_slot_not_last",
-    &InvalidFunctionSignatureReason::GenericWhereConstraintsUnsupported => "invalid_function_signature.generic_where_constraints_unsupported",
+        @delegate(reason => InvalidFunctionSignatureCode::of(reason).stable_reason_key());
+    },
+    InvalidFunctionSignatureCode => {
+        &InvalidFunctionSignatureCode::MissingArrowOrColon => "invalid_function_signature.missing_arrow_or_colon",
+        &InvalidFunctionSignatureCode::UnexpectedEndAfterParameters => "invalid_function_signature.unexpected_end_after_parameters",
+        &InvalidFunctionSignatureCode::MissingReturnType => "invalid_function_signature.missing_return_type",
+        &InvalidFunctionSignatureCode::MissingTraitRequirementReturnType => "invalid_function_signature.missing_trait_requirement_return_type",
+        &InvalidFunctionSignatureCode::TrailingCommaInReturns => "invalid_function_signature.trailing_comma_in_returns",
+        &InvalidFunctionSignatureCode::UnexpectedEndAfterComma => "invalid_function_signature.unexpected_end_after_comma",
+        &InvalidFunctionSignatureCode::UnexpectedEndInReturns => "invalid_function_signature.unexpected_end_in_returns",
+        &InvalidFunctionSignatureCode::MissingColonAfterReturns => "invalid_function_signature.missing_colon_after_returns",
+        &InvalidFunctionSignatureCode::UnexpectedArrowInReturns => "invalid_function_signature.unexpected_arrow_in_returns",
+        &InvalidFunctionSignatureCode::MissingCommaOrColon => "invalid_function_signature.missing_comma_or_colon",
+        &InvalidFunctionSignatureCode::VoidNotAllowed => "invalid_function_signature.void_not_allowed",
+        &InvalidFunctionSignatureCode::MultipleErrorReturnSlots => "invalid_function_signature.multiple_error_return_slots",
+        &InvalidFunctionSignatureCode::ErrorSlotNotLast => "invalid_function_signature.error_slot_not_last",
+        &InvalidFunctionSignatureCode::GenericWhereConstraintsUnsupported => "invalid_function_signature.generic_where_constraints_unsupported",
     },
 
     InvalidChoiceVariantReason => {
@@ -1232,13 +1245,16 @@ define_stable_reason_keys! {
     },
 
     InvalidThisUsageReason => {
-    &InvalidThisUsageReason::NotInReceiverMethod => "invalid_this_usage.not_in_receiver_method",
-    &InvalidThisUsageReason::Reassignment => "invalid_this_usage.reassignment",
-    &InvalidThisUsageReason::LoopBinding => "invalid_this_usage.loop_binding",
-    &InvalidThisUsageReason::DeclarationBinding => "invalid_this_usage.declaration_binding",
-    &InvalidThisUsageReason::DuplicateThis { .. } => "invalid_this_usage.duplicate_this",
-    &InvalidThisUsageReason::NotFirstParameter { .. } => "invalid_this_usage.not_first_parameter",
-    &InvalidThisUsageReason::OutsideTraitDeclaration => "invalid_this_usage.outside_trait_declaration",
+        @delegate(reason => InvalidThisUsageCode::of(reason).stable_reason_key());
+    },
+    InvalidThisUsageCode => {
+        &InvalidThisUsageCode::NotInReceiverMethod => "invalid_this_usage.not_in_receiver_method",
+        &InvalidThisUsageCode::Reassignment => "invalid_this_usage.reassignment",
+        &InvalidThisUsageCode::LoopBinding => "invalid_this_usage.loop_binding",
+        &InvalidThisUsageCode::DeclarationBinding => "invalid_this_usage.declaration_binding",
+        &InvalidThisUsageCode::DuplicateThis => "invalid_this_usage.duplicate_this",
+        &InvalidThisUsageCode::NotFirstParameter => "invalid_this_usage.not_first_parameter",
+        &InvalidThisUsageCode::OutsideTraitDeclaration => "invalid_this_usage.outside_trait_declaration",
     },
 
     InvalidTraitKeywordUsageReason => {
@@ -1247,16 +1263,19 @@ define_stable_reason_keys! {
     },
 
     InvalidReceiverDeclarationReason => {
-    &InvalidReceiverDeclarationReason::UnknownStructTarget => "invalid_receiver_declaration.unknown_struct_target",
-    &InvalidReceiverDeclarationReason::NonlocalSourceType => "invalid_receiver_declaration.nonlocal_source_type",
-    &InvalidReceiverDeclarationReason::BuiltinScalarType => "invalid_receiver_declaration.builtin_scalar_type",
-    &InvalidReceiverDeclarationReason::ExternalOpaqueType => "invalid_receiver_declaration.external_opaque_type",
-    &InvalidReceiverDeclarationReason::FieldNameConflict => "invalid_receiver_declaration.field_name_conflict",
-    &InvalidReceiverDeclarationReason::DuplicateMethod => "invalid_receiver_declaration.duplicate_method",
-    &InvalidReceiverDeclarationReason::DuplicateVisibleMethod => "invalid_receiver_declaration.duplicate_visible_method",
-    &InvalidReceiverDeclarationReason::GenericReceiverType { .. } => "invalid_receiver_declaration.generic_receiver_type",
-    &InvalidReceiverDeclarationReason::UnsupportedType { .. } => "invalid_receiver_declaration.unsupported_type",
-    &InvalidReceiverDeclarationReason::ReceiverMethodImportOrExportNotAllowed => "invalid_receiver_declaration.receiver_method_import_or_export_not_allowed",
+        @delegate(reason => InvalidReceiverDeclarationCode::of(reason).stable_reason_key());
+    },
+    InvalidReceiverDeclarationCode => {
+        &InvalidReceiverDeclarationCode::UnknownStructTarget => "invalid_receiver_declaration.unknown_struct_target",
+        &InvalidReceiverDeclarationCode::NonlocalSourceType => "invalid_receiver_declaration.nonlocal_source_type",
+        &InvalidReceiverDeclarationCode::BuiltinScalarType => "invalid_receiver_declaration.builtin_scalar_type",
+        &InvalidReceiverDeclarationCode::ExternalOpaqueType => "invalid_receiver_declaration.external_opaque_type",
+        &InvalidReceiverDeclarationCode::FieldNameConflict => "invalid_receiver_declaration.field_name_conflict",
+        &InvalidReceiverDeclarationCode::DuplicateMethod => "invalid_receiver_declaration.duplicate_method",
+        &InvalidReceiverDeclarationCode::DuplicateVisibleMethod => "invalid_receiver_declaration.duplicate_visible_method",
+        &InvalidReceiverDeclarationCode::GenericReceiverType => "invalid_receiver_declaration.generic_receiver_type",
+        &InvalidReceiverDeclarationCode::UnsupportedType => "invalid_receiver_declaration.unsupported_type",
+        &InvalidReceiverDeclarationCode::ReceiverMethodImportOrExportNotAllowed => "invalid_receiver_declaration.receiver_method_import_or_export_not_allowed",
     },
 
     InvalidControlFlowStatementReason => {
@@ -1721,20 +1740,23 @@ define_stable_reason_keys! {
     },
 
     InvalidGenericInstantiationReason => {
-    &InvalidGenericInstantiationReason::WrongArgumentCount { .. } => "invalid_generic_instantiation.wrong_argument_count",
-    &InvalidGenericInstantiationReason::TypeDoesNotAcceptArguments => "invalid_generic_instantiation.type_does_not_accept_arguments",
-    &InvalidGenericInstantiationReason::OptionTypeSyntaxNotSupported => "invalid_generic_instantiation.option_type_syntax_not_supported",
-    &InvalidGenericInstantiationReason::ResultTypeSyntaxNotSupported => "invalid_generic_instantiation.result_type_syntax_not_supported",
-    &InvalidGenericInstantiationReason::ExternalTypeArgumentsUnsupported => "invalid_generic_instantiation.external_type_arguments_unsupported",
-    &InvalidGenericInstantiationReason::MissingTypeArguments => "invalid_generic_instantiation.missing_type_arguments",
-    &InvalidGenericInstantiationReason::CannotInferArguments { .. } => "invalid_generic_instantiation.cannot_infer_arguments",
-    &InvalidGenericInstantiationReason::CannotInferFunctionArguments { .. } => "invalid_generic_instantiation.cannot_infer_function_arguments",
-    &InvalidGenericInstantiationReason::ConflictingInference { .. } => "invalid_generic_instantiation.conflicting_inference",
-    &InvalidGenericInstantiationReason::MissingTraitEvidence { .. } => "invalid_generic_instantiation.missing_trait_evidence",
-    &InvalidGenericInstantiationReason::MissingNominalTraitEvidence { .. } => "invalid_generic_instantiation.missing_nominal_trait_evidence",
-    &InvalidGenericInstantiationReason::RecursiveFunctionInstantiation => "invalid_generic_instantiation.recursive_function_instantiation",
-    &InvalidGenericInstantiationReason::ExplicitCallTypeArgumentsUnsupported => "invalid_generic_instantiation.explicit_call_type_arguments_unsupported",
-    &InvalidGenericInstantiationReason::GenericFunctionValueDeferred => "invalid_generic_instantiation.generic_function_value_deferred",
+        @delegate(reason => InvalidGenericInstantiationCode::of(reason).stable_reason_key());
+    },
+    InvalidGenericInstantiationCode => {
+        &InvalidGenericInstantiationCode::WrongArgumentCount => "invalid_generic_instantiation.wrong_argument_count",
+        &InvalidGenericInstantiationCode::TypeDoesNotAcceptArguments => "invalid_generic_instantiation.type_does_not_accept_arguments",
+        &InvalidGenericInstantiationCode::OptionTypeSyntaxNotSupported => "invalid_generic_instantiation.option_type_syntax_not_supported",
+        &InvalidGenericInstantiationCode::ResultTypeSyntaxNotSupported => "invalid_generic_instantiation.result_type_syntax_not_supported",
+        &InvalidGenericInstantiationCode::ExternalTypeArgumentsUnsupported => "invalid_generic_instantiation.external_type_arguments_unsupported",
+        &InvalidGenericInstantiationCode::MissingTypeArguments => "invalid_generic_instantiation.missing_type_arguments",
+        &InvalidGenericInstantiationCode::CannotInferArguments => "invalid_generic_instantiation.cannot_infer_arguments",
+        &InvalidGenericInstantiationCode::CannotInferFunctionArguments => "invalid_generic_instantiation.cannot_infer_function_arguments",
+        &InvalidGenericInstantiationCode::ConflictingInference => "invalid_generic_instantiation.conflicting_inference",
+        &InvalidGenericInstantiationCode::MissingTraitEvidence => "invalid_generic_instantiation.missing_trait_evidence",
+        &InvalidGenericInstantiationCode::MissingNominalTraitEvidence => "invalid_generic_instantiation.missing_nominal_trait_evidence",
+        &InvalidGenericInstantiationCode::RecursiveFunctionInstantiation => "invalid_generic_instantiation.recursive_function_instantiation",
+        &InvalidGenericInstantiationCode::ExplicitCallTypeArgumentsUnsupported => "invalid_generic_instantiation.explicit_call_type_arguments_unsupported",
+        &InvalidGenericInstantiationCode::GenericFunctionValueDeferred => "invalid_generic_instantiation.generic_function_value_deferred",
     },
 
     ProjectContextEscapeReason => {

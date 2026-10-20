@@ -12,6 +12,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_
     InvalidLoopHeaderCode, InvalidLoopHeaderView, InvalidMatchArmView,
     InvalidStandaloneStatementView, InvalidStatementPositionView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
+    InvalidParameterContractView, InvalidThisUsageView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::InvalidTypeAnnotationView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::InvalidStyleDirectiveView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::ExpectedTokenView;
@@ -119,6 +122,23 @@ pub(crate) fn invalid_parameter_contract_message(reason: InvalidParameterContrac
                 contract_name(contract)
             )
         }
+    }
+}
+
+/// WHAT: renders an invalid parameter contract from its reason code and optional kinds.
+/// WHY: the code determines which contract facts the legacy reason requires.
+pub(crate) fn render_invalid_parameter_contract(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidParameterContractView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = facts
+        .code
+        .to_reason(facts.contract, facts.nested_contract)
+        .expect("a parameter-contract code stores its required kinds");
+    RenderedPayload {
+        message: invalid_parameter_contract_message(reason),
+        guidance: Vec::new(),
     }
 }
 pub(crate) fn invalid_string_escape_message(reason: InvalidStringEscapeReason) -> String {
@@ -891,5 +911,22 @@ pub(crate) fn invalid_this_usage_message(
             "'This' is only valid inside trait declarations. Use a concrete type name here."
                 .to_string()
         }
+    }
+}
+
+/// WHAT: renders invalid `this` usage from its reason code and optional function name.
+/// WHY: only the two function-specific codes read the stored name.
+pub(crate) fn render_invalid_this_usage(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidThisUsageView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = facts
+        .code
+        .to_reason(facts.function_name)
+        .expect("a this-usage code stores its required function name");
+    RenderedPayload {
+        message: invalid_this_usage_message(reason, context.string_table),
+        guidance: Vec::new(),
     }
 }

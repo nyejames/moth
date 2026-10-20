@@ -30,8 +30,20 @@ pub(crate) trait FactCodec {
     type Durable;
     /// Words the fact occupies.
     const WORDS: usize;
-    /// Whether the words hold raw type ids that compaction rewrites into type display words.
+    /// Whether all fact words hold raw type ids that compaction rewrites into type display words.
     const PENDING: bool = false;
+    /// Relative fact words that every value of this codec leaves as raw type ids.
+    const REQUIRED_PENDING_MASK: u8 = if Self::PENDING {
+        ((1u16 << Self::WORDS) - 1) as u8
+    } else {
+        0
+    };
+    /// Relative fact words that some value of this codec may leave as raw type ids.
+    const PENDING_MASK: u8 = Self::REQUIRED_PENDING_MASK;
+    /// The exact relative fact words holding raw type ids in this draft value.
+    fn pending_mask(_draft: &Self::Draft) -> u8 {
+        Self::REQUIRED_PENDING_MASK
+    }
 
     fn encode(draft: &Self::Draft, words: &mut [u32]) -> Result<(), FactCapacityError>;
     fn decode(words: &[u32]) -> Option<Self::Durable>;
@@ -488,7 +500,8 @@ impl<T: UnitCode> FactCodec for OptUnitFact<T> {
     }
 }
 
-/// Writes facts into a record's fact area in declaration order.
+/// Writes facts in declaration order, records each draft's exact pending type words, and validates
+/// them against the family's required and possible masks.
 pub(super) struct FactCursor {
     words: [u32; FACT_WORDS],
     used: usize,
@@ -511,16 +524,23 @@ impl FactCursor {
             "family fact layout exceeds the record's fact area"
         );
         C::encode(draft, &mut self.words[self.used..end])?;
-        if C::PENDING {
-            for word in self.used..end {
-                self.pending |= 1 << word;
-            }
-        }
+        let pending = C::pending_mask(draft);
+        assert_eq!(
+            pending & C::REQUIRED_PENDING_MASK,
+            C::REQUIRED_PENDING_MASK,
+            "every required pending type word is present"
+        );
+        assert_eq!(
+            pending & !C::PENDING_MASK,
+            0,
+            "a fact value's pending words are possible for its codec"
+        );
+        self.pending |= pending << self.used;
         self.used = end;
         Ok(())
     }
 
-    /// Checks the written facts against the family row and returns the words and pending mask.
+    /// Checks the written facts against the row's required and possible pending type words.
     pub(super) fn finish_for(self, row: &FamilyRow) -> ([u32; FACT_WORDS], u8) {
         assert_eq!(
             self.used,
@@ -528,9 +548,14 @@ impl FactCursor {
             "a family constructor writes every fact in its family layout"
         );
         assert_eq!(
-            self.pending,
-            row.pending_mask(),
-            "pending type words match the family layout"
+            self.pending & row.required_pending_mask(),
+            row.required_pending_mask(),
+            "every required pending type word is present"
+        );
+        assert_eq!(
+            self.pending & !row.pending_mask(),
+            0,
+            "pending type words are possible in the family layout"
         );
         (self.words, self.pending)
     }

@@ -5,8 +5,13 @@
 //! WHY: declarations are resolved before executable body parsing and form their own payload family.
 
 use super::{
-    DiagnosticRenderContext, RenderedPayload, diagnostic_type_name, duplicate_declaration_message,
+    DiagnosticRenderContext, RenderedPayload, duplicate_declaration_message,
     namespace_misuse_message, token_kind_name, unknown_name_message,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
+    GenericInstantiationExtra, GenericInstantiationShape, InvalidFunctionSignatureView,
+    InvalidGenericInstantiationView, InvalidReceiverDeclarationCode,
+    InvalidReceiverDeclarationView, decode_generic_instantiation_extra,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
     DuplicateDeclarationView, IdentifierNamingConventionView, InvalidDeclarationCode,
@@ -17,9 +22,8 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::names_de
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
-    InvalidDeclarationReason, InvalidFunctionSignatureReason, InvalidGenericInstantiationReason,
-    InvalidReceiverDeclarationReason, InvalidSignatureMemberReason, NameNamespace,
-    NamingConvention, ReservedNameOwner,
+    InvalidDeclarationReason, InvalidFunctionSignatureReason, InvalidSignatureMemberReason,
+    NameNamespace, NamingConvention, ReservedNameOwner,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
@@ -227,6 +231,23 @@ pub(crate) fn invalid_function_signature_message(
     }
 }
 
+/// WHAT: renders an invalid function signature from its reason code and optional token.
+/// WHY: the code determines whether the token fact is required.
+pub(crate) fn render_invalid_function_signature(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidFunctionSignatureView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = facts
+        .code
+        .to_reason(facts.found)
+        .expect("a function-signature code stores its required token");
+    RenderedPayload {
+        message: invalid_function_signature_message(&reason, context.string_table),
+        guidance: Vec::new(),
+    }
+}
+
 pub(crate) fn invalid_declaration_message(
     reason: InvalidDeclarationReason,
     name: Option<StringId>,
@@ -374,72 +395,92 @@ pub(crate) fn render_missing_declaration_initializer(
     }
 }
 
-pub(crate) fn invalid_generic_instantiation_message(
-    type_name: Option<StringId>,
-    reason: &InvalidGenericInstantiationReason,
+pub(crate) fn render_invalid_generic_instantiation(
+    diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidGenericInstantiationView,
     context: DiagnosticRenderContext<'_>,
-) -> String {
-    use InvalidGenericInstantiationReason;
+) -> RenderedPayload {
+    use GenericInstantiationExtra as Extra;
+    use GenericInstantiationShape as Shape;
 
-    let string_table = context.string_table;
-    let type_name_str = type_name
-        .map(|n| format!("'{}'", string_table.resolve(n)))
-        .unwrap_or_else(|| "This type".to_string());
-
-    match reason {
-        InvalidGenericInstantiationReason::WrongArgumentCount { expected, found } => {
-            format!(
-                "Generic type {type_name_str} expects {expected} type argument{}, but {found} were provided.",
-                if *expected == 1 { "" } else { "s" }
-            )
-        }
-        InvalidGenericInstantiationReason::OptionTypeSyntaxNotSupported => {
+    let extra = decode_generic_instantiation_extra(facts.shape.code(), diagnostic.string_ids())
+        .expect("generic-instantiation reason code and extra string ids agree");
+    let type_name = match extra {
+        Extra::ConflictingInference { type_name, .. } => type_name,
+        _ => facts.shape.type_name(),
+    };
+    let type_name = type_name
+        .map(|name| format!("'{}'", context.string_table.resolve(name)))
+        .unwrap_or_else(|| "This type".to_owned());
+    let message = match (&facts.shape, extra) {
+        (
+            Shape::WrongArgumentCount {
+                expected, found, ..
+            },
+            Extra::None,
+        ) => format!(
+            "Generic type {type_name} expects {expected} type argument{}, but {found} were provided.",
+            if *expected == 1 { "" } else { "s" }
+        ),
+        (Shape::OptionTypeSyntaxNotSupported { .. }, Extra::None) => {
             "`Option of T` is not Moth type syntax. Use the `T?` optional suffix.".to_string()
         }
-        InvalidGenericInstantiationReason::ResultTypeSyntaxNotSupported => {
+        (Shape::ResultTypeSyntaxNotSupported { .. }, Extra::None) => {
             "`Result of T, E` is not Moth type syntax. Fallible functions declare a final `E!` error return slot.".to_string()
         }
-        InvalidGenericInstantiationReason::TypeDoesNotAcceptArguments => {
-            format!("Type {type_name_str} does not accept generic arguments.")
+        (Shape::TypeDoesNotAcceptArguments { .. }, Extra::None) => {
+            format!("Type {type_name} does not accept generic arguments.")
         }
-        InvalidGenericInstantiationReason::ExternalTypeArgumentsUnsupported => {
-            format!(
-                "External package type {type_name_str} cannot be generic. Expose a concrete external type instead."
-            )
+        (Shape::ExternalTypeArgumentsUnsupported { .. }, Extra::None) => format!(
+            "External package type {type_name} cannot be generic. Expose a concrete external type instead."
+        ),
+        (Shape::MissingTypeArguments { .. }, Extra::None) => {
+            format!("Generic type {type_name} requires type arguments.")
         }
-        InvalidGenericInstantiationReason::MissingTypeArguments => {
-            format!("Generic type {type_name_str} requires type arguments.")
-        }
-        InvalidGenericInstantiationReason::CannotInferArguments { missing_parameters } => {
+        (Shape::CannotInferArguments { .. }, Extra::MissingParameters(missing_parameters)) => {
             let missing = missing_parameters
                 .iter()
-                .map(|p| string_table.resolve(*p))
+                .map(|parameter| context.string_table.resolve(*parameter))
                 .collect::<Vec<_>>()
                 .join(", ");
             format!(
-                "Cannot infer type argument(s) for generic type {type_name_str}: {missing}. Provide an explicit type annotation or constructor arguments with concrete types."
+                "Cannot infer type argument(s) for generic type {type_name}: {missing}. Provide an explicit type annotation or constructor arguments with concrete types."
             )
         }
-        InvalidGenericInstantiationReason::CannotInferFunctionArguments { missing_parameters } => {
+        (
+            Shape::CannotInferFunctionArguments { .. },
+            Extra::MissingParameters(missing_parameters),
+        ) => {
             let missing = missing_parameters
                 .iter()
-                .map(|p| string_table.resolve(*p))
+                .map(|parameter| context.string_table.resolve(*parameter))
                 .collect::<Vec<_>>()
                 .join(", ");
             format!(
-                "Cannot infer type argument(s) for generic function {type_name_str}: {missing}. Add an immediate receiving-site type annotation or pass arguments that fix the type."
+                "Cannot infer type argument(s) for generic function {type_name}: {missing}. Add an immediate receiving-site type annotation or pass arguments that fix the type."
             )
         }
-        InvalidGenericInstantiationReason::ConflictingInference {
-            subject,
-            parameter_name,
-            existing_type_id,
-            replacement_type_id,
-            ..
-        } => {
-            let parameter = string_table.resolve(*parameter_name);
-            let existing_type = diagnostic_type_name(*existing_type_id, context);
-            let replacement_type = diagnostic_type_name(*replacement_type_id, context);
+        (
+            Shape::ConflictingInference {
+                subject,
+                existing_type,
+                replacement_type,
+            },
+            Extra::ConflictingInference {
+                parameter_name, ..
+            },
+        ) => {
+            let parameter = context.string_table.resolve(parameter_name);
+            let existing_type = diagnostic.types().display_for_render(
+                *existing_type,
+                context.string_table,
+                context.path_table(),
+            );
+            let replacement_type = diagnostic.types().display_for_render(
+                *replacement_type,
+                context.string_table,
+                context.path_table(),
+            );
             let subject = match subject {
                 crate::compiler_frontend::compiler_messages::GenericInferenceSubject::Function => {
                     "generic function"
@@ -449,102 +490,145 @@ pub(crate) fn invalid_generic_instantiation_message(
                 }
             };
             format!(
-                "Generic parameter '{parameter}' in {subject} {type_name_str} was inferred as both {existing_type} and {replacement_type}."
+                "Generic parameter '{parameter}' in {subject} {type_name} was inferred as both {existing_type} and {replacement_type}."
             )
         }
-        InvalidGenericInstantiationReason::MissingTraitEvidence {
-            parameter_name,
-            trait_name,
-            concrete_type_id,
-        } => {
-            let parameter = string_table.resolve(*parameter_name);
-            let trait_name = string_table.resolve(*trait_name);
-            let concrete_type = diagnostic_type_name(*concrete_type_id, context);
+        (
+            Shape::MissingTraitEvidence {
+                concrete_type, ..
+            },
+            Extra::MissingTraitEvidence {
+                parameter_name,
+                trait_name,
+            },
+        ) => {
+            let parameter = context.string_table.resolve(parameter_name);
+            let trait_name = context.string_table.resolve(trait_name);
+            let concrete_type = diagnostic.types().display_for_render(
+                *concrete_type,
+                context.string_table,
+                context.path_table(),
+            );
             format!(
-                "Generic function {type_name_str} requires '{parameter}' to satisfy trait '{trait_name}', but {concrete_type} does not conform to that trait."
+                "Generic function {type_name} requires '{parameter}' to satisfy trait '{trait_name}', but {concrete_type} does not conform to that trait."
             )
         }
-        InvalidGenericInstantiationReason::MissingNominalTraitEvidence {
-            parameter_name,
-            trait_name,
-            concrete_type_id,
-        } => {
-            let parameter = string_table.resolve(*parameter_name);
-            let trait_name = string_table.resolve(*trait_name);
-            let concrete_type = diagnostic_type_name(*concrete_type_id, context);
+        (
+            Shape::MissingNominalTraitEvidence {
+                concrete_type, ..
+            },
+            Extra::MissingTraitEvidence {
+                parameter_name,
+                trait_name,
+            },
+        ) => {
+            let parameter = context.string_table.resolve(parameter_name);
+            let trait_name = context.string_table.resolve(trait_name);
+            let concrete_type = diagnostic.types().display_for_render(
+                *concrete_type,
+                context.string_table,
+                context.path_table(),
+            );
             format!(
-                "Generic type {type_name_str} requires '{parameter}' to satisfy trait '{trait_name}', but {concrete_type} does not conform to that trait."
+                "Generic type {type_name} requires '{parameter}' to satisfy trait '{trait_name}', but {concrete_type} does not conform to that trait."
             )
         }
-        InvalidGenericInstantiationReason::RecursiveFunctionInstantiation => {
-            format!(
-                "Generic function {type_name_str} recursively instantiates itself, which is deferred for Alpha."
-            )
-        }
-        InvalidGenericInstantiationReason::ExplicitCallTypeArgumentsUnsupported => {
+        (Shape::RecursiveFunctionInstantiation { .. }, Extra::None) => format!(
+            "Generic function {type_name} recursively instantiates itself, which is deferred for Alpha."
+        ),
+        (Shape::ExplicitCallTypeArgumentsUnsupported { .. }, Extra::None) => {
             "Explicit generic call-site type arguments are not supported. Add an ordinary type annotation to the receiving declaration or argument instead.".to_string()
         }
-        InvalidGenericInstantiationReason::GenericFunctionValueDeferred => {
-            format!(
-                "Generic functions cannot be used as values. Call {type_name_str} directly or write a concrete wrapper function."
-            )
+        (Shape::GenericFunctionValueDeferred { .. }, Extra::None) => format!(
+            "Generic functions cannot be used as values. Call {type_name} directly or write a concrete wrapper function."
+        ),
+        _ => unreachable!("generic-instantiation code and decoded fact shapes agree"),
+    };
+    let guidance = match &facts.shape {
+        Shape::CannotInferFunctionArguments { .. } => vec![
+            "Add a type annotation to the receiving declaration, for example `value I32 = ...`."
+                .to_owned(),
+        ],
+        _ => Vec::new(),
+    };
+    RenderedPayload { message, guidance }
+}
+
+pub(crate) fn invalid_receiver_declaration_message(
+    code: InvalidReceiverDeclarationCode,
+    function_name: Option<StringId>,
+    type_name: Option<String>,
+    string_table: &dyn StringTableResolver,
+) -> String {
+    use InvalidReceiverDeclarationCode as Code;
+
+    match code {
+        Code::UnknownStructTarget => {
+            "Receiver method targets an unknown receiver type.".to_string()
+        }
+        Code::NonlocalSourceType => {
+            "Source-authored receiver methods must be declared in the same file as their user-defined receiver type. Use a free function for values owned by another file or package."
+                .to_string()
+        }
+        Code::BuiltinScalarType => {
+            "Source-authored receiver methods cannot target builtin scalar types. Use a free function for builtin values."
+                .to_string()
+        }
+        Code::ExternalOpaqueType => {
+            "Source-authored receiver methods cannot target external opaque types. Use a free function for values owned by another package."
+                .to_string()
+        }
+        Code::FieldNameConflict => {
+            "Struct declares both a field and a method with the same name.".to_string()
+        }
+        Code::DuplicateMethod => "Duplicate receiver method for this receiver and name.".to_string(),
+        Code::DuplicateVisibleMethod => {
+            "Visible receiver methods collide for the same receiver type and method name."
+                .to_string()
+        }
+        Code::GenericReceiverType => {
+            "Receiver methods on instantiated generic receiver types are not supported. Define the method on the generic type declaration using the receiver type's own parameters."
+                .to_string()
+        }
+        Code::UnsupportedType => format!(
+            "Function '{}' uses unsupported receiver type '{}'. Source-authored receiver methods must target a user-defined struct or choice.",
+            string_table.resolve(function_name.expect("unsupported receiver type stores its function name")),
+            type_name.expect("unsupported receiver type stores its type")
+        ),
+        Code::ReceiverMethodImportOrExportNotAllowed => {
+            "Receiver methods are not dependency-bound, exported, or aliased independently. Expose the receiver type; its same-file methods travel with values of that type and are called through receiver-call syntax."
+                .to_string()
         }
     }
 }
 
-pub(crate) fn invalid_receiver_declaration_message(
-    reason: InvalidReceiverDeclarationReason,
+/// WHAT: renders a receiver declaration from its reason code and retained name/type facts.
+/// WHY: the type display id is resolved from the diagnostic snapshot, not the legacy type arena.
+pub(crate) fn render_invalid_receiver_declaration(
+    diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidReceiverDeclarationView,
     context: DiagnosticRenderContext<'_>,
-) -> String {
-    use InvalidReceiverDeclarationReason;
-
-    match reason {
-        InvalidReceiverDeclarationReason::UnknownStructTarget => {
-            "Receiver method targets an unknown receiver type.".to_string()
-        }
-        InvalidReceiverDeclarationReason::NonlocalSourceType => {
-            "Source-authored receiver methods must be declared in the same file as their user-defined receiver type. Use a free function for values owned by another file or package."
-                .to_string()
-        }
-        InvalidReceiverDeclarationReason::BuiltinScalarType => {
-            "Source-authored receiver methods cannot target builtin scalar types. Use a free function for builtin values."
-                .to_string()
-        }
-        InvalidReceiverDeclarationReason::ExternalOpaqueType => {
-            "Source-authored receiver methods cannot target external opaque types. Use a free function for values owned by another package."
-                .to_string()
-        }
-        InvalidReceiverDeclarationReason::FieldNameConflict => {
-            "Struct declares both a field and a method with the same name.".to_string()
-        }
-        InvalidReceiverDeclarationReason::DuplicateMethod => {
-            "Duplicate receiver method for this receiver and name.".to_string()
-        }
-        InvalidReceiverDeclarationReason::DuplicateVisibleMethod => {
-            "Visible receiver methods collide for the same receiver type and method name."
-                .to_string()
-        }
-        InvalidReceiverDeclarationReason::GenericReceiverType {
-            function_name: _,
-            type_id: _,
-        } => {
-            "Receiver methods on instantiated generic receiver types are not supported. Define the method on the generic type declaration using the receiver type's own parameters."
-                .to_string()
-        }
-        InvalidReceiverDeclarationReason::UnsupportedType {
-            function_name,
-            type_id,
-        } => {
-            format!(
-                "Function '{}' uses unsupported receiver type '{}'. Source-authored receiver methods must target a user-defined struct or choice.",
-                context.string_table.resolve(function_name),
-                diagnostic_type_name(type_id, context)
-            )
-        }
-        InvalidReceiverDeclarationReason::ReceiverMethodImportOrExportNotAllowed => {
-            "Receiver methods are not dependency-bound, exported, or aliased independently. Expose the receiver type; its same-file methods travel with values of that type and are called through receiver-call syntax."
-                .to_string()
-        }
+) -> RenderedPayload {
+    let type_name = match facts.code {
+        InvalidReceiverDeclarationCode::UnsupportedType => Some(
+            diagnostic.types().display_for_render(
+                facts
+                    .type_id
+                    .expect("unsupported receiver type stores its type"),
+                context.string_table,
+                context.path_table(),
+            ),
+        ),
+        _ => None,
+    };
+    RenderedPayload {
+        message: invalid_receiver_declaration_message(
+            facts.code,
+            facts.function_name,
+            type_name,
+            context.string_table,
+        ),
+        guidance: Vec::new(),
     }
 }
 

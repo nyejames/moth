@@ -9,8 +9,9 @@ use super::*;
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidValueReceiverView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
-    DuplicatePublicExportView, GenericBoundPrivateSurfaceLeakView, InvalidTraitIncompatibilityView,
-    InvalidTraitKeywordUsageView, PrivateTypeInExportedApiView, TraitNameUsedAsTypeView,
+    DuplicatePublicExportView, DuplicateTraitRequirementView, GenericBoundPrivateSurfaceLeakView,
+    InvalidTraitIncompatibilityView, InvalidTraitKeywordUsageView, PrivateTypeInExportedApiView,
+    TraitNameUsedAsTypeView, TraitPrivateSurfaceLeakView, UnknownTraitView,
     UnsupportedTraitFeatureView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
@@ -82,24 +83,10 @@ pub(crate) fn render_payload(
     payload: &DiagnosticPayload,
     context: DiagnosticRenderContext<'_>,
 ) -> RenderedPayload {
-    let message = render_payload_message(payload, context);
-    let guidance = match payload {
-        DiagnosticPayload::InvalidGenericInstantiation {
-            reason:
-                crate::compiler_frontend::compiler_messages::InvalidGenericInstantiationReason::CannotInferFunctionArguments {
-                    ..
-                },
-            ..
-        } => {
-            vec![
-                "Add a type annotation to the receiving declaration, for example `value I32 = ...`."
-                    .to_owned(),
-            ]
-        }
-        _ => Vec::new(),
-    };
-
-    RenderedPayload { message, guidance }
+    RenderedPayload {
+        message: render_payload_message(payload, context),
+        guidance: Vec::new(),
+    }
 }
 
 /// WHAT: renders a capacity diagnostic from its compact facts.
@@ -224,55 +211,101 @@ fn render_payload_message(
             unknown_name_message(*name, *namespace, string_table)
         }
         DiagnosticPayload::BorrowConflict { .. } => borrow_payload_message(payload, context),
-        DiagnosticPayload::InvalidGenericApplication { reason } => {
-            invalid_generic_application_message(*reason).to_owned()
-        }
-        DiagnosticPayload::InvalidParameterContract { reason } => {
-            invalid_parameter_contract_message(*reason)
-        }
         DiagnosticPayload::InvalidGenericParameter { reason } => {
             invalid_generic_parameter_message(reason, string_table)
         }
         DiagnosticPayload::InvalidFunctionSignature { reason } => {
             invalid_function_signature_message(reason, string_table)
         }
-        DiagnosticPayload::UnknownTrait { name } => {
-            format!("Unknown trait '{}'.", string_table.resolve(*name))
-        }
-        DiagnosticPayload::DuplicateTraitRequirement {
-            trait_name,
-            requirement_name,
-        } => format!(
-            "Trait '{}' declares duplicate requirement '{}'. Trait requirements cannot be overloaded in v1.",
-            string_table.resolve(*trait_name),
-            string_table.resolve(*requirement_name)
-        ),
-        DiagnosticPayload::TraitPrivateSurfaceLeak {
-            trait_name,
-            surface_type,
-        } => format!(
-            "Exported trait '{}' exposes private type {} in its requirement surface.",
-            string_table.resolve(*trait_name),
-            diagnostic_type_name(*surface_type, context)
-        ),
         DiagnosticPayload::InvalidTraitConformance {
             target_name,
             trait_name,
             reason,
         } => invalid_trait_conformance_message(*target_name, *trait_name, reason, context),
-        DiagnosticPayload::InvalidThisUsage { reason } => {
-            invalid_this_usage_message(*reason, string_table)
-        }
-        DiagnosticPayload::InvalidReceiverDeclaration { reason } => {
-            invalid_receiver_declaration_message(*reason, context)
-        }
-        DiagnosticPayload::InvalidGenericInstantiation { type_name, reason } => {
-            invalid_generic_instantiation_message(*type_name, reason, context)
-        }
         DiagnosticPayload::None => String::new(),
         _ => unreachable!(
             "migrated families render through the compact path; P4.6 deletes this function"
         ),
+    }
+}
+
+fn unknown_trait_message(name: StringId, string_table: &dyn StringTableResolver) -> String {
+    format!("Unknown trait '{}'.", string_table.resolve(name))
+}
+
+/// WHAT: renders an unknown trait from its compact name fact.
+/// WHY: the name is the only variable part of this message.
+pub(crate) fn render_unknown_trait(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &UnknownTraitView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: unknown_trait_message(facts.name, context.string_table),
+        guidance: Vec::new(),
+    }
+}
+
+fn duplicate_trait_requirement_message(
+    trait_name: StringId,
+    requirement_name: StringId,
+    string_table: &dyn StringTableResolver,
+) -> String {
+    format!(
+        "Trait '{}' declares duplicate requirement '{}'. Trait requirements cannot be overloaded in v1.",
+        string_table.resolve(trait_name),
+        string_table.resolve(requirement_name)
+    )
+}
+
+/// WHAT: renders a duplicate trait requirement from its two names.
+/// WHY: its label is stored separately from its message facts.
+pub(crate) fn render_duplicate_trait_requirement(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &DuplicateTraitRequirementView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: duplicate_trait_requirement_message(
+            facts.trait_name,
+            facts.requirement_name,
+            context.string_table,
+        ),
+        guidance: Vec::new(),
+    }
+}
+
+fn trait_private_surface_leak_message(
+    trait_name: StringId,
+    surface_type: &str,
+    string_table: &dyn StringTableResolver,
+) -> String {
+    format!(
+        "Exported trait '{}' exposes private type {} in its requirement surface.",
+        string_table.resolve(trait_name),
+        surface_type
+    )
+}
+
+/// WHAT: renders a trait surface leak from its trait name and type display.
+/// WHY: compaction stores a display id rather than the legacy raw type id.
+pub(crate) fn render_trait_private_surface_leak(
+    diagnostic: &DiagnosticView<'_>,
+    facts: &TraitPrivateSurfaceLeakView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let surface_type = diagnostic.types().display_for_render(
+        facts.surface_type,
+        context.string_table,
+        context.path_table(),
+    );
+    RenderedPayload {
+        message: trait_private_surface_leak_message(
+            facts.trait_name,
+            &surface_type,
+            context.string_table,
+        ),
+        guidance: Vec::new(),
     }
 }
 fn circular_dependency_message(path: PathId, context: DiagnosticRenderContext<'_>) -> String {

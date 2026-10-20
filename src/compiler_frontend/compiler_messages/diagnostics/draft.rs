@@ -44,7 +44,7 @@ pub(super) struct DraftCore {
     pub(super) family: &'static FamilyRow,
     pub(super) span: Option<SourceSpan>,
     pub(super) facts: [u32; FACT_WORDS],
-    /// Bit `i` set means fact word `i` holds a raw `TypeId` that `capture_types` must rewrite.
+    /// Exact mask of fact words still holding raw `TypeId`s; the family mask may be a superset.
     pub(super) pending_facts: u8,
     /// Set once a value failed to encode. The draft then stores as a capacity record and takes no more parts.
     pub(super) faulted: bool,
@@ -199,12 +199,13 @@ impl DiagnosticDraft {
 }
 
 impl DiagnosticDraft {
-    /// Rewrites every pending type word through `rewrite`, which maps a `TypeId` to its display ID.
+    /// Rewrites the pending type words of this draft through `rewrite`, which maps each raw `TypeId` to its display ID.
     ///
+    /// The mask records the concrete shape's type words, so type-free words such as a reason code stay untouched.
     /// All-or-nothing: the new words are computed into temporaries first, and the draft changes only when every
     /// rewrite succeeds. A failed call leaves the draft exactly as it was. Callers map the error to their own
     /// capacity handling: the render adapter expects success, since one diagnostic's types always fit the id space.
-    /// The P4.6 producer emits `COMPILER_CAPACITY_EXCEEDED` (D5), and P4.5 bags latch their domain capacity.
+    /// The P4.6 producer emits TypeIds while it owns the type environment, so capture happens at this boundary.
     pub(super) fn capture_types(
         &mut self,
         rewrite: &mut impl FnMut(TypeId) -> Result<TypeDisplayId, TypeDisplayCapacityError>,
