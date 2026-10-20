@@ -9,7 +9,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_da
     InvalidCallShapeCode, InvalidCollectionTypeCode, InvalidMapTypeCode, InvalidMultiBindCode,
     InvalidReturnShapeCode,
 };
-use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::InvalidImportPathCode;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
+    InvalidExternalModuleCode, InvalidImportPathCode,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
     DeferredFeatureCode, InvalidDeclarationCode, InvalidTypeAnnotationCode,
 };
@@ -1016,8 +1018,11 @@ define_stable_reason_keys! {
         &InvalidImportPathCode::CaseMismatch => "invalid_import_path.case_mismatch",
     },
     InvalidExternalModuleReason => {
-        &InvalidExternalModuleReason::ReceiverMethod { .. } => "invalid_external_module.receiver_method",
-        &InvalidExternalModuleReason::ParserDiagnostic { .. } => "invalid_external_module.parser_diagnostic",
+        @delegate(reason => InvalidExternalModuleCode::of(reason).stable_reason_key());
+    },
+    InvalidExternalModuleCode => {
+        &InvalidExternalModuleCode::ReceiverMethod => "invalid_external_module.receiver_method",
+        &InvalidExternalModuleCode::ParserDiagnostic => "invalid_external_module.parser_diagnostic",
     },
 
 

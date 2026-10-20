@@ -224,19 +224,6 @@ fn render_payload_message(
         DiagnosticPayload::UnknownName { name, namespace } => {
             unknown_name_message(*name, *namespace, string_table)
         }
-        DiagnosticPayload::DirectSymbolPathImport { .. }
-        | DiagnosticPayload::InvalidNamespaceDefaultName { .. }
-        | DiagnosticPayload::DuplicateImportSurfaceMember { .. }
-        | DiagnosticPayload::ExplicitMothExtension { .. }
-        | DiagnosticPayload::ExplicitSourceExtension { .. }
-        | DiagnosticPayload::UnsupportedSourceFileKind { .. }
-        | DiagnosticPayload::InvalidSourceFileEntry { .. }
-        | DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor { .. }
-        | DiagnosticPayload::DuplicateMothTemplateInputPath { .. }
-        | DiagnosticPayload::UnsupportedExternalExtension { .. }
-        | DiagnosticPayload::InvalidExternalModule { .. } => {
-            import_payload_message(payload, context)
-        }
         DiagnosticPayload::BorrowConflict { .. }
         | DiagnosticPayload::MultipleMutableBorrows { .. }
         | DiagnosticPayload::SharedMutableConflict { .. }
@@ -852,56 +839,6 @@ fn trait_name_used_as_type_message(
     format!(
         "Trait '{trait_text}' is a static contract and cannot be used as a value type. Use `type T is {trait_text}` for static reuse or a choice for runtime heterogeneity."
     )
-}
-
-fn import_payload_message(
-    payload: &DiagnosticPayload,
-    context: DiagnosticRenderContext<'_>,
-) -> String {
-    match payload {
-        DiagnosticPayload::DirectSymbolPathImport { path } => {
-            direct_symbol_path_import_message(*path, context)
-        }
-        DiagnosticPayload::InvalidNamespaceDefaultName { path } => {
-            invalid_namespace_default_name_message(*path, context)
-        }
-        DiagnosticPayload::DuplicateImportSurfaceMember {
-            surface_path,
-            member_name,
-        } => duplicate_import_surface_member_message(*surface_path, *member_name, context),
-        DiagnosticPayload::ExplicitMothExtension { path } => {
-            explicit_moth_extension_message(*path, context)
-        }
-        DiagnosticPayload::ExplicitSourceExtension { path, extension } => {
-            explicit_source_extension_message(*path, *extension, context)
-        }
-        DiagnosticPayload::UnsupportedSourceFileKind { path, extension } => {
-            unsupported_source_file_kind_message(*path, *extension, context)
-        }
-        DiagnosticPayload::InvalidSourceFileEntry { path, extension } => {
-            invalid_source_file_entry_message(*path, *extension, context)
-        }
-        DiagnosticPayload::DuplicateMothTemplateInputPath { path, .. } => {
-            duplicate_moth_template_input_path_message(*path, context)
-        }
-        DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor {
-            first_path,
-            second_path,
-        } => moth_template_inputs_share_no_common_ancestor_message(
-            *first_path,
-            *second_path,
-            context,
-        ),
-        DiagnosticPayload::UnsupportedExternalExtension { path, extension } => {
-            unsupported_external_extension_message(*path, *extension, context)
-        }
-        DiagnosticPayload::InvalidExternalModule { path, reason } => {
-            invalid_external_module_message(*path, reason, context)
-        }
-        _ => unreachable!(
-            "migrated families render through the compact path; P4.6 deletes this function"
-        ),
-    }
 }
 
 fn missing_package_symbol_message(

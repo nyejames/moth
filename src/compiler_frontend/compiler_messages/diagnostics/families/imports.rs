@@ -1,7 +1,6 @@
 //! Family rows for import diagnostics.
 //!
-//! WHAT: the unused-import (reserved) and missing-import-target pilots, in full.
-//! The other 22 rows are identity rows for import families.
+//! WHAT: the unused-import (reserved) and all active import diagnostics, in full.
 //! WHY: every row is in the import band, so they share one group table.
 
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
@@ -15,15 +14,20 @@ use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
 use crate::compiler_frontend::compiler_messages::render::{
     render_ambiguous_import_target, render_bare_file_import,
     render_cross_module_import_not_exported, render_dependency_alias_case_mismatch,
-    render_direct_special_file_import, render_import_name_collision, render_invalid_import_path,
+    render_direct_special_file_import, render_direct_symbol_path_import,
+    render_duplicate_import_surface_member, render_duplicate_moth_template_input_path,
+    render_explicit_moth_extension, render_explicit_source_extension, render_import_name_collision,
+    render_invalid_external_module, render_invalid_import_path,
+    render_invalid_namespace_default_name, render_invalid_source_file_entry,
     render_missing_import_target, render_missing_module_root_public_surface,
-    render_missing_package_symbol, render_not_exported_by_public_surface,
-    render_not_exported_by_source_file,
+    render_missing_package_symbol, render_moth_template_inputs_share_no_common_ancestor,
+    render_not_exported_by_public_surface, render_not_exported_by_source_file,
+    render_unsupported_external_extension, render_unsupported_source_file_kind,
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticCategory, DiagnosticKind, DiagnosticLabelMessage,
     DiagnosticPayload, DiagnosticSeverity, ImportDiagnosticKind, ImportPublicSurfaceType,
-    InvalidImportPathReason,
+    InvalidExternalModuleReason, InvalidImportPathReason,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -42,6 +46,44 @@ unit_code! {
         EscapesProjectRoot = 4,
         EscapesSourcePackageRoot = 5,
         CaseMismatch = 6,
+    }
+}
+
+unit_code! {
+    pub(crate) enum InvalidExternalModuleCode {
+        ReceiverMethod = 1,
+        ParserDiagnostic = 2,
+    }
+}
+
+impl InvalidExternalModuleCode {
+    pub(crate) fn of(reason: &InvalidExternalModuleReason) -> Self {
+        match reason {
+            InvalidExternalModuleReason::ReceiverMethod { .. } => Self::ReceiverMethod,
+            InvalidExternalModuleReason::ParserDiagnostic { .. } => Self::ParserDiagnostic,
+        }
+    }
+
+    pub(crate) fn split(reason: &InvalidExternalModuleReason) -> (Self, StringId) {
+        match reason {
+            InvalidExternalModuleReason::ReceiverMethod { moth_name } => {
+                (Self::ReceiverMethod, *moth_name)
+            }
+            InvalidExternalModuleReason::ParserDiagnostic { parser_detail } => {
+                (Self::ParserDiagnostic, *parser_detail)
+            }
+        }
+    }
+
+    pub(crate) fn to_reason(self, detail: StringId) -> InvalidExternalModuleReason {
+        match self {
+            Self::ReceiverMethod => {
+                InvalidExternalModuleReason::ReceiverMethod { moth_name: detail }
+            }
+            Self::ParserDiagnostic => InvalidExternalModuleReason::ParserDiagnostic {
+                parser_detail: detail,
+            },
+        }
     }
 }
 
@@ -215,6 +257,94 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
             DiagnosticKind::Import(ImportDiagnosticKind::InvalidImportPath),
             DiagnosticPayload::InvalidImportPath { path, reason },
         ) => Some(invalid_import_path(*path, *reason, diagnostic.primary_span)),
+        (
+            DiagnosticKind::Import(ImportDiagnosticKind::DirectSymbolPathImport),
+            DiagnosticPayload::DirectSymbolPathImport { path },
+        ) => Some(direct_symbol_path_import(*path, diagnostic.primary_span)),
+        (
+            DiagnosticKind::Import(ImportDiagnosticKind::InvalidNamespaceDefaultName),
+            DiagnosticPayload::InvalidNamespaceDefaultName { path },
+        ) => Some(invalid_namespace_default_name(
+            *path,
+            diagnostic.primary_span,
+        )),
+        (
+            DiagnosticKind::Import(ImportDiagnosticKind::DuplicateImportSurfaceMember),
+            DiagnosticPayload::DuplicateImportSurfaceMember {
+                surface_path,
+                member_name,
+            },
+        ) => Some(duplicate_import_surface_member(
+            *surface_path,
+            *member_name,
+            diagnostic.primary_span,
+        )),
+        (
+            DiagnosticKind::Import(ImportDiagnosticKind::ExplicitMothExtension),
+            DiagnosticPayload::ExplicitMothExtension { path },
+        ) => Some(explicit_moth_extension(*path, diagnostic.primary_span)),
+        (
+            DiagnosticKind::Import(ImportDiagnosticKind::UnsupportedExternalExtension),
+            DiagnosticPayload::UnsupportedExternalExtension { path, extension },
+        ) => Some(unsupported_external_extension(
+            *path,
+            *extension,
+            diagnostic.primary_span,
+        )),
+        (
+            DiagnosticKind::Import(ImportDiagnosticKind::InvalidExternalModule),
+            DiagnosticPayload::InvalidExternalModule { path, reason },
+        ) => Some(invalid_external_module(
+            *path,
+            reason.clone(),
+            diagnostic.primary_span,
+        )),
+        (
+            DiagnosticKind::Import(ImportDiagnosticKind::ExplicitSourceExtension),
+            DiagnosticPayload::ExplicitSourceExtension { path, extension },
+        ) => Some(explicit_source_extension(
+            *path,
+            *extension,
+            diagnostic.primary_span,
+        )),
+        (
+            DiagnosticKind::Import(ImportDiagnosticKind::UnsupportedSourceFileKind),
+            DiagnosticPayload::UnsupportedSourceFileKind { path, extension },
+        ) => Some(unsupported_source_file_kind(
+            *path,
+            *extension,
+            diagnostic.primary_span,
+        )),
+        (
+            DiagnosticKind::Import(ImportDiagnosticKind::InvalidSourceFileEntry),
+            DiagnosticPayload::InvalidSourceFileEntry { path, extension },
+        ) => Some(invalid_source_file_entry(
+            *path,
+            *extension,
+            diagnostic.primary_span,
+        )),
+        (
+            DiagnosticKind::Import(ImportDiagnosticKind::DuplicateMothTemplateInputPath),
+            DiagnosticPayload::DuplicateMothTemplateInputPath { path },
+        ) => {
+            // The outer legacy adapter copies existing labels after mapping the payload facts.
+            Some(duplicate_moth_template_input_path(
+                *path,
+                None,
+                diagnostic.primary_span,
+            ))
+        }
+        (
+            DiagnosticKind::Import(ImportDiagnosticKind::MothTemplateInputsShareNoCommonAncestor),
+            DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor {
+                first_path,
+                second_path,
+            },
+        ) => Some(moth_template_inputs_share_no_common_ancestor(
+            *first_path,
+            *second_path,
+            diagnostic.primary_span,
+        )),
         _ => None,
     }
 }
@@ -439,91 +569,217 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_impo
     })
 }
 
+/// Stores an invalid external-module reason code and its shared string fact.
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_external_module(
+    path: PathId,
+    reason: InvalidExternalModuleReason,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    let (reason_code, detail) = InvalidExternalModuleCode::split(&reason);
+    DiagnosticDraft::with_facts(&INVALID_EXTERNAL_MODULE, span, |cursor| {
+        cursor.push::<PathFact>(&path)?;
+        cursor.push::<UnitFact<InvalidExternalModuleCode>>(&reason_code)?;
+        cursor.push::<StringFact>(&detail)?;
+        Ok(())
+    })
+}
+
 diagnostic_family! {
-    identity DIRECT_SYMBOL_PATH_IMPORT {
+    pilot DIRECT_SYMBOL_PATH_IMPORT {
         internal: 4017,
         stable: "MOTH-IMPORT-0017",
         category: DiagnosticCategory::Import,
+        severity: DiagnosticSeverity::Error,
+        title: "Direct symbol dependency path",
+        facts: [path: PathFact],
+        labels: [],
+        extra: None,
+        ctor: generated direct_symbol_path_import,
+        view: DirectSymbolPathImportView,
+        render: render_direct_symbol_path_import,
     }
 }
-
 diagnostic_family! {
-    identity INVALID_NAMESPACE_DEFAULT_NAME {
+    pilot INVALID_NAMESPACE_DEFAULT_NAME {
         internal: 4018,
         stable: "MOTH-IMPORT-0018",
         category: DiagnosticCategory::Import,
+        severity: DiagnosticSeverity::Error,
+        title: "Invalid namespace default name",
+        facts: [path: PathFact],
+        labels: [],
+        extra: None,
+        ctor: generated invalid_namespace_default_name,
+        view: InvalidNamespaceDefaultNameView,
+        render: render_invalid_namespace_default_name,
     }
 }
 
 diagnostic_family! {
-    identity DUPLICATE_IMPORT_SURFACE_MEMBER {
+    pilot DUPLICATE_IMPORT_SURFACE_MEMBER {
         internal: 4019,
         stable: "MOTH-IMPORT-0019",
         category: DiagnosticCategory::Import,
+        severity: DiagnosticSeverity::Error,
+        title: "Duplicate dependency surface member",
+        facts: [surface_path: PathFact, member_name: StringFact],
+        labels: [],
+        extra: None,
+        ctor: generated duplicate_import_surface_member,
+        view: DuplicateImportSurfaceMemberView,
+        render: render_duplicate_import_surface_member,
     }
 }
 
 diagnostic_family! {
-    identity EXPLICIT_MOTH_EXTENSION {
+    pilot EXPLICIT_MOTH_EXTENSION {
         internal: 4020,
         stable: "MOTH-IMPORT-0020",
         category: DiagnosticCategory::Import,
+        severity: DiagnosticSeverity::Error,
+        title: "Explicit .moth extension in dependency",
+        facts: [path: PathFact],
+        labels: [],
+        extra: None,
+        ctor: generated explicit_moth_extension,
+        view: ExplicitMothExtensionView,
+        render: render_explicit_moth_extension,
     }
 }
 
 diagnostic_family! {
-    identity UNSUPPORTED_EXTERNAL_EXTENSION {
+    pilot UNSUPPORTED_EXTERNAL_EXTENSION {
         internal: 4021,
         stable: "MOTH-IMPORT-0021",
         category: DiagnosticCategory::Import,
+        severity: DiagnosticSeverity::Error,
+        title: "Unsupported external file dependency extension",
+        facts: [path: PathFact, extension: StringFact],
+        labels: [],
+        extra: None,
+        ctor: generated unsupported_external_extension,
+        view: UnsupportedExternalExtensionView,
+        render: render_unsupported_external_extension,
     }
 }
 
 diagnostic_family! {
-    identity INVALID_EXTERNAL_MODULE {
+    pilot INVALID_EXTERNAL_MODULE {
         internal: 4022,
         stable: "MOTH-IMPORT-0022",
         category: DiagnosticCategory::Import,
+        severity: DiagnosticSeverity::Error,
+        title: "Invalid external JS module",
+        facts: [
+            path: PathFact,
+            reason_code: UnitFact<InvalidExternalModuleCode>,
+            reason_detail: StringFact,
+        ],
+        labels: [],
+        extra: None,
+        ctor: manual,
+        view: InvalidExternalModuleView,
+        render: render_invalid_external_module,
     }
 }
 
 diagnostic_family! {
-    identity EXPLICIT_SOURCE_EXTENSION {
+    pilot EXPLICIT_SOURCE_EXTENSION {
         internal: 4024,
         stable: "MOTH-IMPORT-0024",
         category: DiagnosticCategory::Import,
+        severity: DiagnosticSeverity::Error,
+        title: "Explicit source extension in dependency",
+        facts: [path: PathFact, extension: StringFact],
+        labels: [],
+        extra: None,
+        ctor: generated explicit_source_extension,
+        view: ExplicitSourceExtensionView,
+        render: render_explicit_source_extension,
     }
 }
 
 diagnostic_family! {
-    identity UNSUPPORTED_SOURCE_FILE_KIND {
+    pilot UNSUPPORTED_SOURCE_FILE_KIND {
         internal: 4025,
         stable: "MOTH-IMPORT-0025",
         category: DiagnosticCategory::Import,
+        severity: DiagnosticSeverity::Error,
+        title: "Unsupported source file kind",
+        facts: [path: PathFact, extension: StringFact],
+        labels: [],
+        extra: None,
+        ctor: generated unsupported_source_file_kind,
+        view: UnsupportedSourceFileKindView,
+        render: render_unsupported_source_file_kind,
     }
 }
 
 diagnostic_family! {
-    identity INVALID_SOURCE_FILE_ENTRY {
+    pilot INVALID_SOURCE_FILE_ENTRY {
         internal: 4026,
         stable: "MOTH-IMPORT-0026",
         category: DiagnosticCategory::Import,
+        severity: DiagnosticSeverity::Error,
+        title: "Source file kind cannot be used as an entry",
+        facts: [path: PathFact, extension: StringFact],
+        labels: [],
+        extra: None,
+        ctor: generated invalid_source_file_entry,
+        view: InvalidSourceFileEntryView,
+        render: render_invalid_source_file_entry,
     }
 }
 
 diagnostic_family! {
-    identity DUPLICATE_MOTH_TEMPLATE_INPUT_PATH {
+    pilot DUPLICATE_MOTH_TEMPLATE_INPUT_PATH {
         internal: 4028,
         stable: "MOTH-IMPORT-0028",
         category: DiagnosticCategory::Import,
+        severity: DiagnosticSeverity::Error,
+        title: "Duplicate Moth template input path",
+        facts: [path: PathFact],
+        labels: [],
+        extra: None,
+        ctor: manual,
+        view: DuplicateMothTemplateInputPathView,
+        render: render_duplicate_moth_template_input_path,
+    }
+}
+
+/// Stores a duplicate Moth template input path and its message-less label.
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn duplicate_moth_template_input_path(
+    path: PathId,
+    first_span: Option<SourceSpan>,
+    duplicate_span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    let draft = DiagnosticDraft::with_facts(
+        &DUPLICATE_MOTH_TEMPLATE_INPUT_PATH,
+        duplicate_span,
+        |cursor| {
+            cursor.push::<PathFact>(&path)?;
+            Ok(())
+        },
+    );
+    match first_span {
+        Some(first_span) => draft.with_label(Some(first_span), None),
+        None => draft,
     }
 }
 
 diagnostic_family! {
-    identity MOTH_TEMPLATE_INPUTS_SHARE_NO_COMMON_ANCESTOR {
+    pilot MOTH_TEMPLATE_INPUTS_SHARE_NO_COMMON_ANCESTOR {
         internal: 4029,
         stable: "MOTH-IMPORT-0029",
         category: DiagnosticCategory::Import,
+        severity: DiagnosticSeverity::Error,
+        title: "Moth template inputs share no common ancestor",
+        facts: [first_path: PathFact, second_path: PathFact],
+        labels: [],
+        extra: None,
+        ctor: generated moth_template_inputs_share_no_common_ancestor,
+        view: MothTemplateInputsShareNoCommonAncestorView,
+        render: render_moth_template_inputs_share_no_common_ancestor,
     }
 }
 
