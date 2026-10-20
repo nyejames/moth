@@ -13,7 +13,9 @@ available.
 - Current checkpoint: native binding and artefact handoff.
 - Blockers: the V1 host ABI is accepted. Approve the execution checkpoints
   below, then consume the relevant delivered compiler APIs.
-- Next action: deliver the public custom-builder SDK and descriptor handoff.
+- Next action: deliver the public custom-builder SDK and descriptor handoff
+  through the active
+  [native binding handoff plan](../../docs/roadmap/plans/lappet-native-binding-handoff-plan.md).
   Package management remains deferred.
 
 [Runtime design](docs/design.md), [package-manager design](docs/package-manager.md)
