@@ -10,7 +10,16 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
-use super::{DiagnosticRenderContext, diagnostic_type_name, named_value_or_default};
+use super::{
+    DiagnosticRenderContext, RenderedPayload, diagnostic_type_name, named_value_or_default,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
+    NonExhaustiveMatchView, UnreachableMatchArmView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
+
+/// The fixed message for an unreachable match arm, shared by the compact and legacy renderers.
+pub(crate) const UNREACHABLE_MATCH_ARM_MESSAGE: &str = "Unreachable match arm";
 
 pub(crate) fn invalid_control_flow_statement_message(
     reason: InvalidControlFlowStatementReason,
@@ -284,5 +293,35 @@ pub(crate) fn non_exhaustive_match_message(
             "Non-exhaustive option match. Add `none =>` or `|name| =>` to cover all cases."
                 .to_string()
         }
+    }
+}
+
+/// WHAT: renders an unreachable match arm from its compact record, which carries no facts.
+/// WHY: the message is fixed, so the record stores nothing beyond its family.
+pub(crate) fn render_unreachable_match_arm(
+    _diagnostic: &DiagnosticView<'_>,
+    _facts: &UnreachableMatchArmView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: UNREACHABLE_MATCH_ARM_MESSAGE.to_owned(),
+        guidance: Vec::new(),
+    }
+}
+
+/// WHAT: renders a non-exhaustive match from its compact reason and missing variant names.
+/// WHY: the record stores the same reason and variant names as the legacy payload.
+pub(crate) fn render_non_exhaustive_match(
+    diagnostic: &DiagnosticView<'_>,
+    facts: &NonExhaustiveMatchView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: non_exhaustive_match_message(
+            facts.reason,
+            diagnostic.string_ids(),
+            context.string_table,
+        ),
+        guidance: Vec::new(),
     }
 }

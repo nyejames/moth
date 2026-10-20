@@ -5,6 +5,8 @@
 //! for turning those facts into stable text.
 
 use super::*;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::UseOfUninitializedLocalView;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 
 pub(crate) fn diagnostic_place_name(
     place: &DiagnosticPlace,
@@ -161,4 +163,17 @@ pub(crate) fn use_of_uninitialized_local_message(
         "Use of {} before initialization or after scope end.",
         diagnostic_place_name(place, context)
     )
+}
+
+/// WHAT: renders a use of an uninitialized local from its compact place.
+/// WHY: the stored place decodes to the same diagnostic place the legacy payload carries.
+pub(crate) fn render_use_of_uninitialized_local(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &UseOfUninitializedLocalView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: use_of_uninitialized_local_message(&facts.place.diagnostic_place(), context),
+        guidance: Vec::new(),
+    }
 }

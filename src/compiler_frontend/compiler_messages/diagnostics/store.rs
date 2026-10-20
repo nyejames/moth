@@ -9,7 +9,7 @@ use super::extras::{DiagnosticExtraRecord, ExtraDataKind};
 use super::facts::FactReader;
 use super::foreign::{ForeignSiteRecord, SiteRef};
 use super::labels::{GenericSubstitutionRecord, SecondaryDiagnosticLabel};
-use super::record::{DiagnosticCode, DiagnosticRecord};
+use super::record::{DiagnosticCode, DiagnosticRecord, SeverityOverride};
 use super::resource::DiagnosticLimits;
 use crate::compiler_frontend::compiler_messages::DiagnosticCapacityResource;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan};
@@ -53,7 +53,6 @@ impl DiagnosticId {
 
 impl DiagnosticStore {
     /// An empty store with production ceilings.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 boundary bags own a store"))]
     pub(crate) fn new() -> Self {
         Self::with_limits(DiagnosticLimits::production())
     }
@@ -80,10 +79,6 @@ impl DiagnosticStore {
     }
 
     /// The record at `id`, read through the store's arenas.
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "P4.3 render dispatch reads stored records")
-    )]
     pub(crate) fn record(&self, id: DiagnosticId) -> RecordRef<'_> {
         RecordRef {
             store: self,
@@ -104,6 +99,15 @@ impl<'a> RecordRef<'a> {
         self.record.code
     }
 
+    /// The severity override the record stores. `Default` keeps the family descriptor's severity.
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.3 render honours severity overrides")
+    )]
+    pub(crate) fn severity(self) -> SeverityOverride {
+        self.record.severity
+    }
+
     /// A reader over the fact words. Each view reads the words its family declares, in layout order.
     pub(crate) fn facts(self) -> FactReader<'a> {
         FactReader::new(&self.record.facts)
@@ -111,13 +115,20 @@ impl<'a> RecordRef<'a> {
 
     /// The primary site: foreign when a foreign-site row names the primary selector, otherwise local. The span stays
     /// in the record either way, so a foreign primary reads its span from the record.
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.5 report freeze reads record sites")
+    )]
     pub(crate) fn primary(self) -> SiteRef<'a> {
         self.site(self.record.primary, PRIMARY_SELECTOR)
     }
 
     /// The site of secondary label `index`: foreign when a foreign-site row names the label, otherwise local. The span
     /// stays in the label either way.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.3 render reads label sites"))]
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.5 report freeze reads label sites")
+    )]
     pub(crate) fn label_site(self, index: usize) -> SiteRef<'a> {
         let span = self.labels().get(index).and_then(|label| label.span());
         self.site(span, index as u32 + 1)

@@ -6,10 +6,15 @@
 
 use super::*;
 use crate::builder_surface::SourceFileKind;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::CompilerCapacityExceededView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::TypeMismatchView;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::compact_for_render;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticCapacityResource, DiagnosticKind, DiagnosticPayload, InvalidTraitConformanceReason,
-    InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, NamingConvention,
-    ProjectContextEscapeReason, PublicGenericOwnerKind, ReservedNameOwner,
+    CompilerDiagnostic, DiagnosticCapacityResource, DiagnosticPayload,
+    InvalidTraitConformanceReason, InvalidTraitIncompatibilityReason,
+    InvalidTraitKeywordUsageReason, NamingConvention, ProjectContextEscapeReason,
+    PublicGenericOwnerKind, ReservedNameOwner, TypeMismatchContext,
 };
 
 pub(crate) struct RenderedPayload {
@@ -41,10 +46,10 @@ pub(crate) fn render_payload(
         }
         DiagnosticPayload::TypeMismatch {
             expected, found, ..
-        } => vec![
-            format!("Expected: {}", diagnostic_type_name(*expected, context)),
-            format!("Found: {}", diagnostic_type_name(*found, context)),
-        ],
+        } => type_mismatch_guidance(
+            &diagnostic_type_name(*expected, context),
+            &diagnostic_type_name(*found, context),
+        ),
         DiagnosticPayload::CompileTimeEvaluationError { reason, .. } => {
             vec![compile_time_evaluation_error_suggestion(*reason).to_owned()]
         }
@@ -79,17 +84,86 @@ pub(crate) fn render_payload(
     RenderedPayload { message, guidance }
 }
 
+/// WHAT: renders one diagnostic, preferring the compact renderer of its family.
+/// WHY: a diagnostic whose compact record decodes renders from typed facts. Every other diagnostic keeps
+/// the legacy payload dispatch until its family migrates.
+pub(crate) fn render_diagnostic(
+    diagnostic: &CompilerDiagnostic,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    if let Some(compact) = compact_for_render(diagnostic, context) {
+        let view = compact.view();
+        if let Some(render) = view.family().render {
+            return render(&view, context);
+        }
+    }
+    render_payload(&diagnostic.payload, context)
+}
+
+/// WHAT: renders a capacity diagnostic from its compact facts.
+/// WHY: the record stores the same resource the legacy payload carries, so both paths share one message.
+pub(crate) fn render_compiler_capacity_exceeded(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &CompilerCapacityExceededView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: capacity_message(facts.resource),
+        guidance: Vec::new(),
+    }
+}
+
+/// WHAT: renders a type mismatch from its compact facts.
+/// WHY: the snapshot spells each type through the same rules as the live environment, so the text
+/// matches the legacy payload path.
+pub(crate) fn render_type_mismatch(
+    diagnostic: &DiagnosticView<'_>,
+    facts: &TypeMismatchView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let expected = diagnostic.types().display_for_render(
+        facts.expected,
+        context.string_table,
+        context.path_table(),
+    );
+    let found = diagnostic.types().display_for_render(
+        facts.found,
+        context.string_table,
+        context.path_table(),
+    );
+    RenderedPayload {
+        message: type_mismatch_message(facts.context, &expected, &found),
+        guidance: type_mismatch_guidance(&expected, &found),
+    }
+}
+
+fn type_mismatch_message(
+    mismatch_context: TypeMismatchContext,
+    expected: &str,
+    found: &str,
+) -> String {
+    format!(
+        "Type mismatch in {}: expected {}, found {}",
+        type_mismatch_context_name(mismatch_context),
+        expected,
+        found
+    )
+}
+
+fn type_mismatch_guidance(expected: &str, found: &str) -> Vec<String> {
+    vec![format!("Expected: {expected}"), format!("Found: {found}")]
+}
+
 /// WHAT: guarantees every terse record carries a non-empty message.
 /// WHY: descriptor-only diagnostics use `DiagnosticPayload::None`, which renders an empty
 /// payload message. The descriptor title is always present and provides useful context.
-pub(crate) fn terse_payload_message(
-    payload: &DiagnosticPayload,
-    kind: DiagnosticKind,
+pub(crate) fn terse_diagnostic_message(
+    diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let rendered = render_payload(payload, context);
+    let rendered = render_diagnostic(diagnostic, context);
     if rendered.message.is_empty() {
-        kind.descriptor().title.to_owned()
+        diagnostic.kind.descriptor().title.to_owned()
     } else {
         rendered.message
     }
@@ -122,11 +196,10 @@ fn render_payload_message(
             expected,
             found,
             context: mismatch_context,
-        } => format!(
-            "Type mismatch in {}: expected {}, found {}",
-            type_mismatch_context_name(*mismatch_context),
-            diagnostic_type_name(*expected, context),
-            diagnostic_type_name(*found, context)
+        } => type_mismatch_message(
+            *mismatch_context,
+            &diagnostic_type_name(*expected, context),
+            &diagnostic_type_name(*found, context),
         ),
         DiagnosticPayload::DuplicateDeclaration { name } => {
             duplicate_declaration_message(*name, string_table)
@@ -184,7 +257,7 @@ fn render_payload_message(
         DiagnosticPayload::ReservedBuiltinName { name } => {
             format!("Reserved builtin name '{}'", string_table.resolve(*name))
         }
-        DiagnosticPayload::UnreachableMatchArm => "Unreachable match arm".to_owned(),
+        DiagnosticPayload::UnreachableMatchArm => UNREACHABLE_MATCH_ARM_MESSAGE.to_owned(),
         DiagnosticPayload::IdentifierNamingConvention {
             name,
             expected_style,
@@ -918,10 +991,7 @@ fn import_payload_message(
     let string_table = context.string_table;
     match payload {
         DiagnosticPayload::MissingImportTarget { path } => {
-            format!(
-                "Cannot resolve dependency '{}'.",
-                context.render_path(*path)
-            )
+            missing_import_target_message(*path, context)
         }
         DiagnosticPayload::AmbiguousImportTarget { path } => format!(
             "Ambiguous dependency target '{}'. Use a more specific path.",

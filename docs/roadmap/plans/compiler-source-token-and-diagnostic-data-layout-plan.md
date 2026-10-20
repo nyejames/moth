@@ -108,11 +108,13 @@ ACTIVE_PLAN:
 - Execution order: Phase 4 runs as the steps in `PHASE_4_EXECUTION_ORDER` below. The slice
   checklists remain the acceptance contract. Only their order and grouping changed, under the
   architecture document's repository-discovered corrections rule.
-- NEXT_SUBSTEP: P4.3, the render side: view renderers, the private legacy adapter and
-  per-diagnostic dual dispatch. P4.2 (4C) is accepted in the checkpoint
-  "Phase 4 P4.2: type-display snapshots and shared formatter" and P4.1 (4A/4B) in "Phase 4 P4.1:
-  compact diagnostic vocabulary, storage and pilots". Render equivalence for each checkpoint is
-  checked by rendering every diagnosed integration case (1,655 cases) before and after: identical.
+- NEXT_SUBSTEP: P4.3b: labels, primary sites, titles and severities render from compact records;
+  message-less labels and universal generic-instantiation label roles make the adapter total for
+  the pilots, whose legacy payload arms are then deleted. P4.2 (4C) is accepted in the checkpoint
+  "Phase 4 P4.2: type-display snapshots and shared formatter", P4.1 (4A/4B) in "Phase 4 P4.1:
+  compact diagnostic vocabulary, storage and pilots" and P4.3a in "Phase 4 P4.3a: compact message
+  and guidance rendering for pilot families". Render equivalence for each checkpoint is checked by
+  rendering every diagnosed integration case (1,655 cases) before and after: identical.
 - Phase 4 non-goals: `CompilationOutcome::Success`, typed failure lanes and `compiler_bug!`
   (Phase 5), frozen tooling sessions (Phase 6) and user-facing diagnostic prose changes (paused
   diagnostics plan).
@@ -126,7 +128,7 @@ PHASE_4_EXECUTION_ORDER:
 |---|---|---|
 | P4.1 | 4A vocabulary, 4B | `compiler_messages/diagnostics/`: code, record, draft with `capture_types`, facts and codecs, labels, extras, place, list ranges, store, hookless compaction, capacity policy, foreign-site cold rows, the `diagnostic_family!` vocabulary, the registry, per-group declaration files, identity rows for every family and twelve pilot families |
 | P4.2 | 4C | `compiler_messages/diagnostic_types/` snapshot store and builder; one shared formatter in `datatypes/display.rs` over live and snapshot views |
-| P4.3 | 4H render side | view renderers and per-diagnostic dual dispatch: migrated families convert through the private Phase 4 legacy adapter, compact with a type snapshot and render through the view renderer; pilot renderers are ported |
+| P4.3 | 4H render side | view renderers and per-diagnostic dual dispatch: migrated families convert through the private Phase 4 legacy adapter, compact with a type snapshot and render through the view renderer. P4.3a ports the pilot messages and guidance; P4.3b moves labels, sites, titles and severities to compact records, makes the adapter total for pilots and deletes their legacy arms |
 | P4.4 | 4G1–4G8 family groups | per group: schema declarations, mirror constructors, durable views, reason codecs, adapter arms, a renderer port that deletes the old payload arms, and tests |
 | P4.5 | 4D, 4E, 4F, 4H boundaries | draft bags, `PreparedDiagnosticBatch`, canonical aggregation, freeze, `DiagnosticReportSet` and warning ownership; delete `CompilerMessages`, `ModuleDiagnostics`, `PremergeDiagnosticBatch` and `RenderTypeContext` |
 | P4.6 | 4G producer sweep, 4I | producers construct `DiagnosticDraft` directly and tests use typed views; delete the adapter and the old model; update docs and the index |
@@ -134,9 +136,12 @@ PHASE_4_EXECUTION_ORDER:
 
 PHASE_4_MIGRATION_STATE:
 - Legacy adapter from `CompilerDiagnostic` to `DiagnosticDraft`: Phase 4-internal temporary
-  conversion code, private to `compiler_messages`. P4.3 introduces it for per-diagnostic render
-  dispatch, P4.5 moves it to bag entry and P4.6 (Slice 4I) deletes it. It never crosses the
-  Phase 4 boundary.
+  conversion code, private to `compiler_messages` (`diagnostics/legacy_adapter.rs`, which chains
+  one `from_legacy` function per `families/*.rs` group file). P4.3 introduces it for
+  per-diagnostic render dispatch, P4.5 moves it to bag entry and P4.6 (Slice 4I) deletes it. It
+  never crosses the Phase 4 boundary. Until P4.3b, it declines a diagnostic carrying a message-less
+  label or a label role its family does not declare, which keeps that diagnostic on the legacy
+  payload path; the pilots' legacy payload arms stay until then.
 - Unconsumed new items: declarations added by P4.1 and P4.2 that have no production consumer yet
   carry item-level dead-code allowances naming the slice that consumes them (P4.3 render
   dispatch, P4.5 capture and merge, or P4.6). Most use `cfg_attr(not(test), ...)`; the generated

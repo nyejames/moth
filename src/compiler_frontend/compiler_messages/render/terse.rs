@@ -10,7 +10,7 @@ use crate::compiler_frontend::compiler_messages::render::infrastructure::{
 };
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, display_column_number, display_line_number,
-    relative_display_path_from_root, terse_payload_message,
+    relative_display_path_from_root, terse_diagnostic_message,
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticSeverity, InfrastructureDiagnosticKind,
@@ -124,7 +124,7 @@ pub(crate) fn format_terse_diagnostic_with_context(
         None => (String::new(), String::new()),
     };
 
-    let message = terse_payload_message(&diagnostic.payload, diagnostic.kind, context);
+    let message = terse_diagnostic_message(diagnostic, context);
 
     format!(
         "{severity_char}|{}|{}|{}|{}",

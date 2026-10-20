@@ -167,7 +167,7 @@ fn assert_shared_duplicate_diagnostic(
     );
 
     let render_context = DiagnosticRenderContext::new(string_table);
-    let guidance = terminal::format_payload_guidance(&error.payload, render_context);
+    let guidance = terminal::format_diagnostic_guidance(error, render_context);
     let expected_fragment = format!(
         "Cannot declare '{expected_name}' because that name is already visible in this scope"
     );

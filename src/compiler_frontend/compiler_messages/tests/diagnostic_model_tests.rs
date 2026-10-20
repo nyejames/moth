@@ -352,8 +352,8 @@ fn body_declaration_placement_preserves_source_name_and_stable_reason() {
             name: Some(source_name),
         } if *source_name == name
     ));
-    let guidance = terminal::format_payload_guidance(
-        &diagnostic.payload,
+    let guidance = terminal::format_diagnostic_guidance(
+        &diagnostic,
         DiagnosticRenderContext::new(&string_table),
     )
     .join("\n");
@@ -2233,7 +2233,7 @@ fn value_receiver_diagnostic_preserves_factual_arity_and_producer_span() {
         assert!(rendered.contains(&format!(
             "Invalid declaration receiver: expected 1 success slot(s), but this expression produces {produced_count}."
         )));
-        let guidance = terminal::format_payload_guidance(&diagnostic.payload, context).join("\n");
+        let guidance = terminal::format_diagnostic_guidance(&diagnostic, context).join("\n");
         if produced_count == 0 {
             assert!(
                 guidance.contains("Use an expression that produces the required success values.")
@@ -2295,7 +2295,7 @@ fn type_mismatch_terminal_guidance_renders_type_names_with_context() {
         .with_optional_type_environment(Some(&type_environment))
         .with_path_table(&path_table);
 
-    let guidance = terminal::format_payload_guidance(&diagnostic.payload, render_context);
+    let guidance = terminal::format_diagnostic_guidance(&diagnostic, render_context);
 
     assert!(guidance.iter().any(|line| line == "Expected: I32"));
     assert!(guidance.iter().any(|line| line == "Found: String"));
@@ -2346,8 +2346,7 @@ fn invalid_string_escape_renderer_preserves_the_authored_escape_spelling() {
             InvalidStringEscapeReason::UnsupportedEscape { escaped },
             span(source_path),
         );
-        let message =
-            terminal::format_payload_guidance(&diagnostic.payload, render_context).join("\n");
+        let message = terminal::format_diagnostic_guidance(&diagnostic, render_context).join("\n");
 
         assert!(message.contains(expected), "unexpected message: {message}");
     }
@@ -2373,8 +2372,7 @@ fn invalid_string_escape_renderer_distinguishes_physical_newlines_and_trailing_b
         ),
     ] {
         let diagnostic = CompilerDiagnostic::invalid_string_escape(reason, span(source_path));
-        let message =
-            terminal::format_payload_guidance(&diagnostic.payload, render_context).join("\n");
+        let message = terminal::format_diagnostic_guidance(&diagnostic, render_context).join("\n");
 
         assert_eq!(message, expected);
     }
@@ -2400,7 +2398,7 @@ fn rule_renderers_use_user_facing_messages_not_reason_debug_names() {
     );
     let render_context = DiagnosticRenderContext::new(&string_table);
 
-    let guidance = terminal::format_payload_guidance(&diagnostic.payload, render_context);
+    let guidance = terminal::format_diagnostic_guidance(&diagnostic, render_context);
     let terse_line = terse::format_terse_diagnostic_with_context(&diagnostic, render_context);
 
     assert!(guidance.iter().any(|line| line
@@ -2514,7 +2512,7 @@ fn syntax_and_choice_renderers_use_user_facing_messages_not_reason_debug_names()
     let render_context = DiagnosticRenderContext::new(&string_table);
 
     for (diagnostic, expected_message, debug_name) in diagnostics {
-        let guidance = terminal::format_payload_guidance(&diagnostic.payload, render_context);
+        let guidance = terminal::format_diagnostic_guidance(&diagnostic, render_context);
         let terse_line = terse::format_terse_diagnostic_with_context(&diagnostic, render_context);
 
         assert!(
@@ -2557,7 +2555,7 @@ fn choice_variant_unknown_variant_suggests_close_candidate() {
         span(source_path),
     );
     let render_context = DiagnosticRenderContext::new(&string_table);
-    let guidance = terminal::format_payload_guidance(&diagnostic.payload, render_context);
+    let guidance = terminal::format_diagnostic_guidance(&diagnostic, render_context);
 
     let message = guidance
         .iter()
@@ -2599,7 +2597,7 @@ fn choice_variant_unknown_variant_no_suggestion_for_unrelated_name() {
         span(source_path),
     );
     let render_context = DiagnosticRenderContext::new(&string_table);
-    let guidance = terminal::format_payload_guidance(&diagnostic.payload, render_context);
+    let guidance = terminal::format_diagnostic_guidance(&diagnostic, render_context);
 
     let message = guidance
         .iter()
@@ -2879,7 +2877,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
     let render_context = DiagnosticRenderContext::new(&string_table);
 
     for (diagnostic, expected_message, debug_name) in diagnostics {
-        let guidance = terminal::format_payload_guidance(&diagnostic.payload, render_context);
+        let guidance = terminal::format_diagnostic_guidance(&diagnostic, render_context);
         let terse_line = terse::format_terse_diagnostic_with_context(&diagnostic, render_context);
 
         assert!(
@@ -2962,7 +2960,7 @@ fn invalid_expression_renderers_keep_structured_reason_prose() {
     let render_context = DiagnosticRenderContext::new(&string_table);
 
     for (diagnostic, expected_message, debug_name) in diagnostics {
-        let guidance = terminal::format_payload_guidance(&diagnostic.payload, render_context);
+        let guidance = terminal::format_diagnostic_guidance(&diagnostic, render_context);
         let terse_line = terse::format_terse_diagnostic_with_context(&diagnostic, render_context);
 
         assert!(
@@ -3111,7 +3109,7 @@ fn propagation_boundary_renderers_preserve_authored_count_and_semantic_error_typ
             InvalidFallibleHandlingReason::FunctionHasMultipleSuccessReturns { count },
             None,
         );
-        let guidance = terminal::format_payload_guidance(&diagnostic.payload, context).join("\n");
+        let guidance = terminal::format_diagnostic_guidance(&diagnostic, context).join("\n");
         let terse = terse::format_terse_diagnostic_with_context(&diagnostic, context);
         let count_fact = format!("{count} authored success return slots");
         for message in [&guidance, &terse] {
@@ -3132,7 +3130,7 @@ fn propagation_boundary_renderers_preserve_authored_count_and_semantic_error_typ
         },
         None,
     );
-    let guidance = terminal::format_payload_guidance(&diagnostic.payload, context).join("\n");
+    let guidance = terminal::format_diagnostic_guidance(&diagnostic, context).join("\n");
     let terse = terse::format_terse_diagnostic_with_context(&diagnostic, context);
     for message in [&guidance, &terse] {
         assert!(message.contains("produces `ParseFailure!`"), "{message}");
@@ -3297,9 +3295,7 @@ fn phase_1_2_renderers_keep_source_language_terminology() {
     let render_context = DiagnosticRenderContext::new(&string_table);
     let rendered = diagnostics
         .iter()
-        .flat_map(|diagnostic| {
-            terminal::format_payload_guidance(&diagnostic.payload, render_context)
-        })
+        .flat_map(|diagnostic| terminal::format_diagnostic_guidance(diagnostic, render_context))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -3493,7 +3489,7 @@ fn render_boundary_smoke_coverage_hides_internal_debug_names_by_family() {
 
     for diagnostic in &diagnostics {
         let terminal_guidance =
-            terminal::format_payload_guidance(&diagnostic.payload, render_context).join("\n");
+            terminal::format_diagnostic_guidance(diagnostic, render_context).join("\n");
         let terse_line = terse::format_terse_diagnostic_with_context(diagnostic, render_context);
         let dev_server_html = dev_server::render_diagnostics_html_with_context(
             std::slice::from_ref(diagnostic),
@@ -3542,7 +3538,7 @@ fn incompatible_choice_comparison_renderer_hides_reason_debug_names() {
     );
     let render_context = DiagnosticRenderContext::new(&string_table);
 
-    let guidance = terminal::format_payload_guidance(&diagnostic.payload, render_context);
+    let guidance = terminal::format_diagnostic_guidance(&diagnostic, render_context);
     let terse_line = terse::format_terse_diagnostic_with_context(&diagnostic, render_context);
 
     assert!(
@@ -3573,7 +3569,7 @@ fn render_invalid_call_shape(
     let diagnostic =
         CompilerDiagnostic::invalid_call_shape(reason, Some(callee), span(source_path));
     let render_context = DiagnosticRenderContext::new(string_table);
-    terminal::format_payload_guidance(&diagnostic.payload, render_context)
+    terminal::format_diagnostic_guidance(&diagnostic, render_context)
         .into_iter()
         .next()
         .unwrap_or_default()
@@ -3879,7 +3875,7 @@ fn render_invalid_receiver_call(
         span(source_path),
     );
     let render_context = DiagnosticRenderContext::new(string_table);
-    terminal::format_payload_guidance(&diagnostic.payload, render_context)
+    terminal::format_diagnostic_guidance(&diagnostic, render_context)
         .into_iter()
         .next()
         .unwrap_or_default()
@@ -4248,7 +4244,7 @@ fn generic_conflict_rendering_resolves_concrete_type_names() {
     let render_context = DiagnosticRenderContext::new(&string_table)
         .with_optional_type_environment(Some(&type_environment))
         .with_path_table(&path_table);
-    let guidance = terminal::format_payload_guidance(&diagnostic.payload, render_context);
+    let guidance = terminal::format_diagnostic_guidance(&diagnostic, render_context);
 
     assert!(
         guidance
@@ -4304,7 +4300,7 @@ fn token_diagnostics_render_source_spelling_not_token_debug_names() {
     let render_context = DiagnosticRenderContext::new(&string_table);
     let expected_terse = terse::format_terse_diagnostic_with_context(&expected, render_context);
     let unexpected_terminal =
-        terminal::format_payload_guidance(&unexpected.payload, render_context).join("\n");
+        terminal::format_diagnostic_guidance(&unexpected, render_context).join("\n");
 
     assert!(expected_terse.contains("Expected `(`"), "{expected_terse}");
     assert!(expected_terse.contains("name `item`"), "{expected_terse}");
@@ -4334,7 +4330,7 @@ fn borrow_conflict_rendering_hides_payload_debug_names() {
 
     let render_context = DiagnosticRenderContext::new(&string_table);
     let terminal_guidance =
-        terminal::format_payload_guidance(&diagnostic.payload, render_context).join("\n");
+        terminal::format_diagnostic_guidance(&diagnostic, render_context).join("\n");
     let terse_line = terse::format_terse_diagnostic_with_context(&diagnostic, render_context);
 
     assert!(

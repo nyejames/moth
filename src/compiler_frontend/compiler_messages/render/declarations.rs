@@ -4,10 +4,17 @@
 //! and receiver-method declarations.
 //! WHY: declarations are resolved before executable body parsing and form their own payload family.
 
-use super::{DiagnosticRenderContext, diagnostic_type_name, token_kind_name};
+use super::{
+    DiagnosticRenderContext, RenderedPayload, diagnostic_type_name, duplicate_declaration_message,
+    token_kind_name, unknown_name_message,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
+    DuplicateDeclarationView, UnknownTypeNameView, UnknownValueNameView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
     InvalidDeclarationReason, InvalidFunctionSignatureReason, InvalidGenericInstantiationReason,
-    InvalidReceiverDeclarationReason, InvalidSignatureMemberReason,
+    InvalidReceiverDeclarationReason, InvalidSignatureMemberReason, NameNamespace,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
@@ -364,5 +371,44 @@ pub(crate) fn invalid_receiver_declaration_message(
             "Receiver methods are not dependency-bound, exported, or aliased independently. Expose the receiver type; its same-file methods travel with values of that type and are called through receiver-call syntax."
                 .to_string()
         }
+    }
+}
+
+/// WHAT: renders a duplicate declaration from its compact facts.
+/// WHY: the record stores the same declared name as the legacy payload.
+pub(crate) fn render_duplicate_declaration(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &DuplicateDeclarationView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: duplicate_declaration_message(facts.name, context.string_table),
+        guidance: Vec::new(),
+    }
+}
+
+/// WHAT: renders an unknown value name from its compact facts.
+/// WHY: the family fixes the value namespace, so the record stores only the name.
+pub(crate) fn render_unknown_value_name(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &UnknownValueNameView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: unknown_name_message(facts.name, NameNamespace::Value, context.string_table),
+        guidance: Vec::new(),
+    }
+}
+
+/// WHAT: renders an unknown type name from its compact facts.
+/// WHY: the family fixes the type namespace, so the record stores only the name.
+pub(crate) fn render_unknown_type_name(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &UnknownTypeNameView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: unknown_name_message(facts.name, NameNamespace::Type, context.string_table),
+        guidance: Vec::new(),
     }
 }

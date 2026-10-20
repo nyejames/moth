@@ -4,7 +4,12 @@
 //! WHY: these helpers are shared by terminal, terse, and dev-server renderers, but they do not
 //! need to live in the root render module map.
 
-use super::{DiagnosticRenderContext, diagnostic_type_name, token_kind_name};
+use super::{
+    DiagnosticRenderContext, RenderedPayload, diagnostic_type_name, expected_token_message,
+    token_kind_name,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::ExpectedTokenView;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
     ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason, InvalidLoopHeaderReason,
     InvalidMatchArmReason, InvalidParameterContractReason, InvalidStandaloneStatementReason,
@@ -15,6 +20,24 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
+
+/// WHAT: renders an expected-token diagnostic from its compact facts.
+/// WHY: the record stores the same expected and found tokens as the legacy payload, so both
+/// paths share one message.
+pub(crate) fn render_expected_token(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &ExpectedTokenView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: expected_token_message(
+            &facts.expected,
+            facts.found.as_ref(),
+            context.string_table,
+        ),
+        guidance: Vec::new(),
+    }
+}
 
 pub(crate) fn invalid_parameter_contract_message(reason: InvalidParameterContractReason) -> String {
     let contract_name = |contract: ParameterContractKind| contract.spelling();

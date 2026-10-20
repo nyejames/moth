@@ -36,10 +36,6 @@ impl DiagnosticStore {
     ///
     /// The draft's types must already be captured. A pending mark is a caller bug, so it panics rather than storing a
     /// raw `TypeId` where a display ID belongs.
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "P4.3 adapter and P4.5 bags compact drafts")
-    )]
     pub(crate) fn compact(&mut self, draft: DiagnosticDraft) -> CompactOutcome {
         if let Some(resource) = self.full {
             return CompactOutcome::Rejected(resource);

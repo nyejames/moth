@@ -52,4 +52,5 @@ pub(super) static TEST_LABEL_FAMILY: FamilyRow = FamilyRow {
         LabelMessageCode::TYPED_FAILURE_PRODUCER,
         LabelMessageCode::BUILTIN_WRITE_BACK_ORIGIN,
     ],
+    render: None,
 };

@@ -11,7 +11,7 @@ use crate::compiler_frontend::compiler_messages::render::infrastructure::{
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, ResolvedDiagnosticLabel, display_column_number, display_gutter_width,
     display_line_number, expand_tabs_for_display, primary_caret_padding, primary_underline_length,
-    relative_display_path_from_root, render_payload, resolve_label_render_facts_from_root,
+    relative_display_path_from_root, render_diagnostic, resolve_label_render_facts_from_root,
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticLabelStyle, DiagnosticSeverity,
@@ -192,7 +192,7 @@ fn render_diagnostic_card(
 
     let source_frame = render_source_frame(diagnostic, project_root, context);
 
-    let rendered_payload = render_payload(&diagnostic.payload, context);
+    let rendered_payload = render_diagnostic(diagnostic, context);
 
     let mut body = String::new();
 

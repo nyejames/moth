@@ -4,8 +4,11 @@
 //! WHY: call/return validation is a distinct frontend boundary with its own payload family.
 
 use super::{
-    DiagnosticRenderContext, closest_name_suggestion, diagnostic_type_name, named_value_or_default,
+    DiagnosticRenderContext, RenderedPayload, closest_name_suggestion, diagnostic_type_name,
+    named_value_or_default,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidMultiBindView;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
     InvalidAssignmentTargetReason, InvalidBuiltinCallReason, InvalidCallShapeReason,
     InvalidCastReason, InvalidCopyTargetReason, InvalidFieldAccessReason, InvalidMultiBindReason,
@@ -740,5 +743,23 @@ pub(crate) fn invalid_field_access_message(
                 None => format!("Property or method {field_text} not found."),
             }
         }
+    }
+}
+
+/// WHAT: renders an invalid multi-bind from its compact facts.
+/// WHY: the record stores the reason code and arity counts; the legacy reason is rebuilt for the
+/// shared message.
+pub(crate) fn render_invalid_multi_bind(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidMultiBindView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_multi_bind_message(
+            facts.reason.to_reason(facts.expected, facts.found),
+            facts.target_name,
+            context.string_table,
+        ),
+        guidance: Vec::new(),
     }
 }

@@ -4,13 +4,16 @@
 //! The other 22 rows are identity rows for import families.
 //! WHY: every row is in the import band, so they share one group table.
 
-#[cfg(test)]
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::PathFact;
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
     FamilyRow, diagnostic_family,
 };
-use crate::compiler_frontend::compiler_messages::{DiagnosticCategory, DiagnosticSeverity};
+use crate::compiler_frontend::compiler_messages::render::render_missing_import_target;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticCategory, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
+    ImportDiagnosticKind,
+};
 #[cfg(test)]
 use crate::compiler_frontend::source::SourceSpan;
 
@@ -25,7 +28,9 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        #[allow(dead_code, reason = "reserved (D9): no producer or renderer builds this view")]
         view: UnusedImportView,
+        render: none,
         reserved,
     }
 }
@@ -48,6 +53,18 @@ diagnostic_family! {
         extra: None,
         ctor: generated missing_import_target,
         view: MissingImportTargetView,
+        render: render_missing_import_target,
+    }
+}
+
+/// Maps the legacy missing-import-target diagnostic onto its compact constructor. Declines other payloads.
+pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticDraft> {
+    match (diagnostic.kind, &diagnostic.payload) {
+        (
+            DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget),
+            DiagnosticPayload::MissingImportTarget { path },
+        ) => Some(missing_import_target(*path, diagnostic.primary_span)),
+        _ => None,
     }
 }
 

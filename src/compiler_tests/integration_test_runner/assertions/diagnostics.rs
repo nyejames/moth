@@ -64,8 +64,8 @@ pub(super) fn validate_diagnostics(
         let mut rendered_messages: Vec<String> = error_diagnostics
             .iter()
             .map(|(diagnostic_index, diagnostic)| {
-                terminal::format_payload_guidance(
-                    &diagnostic.payload,
+                terminal::format_diagnostic_guidance(
+                    diagnostic,
                     messages.diagnostic_render_context(*diagnostic_index),
                 )
                 .join("\n")

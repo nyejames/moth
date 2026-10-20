@@ -7,6 +7,7 @@
 
 use super::extras::DiagnosticExtraId;
 use super::facts::FACT_WORDS;
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::source::SourceSpan;
 use std::num::NonZeroU16;
 
@@ -29,10 +30,6 @@ impl DiagnosticCode {
 }
 
 /// A per-record severity override. `Default` keeps the family descriptor's severity.
-#[cfg_attr(
-    not(test),
-    allow(dead_code, reason = "P4.3 render honours severity overrides")
-)]
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum SeverityOverride {
@@ -43,15 +40,40 @@ pub(crate) enum SeverityOverride {
     Note = 3,
 }
 
+impl SeverityOverride {
+    /// The override that stores `severity` on a family whose default is `default`. A severity equal to the default
+    /// stores `Default`, so the record keeps the descriptor's severity.
+    pub(super) fn for_severity(severity: DiagnosticSeverity, default: DiagnosticSeverity) -> Self {
+        if severity == default {
+            return Self::Default;
+        }
+        match severity {
+            DiagnosticSeverity::Error => Self::Error,
+            DiagnosticSeverity::Warning => Self::Warning,
+            DiagnosticSeverity::Note => Self::Note,
+        }
+    }
+
+    /// The severity a record reports: the stored override, or the family default when no override is stored.
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.3 render honours severity overrides")
+    )]
+    pub(super) fn resolve(self, default: DiagnosticSeverity) -> DiagnosticSeverity {
+        match self {
+            Self::Default => default,
+            Self::Error => DiagnosticSeverity::Error,
+            Self::Warning => DiagnosticSeverity::Warning,
+            Self::Note => DiagnosticSeverity::Note,
+        }
+    }
+}
+
 /// One compact diagnostic. Its size is locked at 32 bytes: the fields take 31 bytes, and
 /// the tail pads them to the 4-byte alignment of the span and fact words.
 #[derive(Debug)]
 pub(crate) struct DiagnosticRecord {
     pub(super) code: DiagnosticCode,
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "P4.3 render honours severity overrides")
-    )]
     pub(super) severity: SeverityOverride,
     pub(super) primary: Option<SourceSpan>,
     pub(super) facts: [u32; FACT_WORDS],

@@ -89,13 +89,13 @@ fn fixture_resource_id(resources: &mut ModuleResourceTable, relative_path: &str)
     resources.intern_origin(origin, None)
 }
 
-/// Renders the page-metadata payload message through the shared render boundary.
+/// Renders the page-metadata diagnostic message through the shared render boundary.
 fn metadata_error_message(
-    payload: &crate::compiler_frontend::compiler_messages::DiagnosticPayload,
+    diagnostic: &crate::compiler_frontend::compiler_messages::CompilerDiagnostic,
     string_table: &StringTable,
 ) -> String {
     let render_context = DiagnosticRenderContext::new(string_table);
-    terminal::format_payload_guidance(payload, render_context).join("\n")
+    terminal::format_diagnostic_guidance(diagnostic, render_context).join("\n")
 }
 #[test]
 fn extracts_reserved_entry_metadata() {
@@ -200,7 +200,7 @@ fn rejects_non_string_reserved_values() {
         other => panic!("expected InvalidPageMetadata payload, got {other:?}"),
     }
 
-    let message = metadata_error_message(&error.payload, &string_table);
+    let message = metadata_error_message(&error, &string_table);
     assert!(
         message.contains("must fold to a string"),
         "unexpected message: {message}"

@@ -7,10 +7,10 @@ use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticPrimaryPosition, DiagnosticRenderContext, ResolvedDiagnosticLabel,
     display_column_number, display_gutter_width, display_line_number, expand_tabs_for_display,
     primary_caret_padding, primary_underline_length, relative_display_path_from_root,
-    render_payload, resolve_label_render_facts_from_root,
+    render_diagnostic, resolve_label_render_facts_from_root,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticLabelStyle, DiagnosticPayload, DiagnosticSeverity,
+    CompilerDiagnostic, DiagnosticLabelStyle, DiagnosticSeverity,
 };
 use saying::say;
 use std::path::Path;
@@ -84,7 +84,7 @@ pub(crate) fn print_diagnostic_with_context(
         say!(Bright Blue "  ", label_message);
     }
 
-    for guidance in format_payload_guidance(&diagnostic.payload, context) {
+    for guidance in format_diagnostic_guidance(diagnostic, context) {
         say!(Bright Blue "  ", guidance);
     }
 }
@@ -207,11 +207,11 @@ fn format_label_messages_with_context_from_root_impl(
     rendered_labels
 }
 
-pub(crate) fn format_payload_guidance(
-    payload: &DiagnosticPayload,
+pub(crate) fn format_diagnostic_guidance(
+    diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
 ) -> Vec<String> {
-    let rendered_payload = render_payload(payload, context);
+    let rendered_payload = render_diagnostic(diagnostic, context);
     let mut lines = Vec::new();
 
     if !rendered_payload.message.is_empty() {

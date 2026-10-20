@@ -493,7 +493,7 @@ fn render_test_diagnostic(
     let render_context = DiagnosticRenderContext::new(string_table);
     let mut rendered = terse::format_terse_diagnostic_with_context(diagnostic, render_context);
 
-    let guidance = terminal::format_payload_guidance(&diagnostic.payload, render_context);
+    let guidance = terminal::format_diagnostic_guidance(diagnostic, render_context);
     if !guidance.is_empty() {
         rendered.push('\n');
         rendered.push_str(&guidance.join("\n"));

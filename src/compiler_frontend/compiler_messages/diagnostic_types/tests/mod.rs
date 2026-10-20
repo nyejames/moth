@@ -59,7 +59,7 @@ fn build_snapshot(
     environment: &TypeEnvironment,
     type_ids: &[TypeId],
 ) -> (TypeDisplaySnapshot, Vec<TypeDisplayId>) {
-    let mut builder = TypeDisplaySnapshotBuilder::new(environment);
+    let mut builder = TypeDisplaySnapshotBuilder::new(Some(environment));
     let display_ids = type_ids
         .iter()
         .map(|&type_id| builder.display_id(type_id).expect("test snapshot fits"))

@@ -6,6 +6,7 @@
 //! checks, not only codec checks.
 
 use super::{TEST_LABEL_FAMILY, exact_span, identity};
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::diagnostic_types::{
     TypeDisplayCapacityError, TypeDisplayId,
 };
@@ -31,6 +32,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::foreign::{
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DraftType;
 use crate::compiler_frontend::compiler_messages::diagnostics::record::SeverityOverride;
 use crate::compiler_frontend::compiler_messages::diagnostics::store::DiagnosticStore;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::FamilyView;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticLabelMessage, DiagnosticToken, GenericSubstitutionDiagnostic, HirCapacityResource,
     TokenTag, TypeMismatchContext,
@@ -179,7 +181,7 @@ fn captured_draft_compacts_and_views_read_display_ids() {
     assert_eq!(view.expected.index(), 3);
     assert_eq!(view.found.index(), 5);
     assert_eq!(view.context, TypeMismatchContext::Assignment);
-    assert!(matches!(view.primary, SiteRef::Local(_)));
+    assert!(matches!(store.record(id).primary(), SiteRef::Local(_)));
 }
 
 #[test]
@@ -213,7 +215,8 @@ fn foreign_primary_keeps_its_span_and_adds_a_site_row() {
     };
     assert!(matches!(
         store.record(id).primary(),
-        SiteRef::Foreign { span, .. } if span == exact_span(2, 3)
+        SiteRef::Foreign { span, context }
+            if span == exact_span(2, 3) && std::ptr::eq(context, &store.identity_contexts[0])
     ));
     assert_eq!(store.identity_contexts.len(), 1);
 }
@@ -222,19 +225,19 @@ fn foreign_primary_keeps_its_span_and_adds_a_site_row() {
 fn foreign_label_and_primary_share_one_identity_row() {
     let mut store = DiagnosticStore::new();
     let handle = identity();
-    let draft = duplicate_declaration(
-        StringId::from_index(1),
-        Some(exact_span(0, 2)),
-        Some(exact_span(10, 2)),
-    )
-    .with_foreign(ForeignSiteDraft {
-        slot: ForeignSlot::Label(0),
-        context: handle.clone(),
-    })
-    .with_foreign(ForeignSiteDraft {
-        slot: ForeignSlot::Primary,
-        context: handle,
-    });
+    let draft = duplicate_declaration(StringId::from_index(1), Some(exact_span(10, 2)))
+        .with_label(
+            Some(exact_span(0, 2)),
+            DiagnosticLabelMessage::PreviousDeclaration,
+        )
+        .with_foreign(ForeignSiteDraft {
+            slot: ForeignSlot::Label(0),
+            context: handle.clone(),
+        })
+        .with_foreign(ForeignSiteDraft {
+            slot: ForeignSlot::Primary,
+            context: handle,
+        });
 
     let CompactOutcome::Stored(id) = store.compact(draft) else {
         panic!("a foreign label stores");
@@ -249,19 +252,19 @@ fn foreign_label_and_primary_share_one_identity_row() {
 #[test]
 fn distinct_identities_get_distinct_context_rows() {
     let mut store = DiagnosticStore::new();
-    let draft = duplicate_declaration(
-        StringId::from_index(1),
-        Some(exact_span(0, 2)),
-        Some(exact_span(10, 2)),
-    )
-    .with_foreign(ForeignSiteDraft {
-        slot: ForeignSlot::Label(0),
-        context: identity(),
-    })
-    .with_foreign(ForeignSiteDraft {
-        slot: ForeignSlot::Primary,
-        context: identity(),
-    });
+    let draft = duplicate_declaration(StringId::from_index(1), Some(exact_span(10, 2)))
+        .with_label(
+            Some(exact_span(0, 2)),
+            DiagnosticLabelMessage::PreviousDeclaration,
+        )
+        .with_foreign(ForeignSiteDraft {
+            slot: ForeignSlot::Label(0),
+            context: identity(),
+        })
+        .with_foreign(ForeignSiteDraft {
+            slot: ForeignSlot::Primary,
+            context: identity(),
+        });
 
     assert!(matches!(store.compact(draft), CompactOutcome::Stored(_)));
     assert_eq!(store.identity_contexts.len(), 2);
@@ -291,18 +294,25 @@ fn expected_token_view_reads_back_what_was_compacted() {
 #[test]
 fn severity_overrides_reach_the_stored_record() {
     let mut store = DiagnosticStore::new();
-    for severity in [
-        SeverityOverride::Default,
-        SeverityOverride::Error,
-        SeverityOverride::Warning,
-        SeverityOverride::Note,
+    for (severity, resolved) in [
+        (SeverityOverride::Default, DiagnosticSeverity::Warning),
+        (SeverityOverride::Error, DiagnosticSeverity::Error),
+        (SeverityOverride::Warning, DiagnosticSeverity::Warning),
+        (SeverityOverride::Note, DiagnosticSeverity::Note),
     ] {
         let mut draft = unreachable_match_arm(Some(exact_span(0, 1)));
         draft.core.severity = severity;
         let CompactOutcome::Stored(id) = store.compact(draft) else {
             panic!("a plain draft must fit in an empty store");
         };
-        assert_eq!(store.records[id.index()].severity, severity);
+        assert_eq!(store.record(id).severity(), severity);
+        assert_eq!(
+            store
+                .record(id)
+                .severity()
+                .resolve(DiagnosticSeverity::Warning),
+            resolved
+        );
     }
 }
 

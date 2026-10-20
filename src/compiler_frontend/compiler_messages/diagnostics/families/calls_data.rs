@@ -12,8 +12,10 @@ use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
     FamilyRow, diagnostic_family,
 };
+use crate::compiler_frontend::compiler_messages::render::render_invalid_multi_bind;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticCategory, DiagnosticSeverity, InvalidMultiBindReason,
+    CompilerDiagnostic, DiagnosticCategory, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
+    InvalidMultiBindReason, RuleDiagnosticKind,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -65,6 +67,33 @@ impl InvalidMultiBindCode {
             InvalidMultiBindReason::RhsNotMultiValue => Self::RhsNotMultiValue,
         }
     }
+
+    /// The legacy reason for this code. The arity counts fill `ArityMismatch`, the only reason that reads them.
+    pub(crate) fn to_reason(self, expected: usize, found: usize) -> InvalidMultiBindReason {
+        match self {
+            Self::ThisTargetReserved => InvalidMultiBindReason::ThisTargetReserved,
+            Self::ExpectedTargetName => InvalidMultiBindReason::ExpectedTargetName,
+            Self::MissingTargetAfterComma => InvalidMultiBindReason::MissingTargetAfterComma,
+            Self::MissingAssignmentOperator => InvalidMultiBindReason::MissingAssignmentOperator,
+            Self::InvalidTokenAfterTarget => InvalidMultiBindReason::InvalidTokenAfterTarget,
+            Self::MissingRightHandExpression => InvalidMultiBindReason::MissingRightHandExpression,
+            Self::MultipleRightHandExpressions => {
+                InvalidMultiBindReason::MultipleRightHandExpressions
+            }
+            Self::MutableTargetNeedsExplicitType => {
+                InvalidMultiBindReason::MutableTargetNeedsExplicitType
+            }
+            Self::CompileTimeMarkerOnTarget => InvalidMultiBindReason::CompileTimeMarkerOnTarget,
+            Self::DuplicateTarget => InvalidMultiBindReason::DuplicateTarget,
+            Self::UnsupportedRhs => InvalidMultiBindReason::UnsupportedRhs,
+            Self::ExistingTargetMutableMarker => {
+                InvalidMultiBindReason::ExistingTargetMutableMarker
+            }
+            Self::ExistingTargetImmutable => InvalidMultiBindReason::ExistingTargetImmutable,
+            Self::ArityMismatch => InvalidMultiBindReason::ArityMismatch { expected, found },
+            Self::RhsNotMultiValue => InvalidMultiBindReason::RhsNotMultiValue,
+        }
+    }
 }
 
 diagnostic_family! {
@@ -84,15 +113,12 @@ diagnostic_family! {
         extra: None,
         ctor: manual,
         view: InvalidMultiBindView,
+        render: render_invalid_multi_bind,
     }
 }
 
 /// The invalid-multi-bind draft for a rule-kind diagnostic. The arity counts are zero unless the reason is
 /// `ArityMismatch`.
-#[cfg_attr(
-    not(test),
-    allow(dead_code, reason = "P4.6 producer switch: invalid multi-binds")
-)]
 pub(crate) fn invalid_multi_bind(
     reason: InvalidMultiBindReason,
     target_name: Option<StringId>,
@@ -110,6 +136,24 @@ pub(crate) fn invalid_multi_bind(
         cursor.push::<CountFact>(&found)?;
         Ok(())
     })
+}
+
+/// Maps the legacy invalid-multi-bind diagnostic onto its compact constructor. Declines other payloads.
+pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticDraft> {
+    match (diagnostic.kind, &diagnostic.payload) {
+        (
+            DiagnosticKind::Rule(RuleDiagnosticKind::InvalidMultiBind),
+            DiagnosticPayload::InvalidMultiBind {
+                reason,
+                target_name,
+            },
+        ) => Some(invalid_multi_bind(
+            *reason,
+            *target_name,
+            diagnostic.primary_span,
+        )),
+        _ => None,
+    }
 }
 
 diagnostic_family! {

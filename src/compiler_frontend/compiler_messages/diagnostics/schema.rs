@@ -10,7 +10,13 @@ use super::extras::ExtraDataKind;
 use super::facts::FactCodec;
 use super::labels::LabelMessageCode;
 use super::record::DiagnosticCode;
-use crate::compiler_frontend::compiler_messages::{DiagnosticCategory, DiagnosticDescriptor};
+use super::view::DiagnosticView;
+use crate::compiler_frontend::compiler_messages::render::{
+    DiagnosticRenderContext, RenderedPayload,
+};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticCategory, DiagnosticDescriptor, DiagnosticSeverity,
+};
 
 /// One fact's storage shape, read from its codec.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,6 +34,10 @@ impl FactDescriptor {
     }
 }
 
+/// One family's renderer. It reads a record through the family's view and returns the message and guidance.
+pub(crate) type FamilyRenderer =
+    fn(&DiagnosticView<'_>, DiagnosticRenderContext<'_>) -> RenderedPayload;
+
 /// A family's static schema.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FamilyRow {
@@ -35,7 +45,7 @@ pub(crate) struct FamilyRow {
     pub(crate) stable_code: &'static str,
     #[cfg_attr(
         not(test),
-        allow(dead_code, reason = "P4.3 render dispatch reads family metadata")
+        allow(dead_code, reason = "P4.6 producer sweep reads family categories")
     )]
     pub(crate) category: DiagnosticCategory,
     pub(crate) reserved: bool,
@@ -45,6 +55,9 @@ pub(crate) struct FamilyRow {
     pub(crate) extra: ExtraDataKind,
     /// Label codes that drafts of this family may declare.
     pub(crate) labels: &'static [LabelMessageCode],
+    /// Renders the family's records from their typed view. Only pilot rows carry a renderer; identity rows have no
+    /// records to render.
+    pub(crate) render: Option<FamilyRenderer>,
 }
 
 impl FamilyRow {
@@ -88,9 +101,14 @@ impl FamilyRow {
         }
     }
 
+    /// The severity that the family's descriptor gives its records. Only pilot rows carry a descriptor.
+    pub(crate) const fn default_severity(&self) -> DiagnosticSeverity {
+        self.pilot_descriptor().default_severity
+    }
+
     #[cfg_attr(
         not(test),
-        allow(dead_code, reason = "P4.3 render dispatch skips reserved families")
+        allow(dead_code, reason = "reserved flag (D9): only schema tests read it")
     )]
     pub(crate) const fn is_reserved(&self) -> bool {
         self.reserved
@@ -124,10 +142,35 @@ macro_rules! reserved_flag {
 }
 pub(crate) use reserved_flag;
 
+/// Expands to a family's renderer slot. `none` marks a reserved family with no records; any other renderer
+/// decodes the record into the family view and passes it to the renderer.
+macro_rules! family_renderer {
+    (none, $view:ident) => {
+        None
+    };
+    ($render:ident, $view:ident) => {
+        Some({
+            fn render_family(
+                diagnostic: &$crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView<'_>,
+                context: $crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext<'_>,
+            ) -> $crate::compiler_frontend::compiler_messages::render::RenderedPayload {
+                let facts = diagnostic
+                    .family_view::<$view>()
+                    .expect("a family row decodes only records of its own code");
+                $render(diagnostic, &facts, context)
+            }
+            render_family
+        })
+    };
+}
+pub(crate) use family_renderer;
+
 /// Declares a family row.
 ///
 /// `pilot` rows serve the legacy descriptor and get a typed view. Their constructor is generated (`ctor: generated`)
-/// or written by hand in the group module (`ctor: manual`). `identity` rows declare only the code and category.
+/// or written by hand in the group module (`ctor: manual`). `render` names the renderer that takes the view, or
+/// `none` for a reserved family with no records. `identity` rows declare only the code and category.
+/// Attributes before `view:` go on the generated view struct. A reserved family uses one for its D9 allowance.
 macro_rules! diagnostic_family {
     (
         pilot $name:ident {
@@ -140,7 +183,9 @@ macro_rules! diagnostic_family {
             labels: [$($label:expr),* $(,)?],
             extra: $extra:ident,
             ctor: generated $ctor:ident,
-            view: $view:ident $(, $reserved:ident)? $(,)?
+            $(#[$view_attr:meta])*
+            view: $view:ident,
+            render: $render:ident $(, $reserved:ident)? $(,)?
         }
     ) => {
         const _: () = assert!(
@@ -167,21 +212,20 @@ macro_rules! diagnostic_family {
                 ),*],
                 extra: $crate::compiler_frontend::compiler_messages::diagnostics::extras::ExtraDataKind::$extra,
                 labels: &[$($label),*],
+                render: $crate::compiler_frontend::compiler_messages::diagnostics::schema::family_renderer!(
+                    $render,
+                    $view
+                ),
             };
 
-        #[allow(dead_code, reason = "P4.3 render views read pilot records")]
-        pub(crate) struct $view<'a> {
-            pub(crate) record: $crate::compiler_frontend::compiler_messages::diagnostics::store::RecordRef<'a>,
-            pub(crate) primary: $crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef<'a>,
-            pub(crate) labels: &'a [$crate::compiler_frontend::compiler_messages::diagnostics::labels::SecondaryDiagnosticLabel],
-            pub(crate) string_ids: &'a [$crate::compiler_frontend::symbols::string_interning::StringId],
+        $(#[$view_attr])*
+        pub(crate) struct $view {
             $(pub(crate) $field: <$codec as $crate::compiler_frontend::compiler_messages::diagnostics::facts::FactCodec>::Durable,)*
         }
 
-        #[allow(dead_code, reason = "P4.3 render views read pilot records")]
-        impl<'a> $view<'a> {
-            pub(crate) fn from_record(
-                record: $crate::compiler_frontend::compiler_messages::diagnostics::store::RecordRef<'a>,
+        impl $crate::compiler_frontend::compiler_messages::diagnostics::view::FamilyView for $view {
+            fn from_record(
+                record: $crate::compiler_frontend::compiler_messages::diagnostics::store::RecordRef<'_>,
             ) -> Option<Self> {
                 if record.code() != $name.code {
                     return None;
@@ -190,16 +234,11 @@ macro_rules! diagnostic_family {
                 $(let $field = facts.read::<$codec>();)*
                 facts.finish();
                 Some(Self {
-                    record,
-                    primary: record.primary(),
-                    labels: record.labels(),
-                    string_ids: record.string_ids(),
                     $($field,)*
                 })
             }
         }
 
-        #[allow(dead_code, reason = "P4.6 producer switch: generated family constructor")]
         pub(crate) fn $ctor(
             $($field: <$codec as $crate::compiler_frontend::compiler_messages::diagnostics::facts::FactCodec>::Draft,)*
             span: Option<$crate::compiler_frontend::source::SourceSpan>,
@@ -226,7 +265,9 @@ macro_rules! diagnostic_family {
             labels: [$($label:expr),* $(,)?],
             extra: $extra:ident,
             ctor: manual,
-            view: $view:ident $(, $reserved:ident)? $(,)?
+            $(#[$view_attr:meta])*
+            view: $view:ident,
+            render: $render:ident $(, $reserved:ident)? $(,)?
         }
     ) => {
         const _: () = assert!(
@@ -253,21 +294,20 @@ macro_rules! diagnostic_family {
                 ),*],
                 extra: $crate::compiler_frontend::compiler_messages::diagnostics::extras::ExtraDataKind::$extra,
                 labels: &[$($label),*],
+                render: $crate::compiler_frontend::compiler_messages::diagnostics::schema::family_renderer!(
+                    $render,
+                    $view
+                ),
             };
 
-        #[allow(dead_code, reason = "P4.3 render views read pilot records")]
-        pub(crate) struct $view<'a> {
-            pub(crate) record: $crate::compiler_frontend::compiler_messages::diagnostics::store::RecordRef<'a>,
-            pub(crate) primary: $crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef<'a>,
-            pub(crate) labels: &'a [$crate::compiler_frontend::compiler_messages::diagnostics::labels::SecondaryDiagnosticLabel],
-            pub(crate) string_ids: &'a [$crate::compiler_frontend::symbols::string_interning::StringId],
+        $(#[$view_attr])*
+        pub(crate) struct $view {
             $(pub(crate) $field: <$codec as $crate::compiler_frontend::compiler_messages::diagnostics::facts::FactCodec>::Durable,)*
         }
 
-        #[allow(dead_code, reason = "P4.3 render views read pilot records")]
-        impl<'a> $view<'a> {
-            pub(crate) fn from_record(
-                record: $crate::compiler_frontend::compiler_messages::diagnostics::store::RecordRef<'a>,
+        impl $crate::compiler_frontend::compiler_messages::diagnostics::view::FamilyView for $view {
+            fn from_record(
+                record: $crate::compiler_frontend::compiler_messages::diagnostics::store::RecordRef<'_>,
             ) -> Option<Self> {
                 if record.code() != $name.code {
                     return None;
@@ -276,10 +316,6 @@ macro_rules! diagnostic_family {
                 $(let $field = facts.read::<$codec>();)*
                 facts.finish();
                 Some(Self {
-                    record,
-                    primary: record.primary(),
-                    labels: record.labels(),
-                    string_ids: record.string_ids(),
                     $($field,)*
                 })
             }
@@ -310,6 +346,7 @@ macro_rules! diagnostic_family {
                 layout: &[],
                 extra: $crate::compiler_frontend::compiler_messages::diagnostics::extras::ExtraDataKind::None,
                 labels: &[],
+                render: None,
             };
     };
 }

@@ -203,10 +203,6 @@ impl SecondaryDiagnosticLabel {
     }
 
     /// The span this label points at. `None` when the span belongs to a foreign site.
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "P4.3 render reads secondary labels")
-    )]
     pub(crate) fn span(self) -> Option<SourceSpan> {
         self.span
     }

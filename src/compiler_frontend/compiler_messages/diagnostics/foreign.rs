@@ -9,10 +9,6 @@
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan};
 
 /// Which span of a draft a foreign site belongs to.
-#[cfg_attr(
-    not(test),
-    allow(dead_code, reason = "P4.3 adapter attaches foreign sites")
-)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ForeignSlot {
     Primary,
@@ -41,7 +37,10 @@ const _: () = assert!(
 );
 
 /// A span as a reader sees it: local to the diagnostic, foreign to it, or absent.
-#[allow(dead_code, reason = "P4.3 render reads record sites")]
+#[cfg_attr(
+    not(test),
+    allow(dead_code, reason = "P4.5 report freeze reads record sites")
+)]
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum SiteRef<'a> {
     Absent,

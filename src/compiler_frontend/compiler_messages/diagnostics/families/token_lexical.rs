@@ -11,9 +11,13 @@ use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
     FamilyRow, diagnostic_family,
 };
+use crate::compiler_frontend::compiler_messages::render::{
+    render_compiler_capacity_exceeded, render_expected_token,
+};
 use crate::compiler_frontend::compiler_messages::{
-    AstCapacityResource, CapacityResource, DiagnosticCapacityResource, DiagnosticCategory,
-    DiagnosticSeverity, HirCapacityResource,
+    AstCapacityResource, CapacityResource, CompilerDiagnostic, DiagnosticCapacityResource,
+    DiagnosticCategory, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, HirCapacityResource,
+    SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::source::SourceSpan;
 
@@ -96,6 +100,7 @@ diagnostic_family! {
         extra: None,
         ctor: generated expected_token_from_projections,
         view: ExpectedTokenView,
+        render: render_expected_token,
     }
 }
 
@@ -111,17 +116,11 @@ diagnostic_family! {
         extra: None,
         ctor: manual,
         view: CompilerCapacityExceededView,
+        render: render_compiler_capacity_exceeded,
     }
 }
 
 /// The compiler-capacity draft for `resource` at `span`. Callers use it when a fixed-size limit is reached.
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "P4.3 adapter and P4.5 bags report capacity faults"
-    )
-)]
 pub(crate) fn compiler_capacity_exceeded(
     resource: impl Into<CapacityResource>,
     span: Option<SourceSpan>,
@@ -129,6 +128,22 @@ pub(crate) fn compiler_capacity_exceeded(
     DiagnosticDraft::with_facts(&COMPILER_CAPACITY_EXCEEDED, span, |cursor| {
         cursor.push::<CapacityResourceFact>(&resource.into())
     })
+}
+
+/// Maps the legacy expected-token and capacity diagnostics onto their compact constructors. Declines other payloads.
+pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticDraft> {
+    let span = diagnostic.primary_span;
+    match (diagnostic.kind, &diagnostic.payload) {
+        (
+            DiagnosticKind::Syntax(SyntaxDiagnosticKind::ExpectedToken),
+            DiagnosticPayload::ExpectedToken { expected, found },
+        ) => Some(expected_token_from_projections(*expected, *found, span)),
+        (
+            DiagnosticKind::Syntax(SyntaxDiagnosticKind::CompilerCapacityExceeded),
+            DiagnosticPayload::CompilerCapacityExceeded { resource },
+        ) => Some(compiler_capacity_exceeded(*resource, span)),
+        _ => None,
+    }
 }
 
 diagnostic_family! {

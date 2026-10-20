@@ -10,8 +10,12 @@ use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelMessa
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
     FamilyRow, diagnostic_family,
 };
+use crate::compiler_frontend::compiler_messages::render::{
+    render_duplicate_declaration, render_unknown_type_name, render_unknown_value_name,
+};
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticCategory, DiagnosticLabelMessage, DiagnosticSeverity,
+    CompilerDiagnostic, DiagnosticCategory, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
+    NameNamespace, RuleDiagnosticKind,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -28,6 +32,7 @@ diagnostic_family! {
         extra: None,
         ctor: manual,
         view: DuplicateDeclarationView,
+        render: render_duplicate_declaration,
     }
 }
 
@@ -43,6 +48,7 @@ diagnostic_family! {
         extra: None,
         ctor: generated unknown_value_name,
         view: UnknownValueNameView,
+        render: render_unknown_value_name,
     }
 }
 
@@ -58,26 +64,44 @@ diagnostic_family! {
         extra: None,
         ctor: generated unknown_type_name,
         view: UnknownTypeNameView,
+        render: render_unknown_type_name,
     }
 }
 
-/// The duplicate-declaration draft. The primary site is the duplicate. The earlier declaration becomes a label
-/// only when its span is known.
-#[cfg_attr(
-    not(test),
-    allow(dead_code, reason = "P4.6 producer switch: duplicate declarations")
-)]
+/// The duplicate-declaration draft. The primary site is the duplicate. The earlier declaration is not part of this
+/// constructor: the legacy adapter adds it as a label, and only when its span is known.
 pub(crate) fn duplicate_declaration(
     name: StringId,
-    first_span: Option<SourceSpan>,
     duplicate_span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
-    let draft = DiagnosticDraft::with_facts(&DUPLICATE_DECLARATION, duplicate_span, |cursor| {
+    DiagnosticDraft::with_facts(&DUPLICATE_DECLARATION, duplicate_span, |cursor| {
         cursor.push::<StringFact>(&name)
-    });
-    match first_span {
-        Some(_) => draft.with_label(first_span, DiagnosticLabelMessage::PreviousDeclaration),
-        None => draft,
+    })
+}
+
+/// Maps the legacy name diagnostics onto their compact constructors. Declines other payloads.
+pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticDraft> {
+    let span = diagnostic.primary_span;
+    match (diagnostic.kind, &diagnostic.payload) {
+        (
+            DiagnosticKind::Rule(RuleDiagnosticKind::DuplicateDeclaration),
+            DiagnosticPayload::DuplicateDeclaration { name },
+        ) => Some(duplicate_declaration(*name, span)),
+        (
+            DiagnosticKind::Rule(RuleDiagnosticKind::UnknownValueName),
+            DiagnosticPayload::UnknownName {
+                name,
+                namespace: NameNamespace::Value,
+            },
+        ) => Some(unknown_value_name(*name, span)),
+        (
+            DiagnosticKind::Rule(RuleDiagnosticKind::UnknownTypeName),
+            DiagnosticPayload::UnknownName {
+                name,
+                namespace: NameNamespace::Type,
+            },
+        ) => Some(unknown_type_name(*name, span)),
+        _ => None,
     }
 }
 

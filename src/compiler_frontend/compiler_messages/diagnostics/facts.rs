@@ -263,6 +263,18 @@ pub(crate) enum StoredPlace {
     Path(PathId),
 }
 
+impl StoredPlace {
+    /// The draft place this stored place renders as. A rendered-text place was stored as a local name, so it reads
+    /// back as `Local`; the adapter rejects rendered-text places before compaction.
+    pub(crate) fn diagnostic_place(self) -> DiagnosticPlace {
+        match self {
+            Self::Unknown => DiagnosticPlace::Unknown,
+            Self::Local(name) => DiagnosticPlace::Local(name),
+            Self::Path(path) => DiagnosticPlace::Path(path),
+        }
+    }
+}
+
 /// A place: unknown, a local name, or a path.
 pub(crate) struct PlaceFact;
 

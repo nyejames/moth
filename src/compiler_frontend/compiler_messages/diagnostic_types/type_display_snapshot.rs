@@ -22,13 +22,6 @@ use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 /// Spelling class of one snapshot record. The class selects how the record's data words are read.
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "P4.3 render dispatch reads frozen type-display snapshots"
-    )
-)]
 #[repr(u16)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum DiagnosticTypeTag {
@@ -50,6 +43,9 @@ pub(super) enum DiagnosticTypeTag {
     GenericParameter,
     GenericInstance,
     AnonymousConstRecord,
+    /// Transitional root for a top-level type that legacy rendering prints as its raw `TypeId`.
+    /// `data_0` holds the raw id. P4.5 deletes this tag with the transitional fallback.
+    UnresolvedTypeId,
 }
 
 /// One type's spelling class and payload in 12 bytes.
@@ -63,13 +59,6 @@ pub(super) enum DiagnosticTypeTag {
 /// - `External`: `data_0` is the raw external type id.
 /// - `GenericParameter`: `data_0` is the name's string id.
 /// - Every other tag leaves both words zero.
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "P4.3 render dispatch reads frozen type-display snapshots"
-    )
-)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct DiagnosticTypeRecord {
     pub(super) tag: DiagnosticTypeTag,
@@ -80,10 +69,6 @@ pub(super) struct DiagnosticTypeRecord {
 
 const _: () = assert!(std::mem::size_of::<DiagnosticTypeRecord>() == 12);
 
-#[cfg_attr(
-    not(test),
-    allow(dead_code, reason = "P4.6 producer switch builds snapshot records")
-)]
 impl DiagnosticTypeRecord {
     /// A record with no flags set.
     pub(super) fn new(tag: DiagnosticTypeTag, data_0: u32, data_1: u32) -> Self {
@@ -97,23 +82,9 @@ impl DiagnosticTypeRecord {
 }
 
 /// Set in `flags` when a `Struct` record names a const record.
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "P4.3 render dispatch reads frozen type-display snapshots"
-    )
-)]
 pub(super) const CONST_RECORD_FLAG: u16 = 1;
 
 /// A run of items in one arena, addressed by its start index and length.
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "P4.3 render dispatch reads frozen type-display snapshots"
-    )
-)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ChildRange {
     pub(super) start: u32,
@@ -121,13 +92,6 @@ pub(super) struct ChildRange {
 }
 
 /// Choice spelling data. Variant shapes live in the snapshot's `variants` arena.
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "P4.3 render dispatch reads frozen type-display snapshots"
-    )
-)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ChoiceSummary {
     pub(super) path: PathId,
@@ -135,13 +99,6 @@ pub(super) struct ChoiceSummary {
 }
 
 /// Function spelling data. Parameter and return ids live in the snapshot's `type_ids` arena.
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "P4.3 render dispatch reads frozen type-display snapshots"
-    )
-)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct CallableSummary {
     pub(super) parameters: ChildRange,
@@ -150,13 +107,6 @@ pub(super) struct CallableSummary {
 }
 
 /// Generic instance spelling data. Argument ids live in the snapshot's `type_ids` arena.
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "P4.3 render dispatch reads frozen type-display snapshots"
-    )
-)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct GenericInstanceSummary {
     pub(super) base_path: Option<PathId>,
@@ -164,13 +114,6 @@ pub(super) struct GenericInstanceSummary {
 }
 
 /// Collection spelling data. Element ids live in the snapshot's `type_ids` arena.
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "P4.3 render dispatch reads frozen type-display snapshots"
-    )
-)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct CollectionSummary {
     pub(super) fixed_capacity: Option<usize>,
@@ -178,13 +121,6 @@ pub(super) struct CollectionSummary {
 }
 
 /// Frozen spelling data for a set of types. Built by `TypeDisplaySnapshotBuilder`.
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "P4.3 render dispatch reads frozen type-display snapshots"
-    )
-)]
 #[derive(Debug, Default)]
 pub(crate) struct TypeDisplaySnapshot {
     pub(super) records: Vec<DiagnosticTypeRecord>,
@@ -197,19 +133,11 @@ pub(crate) struct TypeDisplaySnapshot {
 }
 
 /// Converts an arena length into the `u32` index space that records and ranges use.
-#[cfg_attr(
-    not(test),
-    allow(dead_code, reason = "P4.6 producer switch builds snapshot records")
-)]
 pub(super) fn arena_index(len: usize) -> Result<u32, TypeDisplayCapacityError> {
     u32::try_from(len).map_err(|_| TypeDisplayCapacityError)
 }
 
 /// Appends `items` to `arena` and returns the range they occupy.
-#[cfg_attr(
-    not(test),
-    allow(dead_code, reason = "P4.6 producer switch builds snapshot records")
-)]
 pub(super) fn push_range<Item>(
     arena: &mut Vec<Item>,
     items: impl IntoIterator<Item = Item>,
@@ -224,10 +152,6 @@ pub(super) fn push_range<Item>(
 }
 
 /// Appends one summary to `arena` and returns its index.
-#[cfg_attr(
-    not(test),
-    allow(dead_code, reason = "P4.6 producer switch builds snapshot records")
-)]
 pub(super) fn push_summary<Item>(
     arena: &mut Vec<Item>,
     item: Item,
@@ -238,35 +162,17 @@ pub(super) fn push_summary<Item>(
 }
 
 /// Encodes a path id as a record data word. Path indices fit in `u32` by construction.
-#[cfg_attr(
-    not(test),
-    allow(dead_code, reason = "P4.6 producer switch builds snapshot records")
-)]
 pub(super) fn encode_path(path: PathId) -> u32 {
     u32::try_from(path.index()).expect("path table indices fit in u32 by construction")
 }
 
 /// Decodes a data word written by `encode_path`.
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "P4.3 render dispatch reads frozen type-display snapshots"
-    )
-)]
 fn decode_path(word: u32) -> PathId {
     PathId::try_from_index(word as usize)
         .expect("path data words are written by encode_path from a valid PathId")
 }
 
 /// Returns the items a range covers. Ranges come from `push_range` on the same arena.
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "P4.3 render dispatch reads frozen type-display snapshots"
-    )
-)]
 fn range_slice<Item>(arena: &[Item], range: ChildRange) -> &[Item] {
     let start = range.start as usize;
     let end = start + range.len as usize;
@@ -276,13 +182,6 @@ fn range_slice<Item>(arena: &[Item], range: ChildRange) -> &[Item] {
 }
 
 /// Returns the summary at `index`. Indices come from `push_summary` on the same arena.
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "P4.3 render dispatch reads frozen type-display snapshots"
-    )
-)]
 fn summary<Item>(arena: &[Item], index: u32) -> &Item {
     arena
         .get(index as usize)
@@ -290,13 +189,6 @@ fn summary<Item>(arena: &[Item], index: u32) -> &Item {
 }
 
 /// Decodes a `Number` data word written from a validated `NumberScale`.
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "P4.3 render dispatch reads frozen type-display snapshots"
-    )
-)]
 fn decode_number_scale(word: u32) -> NumberScale {
     u16::try_from(word)
         .ok()
@@ -305,13 +197,6 @@ fn decode_number_scale(word: u32) -> NumberScale {
 }
 
 /// Decodes a `FixedScalar` data word written from a scalar discriminant.
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "P4.3 render dispatch reads frozen type-display snapshots"
-    )
-)]
 fn decode_fixed_scalar(word: u32) -> FixedScalar {
     FixedScalar::ALL
         .into_iter()
@@ -319,13 +204,6 @@ fn decode_fixed_scalar(word: u32) -> FixedScalar {
         .expect("fixed scalar data words are written from a FixedScalar discriminant")
 }
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "P4.3 render dispatch reads frozen type-display snapshots"
-    )
-)]
 impl TypeDisplaySnapshot {
     /// Renders the spelling of `type_id`. The result matches `display_type` for the live type.
     pub(crate) fn display(
@@ -335,6 +213,25 @@ impl TypeDisplaySnapshot {
         path_table: &PathTable,
     ) -> String {
         display_view_type(self, type_id, table, path_table)
+    }
+
+    /// Renders the spelling of `type_id` for a diagnostic. An unresolved root prints its raw `TypeId`, which is the
+    /// legacy spelling when the environment or path table is missing or the type is unknown.
+    pub(crate) fn display_for_render(
+        &self,
+        type_id: TypeDisplayId,
+        table: &dyn StringTableResolver,
+        path_table: Option<&PathTable>,
+    ) -> String {
+        let record = self.record(type_id);
+        match record.tag {
+            DiagnosticTypeTag::UnresolvedTypeId => format!("TypeId({})", record.data_0),
+            _ => self.display(
+                type_id,
+                table,
+                path_table.expect("resolved type spellings need the path table"),
+            ),
+        }
     }
 
     fn record(&self, type_id: TypeDisplayId) -> &DiagnosticTypeRecord {
@@ -460,6 +357,9 @@ impl TypeDisplayView for TypeDisplaySnapshot {
                 base_path: self.generic_instance(type_id).base_path,
             },
             DiagnosticTypeTag::AnonymousConstRecord => TypeDisplayShape::AnonymousConstRecord,
+            DiagnosticTypeTag::UnresolvedTypeId => {
+                unreachable!("unresolved roots render through display_for_render")
+            }
         }
     }
 

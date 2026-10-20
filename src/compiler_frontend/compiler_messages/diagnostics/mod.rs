@@ -12,11 +12,13 @@ pub(crate) mod facts;
 pub(crate) mod families;
 pub(crate) mod foreign;
 pub(crate) mod labels;
+pub(crate) mod legacy_adapter;
 pub(crate) mod record;
 pub(crate) mod registry;
 pub(crate) mod resource;
 pub(crate) mod schema;
 pub(crate) mod store;
+pub(crate) mod view;
 
 #[cfg(test)]
 mod tests;

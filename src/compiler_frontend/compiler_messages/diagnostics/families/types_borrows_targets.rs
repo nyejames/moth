@@ -11,8 +11,13 @@ use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
     FamilyRow, diagnostic_family,
 };
+use crate::compiler_frontend::compiler_messages::render::{
+    render_type_mismatch, render_use_of_uninitialized_local,
+};
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticCategory, DiagnosticPlace, DiagnosticSeverity, TypeMismatchContext,
+    BorrowDiagnosticKind, CompilerDiagnostic, DiagnosticCategory, DiagnosticKind,
+    DiagnosticPayload, DiagnosticPlace, DiagnosticSeverity, TypeDiagnosticKind,
+    TypeMismatchContext,
 };
 use crate::compiler_frontend::source::SourceSpan;
 
@@ -50,6 +55,7 @@ diagnostic_family! {
         extra: None,
         ctor: generated type_mismatch,
         view: TypeMismatchView,
+        render: render_type_mismatch,
     }
 }
 
@@ -65,12 +71,12 @@ diagnostic_family! {
         extra: None,
         ctor: manual,
         view: UseOfUninitializedLocalView,
+        render: render_use_of_uninitialized_local,
     }
 }
 
-/// The uninitialised-local draft. The place is stored in the place fact; `RenderedText` places are not yet
-/// distinguishable from locals after storage (see `PlaceFact`).
-#[allow(dead_code, reason = "P4.6 producer switch: uninitialised locals")]
+/// The uninitialised-local draft. The place is stored in the place fact. A `RenderedText` place is stored as a local,
+/// since both render as the same backticked name (see `PlaceFact`).
 pub(crate) fn use_of_uninitialized_local(
     place: DiagnosticPlace,
     span: Option<SourceSpan>,
@@ -78,6 +84,27 @@ pub(crate) fn use_of_uninitialized_local(
     DiagnosticDraft::with_facts(&USE_OF_UNINITIALIZED_LOCAL, span, |cursor| {
         cursor.push::<PlaceFact>(&place)
     })
+}
+
+/// Maps the legacy type-mismatch and uninitialised-local diagnostics onto their compact constructors. Declines
+/// other payloads.
+pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticDraft> {
+    let span = diagnostic.primary_span;
+    match (diagnostic.kind, &diagnostic.payload) {
+        (
+            DiagnosticKind::Type(TypeDiagnosticKind::TypeMismatch),
+            DiagnosticPayload::TypeMismatch {
+                expected,
+                found,
+                context,
+            },
+        ) => Some(type_mismatch(*expected, *found, *context, span)),
+        (
+            DiagnosticKind::Borrow(BorrowDiagnosticKind::UseOfUninitializedLocal),
+            DiagnosticPayload::UseOfUninitializedLocal { place },
+        ) => Some(use_of_uninitialized_local(place.clone(), span)),
+        _ => None,
+    }
 }
 
 diagnostic_family! {

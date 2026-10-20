@@ -25,31 +25,17 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use rustc_hash::FxHashMap;
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "P4.6 producer switch passes the snapshot builder to diagnostic compaction"
-    )
-)]
 pub(crate) struct TypeDisplaySnapshotBuilder<'environment> {
-    environment: &'environment TypeEnvironment,
+    environment: Option<&'environment TypeEnvironment>,
     snapshot: TypeDisplaySnapshot,
     memo: FxHashMap<TypeId, TypeDisplayId>,
     /// Display ids of the child frames being collected, innermost frame last.
     scratch: Vec<TypeDisplayId>,
 }
 
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "P4.6 producer switch passes the snapshot builder to diagnostic compaction"
-    )
-)]
 impl<'environment> TypeDisplaySnapshotBuilder<'environment> {
-    /// Starts an empty snapshot over `environment`.
-    pub(crate) fn new(environment: &'environment TypeEnvironment) -> Self {
+    /// Starts an empty snapshot. Without an environment every top-level type becomes an unresolved root.
+    pub(crate) fn new(environment: Option<&'environment TypeEnvironment>) -> Self {
         Self {
             environment,
             snapshot: TypeDisplaySnapshot::default(),
@@ -87,12 +73,40 @@ impl<'environment> TypeDisplaySnapshotBuilder<'environment> {
         Ok(id)
     }
 
+    /// Returns the id of a top-level type. A type the environment does not define, and every type without an
+    /// environment, gets a transitional unresolved root. That root prints its raw `TypeId`, the legacy spelling.
+    pub(crate) fn display_top_level(
+        &mut self,
+        type_id: TypeId,
+    ) -> Result<TypeDisplayId, TypeDisplayCapacityError> {
+        match self.environment {
+            Some(environment) if environment.get(type_id).is_some() => self.display_id(type_id),
+            _ => self.push_unresolved(type_id),
+        }
+    }
+
+    /// Pushes the transitional unresolved root for `type_id`. The root is not memoised: it has no spelling of its own.
+    fn push_unresolved(
+        &mut self,
+        type_id: TypeId,
+    ) -> Result<TypeDisplayId, TypeDisplayCapacityError> {
+        let id = TypeDisplayId::from_index(self.snapshot.records.len())?;
+        self.snapshot.records.push(DiagnosticTypeRecord::new(
+            DiagnosticTypeTag::UnresolvedTypeId,
+            type_id.0,
+            0,
+        ));
+        Ok(id)
+    }
+
     /// Encodes the record for `type_id`. Argument ids are resolved before the record is returned.
     fn encode(
         &mut self,
         type_id: TypeId,
     ) -> Result<DiagnosticTypeRecord, TypeDisplayCapacityError> {
-        let environment = self.environment;
+        let environment = self
+            .environment
+            .expect("nested types are encoded only from a resolved environment");
         let leaf = |tag| DiagnosticTypeRecord::new(tag, 0, 0);
         let record = match environment.shape(type_id) {
             TypeDisplayShape::Unknown => leaf(DiagnosticTypeTag::Unknown),

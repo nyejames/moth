@@ -852,7 +852,7 @@ fn structural_string_equality_reports_text_unavailable_outcome() {
         Some("compile_time_evaluation_error.structural_string_requires_final_text")
     );
     let render_context = DiagnosticRenderContext::new(&f.strings);
-    let guidance = terminal::format_payload_guidance(&diagnostic.payload, render_context);
+    let guidance = terminal::format_diagnostic_guidance(&diagnostic, render_context);
     assert!(
         guidance
             .iter()
@@ -887,7 +887,7 @@ fn constant_fold_propagates_structural_string_text_unavailable_outcome() {
         Some("compile_time_evaluation_error.structural_string_requires_final_text")
     );
     let render_context = DiagnosticRenderContext::new(&f.strings);
-    let guidance = terminal::format_payload_guidance(&diagnostic.payload, render_context);
+    let guidance = terminal::format_diagnostic_guidance(&diagnostic, render_context);
     assert!(
         guidance
             .iter()

@@ -5,7 +5,7 @@
 //! identity into source-level names when a module `TypeEnvironment` is available.
 
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
-use crate::compiler_frontend::compiler_messages::render::terminal::format_payload_guidance;
+use crate::compiler_frontend::compiler_messages::render::terminal::format_diagnostic_guidance;
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostics_with_context;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, diagnostic_type_name, unsupported_operator_types_message,
@@ -65,7 +65,7 @@ fn rule_diagnostics_render_receiver_type_names() {
         Vec::new(),
         None,
     );
-    let field_guidance = format_payload_guidance(&field_access.payload, context);
+    let field_guidance = format_diagnostic_guidance(&field_access, context);
     assert!(field_guidance.iter().any(|line| line.contains("'I32'")));
 
     let assignment = CompilerDiagnostic::invalid_assignment_target(
@@ -77,7 +77,7 @@ fn rule_diagnostics_render_receiver_type_names() {
         None,
         None,
     );
-    let assignment_guidance = format_payload_guidance(&assignment.payload, context);
+    let assignment_guidance = format_diagnostic_guidance(&assignment, context);
     assert!(
         assignment_guidance
             .iter()
@@ -107,7 +107,7 @@ fn receiver_declaration_reason_renders_the_receiver_type_identity() {
         },
         None,
     );
-    let guidance = format_payload_guidance(&diagnostic.payload, context);
+    let guidance = format_diagnostic_guidance(&diagnostic, context);
     assert!(
         guidance
             .iter()
@@ -216,7 +216,7 @@ fn failure_handling_renderers_resolve_custom_types_and_recovery_guidance() {
 
     for (reason, expected_fragments) in cases {
         let diagnostic = CompilerDiagnostic::invalid_fallible_handling(reason, None);
-        let guidance = format_payload_guidance(&diagnostic.payload, context).join("\n");
+        let guidance = format_diagnostic_guidance(&diagnostic, context).join("\n");
         if matches!(
             &diagnostic.payload,
             crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidFallibleHandling {

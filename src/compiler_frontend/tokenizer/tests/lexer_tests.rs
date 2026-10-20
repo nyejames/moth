@@ -2,7 +2,7 @@ use super::*;
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, terminal::format_payload_guidance,
+    DiagnosticRenderContext, terminal::format_diagnostic_guidance,
 };
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticCompoundAssignmentOperator,
@@ -546,11 +546,9 @@ fn moth_template_entry_body_rejects_unescaped_outer_template_close() {
         "unescaped template close should retain its authored byte",
     );
 
-    let guidance = format_payload_guidance(
-        &diagnostic.payload,
-        DiagnosticRenderContext::new(&string_table),
-    )
-    .join("\n");
+    let guidance =
+        format_diagnostic_guidance(&diagnostic, DiagnosticRenderContext::new(&string_table))
+            .join("\n");
     assert!(guidance.contains("Moth template `.mtf` source"));
     assert!(guidance.contains(r#"["]"]"#));
 }

@@ -18,7 +18,7 @@ use crate::compiler_frontend::compiler_messages::diagnostic_types::{
     TypeDisplayCapacityError, TypeDisplayId,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CapacityResource, DiagnosticCapacityResource, DiagnosticLabelMessage,
+    CapacityResource, DiagnosticCapacityResource, DiagnosticLabelMessage, DiagnosticSeverity,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -127,6 +127,16 @@ impl DiagnosticDraft {
 }
 
 impl DiagnosticDraft {
+    /// Records `severity` as this draft's override. A severity equal to the family default stores nothing, so the
+    /// record keeps the descriptor's severity. A faulted draft keeps its capacity severity.
+    pub(crate) fn with_severity(mut self, severity: DiagnosticSeverity) -> Self {
+        if !self.core.faulted {
+            self.core.severity =
+                SeverityOverride::for_severity(severity, self.core.family.default_severity());
+        }
+        self
+    }
+
     /// Adds a secondary label in this draft's own identity. A label from another identity takes its span here too,
     /// then goes through `with_foreign`, which records the identity and leaves the span in place.
     pub(super) fn with_label(
@@ -149,10 +159,6 @@ impl DiagnosticDraft {
 
     /// Marks a span as belonging to another identity. The span stays in the draft's primary or label field. The
     /// foreign-site row records which slot it occupies and which identity context owns it.
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "P4.3 adapter attaches foreign sites")
-    )]
     pub(super) fn with_foreign(mut self, site: ForeignSiteDraft) -> Self {
         if self.core.faulted {
             // A capacity-fault draft carries no ownership rows, so its foreign primary is dropped
@@ -187,6 +193,17 @@ impl DiagnosticDraft {
         self.extra.get_or_insert_with(Box::default).data = ExtraDataDraft::StringIds(ids);
         self
     }
+
+    /// Whether every label carries a message its family declares. Compaction asserts this, so callers check it first.
+    pub(super) fn labels_match_family(&self) -> bool {
+        let declared = self.core.family.labels;
+        self.extra.as_ref().is_none_or(|extra| {
+            extra
+                .labels
+                .iter()
+                .all(|label| declared.contains(&label.message))
+        })
+    }
 }
 
 impl DiagnosticDraft {
@@ -194,15 +211,8 @@ impl DiagnosticDraft {
     ///
     /// All-or-nothing: the new words are computed into temporaries first, and the draft changes only when every
     /// rewrite succeeds. A failed call leaves the draft exactly as it was. Callers map the error to their own
-    /// capacity handling: the P4.3 adapter turns it into a `COMPILER_CAPACITY_EXCEEDED` draft and P4.5 bags
-    /// latch their domain capacity.
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "P4.3 adapter and P4.5 bags capture types before compaction"
-        )
-    )]
+    /// capacity handling: the render adapter expects success, since one diagnostic's types always fit the id space.
+    /// The P4.6 producer emits `COMPILER_CAPACITY_EXCEEDED` (D5), and P4.5 bags latch their domain capacity.
     pub(crate) fn capture_types(
         &mut self,
         rewrite: &mut impl FnMut(TypeId) -> Result<TypeDisplayId, TypeDisplayCapacityError>,

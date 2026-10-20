@@ -9,8 +9,12 @@ use crate::compiler_frontend::compiler_messages::diagnostics::facts::{UnitFact, 
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
     FamilyRow, diagnostic_family,
 };
+use crate::compiler_frontend::compiler_messages::render::{
+    render_non_exhaustive_match, render_unreachable_match_arm,
+};
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticCategory, DiagnosticSeverity, NonExhaustiveMatchReason,
+    CompilerDiagnostic, DiagnosticCategory, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
+    NonExhaustiveMatchReason, RuleDiagnosticKind,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -36,6 +40,7 @@ diagnostic_family! {
         extra: None,
         ctor: generated unreachable_match_arm,
         view: UnreachableMatchArmView,
+        render: render_unreachable_match_arm,
     }
 }
 
@@ -51,14 +56,11 @@ diagnostic_family! {
         extra: StringIds,
         ctor: manual,
         view: NonExhaustiveMatchView,
+        render: render_non_exhaustive_match,
     }
 }
 
 /// The non-exhaustive-match draft. The missing variant names are stored as the extra string IDs.
-#[cfg_attr(
-    not(test),
-    allow(dead_code, reason = "P4.6 producer switch: non-exhaustive matches")
-)]
 pub(crate) fn non_exhaustive_match(
     reason: NonExhaustiveMatchReason,
     missing_variants: Vec<StringId>,
@@ -68,6 +70,29 @@ pub(crate) fn non_exhaustive_match(
         cursor.push::<UnitFact<NonExhaustiveMatchReason>>(&reason)
     })
     .with_string_ids(missing_variants)
+}
+
+/// Maps the legacy match diagnostics onto their compact constructors. Declines other payloads.
+pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticDraft> {
+    let span = diagnostic.primary_span;
+    match (diagnostic.kind, &diagnostic.payload) {
+        (
+            DiagnosticKind::Rule(RuleDiagnosticKind::UnreachableMatchArm),
+            DiagnosticPayload::UnreachableMatchArm,
+        ) => Some(unreachable_match_arm(span)),
+        (
+            DiagnosticKind::Rule(RuleDiagnosticKind::NonExhaustiveMatch),
+            DiagnosticPayload::NonExhaustiveMatch {
+                reason,
+                missing_variants,
+            },
+        ) => Some(non_exhaustive_match(
+            *reason,
+            missing_variants.clone(),
+            span,
+        )),
+        _ => None,
+    }
 }
 
 diagnostic_family! {

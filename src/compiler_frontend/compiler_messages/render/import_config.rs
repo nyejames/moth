@@ -5,6 +5,8 @@
 //! expression/type/rule diagnostic rendering.
 
 use super::*;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::MissingImportTargetView;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 
 pub(crate) fn invalid_config_message(
     key: Option<StringId>,
@@ -774,5 +776,27 @@ pub(crate) fn invalid_dependency_clause_message(
         InvalidDependencyClauseReason::ContinuationEnteredStatement => {
             "The comma continued the dependency clause, so this name was consumed as the next selected dependency name. Remove the comma to end the clause and start the following statement."
         }
+    }
+}
+
+/// WHAT: renders the message for an import target that cannot be resolved.
+/// WHY: the compact renderer and the legacy payload path share this text.
+pub(crate) fn missing_import_target_message(
+    path: PathId,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    format!("Cannot resolve dependency '{}'.", context.render_path(path))
+}
+
+/// WHAT: renders a missing import target from its compact facts.
+/// WHY: the record stores the same path the legacy payload carries.
+pub(crate) fn render_missing_import_target(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &MissingImportTargetView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: missing_import_target_message(facts.path, context),
+        guidance: Vec::new(),
     }
 }

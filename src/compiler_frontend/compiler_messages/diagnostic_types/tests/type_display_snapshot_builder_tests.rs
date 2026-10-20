@@ -20,7 +20,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 fn builder_returns_one_display_id_per_type_id() {
     let environment = TypeEnvironment::new();
     let string_type = environment.builtins().string;
-    let mut builder = TypeDisplaySnapshotBuilder::new(&environment);
+    let mut builder = TypeDisplaySnapshotBuilder::new(Some(&environment));
     let first = builder.display_id(string_type).expect("test snapshot fits");
     let second = builder.display_id(string_type).expect("test snapshot fits");
     let snapshot = builder.finish();
@@ -40,7 +40,7 @@ fn builder_keeps_equal_spellings_from_distinct_type_ids_distinct() {
         "fixture must hold two distinct TypeIds"
     );
     let paths = empty_path_table();
-    let mut builder = TypeDisplaySnapshotBuilder::new(&environment);
+    let mut builder = TypeDisplaySnapshotBuilder::new(Some(&environment));
     let first = builder
         .display_id(first_parameter)
         .expect("test snapshot fits");
@@ -70,7 +70,7 @@ fn builder_terminates_on_recursive_struct_field_types() {
         }]),
     );
     let table = paths.freeze();
-    let mut builder = TypeDisplaySnapshotBuilder::new(&environment);
+    let mut builder = TypeDisplaySnapshotBuilder::new(Some(&environment));
     let display_id = builder.display_id(node).expect("test snapshot fits");
     let snapshot = builder.finish();
     assert_eq!(snapshot.records.len(), 1);
@@ -103,7 +103,7 @@ fn builder_terminates_on_recursive_choice_payload_types() {
         }]),
     );
     let table = paths.freeze();
-    let mut builder = TypeDisplaySnapshotBuilder::new(&environment);
+    let mut builder = TypeDisplaySnapshotBuilder::new(Some(&environment));
     let display_id = builder.display_id(status).expect("test snapshot fits");
     let snapshot = builder.finish();
     assert_eq!(snapshot.records.len(), 1);
@@ -118,7 +118,7 @@ fn builder_maps_missing_definitions_to_unknown_placeholder() {
     let strings = StringTable::new();
     let paths = empty_path_table();
     let environment = TypeEnvironment::new();
-    let mut builder = TypeDisplaySnapshotBuilder::new(&environment);
+    let mut builder = TypeDisplaySnapshotBuilder::new(Some(&environment));
     let display_id = builder
         .display_id(TypeId(9_999))
         .expect("test snapshot fits");

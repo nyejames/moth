@@ -23,6 +23,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::resource::Diagnost
 use crate::compiler_frontend::compiler_messages::diagnostics::store::{
     DiagnosticId, DiagnosticStore,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::view::FamilyView;
 use crate::compiler_frontend::compiler_messages::{
     CapacityResource, DiagnosticCapacityResource, DiagnosticLabelMessage,
     GenericSubstitutionDiagnostic, HirCapacityResource, NonExhaustiveMatchReason,
@@ -56,10 +57,9 @@ fn labelled_test_draft(message: DiagnosticLabelMessage) -> DiagnosticDraft {
 #[test]
 fn label_ceiling_rejects_with_labels() {
     let mut store = limited(|limits| limits.labels = 0);
-    let draft = duplicate_declaration(
-        StringId::from_index(1),
+    let draft = duplicate_declaration(StringId::from_index(1), Some(exact_span(10, 2))).with_label(
         Some(exact_span(0, 2)),
-        Some(exact_span(10, 2)),
+        DiagnosticLabelMessage::PreviousDeclaration,
     );
 
     assert_eq!(
@@ -71,10 +71,9 @@ fn label_ceiling_rejects_with_labels() {
 #[test]
 fn extra_ceiling_rejects_with_extras() {
     let mut store = limited(|limits| limits.extras = 0);
-    let draft = duplicate_declaration(
-        StringId::from_index(1),
+    let draft = duplicate_declaration(StringId::from_index(1), Some(exact_span(10, 2))).with_label(
         Some(exact_span(0, 2)),
-        Some(exact_span(10, 2)),
+        DiagnosticLabelMessage::PreviousDeclaration,
     );
 
     assert_eq!(
@@ -178,7 +177,10 @@ fn record_ceiling_stores_one_capacity_record_then_rejects_everything() {
         stand_in.resource,
         CapacityResource::Store(DiagnosticCapacityResource::Records)
     ));
-    assert!(matches!(stand_in.primary, SiteRef::Local(local) if local == span));
+    assert!(matches!(
+        store.record(DiagnosticId::from_index(1)).primary(),
+        SiteRef::Local(local) if local == span
+    ));
 }
 
 #[test]
@@ -193,10 +195,10 @@ fn record_ceiling_stand_in_is_spanless_for_a_spanless_draft() {
         CompactOutcome::Rejected(DiagnosticCapacityResource::Records)
     );
 
-    let stand_in =
-        CompilerCapacityExceededView::from_record(store.record(DiagnosticId::from_index(1)))
-            .expect("the latched store ends with the capacity record");
-    assert!(matches!(stand_in.primary, SiteRef::Absent));
+    let record = store.record(DiagnosticId::from_index(1));
+    CompilerCapacityExceededView::from_record(record)
+        .expect("the latched store ends with the capacity record");
+    assert!(matches!(record.primary(), SiteRef::Absent));
 }
 
 #[test]
@@ -211,10 +213,10 @@ fn record_ceiling_stand_in_drops_a_foreign_primary_span() {
         CompactOutcome::Rejected(DiagnosticCapacityResource::Records)
     );
 
-    let stand_in =
-        CompilerCapacityExceededView::from_record(store.record(DiagnosticId::from_index(1)))
-            .expect("the latched store ends with the capacity record");
-    assert!(matches!(stand_in.primary, SiteRef::Absent));
+    let record = store.record(DiagnosticId::from_index(1));
+    CompilerCapacityExceededView::from_record(record)
+        .expect("the latched store ends with the capacity record");
+    assert!(matches!(record.primary(), SiteRef::Absent));
 }
 
 #[test]
@@ -233,12 +235,14 @@ fn capacity_record_keeps_a_span_only_when_the_draft_had_one() {
         panic!("a spanned capacity draft stores");
     };
 
-    let spanless_view = CompilerCapacityExceededView::from_record(store.record(spanless))
+    let spanless_record = store.record(spanless);
+    CompilerCapacityExceededView::from_record(spanless_record)
         .expect("the stored record is a capacity record");
-    assert!(matches!(spanless_view.primary, SiteRef::Absent));
-    let spanned_view = CompilerCapacityExceededView::from_record(store.record(spanned))
+    assert!(matches!(spanless_record.primary(), SiteRef::Absent));
+    let spanned_record = store.record(spanned);
+    CompilerCapacityExceededView::from_record(spanned_record)
         .expect("the stored record is a capacity record");
-    assert!(matches!(spanned_view.primary, SiteRef::Local(_)));
+    assert!(matches!(spanned_record.primary(), SiteRef::Local(_)));
 }
 
 #[cfg(target_pointer_width = "64")]
@@ -266,7 +270,7 @@ fn oversized_count_becomes_a_fact_value_capacity_record_without_latching() {
         view.resource,
         CapacityResource::Store(DiagnosticCapacityResource::FactValue)
     ));
-    assert!(matches!(view.primary, SiteRef::Local(_)));
+    assert!(matches!(store.record(id).primary(), SiteRef::Local(_)));
     assert!(store.full.is_none());
 }
 
@@ -293,7 +297,8 @@ fn fact_fault_drops_a_primary_marked_foreign_afterwards() {
     let CompactOutcome::Stored(id) = store.compact(draft) else {
         panic!("a fact fault stores a capacity record");
     };
-    let view = CompilerCapacityExceededView::from_record(store.record(id))
+    let record = store.record(id);
+    CompilerCapacityExceededView::from_record(record)
         .expect("the stored record is a capacity record");
-    assert!(matches!(view.primary, SiteRef::Absent));
+    assert!(matches!(record.primary(), SiteRef::Absent));
 }

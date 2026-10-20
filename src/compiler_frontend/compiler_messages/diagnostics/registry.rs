@@ -24,10 +24,6 @@ pub(crate) const FAMILY_GROUPS: &[&[FamilyRow]] = &[
 ];
 
 /// The family row that declares `code`, if one does.
-#[cfg_attr(
-    not(test),
-    allow(dead_code, reason = "P4.3 render dispatch looks up families by code")
-)]
 pub(crate) fn family_for_code(code: DiagnosticCode) -> Option<&'static FamilyRow> {
     FAMILY_GROUPS
         .iter()
