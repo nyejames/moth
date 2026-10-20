@@ -6,6 +6,7 @@
 /// should have one declaration and one owning registry.
 use super::*;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidMultiBindCode;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::InvalidTypeAnnotationCode;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
     CommonSyntaxMistakeCode, InvalidStringEscapeCode, NumberLiteralCode,
 };
@@ -990,15 +991,19 @@ define_stable_reason_keys! {
     },
 
     InvalidTypeAnnotationReason => {
-    &InvalidTypeAnnotationReason::NoneNotAllowed => "invalid_type_annotation.none_not_allowed",
-    &InvalidTypeAnnotationReason::ReservedTraitKeyword => "invalid_type_annotation.reserved_trait_keyword",
-    &InvalidTypeAnnotationReason::TraitThisMustBeDirect => "invalid_type_annotation.trait_this_must_be_direct",
-    &InvalidTypeAnnotationReason::AsNotValidHere => "invalid_type_annotation.as_not_valid_here",
-    &InvalidTypeAnnotationReason::UnexpectedColon => "invalid_type_annotation.unexpected_colon",
-    &InvalidTypeAnnotationReason::InvalidTokenAfterName { .. } => "invalid_type_annotation.invalid_token_after_name",
-    &InvalidTypeAnnotationReason::ExpectedTypeAnnotation { .. } => "invalid_type_annotation.expected_type_annotation",
-    &InvalidTypeAnnotationReason::DuplicateOptional => "invalid_type_annotation.duplicate_optional",
-    &InvalidTypeAnnotationReason::NestedOptional => "invalid_type_annotation.nested_optional",
+        @delegate(reason => InvalidTypeAnnotationCode::split(reason).0.stable_reason_key());
+    },
+
+    InvalidTypeAnnotationCode => {
+    &InvalidTypeAnnotationCode::NoneNotAllowed => "invalid_type_annotation.none_not_allowed",
+    &InvalidTypeAnnotationCode::ReservedTraitKeyword => "invalid_type_annotation.reserved_trait_keyword",
+    &InvalidTypeAnnotationCode::TraitThisMustBeDirect => "invalid_type_annotation.trait_this_must_be_direct",
+    &InvalidTypeAnnotationCode::AsNotValidHere => "invalid_type_annotation.as_not_valid_here",
+    &InvalidTypeAnnotationCode::UnexpectedColon => "invalid_type_annotation.unexpected_colon",
+    &InvalidTypeAnnotationCode::InvalidTokenAfterName => "invalid_type_annotation.invalid_token_after_name",
+    &InvalidTypeAnnotationCode::ExpectedTypeAnnotation => "invalid_type_annotation.expected_type_annotation",
+    &InvalidTypeAnnotationCode::DuplicateOptional => "invalid_type_annotation.duplicate_optional",
+    &InvalidTypeAnnotationCode::NestedOptional => "invalid_type_annotation.nested_optional",
     },
 
     InvalidCollectionTypeReason => {

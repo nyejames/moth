@@ -1,7 +1,6 @@
 use super::{
     CompilerDiagnostic, DiagnosticPayload, DiagnosticToken, InvalidFunctionSignatureReason,
-    InvalidGenericParameterReason, InvalidTypeAnnotationReason, TokenDescriptorPayload,
-    TypeAnnotationContext,
+    InvalidGenericParameterReason, TokenDescriptorPayload,
 };
 use crate::compiler_frontend::compiler_messages::render::terminal::format_diagnostic_guidance;
 use crate::compiler_frontend::compiler_messages::render::{
@@ -108,16 +107,6 @@ fn every_token_payload_render_survives_store_drop() {
                 .expect("fixture token index should resolve");
             let projected = DiagnosticToken::from_token_ref(token_ref);
             let payloads = [
-                DiagnosticPayload::InvalidTypeAnnotation {
-                    context: TypeAnnotationContext::DeclarationTarget,
-                    reason: InvalidTypeAnnotationReason::InvalidTokenAfterName { token: projected },
-                },
-                DiagnosticPayload::InvalidTypeAnnotation {
-                    context: TypeAnnotationContext::DeclarationTarget,
-                    reason: InvalidTypeAnnotationReason::ExpectedTypeAnnotation {
-                        found: projected,
-                    },
-                },
                 DiagnosticPayload::InvalidGenericParameter {
                     reason: InvalidGenericParameterReason::InvalidToken { found: projected },
                 },

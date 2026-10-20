@@ -18,8 +18,8 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::types_bo
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticCapacityResource, DiagnosticPayload, InvalidTraitConformanceReason,
-    InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, NamingConvention,
-    ProjectContextEscapeReason, PublicGenericOwnerKind, ReservedNameOwner, TypeMismatchContext,
+    InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, ProjectContextEscapeReason,
+    PublicGenericOwnerKind, ReservedNameOwner, TypeMismatchContext,
 };
 
 pub(crate) struct RenderedPayload {
@@ -252,27 +252,6 @@ fn render_payload_message(
             *backend_name,
             string_table,
         ),
-        DiagnosticPayload::ReservedBuiltinName { name } => {
-            format!("Reserved builtin name '{}'", string_table.resolve(*name))
-        }
-        DiagnosticPayload::IdentifierNamingConvention {
-            name,
-            expected_style,
-        } => {
-            let style_name = match expected_style {
-                NamingConvention::CamelCase => "CamelCase",
-                NamingConvention::LowercaseWithUnderscores => "lowercase_with_underscores",
-                NamingConvention::UppercaseWithUnderscores => "UPPER_CASE_WITH_UNDERSCORES",
-                NamingConvention::LowercaseOrUppercaseWithUnderscores => {
-                    "lowercase_with_underscores or UPPER_CASE_WITH_UNDERSCORES"
-                }
-            };
-            format!(
-                "Identifier '{}' should use {}",
-                string_table.resolve(*name),
-                style_name
-            )
-        }
         DiagnosticPayload::DependencyAliasCaseMismatch { alias, symbol } => format!(
             "Dependency alias '{}' case mismatch with symbol '{}'",
             string_table.resolve(*alias),
@@ -301,9 +280,6 @@ fn render_payload_message(
             ),
             None => "Source dependency clauses no longer use `import`, and this clause has no automatic delimiter-free replacement. Choose either a namespace alias or direct flat selections beginning with `@`.".to_owned(),
         },
-        DiagnosticPayload::InvalidTypeAnnotation { reason, .. } => {
-            invalid_type_annotation_message(reason, string_table)
-        }
         DiagnosticPayload::InvalidCollectionType { reason } => {
             invalid_collection_type_message(*reason).to_owned()
         }
@@ -320,9 +296,6 @@ fn render_payload_message(
         } => invalid_template_directive_message(*directive_name, *reason, string_table),
         DiagnosticPayload::InvalidTemplateStructure { reason } => {
             invalid_template_structure_message(*reason, context)
-        }
-        DiagnosticPayload::InvalidSignatureMember { reason } => {
-            invalid_signature_member_message(*reason)
         }
         DiagnosticPayload::InvalidFunctionSignature { reason } => {
             invalid_function_signature_message(reason, string_table)
@@ -349,11 +322,6 @@ fn render_payload_message(
         DiagnosticPayload::CircularDependency { path } => {
             format!("Circular dependency at '{}'", context.render_path(*path))
         }
-        DiagnosticPayload::NamespaceMisuse {
-            name,
-            expected,
-            found,
-        } => namespace_misuse_message(*name, *expected, *found, string_table),
         DiagnosticPayload::DependencyNamespaceUsedAsValue { record_name } => {
             dependency_namespace_used_as_value_message(*record_name, string_table)
         }

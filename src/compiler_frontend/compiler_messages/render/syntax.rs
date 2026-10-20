@@ -8,6 +8,7 @@ use super::{
     DiagnosticRenderContext, RenderedPayload, diagnostic_type_name, expected_token_message,
     invalid_expression_message, token_kind_name,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::InvalidTypeAnnotationView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::ExpectedTokenView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidNumberLiteralView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
@@ -306,6 +307,23 @@ pub(crate) fn invalid_type_annotation_message(
             "Nested optional types are not supported. Aliases that already expand to an optional type cannot be marked with '?' again."
                 .to_string()
         }
+    }
+}
+
+/// Renders an invalid type annotation from its compact reason and optional found token.
+pub(crate) fn render_invalid_type_annotation(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidTypeAnnotationView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let _context = facts.context;
+    let reason = facts
+        .code
+        .to_reason(facts.token)
+        .expect("a token-carrying reason code has its token fact");
+    RenderedPayload {
+        message: invalid_type_annotation_message(&reason, context.string_table),
+        guidance: Vec::new(),
     }
 }
 

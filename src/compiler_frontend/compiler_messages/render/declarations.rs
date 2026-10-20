@@ -6,15 +6,18 @@
 
 use super::{
     DiagnosticRenderContext, RenderedPayload, diagnostic_type_name, duplicate_declaration_message,
-    token_kind_name, unknown_name_message,
+    namespace_misuse_message, token_kind_name, unknown_name_message,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
-    DuplicateDeclarationView, UnknownTypeNameView, UnknownValueNameView,
+    DuplicateDeclarationView, IdentifierNamingConventionView, InvalidSignatureMemberView,
+    ReservedBuiltinNameView, TypeUsedAsValueView, UnknownNameView, UnknownTypeNameView,
+    UnknownValueNameView, ValueUsedAsTypeView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
     InvalidDeclarationReason, InvalidFunctionSignatureReason, InvalidGenericInstantiationReason,
     InvalidReceiverDeclarationReason, InvalidSignatureMemberReason, NameNamespace,
+    NamingConvention,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
@@ -52,6 +55,67 @@ pub(crate) fn invalid_signature_member_message(reason: InvalidSignatureMemberRea
         InvalidSignatureMemberReason::MissingDefaultValue => {
             "Expected a default value after '='.".to_string()
         }
+    }
+}
+
+pub(crate) fn render_invalid_signature_member(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidSignatureMemberView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_signature_member_message(facts.reason),
+        guidance: Vec::new(),
+    }
+}
+
+fn identifier_naming_convention_message(
+    name: StringId,
+    expected_style: NamingConvention,
+    string_table: &dyn StringTableResolver,
+) -> String {
+    let style_name = match expected_style {
+        NamingConvention::CamelCase => "CamelCase",
+        NamingConvention::LowercaseWithUnderscores => "lowercase_with_underscores",
+        NamingConvention::UppercaseWithUnderscores => "UPPER_CASE_WITH_UNDERSCORES",
+        NamingConvention::LowercaseOrUppercaseWithUnderscores => {
+            "lowercase_with_underscores or UPPER_CASE_WITH_UNDERSCORES"
+        }
+    };
+    format!(
+        "Identifier '{}' should use {}",
+        string_table.resolve(name),
+        style_name
+    )
+}
+
+pub(crate) fn render_identifier_naming_convention(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &IdentifierNamingConventionView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: identifier_naming_convention_message(
+            facts.name,
+            facts.expected_style,
+            context.string_table,
+        ),
+        guidance: Vec::new(),
+    }
+}
+
+fn reserved_builtin_name_message(name: StringId, string_table: &dyn StringTableResolver) -> String {
+    format!("Reserved builtin name '{}'", string_table.resolve(name))
+}
+
+pub(crate) fn render_reserved_builtin_name(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &ReservedBuiltinNameView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: reserved_builtin_name_message(facts.name, context.string_table),
+        guidance: Vec::new(),
     }
 }
 
@@ -409,6 +473,54 @@ pub(crate) fn render_unknown_type_name(
 ) -> RenderedPayload {
     RenderedPayload {
         message: unknown_name_message(facts.name, NameNamespace::Type, context.string_table),
+        guidance: Vec::new(),
+    }
+}
+
+pub(crate) fn render_unknown_name(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &UnknownNameView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: namespace_misuse_message(
+            facts.name,
+            facts.expected,
+            facts.found,
+            context.string_table,
+        ),
+        guidance: Vec::new(),
+    }
+}
+
+pub(crate) fn render_value_used_as_type(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &ValueUsedAsTypeView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: namespace_misuse_message(
+            facts.name,
+            facts.expected,
+            facts.found,
+            context.string_table,
+        ),
+        guidance: Vec::new(),
+    }
+}
+
+pub(crate) fn render_type_used_as_value(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &TypeUsedAsValueView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: namespace_misuse_message(
+            facts.name,
+            facts.expected,
+            facts.found,
+            context.string_table,
+        ),
         guidance: Vec::new(),
     }
 }
