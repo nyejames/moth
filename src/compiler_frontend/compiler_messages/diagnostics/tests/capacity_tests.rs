@@ -39,7 +39,8 @@ fn limited(change: impl FnOnce(&mut DiagnosticLimits)) -> DiagnosticStore {
     DiagnosticStore::with_limits(limits)
 }
 
-/// A capacity draft whose primary site is foreign, so compacting it needs a foreign-site row and an identity row.
+/// A capacity draft whose primary site is foreign, so compacting it needs both a foreign-site
+/// row and a frozen identity context.
 fn foreign_capacity_draft() -> DiagnosticDraft {
     compiler_capacity_exceeded(HirCapacityResource::ExpressionRows, Some(exact_span(2, 3)))
         .with_foreign(ForeignSiteDraft {

@@ -1,8 +1,8 @@
 //! Family inventory: the registry holds one row per non-infrastructure diagnostic kind.
 //!
-//! WHAT: compares `FAMILY_GROUPS` with `DiagnosticKind::all()` on stable code, category, descriptor (where a row
-//! carries one), registry lookup, and count.
-//! WHY: a kind without a row has no schema identity, and a stray row owns a code no kind emits.
+//! WHAT: compares `FAMILY_GROUPS` with `DiagnosticKind::all()` on stable code, category, descriptor,
+//! registry lookup, and count.
+//! WHY: a kind without a schema row or a row without a diagnostic kind breaks the shared inventory.
 
 use crate::compiler_frontend::compiler_messages::DiagnosticKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::registry::{
@@ -19,7 +19,7 @@ fn every_non_infrastructure_kind_has_exactly_one_family_row() {
             .iter()
             .copied()
             .flat_map(|group| group.iter())
-            .filter(|row| row.stable_code == kind.code())
+            .filter(|row| row.descriptor.code == kind.code())
             .count();
         assert_eq!(rows, 1, "{kind:?} must have exactly one family row");
     }
@@ -35,9 +35,9 @@ fn every_family_row_belongs_to_a_non_infrastructure_kind() {
 
     for row in FAMILY_GROUPS.iter().copied().flat_map(|group| group.iter()) {
         assert!(
-            kind_codes.contains(&row.stable_code),
+            kind_codes.contains(&row.descriptor.code),
             "{} has no diagnostic kind",
-            row.stable_code
+            row.descriptor.code
         );
     }
 }
@@ -52,15 +52,13 @@ fn family_row_matches_its_kind_on_category_descriptor_and_registry_code() {
             .iter()
             .copied()
             .flat_map(|group| group.iter())
-            .find(|row| row.stable_code == kind.code())
+            .find(|row| row.descriptor.code == kind.code())
             .unwrap_or_else(|| panic!("{kind:?} has no family row"));
         assert_eq!(row.category, kind.category(), "{kind:?} category");
-        if let Some(descriptor) = &row.descriptor {
-            assert_eq!(*descriptor, kind.descriptor(), "{kind:?} descriptor");
-        }
+        assert_eq!(row.descriptor, kind.descriptor(), "{kind:?} descriptor");
         assert_eq!(
-            family_for_code(row.code).map(|found| found.stable_code),
-            Some(row.stable_code),
+            family_for_code(row.code).map(|found| found.descriptor.code),
+            Some(row.descriptor.code),
             "{kind:?} registry lookup"
         );
     }

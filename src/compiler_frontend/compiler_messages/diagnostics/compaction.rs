@@ -85,7 +85,7 @@ fn assert_label_roles(draft: &DiagnosticDraft) {
             draft.core.family.permits_label(label.message),
             "label role {} is not declared by family {}",
             label.message.name(),
-            draft.core.family.stable_code
+            draft.core.family.descriptor.code
         );
     }
 }

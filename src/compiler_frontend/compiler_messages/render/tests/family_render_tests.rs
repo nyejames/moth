@@ -1,6 +1,6 @@
-//! Pilot-family render contracts through the public terse entry.
+//! Family render contracts through the public terse entry.
 //!
-//! WHAT: pins how a severity override on a pilot kind reaches the rendered record.
+//! WHAT: pins how a severity override on a family kind reaches the rendered record.
 //! WHY: the compact path reads severity from the stored record, so an override must win over the
 //! family default while the rest of the line stays unchanged.
 
@@ -12,7 +12,7 @@ use crate::compiler_frontend::compiler_messages::render::terse::format_terse_dia
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[test]
-fn severity_override_on_a_pilot_changes_only_the_severity_letter() {
+fn severity_override_on_a_family_changes_only_the_severity_letter() {
     let string_table = StringTable::new();
     let family_default = CompilerDiagnostic::unreachable_match_arm(None);
     let mut escalated = CompilerDiagnostic::unreachable_match_arm(None);

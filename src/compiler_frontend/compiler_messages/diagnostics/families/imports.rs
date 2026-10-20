@@ -1,7 +1,7 @@
 //! Family rows for import diagnostics.
 //!
-//! WHAT: the unused-import (reserved) and all active import diagnostics, in full.
-//! WHY: every row is in the import band, so they share one group table.
+//! WHAT: compact rows, constructors, views and adapters for import diagnostics, including reserved `UnusedImport`.
+//! WHY: import diagnostics share the import band and one group table.
 
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
@@ -133,7 +133,7 @@ impl InvalidImportPathCode {
 }
 
 diagnostic_family! {
-    pilot UNUSED_IMPORT {
+    UNUSED_IMPORT {
         internal: 4002,
         stable: "MOTH-IMPORT-0002",
         category: DiagnosticCategory::Import,
@@ -159,7 +159,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn unused_impor
 }
 
 diagnostic_family! {
-    pilot MISSING_IMPORT_TARGET {
+    MISSING_IMPORT_TARGET {
         internal: 4005,
         stable: "MOTH-IMPORT-0005",
         category: DiagnosticCategory::Import,
@@ -350,7 +350,7 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
 }
 
 diagnostic_family! {
-    pilot DEPENDENCY_ALIAS_CASE_MISMATCH {
+    DEPENDENCY_ALIAS_CASE_MISMATCH {
         internal: 4003,
         stable: "MOTH-IMPORT-0003",
         category: DiagnosticCategory::Import,
@@ -366,7 +366,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot AMBIGUOUS_IMPORT_TARGET {
+    AMBIGUOUS_IMPORT_TARGET {
         internal: 4006,
         stable: "MOTH-IMPORT-0006",
         category: DiagnosticCategory::Import,
@@ -382,7 +382,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot BARE_FILE_IMPORT {
+    BARE_FILE_IMPORT {
         internal: 4007,
         stable: "MOTH-IMPORT-0007",
         category: DiagnosticCategory::Import,
@@ -398,7 +398,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot DIRECT_SPECIAL_FILE_IMPORT {
+    DIRECT_SPECIAL_FILE_IMPORT {
         internal: 4008,
         stable: "MOTH-IMPORT-0008",
         category: DiagnosticCategory::Import,
@@ -414,7 +414,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot IMPORT_NAME_COLLISION {
+    IMPORT_NAME_COLLISION {
         internal: 4009,
         stable: "MOTH-IMPORT-0009",
         category: DiagnosticCategory::Import,
@@ -449,7 +449,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn import_name_
 }
 
 diagnostic_family! {
-    pilot NOT_EXPORTED_BY_SOURCE_FILE {
+    NOT_EXPORTED_BY_SOURCE_FILE {
         internal: 4010,
         stable: "MOTH-IMPORT-0010",
         category: DiagnosticCategory::Import,
@@ -465,7 +465,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot NOT_EXPORTED_BY_PUBLIC_SURFACE {
+    NOT_EXPORTED_BY_PUBLIC_SURFACE {
         internal: 4011,
         stable: "MOTH-IMPORT-0011",
         category: DiagnosticCategory::Import,
@@ -485,7 +485,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot MISSING_MODULE_ROOT_PUBLIC_SURFACE {
+    MISSING_MODULE_ROOT_PUBLIC_SURFACE {
         internal: 4012,
         stable: "MOTH-IMPORT-0012",
         category: DiagnosticCategory::Import,
@@ -501,7 +501,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot MISSING_PACKAGE_SYMBOL {
+    MISSING_PACKAGE_SYMBOL {
         internal: 4013,
         stable: "MOTH-IMPORT-0013",
         category: DiagnosticCategory::Import,
@@ -517,7 +517,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot CROSS_MODULE_IMPORT_NOT_EXPORTED {
+    CROSS_MODULE_IMPORT_NOT_EXPORTED {
         internal: 4015,
         stable: "MOTH-IMPORT-0015",
         category: DiagnosticCategory::Import,
@@ -533,7 +533,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_IMPORT_PATH {
+    INVALID_IMPORT_PATH {
         internal: 4016,
         stable: "MOTH-IMPORT-0016",
         category: DiagnosticCategory::Import,
@@ -585,7 +585,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_exte
 }
 
 diagnostic_family! {
-    pilot DIRECT_SYMBOL_PATH_IMPORT {
+    DIRECT_SYMBOL_PATH_IMPORT {
         internal: 4017,
         stable: "MOTH-IMPORT-0017",
         category: DiagnosticCategory::Import,
@@ -600,7 +600,7 @@ diagnostic_family! {
     }
 }
 diagnostic_family! {
-    pilot INVALID_NAMESPACE_DEFAULT_NAME {
+    INVALID_NAMESPACE_DEFAULT_NAME {
         internal: 4018,
         stable: "MOTH-IMPORT-0018",
         category: DiagnosticCategory::Import,
@@ -616,7 +616,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot DUPLICATE_IMPORT_SURFACE_MEMBER {
+    DUPLICATE_IMPORT_SURFACE_MEMBER {
         internal: 4019,
         stable: "MOTH-IMPORT-0019",
         category: DiagnosticCategory::Import,
@@ -632,7 +632,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot EXPLICIT_MOTH_EXTENSION {
+    EXPLICIT_MOTH_EXTENSION {
         internal: 4020,
         stable: "MOTH-IMPORT-0020",
         category: DiagnosticCategory::Import,
@@ -648,7 +648,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot UNSUPPORTED_EXTERNAL_EXTENSION {
+    UNSUPPORTED_EXTERNAL_EXTENSION {
         internal: 4021,
         stable: "MOTH-IMPORT-0021",
         category: DiagnosticCategory::Import,
@@ -664,7 +664,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_EXTERNAL_MODULE {
+    INVALID_EXTERNAL_MODULE {
         internal: 4022,
         stable: "MOTH-IMPORT-0022",
         category: DiagnosticCategory::Import,
@@ -684,7 +684,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot EXPLICIT_SOURCE_EXTENSION {
+    EXPLICIT_SOURCE_EXTENSION {
         internal: 4024,
         stable: "MOTH-IMPORT-0024",
         category: DiagnosticCategory::Import,
@@ -700,7 +700,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot UNSUPPORTED_SOURCE_FILE_KIND {
+    UNSUPPORTED_SOURCE_FILE_KIND {
         internal: 4025,
         stable: "MOTH-IMPORT-0025",
         category: DiagnosticCategory::Import,
@@ -716,7 +716,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_SOURCE_FILE_ENTRY {
+    INVALID_SOURCE_FILE_ENTRY {
         internal: 4026,
         stable: "MOTH-IMPORT-0026",
         category: DiagnosticCategory::Import,
@@ -732,7 +732,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot DUPLICATE_MOTH_TEMPLATE_INPUT_PATH {
+    DUPLICATE_MOTH_TEMPLATE_INPUT_PATH {
         internal: 4028,
         stable: "MOTH-IMPORT-0028",
         category: DiagnosticCategory::Import,
@@ -768,7 +768,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn duplicate_mo
 }
 
 diagnostic_family! {
-    pilot MOTH_TEMPLATE_INPUTS_SHARE_NO_COMMON_ANCESTOR {
+    MOTH_TEMPLATE_INPUTS_SHARE_NO_COMMON_ANCESTOR {
         internal: 4029,
         stable: "MOTH-IMPORT-0029",
         category: DiagnosticCategory::Import,

@@ -361,7 +361,7 @@ macro_rules! define_reasoned_diagnostic_registry {
                         *name = remap.get(*name);
                     }
                 }
-                descriptor: { INVALID_MULTI_BIND.pilot_descriptor() }
+                descriptor: { INVALID_MULTI_BIND.descriptor() }
             },
             Rule::InvalidBuiltinCall => {
                 payload: InvalidBuiltinCall;
@@ -467,7 +467,7 @@ macro_rules! define_reasoned_diagnostic_registry {
                         *variant = remap.get(*variant);
                     }
                 }
-                descriptor: { NON_EXHAUSTIVE_MATCH.pilot_descriptor() }
+                descriptor: { NON_EXHAUSTIVE_MATCH.descriptor() }
             },
             Rule::InvalidFallibleHandling => {
                 payload: InvalidFallibleHandling;

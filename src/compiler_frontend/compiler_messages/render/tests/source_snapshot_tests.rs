@@ -362,7 +362,7 @@ fn spanless_message_label_renders_without_a_source_position() {
 }
 
 #[test]
-fn message_less_label_on_a_pilot_renders_only_its_location() {
+fn message_less_label_on_a_compact_family_renders_only_its_location() {
     let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
     let mut string_table = StringTable::new();
     let name = string_table.intern("value");

@@ -1129,6 +1129,11 @@ GenericInferenceConflict:
 
 The schema tests validate that unused words and reserved bits are zero.
 
+A family whose reasons need different word layouts declares one family-local shape codec rather than
+widening the record. The codec writes the reason code into word 0 and reports, for each value, which
+words hold a type. The family row records the words that must hold a type and the words that may; a
+draft's pending type-slot marks must lie between the two.
+
 ### Diagnostic draft
 
 ```rust

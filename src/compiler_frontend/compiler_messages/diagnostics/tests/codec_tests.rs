@@ -12,9 +12,10 @@ use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayId
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::extras::ExtraDataKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
-    CharFact, CountFact, FactCapacityError, FactCodec, FactCursor, OptCountFact, OptStringFact,
-    OptTokenFact, OptTypeFact, PathFact, PlaceFact, StoredPlace, StringFact, TokenFact, TypeFact,
-    UnitCode, UnitFact, type_display_from_word, type_display_word,
+    ABSENT_PLACE_WORD, CharFact, CountFact, FactCapacityError, FactCodec, FactCursor, OptCharFact,
+    OptCountFact, OptPlaceFact, OptStringFact, OptTokenFact, OptTypeFact, OptUnitFact, PathFact,
+    PlaceFact, StoredPlace, StringFact, TokenFact, TypeFact, UnitCode, UnitFact,
+    type_display_from_word, type_display_word,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
     GenericInstantiationFact, GenericInstantiationShape, INVALID_GENERIC_INSTANTIATION,
@@ -419,10 +420,13 @@ fn label_encoding_rejects_a_name_beyond_the_fact_range() {
 /// A test-only family whose one fact is an optional type. It is never registered, so no render path reaches it.
 static OPT_TYPE_FAMILY: FamilyRow = FamilyRow {
     code: DiagnosticCode::new(9002),
-    stable_code: "MOTH-TEST-9002",
     category: DiagnosticCategory::Rule,
     reserved: false,
-    descriptor: None,
+    descriptor: crate::compiler_frontend::compiler_messages::DiagnosticDescriptor::new(
+        "MOTH-TEST-9002",
+        "Test family",
+        crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error,
+    ),
     layout: &[FactDescriptor::of::<OptTypeFact>()],
     extra: ExtraDataKind::None,
     labels: &[],
@@ -995,4 +999,69 @@ fn static_rows_reject_a_missing_pending_type_word() {
         .push::<UnitFact<TypeMismatchContext>>(&context)
         .expect("the context code encodes");
     cursor.finish_for(&TYPE_MISMATCH);
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TestCode {
+    One,
+    Two,
+}
+
+impl UnitCode for TestCode {
+    fn code(self) -> u32 {
+        match self {
+            Self::One => 1,
+            Self::Two => 2,
+        }
+    }
+
+    fn from_code(code: u32) -> Option<Self> {
+        match code {
+            1 => Some(Self::One),
+            2 => Some(Self::Two),
+            _ => None,
+        }
+    }
+}
+
+#[test]
+fn opt_unit_fact_round_trips_present_and_absent_values() {
+    let present = Some(TestCode::Two);
+    let mut words = [0];
+    OptUnitFact::<TestCode>::encode(&present, &mut words).expect("a unit code fits one fact word");
+    assert_eq!(OptUnitFact::<TestCode>::decode(&words), Some(present));
+
+    let absent = None;
+    OptUnitFact::<TestCode>::encode(&absent, &mut words).expect("absence fits one fact word");
+    assert_eq!(OptUnitFact::<TestCode>::decode(&words), Some(absent));
+}
+
+#[test]
+fn opt_char_fact_round_trips_present_and_absent_values() {
+    let present = Some('\0');
+    let mut words = [0];
+    OptCharFact::encode(&present, &mut words).expect("a character fits one fact word");
+    assert_eq!(OptCharFact::decode(&words), Some(present));
+
+    let absent = None;
+    OptCharFact::encode(&absent, &mut words).expect("absence fits one fact word");
+    assert_eq!(OptCharFact::decode(&words), Some(absent));
+}
+
+#[test]
+fn opt_place_fact_reserves_an_invalid_place_word_and_round_trips() {
+    let mut words = [0];
+    let present = Some(DiagnosticPlace::Unknown);
+    OptPlaceFact::encode(&present, &mut words).expect("an unknown place fits one fact word");
+    assert_eq!(words, [0]);
+    assert_eq!(
+        OptPlaceFact::decode(&words),
+        Some(Some(StoredPlace::Unknown))
+    );
+
+    let absent: Option<DiagnosticPlace> = None;
+    OptPlaceFact::encode(&absent, &mut words).expect("absence fits one fact word");
+    assert_eq!(words, [ABSENT_PLACE_WORD]);
+    assert_eq!(PlaceFact::decode(&words), None);
+    assert_eq!(OptPlaceFact::decode(&words), Some(None));
 }

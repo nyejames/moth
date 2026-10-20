@@ -1,10 +1,10 @@
-//! Label text parity: the compact and legacy renderers print the same text for every label kind.
+//! Label text parity: compact label decoding and legacy rendering print the same text for every label kind.
 //!
-//! WHAT: one table pairs each of the fifteen `DiagnosticLabelMessage` kinds with its exact text. The kinds are
-//! stored in one compact record and read back by `compact_label_message_text`, then rendered on a non-pilot
-//! diagnostic, whose labels still take the legacy text path. Both paths must print the table's text.
-//! WHY: ten kinds reach no pilot family in production, so this comparison is the only check that their compact
-//! arms read the fields the legacy text reads.
+//! WHAT: one table pairs each `DiagnosticLabelMessage` kind with its exact text. The labels are decoded by
+//! `compact_label_message_text`, then rendered on `InvalidDeclaration` with no payload; the family adapter declines
+//! that diagnostic, so its labels still take the legacy text path.
+//! WHY: the compact label decoder must read every field the legacy renderer reads, including labels on a declined
+//! diagnostic.
 
 use crate::compiler_frontend::build_config::BuildConfigValueOrigin;
 use crate::compiler_frontend::compiler_messages::diagnostic_label::GenericSubstitutionDiagnostic;
@@ -28,14 +28,17 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
-/// A test-only family that declares every label role a pilot does not declare, so one draft can carry all fifteen
-/// kinds. The universal roles need no declaration. It is never registered, so no render path can reach it.
+/// A test-only family that declares every label role needed to carry all fifteen label kinds in one draft.
+/// The universal roles need no declaration. It is never registered, so no render path can reach it.
 static ALL_LABEL_ROLES_FAMILY: FamilyRow = FamilyRow {
     code: DiagnosticCode::new(9002),
-    stable_code: "MOTH-TEST-9002",
     category: DiagnosticCategory::Rule,
     reserved: false,
-    descriptor: None,
+    descriptor: crate::compiler_frontend::compiler_messages::DiagnosticDescriptor::new(
+        "MOTH-TEST-9002",
+        "Test family",
+        crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error,
+    ),
     layout: &[],
     extra: ExtraDataKind::None,
     labels: &[

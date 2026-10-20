@@ -1,7 +1,7 @@
 //! Family rows for type, borrow and target diagnostics.
 //!
-//! WHAT: the type-mismatch and uninitialised-local pilots, in full, with the code for each mismatch context.
-//! The other 13 rows of this group are now full rows for type, borrow and target families; four are reserved.
+//! WHAT: family rows for type, borrow and target diagnostics, including reserved families.
+//! Each row declares its facts and applicable label and renderer metadata.
 //! WHY: type and borrow checks report over the same type and place facts, so their rows share one group.
 
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
@@ -152,7 +152,7 @@ impl IncompatibleChoiceComparisonCode {
 }
 
 diagnostic_family! {
-    pilot TYPE_MISMATCH {
+    TYPE_MISMATCH {
         internal: 2001,
         stable: "MOTH-TYPE-0001",
         category: DiagnosticCategory::Type,
@@ -168,7 +168,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot USE_OF_UNINITIALIZED_LOCAL {
+    USE_OF_UNINITIALIZED_LOCAL {
         internal: 5009,
         stable: "MOTH-BORROW-0009",
         category: DiagnosticCategory::Borrow,
@@ -388,7 +388,7 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
 }
 
 diagnostic_family! {
-    pilot EMPTY_COLLECTION_TYPE_AMBIGUITY {
+    EMPTY_COLLECTION_TYPE_AMBIGUITY {
         internal: 2002,
         stable: "MOTH-TYPE-0002",
         category: DiagnosticCategory::Type,
@@ -404,7 +404,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot UNSUPPORTED_OPERATOR_TYPES {
+    UNSUPPORTED_OPERATOR_TYPES {
         internal: 2003,
         stable: "MOTH-TYPE-0003",
         category: DiagnosticCategory::Type,
@@ -424,7 +424,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INCOMPATIBLE_CHOICE_COMPARISON {
+    INCOMPATIBLE_CHOICE_COMPARISON {
         internal: 2005,
         stable: "MOTH-TYPE-0005",
         category: DiagnosticCategory::Type,
@@ -445,7 +445,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_ROUTE_OUTPUT {
+    INVALID_ROUTE_OUTPUT {
         internal: 2006,
         stable: "MOTH-TYPE-0006",
         category: DiagnosticCategory::Type,
@@ -464,7 +464,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot UNSUPPORTED_EXTERNAL_FUNCTION {
+    UNSUPPORTED_EXTERNAL_FUNCTION {
         internal: 3058,
         stable: "MOTH-RULE-0058",
         category: DiagnosticCategory::Rule,
@@ -484,7 +484,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot UNSUPPORTED_BACKEND_FEATURE {
+    UNSUPPORTED_BACKEND_FEATURE {
         internal: 3064,
         stable: "MOTH-RULE-0064",
         category: DiagnosticCategory::Rule,
@@ -503,7 +503,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot BORROW_CONFLICT {
+    BORROW_CONFLICT {
         internal: 5001,
         stable: "MOTH-BORROW-0001",
         category: DiagnosticCategory::Borrow,
@@ -525,7 +525,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot MULTIPLE_MUTABLE_BORROWS {
+    MULTIPLE_MUTABLE_BORROWS {
         internal: 5002,
         stable: "MOTH-BORROW-0002",
         category: DiagnosticCategory::Borrow,
@@ -541,7 +541,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot SHARED_MUTABLE_CONFLICT {
+    SHARED_MUTABLE_CONFLICT {
         internal: 5003,
         stable: "MOTH-BORROW-0003",
         category: DiagnosticCategory::Borrow,
@@ -562,7 +562,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot USE_AFTER_POSSIBLE_MOVE {
+    USE_AFTER_POSSIBLE_MOVE {
         internal: 5004,
         stable: "MOTH-BORROW-0004",
         category: DiagnosticCategory::Borrow,
@@ -580,7 +580,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot MOVE_WHILE_BORROWED {
+    MOVE_WHILE_BORROWED {
         internal: 5005,
         stable: "MOTH-BORROW-0005",
         category: DiagnosticCategory::Borrow,
@@ -601,7 +601,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot WHOLE_OBJECT_BORROW_CONFLICT {
+    WHOLE_OBJECT_BORROW_CONFLICT {
         internal: 5006,
         stable: "MOTH-BORROW-0006",
         category: DiagnosticCategory::Borrow,
@@ -619,7 +619,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_MUTABLE_ACCESS {
+    INVALID_MUTABLE_ACCESS {
         internal: 5007,
         stable: "MOTH-BORROW-0007",
         category: DiagnosticCategory::Borrow,

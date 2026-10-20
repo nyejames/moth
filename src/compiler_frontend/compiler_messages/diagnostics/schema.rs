@@ -1,10 +1,9 @@
-//! Family rows: the static schema each compact diagnostic family is checked against.
+//! Family rows: the static schema every compact diagnostic family is checked against.
 //!
-//! WHAT: a `FamilyRow` names a family's internal code, stable code, category, fact layout, extra-data kind and
-//! declared label codes. A pilot row also carries the legacy descriptor that the descriptor sites serve, and a
-//! typed view that reads its records back.
-//! WHY: one row per family is the single source of stable codes and titles for pilot families. Compaction
-//! checks every draft against its row before it writes anything.
+//! WHAT: a `FamilyRow` names its internal and stable codes, category, descriptor, fact layout,
+//! extra-data kind and label codes. Its typed view reads records back for rendering.
+//! WHY: one row per family is the single source of codes and titles. Compaction checks every
+//! draft against its row before it writes anything.
 
 use super::extras::ExtraDataKind;
 use super::facts::FactCodec;
@@ -45,21 +44,19 @@ type FamilyRenderer = fn(&DiagnosticView<'_>, DiagnosticRenderContext<'_>) -> Re
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FamilyRow {
     pub(super) code: DiagnosticCode,
-    pub(super) stable_code: &'static str,
     #[cfg_attr(
         not(test),
         allow(dead_code, reason = "P4.6 producer sweep reads family categories")
     )]
     pub(super) category: DiagnosticCategory,
     pub(super) reserved: bool,
-    /// The legacy descriptor. Only pilot rows carry one.
-    pub(super) descriptor: Option<DiagnosticDescriptor>,
+    /// The legacy descriptor served by this family.
+    pub(super) descriptor: DiagnosticDescriptor,
     pub(super) layout: &'static [FactDescriptor],
     pub(super) extra: ExtraDataKind,
     /// Family-specific label codes that drafts of this family may declare. The universal codes apply to every family.
     pub(super) labels: &'static [LabelMessageCode],
-    /// Renders the family's records from their typed view. Only pilot rows carry a renderer; identity rows have no
-    /// records to render.
+    /// Renders records from the family's typed view. Reserved families have no records to render.
     pub(crate) render: Option<FamilyRenderer>,
 }
 
@@ -116,17 +113,14 @@ impl FamilyRow {
         mask
     }
 
-    /// The legacy descriptor of a pilot row.
-    pub(crate) const fn pilot_descriptor(&self) -> DiagnosticDescriptor {
-        match self.descriptor {
-            Some(descriptor) => descriptor,
-            None => panic!("only pilot rows serve a legacy descriptor"),
-        }
+    /// The legacy descriptor served by this family.
+    pub(crate) const fn descriptor(&self) -> DiagnosticDescriptor {
+        self.descriptor
     }
 
-    /// The severity that the family's descriptor gives its records. Only pilot rows carry a descriptor.
+    /// The severity that the family's descriptor gives its records.
     pub(super) const fn default_severity(&self) -> DiagnosticSeverity {
-        self.pilot_descriptor().default_severity
+        self.descriptor().default_severity
     }
 
     /// Whether drafts of this family may carry a label with `code`: one of its declared roles or a universal role.
@@ -193,15 +187,13 @@ macro_rules! family_renderer {
 }
 pub(super) use family_renderer;
 
-/// Declares a family row.
-///
-/// `pilot` rows serve the legacy descriptor and get a typed view. Their constructor is generated (`ctor: generated`)
-/// or written by hand in the group module (`ctor: manual`). `render` names the renderer that takes the view, or
-/// `none` for a reserved family with no records. `identity` rows declare only the code and category.
-/// Attributes before `view:` go on the generated view struct. A reserved family uses one for its D9 allowance.
+/// Declares a family row with its descriptor and typed view. Its constructor is generated
+/// (`ctor: generated`) or written by hand in the group module (`ctor: manual`). `render` names the
+/// renderer that takes the view, or `none` for a reserved family with no records. Attributes before
+/// `view:` go on the generated view struct. A reserved family uses one for its D9 allowance.
 macro_rules! diagnostic_family {
     (
-        pilot $name:ident {
+        $name:ident {
             internal: $internal:literal,
             stable: $stable:literal,
             category: $category:expr,
@@ -219,22 +211,21 @@ macro_rules! diagnostic_family {
         const _: () = assert!(
             ($internal / 1000) * 1000
                 == $crate::compiler_frontend::compiler_messages::diagnostics::schema::band_of($category),
-            "pilot family code must sit in its category's band"
+            "family code must sit in its category's band"
         );
 
         pub(crate) const $name: $crate::compiler_frontend::compiler_messages::diagnostics::schema::FamilyRow =
             $crate::compiler_frontend::compiler_messages::diagnostics::schema::FamilyRow {
                 code: $crate::compiler_frontend::compiler_messages::diagnostics::record::DiagnosticCode::new($internal),
-                stable_code: $stable,
                 category: $category,
                 reserved: $crate::compiler_frontend::compiler_messages::diagnostics::schema::reserved_flag!(
                     $($reserved)?
                 ),
-                descriptor: Some($crate::compiler_frontend::compiler_messages::DiagnosticDescriptor::new(
+                descriptor: $crate::compiler_frontend::compiler_messages::DiagnosticDescriptor::new(
                     $stable,
                     $title,
                     $severity,
-                )),
+                ),
                 layout: &[$(
                     $crate::compiler_frontend::compiler_messages::diagnostics::schema::FactDescriptor::of::<$codec>()
                 ),*],
@@ -283,7 +274,7 @@ macro_rules! diagnostic_family {
         }
     };
     (
-        pilot $name:ident {
+        $name:ident {
             internal: $internal:literal,
             stable: $stable:literal,
             category: $category:expr,
@@ -301,22 +292,21 @@ macro_rules! diagnostic_family {
         const _: () = assert!(
             ($internal / 1000) * 1000
                 == $crate::compiler_frontend::compiler_messages::diagnostics::schema::band_of($category),
-            "pilot family code must sit in its category's band"
+            "family code must sit in its category's band"
         );
 
         pub(crate) const $name: $crate::compiler_frontend::compiler_messages::diagnostics::schema::FamilyRow =
             $crate::compiler_frontend::compiler_messages::diagnostics::schema::FamilyRow {
                 code: $crate::compiler_frontend::compiler_messages::diagnostics::record::DiagnosticCode::new($internal),
-                stable_code: $stable,
                 category: $category,
                 reserved: $crate::compiler_frontend::compiler_messages::diagnostics::schema::reserved_flag!(
                     $($reserved)?
                 ),
-                descriptor: Some($crate::compiler_frontend::compiler_messages::DiagnosticDescriptor::new(
+                descriptor: $crate::compiler_frontend::compiler_messages::DiagnosticDescriptor::new(
                     $stable,
                     $title,
                     $severity,
-                )),
+                ),
                 layout: &[$(
                     $crate::compiler_frontend::compiler_messages::diagnostics::schema::FactDescriptor::of::<$codec>()
                 ),*],
@@ -348,34 +338,6 @@ macro_rules! diagnostic_family {
                 })
             }
         }
-    };
-    (
-        identity $name:ident {
-            internal: $internal:literal,
-            stable: $stable:literal,
-            category: $category:expr $(, $reserved:ident)? $(,)?
-        }
-    ) => {
-        const _: () = assert!(
-            ($internal / 1000) * 1000
-                == $crate::compiler_frontend::compiler_messages::diagnostics::schema::band_of($category),
-            "identity family code must sit in its category's band"
-        );
-
-        pub(crate) const $name: $crate::compiler_frontend::compiler_messages::diagnostics::schema::FamilyRow =
-            $crate::compiler_frontend::compiler_messages::diagnostics::schema::FamilyRow {
-                code: $crate::compiler_frontend::compiler_messages::diagnostics::record::DiagnosticCode::new($internal),
-                stable_code: $stable,
-                category: $category,
-                reserved: $crate::compiler_frontend::compiler_messages::diagnostics::schema::reserved_flag!(
-                    $($reserved)?
-                ),
-                descriptor: None,
-                layout: &[],
-                extra: $crate::compiler_frontend::compiler_messages::diagnostics::extras::ExtraDataKind::None,
-                labels: &[],
-                render: None,
-            };
     };
 }
 pub(super) use diagnostic_family;

@@ -1,11 +1,10 @@
 //! Schema rows: declared layouts, reserved flags, registry lookup and multi-bind code keys.
 //!
-//! WHAT: checks the pilot rows' word counts, the identity-row macro, the registry lookup and the
-//! reason keys that the multi-bind codes share with the legacy descriptors.
+//! WHAT: checks family fact layouts, the registry lookup and the reason keys that multi-bind codes
+//! share with the legacy descriptors.
 //! WHY: a layout or key drift would otherwise surface only at render time, far from the producer
 //! that caused it.
 
-use crate::compiler_frontend::compiler_messages::DiagnosticCategory;
 use crate::compiler_frontend::compiler_messages::diagnostic_payload::reason_keys::StableReasonKey;
 use crate::compiler_frontend::compiler_messages::diagnostic_payload::stable_reason_keys_for_tests;
 use crate::compiler_frontend::compiler_messages::diagnostics::extras::ExtraDataKind;
@@ -27,22 +26,11 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::types_bo
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::record::DiagnosticCode;
 use crate::compiler_frontend::compiler_messages::diagnostics::registry::family_for_code;
-use crate::compiler_frontend::compiler_messages::diagnostics::schema::diagnostic_family;
 use crate::compiler_frontend::compiler_messages::is_well_formed_reason_key;
 use std::collections::HashSet;
 
-// An identity row sits in the TYPE band (2000-2999). It is reserved, so nothing produces it.
-diagnostic_family! {
-    identity TEST_IDENTITY_ROW {
-        internal: 2999,
-        stable: "MOTH-TYPE-0999",
-        category: DiagnosticCategory::Type,
-        reserved
-    }
-}
-
 #[test]
-fn pilot_layouts_declare_their_word_counts() {
+fn family_layouts_declare_their_word_counts() {
     assert_eq!(EXPECTED_TOKEN.word_count(), 4);
     assert_eq!(EXPECTED_TOKEN.pending_mask(), 0);
     assert_eq!(TYPE_MISMATCH.word_count(), 3);
@@ -54,7 +42,7 @@ fn pilot_layouts_declare_their_word_counts() {
 }
 
 #[test]
-fn label_carrying_pilots_declare_their_extra_data_kind() {
+fn label_carrying_families_declare_their_extra_data_kind() {
     assert!(matches!(
         NON_EXHAUSTIVE_MATCH.extra,
         ExtraDataKind::StringIds
@@ -63,33 +51,19 @@ fn label_carrying_pilots_declare_their_extra_data_kind() {
 }
 
 #[test]
-fn reserved_rows_are_flagged_and_pilots_are_not() {
+fn reserved_and_active_rows_are_flagged() {
     assert!(UNUSED_IMPORT.is_reserved());
     assert!(!MISSING_IMPORT_TARGET.is_reserved());
-    assert!(TEST_IDENTITY_ROW.is_reserved());
 }
 
 #[test]
-fn identity_rows_declare_code_and_category_only() {
-    assert_eq!(TEST_IDENTITY_ROW.code.get(), 2999);
-    assert_eq!(TEST_IDENTITY_ROW.stable_code, "MOTH-TYPE-0999");
-    assert!(matches!(
-        TEST_IDENTITY_ROW.category,
-        DiagnosticCategory::Type
-    ));
-    assert!(TEST_IDENTITY_ROW.descriptor.is_none());
-    assert_eq!(TEST_IDENTITY_ROW.word_count(), 0);
-    assert!(TEST_IDENTITY_ROW.labels.is_empty());
-}
-
-#[test]
-fn registry_finds_every_pilot_code_and_no_other() {
+fn registry_finds_sampled_family_codes_and_no_other() {
     for code in [
         1001, 1037, 2001, 3002, 3022, 3034, 3035, 3045, 3050, 4002, 4005, 5009,
     ] {
         assert!(
             family_for_code(DiagnosticCode::new(code)).is_some(),
-            "pilot code {code} is registered"
+            "family code {code} is registered"
         );
     }
     assert!(family_for_code(DiagnosticCode::new(9999)).is_none());

@@ -824,7 +824,7 @@ impl FactCodec for OptChoiceVariantSeparatorGapFact {
 }
 
 diagnostic_family! {
-    pilot EXPECTED_TOKEN {
+    EXPECTED_TOKEN {
         internal: 1001,
         stable: "MOTH-SYNTAX-0001",
         category: DiagnosticCategory::Syntax,
@@ -840,7 +840,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot COMPILER_CAPACITY_EXCEEDED {
+    COMPILER_CAPACITY_EXCEEDED {
         internal: 1037,
         stable: "MOTH-SYNTAX-0037",
         category: DiagnosticCategory::Syntax,
@@ -973,7 +973,7 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
 }
 
 diagnostic_family! {
-    pilot UNEXPECTED_END_OF_FILE {
+    UNEXPECTED_END_OF_FILE {
         internal: 1017,
         stable: "MOTH-SYNTAX-0017",
         category: DiagnosticCategory::Syntax,
@@ -989,7 +989,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_PATH {
+    INVALID_PATH {
         internal: 1018,
         stable: "MOTH-SYNTAX-0018",
         category: DiagnosticCategory::Syntax,
@@ -1005,7 +1005,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_EXPRESSION {
+    INVALID_EXPRESSION {
         internal: 1023,
         stable: "MOTH-SYNTAX-0023",
         category: DiagnosticCategory::Syntax,
@@ -1021,7 +1021,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot MISSING_OPERATOR_OPERAND {
+    MISSING_OPERATOR_OPERAND {
         internal: 1024,
         stable: "MOTH-SYNTAX-0024",
         category: DiagnosticCategory::Syntax,
@@ -1037,7 +1037,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot EXPECTED_SYMBOL_STATEMENT {
+    EXPECTED_SYMBOL_STATEMENT {
         internal: 1026,
         stable: "MOTH-SYNTAX-0026",
         category: DiagnosticCategory::Syntax,
@@ -1053,7 +1053,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot MISSING_COLLECTION_ITEM {
+    MISSING_COLLECTION_ITEM {
         internal: 1027,
         stable: "MOTH-SYNTAX-0027",
         category: DiagnosticCategory::Syntax,
@@ -1069,7 +1069,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot COMMON_SYNTAX_MISTAKE {
+    COMMON_SYNTAX_MISTAKE {
         internal: 1031,
         stable: "MOTH-SYNTAX-0031",
         category: DiagnosticCategory::Syntax,
@@ -1090,7 +1090,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_STRING_ESCAPE {
+    INVALID_STRING_ESCAPE {
         internal: 1034,
         stable: "MOTH-SYNTAX-0034",
         category: DiagnosticCategory::Syntax,
@@ -1106,7 +1106,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot SOURCE_SPAN_CAPACITY {
+    SOURCE_SPAN_CAPACITY {
         internal: 1036,
         stable: "MOTH-SYNTAX-0036",
         category: DiagnosticCategory::Syntax,
@@ -1175,7 +1175,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn source_span_
 }
 
 diagnostic_family! {
-    pilot UNEXPECTED_TOKEN {
+    UNEXPECTED_TOKEN {
         internal: 1002,
         stable: "MOTH-SYNTAX-0002",
         category: DiagnosticCategory::Syntax,
@@ -1222,7 +1222,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_mult
 }
 
 diagnostic_family! {
-    pilot UNEXPECTED_TRAILING_COMMA {
+    UNEXPECTED_TRAILING_COMMA {
         internal: 1003,
         stable: "MOTH-SYNTAX-0003",
         category: DiagnosticCategory::Syntax,
@@ -1245,7 +1245,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn unexpected_t
 }
 
 diagnostic_family! {
-    pilot UNTERMINATED_STRING_LITERAL {
+    UNTERMINATED_STRING_LITERAL {
         internal: 1006,
         stable: "MOTH-SYNTAX-0006",
         category: DiagnosticCategory::Syntax,
@@ -1268,7 +1268,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn unterminated
 }
 
 diagnostic_family! {
-    pilot INVALID_CHARACTER {
+    INVALID_CHARACTER {
         internal: 1007,
         stable: "MOTH-SYNTAX-0007",
         category: DiagnosticCategory::Syntax,
@@ -1294,7 +1294,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_char
 }
 
 diagnostic_family! {
-    pilot INVALID_NUMBER_LITERAL {
+    INVALID_NUMBER_LITERAL {
         internal: 1008,
         stable: "MOTH-SYNTAX-0008",
         category: DiagnosticCategory::Syntax,
@@ -1330,7 +1330,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_numb
 }
 
 diagnostic_family! {
-    pilot INVALID_CHAR_LITERAL {
+    INVALID_CHAR_LITERAL {
         internal: 1009,
         stable: "MOTH-SYNTAX-0009",
         category: DiagnosticCategory::Syntax,
@@ -1353,7 +1353,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_char
 }
 
 diagnostic_family! {
-    pilot INVALID_IDENTIFIER {
+    INVALID_IDENTIFIER {
         internal: 1011,
         stable: "MOTH-SYNTAX-0011",
         category: DiagnosticCategory::Syntax,
@@ -1376,7 +1376,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_iden
 }
 
 diagnostic_family! {
-    pilot MISSING_CLOSING_DELIMITER {
+    MISSING_CLOSING_DELIMITER {
         internal: 1012,
         stable: "MOTH-SYNTAX-0012",
         category: DiagnosticCategory::Syntax,
@@ -1402,7 +1402,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn missing_clos
 }
 
 diagnostic_family! {
-    pilot UNEXPECTED_TOKEN_IN_DECLARATION {
+    UNEXPECTED_TOKEN_IN_DECLARATION {
         internal: 1013,
         stable: "MOTH-SYNTAX-0013",
         category: DiagnosticCategory::Syntax,

@@ -10,7 +10,7 @@ use super::families::{
 use super::record::DiagnosticCode;
 use super::schema::FamilyRow;
 
-/// Every group table. A group with no pilot rows holds an empty slice.
+/// Every group table. A group with no family rows holds an empty slice.
 pub(super) const FAMILY_GROUPS: &[&[FamilyRow]] = &[
     token_lexical::FAMILIES,
     imports::FAMILIES,
@@ -48,7 +48,10 @@ const fn check_registry() {
                         "two families share an internal code"
                     );
                     assert!(
-                        !str_eq(later_rows[later_row].stable_code, rows[row].stable_code),
+                        !str_eq(
+                            later_rows[later_row].descriptor.code,
+                            rows[row].descriptor.code
+                        ),
                         "two families share a stable code"
                     );
                     later_row += 1;

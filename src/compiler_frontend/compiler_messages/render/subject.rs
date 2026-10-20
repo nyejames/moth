@@ -2,9 +2,9 @@
 //!
 //! WHAT: answers the questions every renderer asks of a diagnostic (severity, descriptor, primary
 //! position, resolved labels and payload) from one value per render entry.
-//! WHY: pilot families render from their compact record while every other family renders from the
-//! legacy value. Routing both through one seam keeps the terminal, terse and dev-server renderers
-//! independent of that choice, so P4.6 can delete the legacy path without touching them.
+//! WHY: a matching family adapter arm renders from its compact record while a declined diagnostic renders from the
+//! legacy value. Routing both through one seam keeps the terminal, terse and dev-server renderers independent of
+//! that choice, so P4.6 can delete the legacy path without touching them.
 
 use super::context::{
     DiagnosticPrimaryPosition, DiagnosticRenderContext, ResolvedDiagnosticLabel,
@@ -21,7 +21,7 @@ use std::path::Path;
 
 /// A diagnostic prepared for one render entry.
 ///
-/// WHAT: holds the legacy value and, for a pilot family, its compact record. The compact record is
+/// WHAT: holds the legacy value and, when a family adapter arm matches, its compact record. The record is
 /// built once here, so every read in the same render entry sees the same record.
 /// WHY: compacting per read would repeat the work and let two reads of one diagnostic disagree.
 pub(crate) struct DiagnosticSubject<'d> {
@@ -30,8 +30,8 @@ pub(crate) struct DiagnosticSubject<'d> {
 }
 
 impl<'d> DiagnosticSubject<'d> {
-    /// Prepares `diagnostic` for rendering. A pilot family compacts here; every other family keeps
-    /// the legacy value.
+    /// Prepares `diagnostic` for rendering. A matching family adapter arm compacts it; a declined
+    /// diagnostic keeps the legacy value.
     pub(crate) fn new(
         diagnostic: &'d CompilerDiagnostic,
         context: DiagnosticRenderContext<'_>,
@@ -51,7 +51,7 @@ impl<'d> DiagnosticSubject<'d> {
 
     pub(crate) fn descriptor(&self) -> DiagnosticDescriptor {
         match &self.compact {
-            Some(compact) => compact.view().family().pilot_descriptor(),
+            Some(compact) => compact.view().family().descriptor(),
             None => self.diagnostic.kind.descriptor(),
         }
     }
@@ -92,12 +92,15 @@ impl<'d> DiagnosticSubject<'d> {
             .collect()
     }
 
-    /// The primary message and guidance. A pilot family renders through its compact renderer.
+    /// The primary message and guidance. A matching family row renders through its renderer.
     pub(crate) fn payload(&self, context: DiagnosticRenderContext<'_>) -> RenderedPayload {
         match &self.compact {
             Some(compact) => {
                 let view = compact.view();
-                let render = view.family().render.expect("pilot rows declare a renderer");
+                let render = view
+                    .family()
+                    .render
+                    .expect("matched family rows declare a renderer");
                 render(&view, context)
             }
             None => render_payload(&self.diagnostic.payload, context),

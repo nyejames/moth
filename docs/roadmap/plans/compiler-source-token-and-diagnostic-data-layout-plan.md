@@ -108,14 +108,19 @@ ACTIVE_PLAN:
 - Execution order: Phase 4 runs as the steps in `PHASE_4_EXECUTION_ORDER` below. The slice
   checklists remain the acceptance contract. Only their order and grouping changed, under the
   architecture document's repository-discovered corrections rule.
-- NEXT_SUBSTEP: P4.4, the family groups (4G1–4G8), in thirteen batches over two parallel lanes.
-  A shared preparation step first adds the general codecs both lanes need and replaces the pilot
-  parity table with a descriptor check over every kind. P4.3 is accepted in the checkpoints
-  "Phase 4 P4.3a: compact message and guidance rendering for pilot families" and "Phase 4 P4.3b:
-  compact labels, sites and severities for pilot families", P4.2 (4C) in "Phase 4 P4.2:
-  type-display snapshots and shared formatter" and P4.1 (4A/4B) in "Phase 4 P4.1: compact
-  diagnostic vocabulary, storage and pilots". Render equivalence for each checkpoint is checked by
-  rendering every diagnosed integration case (1,655 cases) before and after: identical.
+- NEXT_SUBSTEP: P4.5 slice S1 of `PHASE_4_5_SEQUENCE`, the boundary cutover (4D, 4E, 4F and the
+  4H boundary items). The CP0 pre-flight re-verified that sequence against the post-P4.4 tree.
+  P4.4 (the schema side of 4G1–4G8) is accepted in the checkpoints "Phase 4 P4.4 prep" through
+  "Phase 4 P4.4 close: every family on a full row": every family has a full row, a mirror
+  constructor, a typed view, a legacy-adapter arm and a view renderer, while producers still build
+  `CompilerDiagnostic` until P4.6. P4.3 is accepted in the checkpoints "Phase 4 P4.3a: compact
+  message and guidance rendering for pilot families" and "Phase 4 P4.3b: compact labels, sites
+  and severities for pilot families", P4.2 (4C) in "Phase 4 P4.2: type-display snapshots and
+  shared formatter" and P4.1 (4A/4B) in "Phase 4 P4.1: compact diagnostic vocabulary, storage and
+  pilots". Render equivalence for each checkpoint is checked by rendering every diagnosed
+  integration case (1,656 cases) before and after: identical, apart from the user-accepted
+  `RecursiveRuntimeStruct` correction (`Cycle: Node`), which
+  `tests/cases/struct_recursive_runtime_cycle_rejected` pins.
 - Phase 4 non-goals: `CompilationOutcome::Success`, typed failure lanes and `compiler_bug!`
   (Phase 5), frozen tooling sessions (Phase 6) and user-facing diagnostic prose changes (paused
   diagnostics plan).
@@ -135,6 +140,23 @@ PHASE_4_EXECUTION_ORDER:
 | P4.6 | 4G producer sweep, 4I | producers construct `DiagnosticDraft` directly and tests use typed views; delete the adapter and the old model; update docs and the index |
 | P4.7 | Phase close | audit, `just validate`, benchmark evidence and the accepted commit |
 
+PHASE_4_5_SEQUENCE (accepted at CP0; each slice lands with `cargo check -p moth` and
+`cargo check -p moth --tests` green. [G] means terse lines, terminal labels and guidance, and
+dev-server HTML for every diagnosed or warned integration case render identically to the P4.4
+baseline; no integration assertion covers that output, so a throwaway render dump checks it):
+
+| Slice | Content |
+|---|---|
+| S1 | additive, unit-tested types: `DiagnosticReport`, `DiagnosticReportSet` with `DiagnosticRun`, `SeverityCounts`, `BoundaryFailure`; `TypeDisplaySnapshot::append` and draft type-display rebasing; draft fact, extra and label ID remaps |
+| S2 [G] | expand-only capture: owning-site `capture_types`, a snapshot beside the environment in `RenderTypeContext`, type-display capacity failures reported as `CompilerCapacityExceeded`, success warnings as drafts beside `ModuleSemanticResult` |
+| S3 [G] | capture at all 21 environment-clone sites, the literal and the finalizer move; `into_diagnostics` readers convert at push time; pure `DiagnosticStoreBuilder`, `PendingDiagnostics`, `PreparedDiagnosticBatch` and `ModuleLocalIdentity` types |
+| S4 [G] | boundary cut, one slice with no bridge: one `into_report_set` replaces `into_render_messages_with_frozen_identity*` and `trailing_project_messages`; `BuildResult::warnings` becomes a report set; terminal, terse, dev-server and test-runner rendering read `DiagnosticView`; `diagnostic_display_order` and the render-time `TypeId(N)` fallbacks go (the unresolved-root text stays identical) |
+| S5 [G] | canonical merge: freeze at canonical failure aggregation and after the build's last producer; `BoundaryPremergeFailure` and `transient_batches` retire |
+| S6 [G] | `ModuleCompilationOutcome::Diagnosed` carries `PreparedDiagnosticBatch`; `module_diagnostics.rs` and `PremergeDiagnosticBatch` retire; module warnings become drafts |
+| S7 [G] | the AST/HIR `CompilerMessages` error channel becomes `DiagnosticBag`; every `with_type_context_for_all_diagnostics` caller captures at its owning site and the environment field goes |
+| S8 [G] | bags hold drafts; delete `CompilerMessages`, the `Render*Context` types and the remaining boundary types; build-result items; probe and metric re-homing |
+| S9 | `just validate`, `just clippy-features`, `just bench-data-layout-check`, docs and changelog |
+
 PHASE_4_MIGRATION_STATE:
 - Legacy adapter from `CompilerDiagnostic` to `DiagnosticDraft`: Phase 4-internal temporary
   conversion code, private to `compiler_messages` (`diagnostics/legacy_adapter.rs`, which chains
@@ -144,27 +166,39 @@ PHASE_4_MIGRATION_STATE:
   has a full row, and compaction panics on a label role that the row neither declares nor treats
   as universal (a message-less label, code 0, and the three generic-instantiation roles). Until
   P4.6, the legacy label text (`render/context.rs`) and the compact label text coexist behind an
-  exact-text parity test, and the legacy payload message functions end in an `unreachable!` arm
-  for migrated payloads. The `UnexpectedToken`, `InvalidMultiBind` and `UnknownName` legacy arms
-  stay until the non-pilot kinds that share those payloads migrate in P4.4.
+  exact-text parity test. Every family except the reserved (D9) ones has an adapter arm. The legacy
+  payload message function keeps only the arms that test-built pairings reach (`UnknownName`,
+  `BorrowConflict` through the `borrow_conflict_diagnostic` test helper, and
+  `InvalidGenericParameter` and `InvalidFunctionSignature` through
+  `diagnostic_token_projection_tests.rs`) and ends in an `unreachable!` arm; P4.6 deletes them with
+  those tests.
 - Unconsumed new items: declarations added by P4.1 and P4.2 that have no production consumer yet
   carry item-level dead-code allowances naming the slice that consumes them (P4.3 render
   dispatch, P4.5 capture and merge, or P4.6). Most use `cfg_attr(not(test), ...)`; the generated
   views and constructors, `GenericSubstitutionRecord`, `SiteRef` and `use_of_uninitialized_local`
   use an unconditional item-level allowance because tests cannot reach every item yet. No
   module-level suppression is used. Each slice removes the attributes that name it.
-- Identity rows: 129 families carry only code, stable code, category and reserved flag until their
-  P4.4 group upgrades them. `FamilyRow.descriptor` is an `Option` and `pilot_descriptor()` panics
-  on an identity row until P4.4 completes. The pilot parity tests and
-  `diagnostics/tests/family_inventory_tests.rs` compare the schema with the legacy `DiagnosticKind`
-  inventory and are deleted with it in P4.6.
+- Family rows: every family has a full row with a non-optional descriptor. Reserved (D9) rows have
+  no renderer and no production constructor. `diagnostic_kind_descriptors.rs` and the reason
+  registry keep literal descriptors for the legacy `DiagnosticKind`; the all-kinds descriptor
+  parity test and `diagnostics/tests/family_inventory_tests.rs` compare them with the schema, and
+  P4.6 deletes all of them with the kind inventory.
+- Legacy data with no compact home: rows keep every legacy field that fits in four words plus one
+  extra. The exceptions are `BuiltinFailureWitness::codes` (never rendered), the
+  `InvalidAssignmentTarget` `target_type` and the unread outer key and folder of some
+  `InvalidConfig` reasons (dropped under the overflow rule). P4.6's producer sweep does not move
+  them into drafts; it deletes a field only where the legacy payload was its last reader
+  (failure classification still reads the witness codes).
 - Foreign-site contexts: the diagnostic store keeps a deduplicated `Vec<FrozenIdentityHandle>`
   behind its 8-byte cold rows. P4.5 replaces it with the report-owned context references of the
   frozen report.
 - Type-display fallback: the live `diagnostic_type_name` still renders `TypeId(N)` when a render
   context has no type environment, no path table, or an environment without the type. P4.3
   reproduces that at render time with one transitional snapshot record created only by the render
-  adapter; P4.5 deletes it once every capture point snapshots types with their owning environment.
+  adapter. P4.4 added `TypeDisplaySnapshot::unresolved_type_id`, through which the operator
+  renderers classify such an operand by its raw `TypeId`, and a builder memo of unresolved roots
+  by `TypeId`. P4.5 deletes all three once every capture point snapshots types with their owning
+  environment.
 - Infrastructure errors keep their current carrier until P4.5. Any transitional infrastructure
   lane beside `DiagnosticReportSet` must be named here, with its Phase 5 deletion slice and caller
   list, before P4.5 lands.
@@ -1133,12 +1167,12 @@ result model early.
 
 - [x] inventory every current stable diagnostic family from the fresh reactivation inventory
 - [x] assign explicit non-zero internal `DiagnosticCode` values; never derive them from enum order
-- [ ] preserve each external `MOTH-*` code, category, title and default severity
+- [x] preserve each external `MOTH-*` code, category, title and default severity
 - [ ] make the schema's stable `reason_key` contract optional; preserve every existing reason key
   exactly and independently of rendered wording. Diagnostics without a reason-key contract remain
   `None`; do not manufacture a reason key merely because the schema can store one. Validate
   uniqueness and well-formedness for every defined key (R10a)
-- [ ] declare fact-word meaning, optional codecs, allowed extra kind, secondary-label roles,
+- [x] declare fact-word meaning, optional codecs, allowed extra kind, secondary-label roles,
   type-rewrite markers and renderer entry once per diagnostic
 - [ ] replace compiler-generated prose stored in payload/label string fields with typed
   reason/message codes and facts; an authored string may remain a `StringId`, but `RenderedText`
@@ -1146,7 +1180,7 @@ result model early.
 - [x] use one small `macro_rules!` vocabulary and const tables
 - [x] keep one registry module and split domain declaration files once the registry would exceed
   the repository's practical file-size guidance; each family still has exactly one declaration
-- [ ] generate/validate descriptor lookup, all-code iteration, typed draft constructors, durable
+- [x] generate/validate descriptor lookup, all-code iteration, typed draft constructors, durable
   accessors and schema tests
 - [x] prohibit raw fact indexing outside diagnostic storage modules
 

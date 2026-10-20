@@ -1,7 +1,6 @@
 //! Family rows for name and declaration diagnostics.
 //!
-//! WHAT: all nineteen name/declaration families have full compact rows
-//! with mirror constructors and typed views; no identity rows remain.
+//! WHAT: compact rows, constructors, typed views and renderers for name and declaration diagnostics.
 //! WHY: the group keeps each family beside its stable code, facts, labels, and renderer.
 
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
@@ -382,7 +381,7 @@ impl InvalidTypeAnnotationCode {
 }
 
 diagnostic_family! {
-    pilot DUPLICATE_DECLARATION {
+    DUPLICATE_DECLARATION {
         internal: 3002,
         stable: "MOTH-RULE-0002",
         category: DiagnosticCategory::Rule,
@@ -398,7 +397,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot UNKNOWN_VALUE_NAME {
+    UNKNOWN_VALUE_NAME {
         internal: 3034,
         stable: "MOTH-RULE-0034",
         category: DiagnosticCategory::Rule,
@@ -414,7 +413,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot UNKNOWN_TYPE_NAME {
+    UNKNOWN_TYPE_NAME {
         internal: 3035,
         stable: "MOTH-RULE-0035",
         category: DiagnosticCategory::Rule,
@@ -663,7 +662,7 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
 }
 
 diagnostic_family! {
-    pilot INVALID_TYPE_ANNOTATION {
+    INVALID_TYPE_ANNOTATION {
         internal: 1014,
         stable: "MOTH-SYNTAX-0014",
         category: DiagnosticCategory::Syntax,
@@ -683,7 +682,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot UNKNOWN_NAME {
+    UNKNOWN_NAME {
         internal: 3001,
         stable: "MOTH-RULE-0001",
         category: DiagnosticCategory::Rule,
@@ -703,7 +702,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot IDENTIFIER_NAMING_CONVENTION {
+    IDENTIFIER_NAMING_CONVENTION {
         internal: 3021,
         stable: "MOTH-RULE-0021",
         category: DiagnosticCategory::Rule,
@@ -722,7 +721,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_TOP_LEVEL_RUNTIME_STATEMENT {
+    INVALID_TOP_LEVEL_RUNTIME_STATEMENT {
         internal: 3023,
         stable: "MOTH-RULE-0023",
         category: DiagnosticCategory::Rule,
@@ -738,7 +737,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot RESERVED_BUILTIN_NAME {
+    RESERVED_BUILTIN_NAME {
         internal: 3027,
         stable: "MOTH-RULE-0027",
         category: DiagnosticCategory::Rule,
@@ -754,7 +753,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_SIGNATURE_MEMBER {
+    INVALID_SIGNATURE_MEMBER {
         internal: 3028,
         stable: "MOTH-RULE-0028",
         category: DiagnosticCategory::Rule,
@@ -770,7 +769,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_STRUCT_DEFAULT_VALUE {
+    INVALID_STRUCT_DEFAULT_VALUE {
         internal: 3030,
         stable: "MOTH-RULE-0030",
         category: DiagnosticCategory::Rule,
@@ -786,7 +785,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot MISSING_DECLARATION_INITIALIZER {
+    MISSING_DECLARATION_INITIALIZER {
         internal: 3031,
         stable: "MOTH-RULE-0031",
         category: DiagnosticCategory::Rule,
@@ -802,7 +801,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot VALUE_USED_AS_TYPE {
+    VALUE_USED_AS_TYPE {
         internal: 3036,
         stable: "MOTH-RULE-0036",
         category: DiagnosticCategory::Rule,
@@ -822,7 +821,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot TYPE_USED_AS_VALUE {
+    TYPE_USED_AS_VALUE {
         internal: 3037,
         stable: "MOTH-RULE-0037",
         category: DiagnosticCategory::Rule,
@@ -842,7 +841,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot SHADOWED_NAME {
+    SHADOWED_NAME {
         internal: 3038,
         stable: "MOTH-RULE-0038",
         category: DiagnosticCategory::Rule,
@@ -858,7 +857,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot RESERVED_NAME_COLLISION {
+    RESERVED_NAME_COLLISION {
         internal: 3039,
         stable: "MOTH-RULE-0039",
         category: DiagnosticCategory::Rule,
@@ -879,7 +878,7 @@ diagnostic_family! {
 // For RecursiveRuntimeStruct, StringIds stores each cycle path's final component in traversal
 // order, without a repeated closing entry.
 diagnostic_family! {
-    pilot INVALID_DECLARATION {
+    INVALID_DECLARATION {
         internal: 3043,
         stable: "MOTH-RULE-0043",
         category: DiagnosticCategory::Rule,
@@ -899,7 +898,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_ASSIGNMENT_TARGET {
+    INVALID_ASSIGNMENT_TARGET {
         internal: 3044,
         stable: "MOTH-RULE-0044",
         category: DiagnosticCategory::Rule,
@@ -920,7 +919,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot CONST_RECORD_USED_AS_VALUE {
+    CONST_RECORD_USED_AS_VALUE {
         internal: 3068,
         stable: "MOTH-RULE-0068",
         category: DiagnosticCategory::Rule,
@@ -936,7 +935,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot DEFERRED_FEATURE {
+    DEFERRED_FEATURE {
         internal: 7001,
         stable: "MOTH-DEFERRED-0001",
         category: DiagnosticCategory::DeferredFeature,

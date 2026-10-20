@@ -302,7 +302,6 @@ impl FactCodec for OptCharFact {
 }
 
 /// An optional count. `u32::MAX` marks absence, so a present count must stay below it.
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.4 family rows use it"))]
 pub(crate) struct OptCountFact;
 
 impl FactCodec for OptCountFact {
@@ -352,7 +351,6 @@ impl FactCodec for TypeFact {
 }
 
 /// An optional type. Absence is `ABSENT_TYPE_WORD`, which `capture_types` captures as `NO_TYPE_WORD`.
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.4 family rows use it"))]
 pub(crate) struct OptTypeFact;
 
 impl FactCodec for OptTypeFact {
@@ -429,7 +427,7 @@ impl FactCodec for PlaceFact {
     }
 }
 /// The tag-0 word with value 1; `PlaceFact` emits only tag-0 value 0 or tag-1/tag-2 words.
-const ABSENT_PLACE_WORD: u32 = 1;
+pub(super) const ABSENT_PLACE_WORD: u32 = 1;
 
 /// A place that may be absent. Tag 0 with nonzero value is not a valid `PlaceFact` encoding.
 pub(crate) struct OptPlaceFact;
@@ -590,79 +588,5 @@ impl<'a> FactReader<'a> {
             self.words[used..].iter().all(|word| *word == 0),
             "unread fact words stay zero"
         );
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        ABSENT_PLACE_WORD, DiagnosticPlace, FactCodec, OptCharFact, OptPlaceFact, OptUnitFact,
-        PlaceFact, StoredPlace, UnitCode,
-    };
-
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    enum TestCode {
-        One,
-        Two,
-    }
-
-    impl UnitCode for TestCode {
-        fn code(self) -> u32 {
-            match self {
-                Self::One => 1,
-                Self::Two => 2,
-            }
-        }
-
-        fn from_code(code: u32) -> Option<Self> {
-            match code {
-                1 => Some(Self::One),
-                2 => Some(Self::Two),
-                _ => None,
-            }
-        }
-    }
-
-    #[test]
-    fn opt_unit_fact_round_trips_present_and_absent_values() {
-        let present = Some(TestCode::Two);
-        let mut words = [0];
-        OptUnitFact::<TestCode>::encode(&present, &mut words)
-            .expect("a unit code fits one fact word");
-        assert_eq!(OptUnitFact::<TestCode>::decode(&words), Some(present));
-
-        let absent = None;
-        OptUnitFact::<TestCode>::encode(&absent, &mut words).expect("absence fits one fact word");
-        assert_eq!(OptUnitFact::<TestCode>::decode(&words), Some(absent));
-    }
-
-    #[test]
-    fn opt_char_fact_round_trips_present_and_absent_values() {
-        let present = Some('\0');
-        let mut words = [0];
-        OptCharFact::encode(&present, &mut words).expect("a character fits one fact word");
-        assert_eq!(OptCharFact::decode(&words), Some(present));
-
-        let absent = None;
-        OptCharFact::encode(&absent, &mut words).expect("absence fits one fact word");
-        assert_eq!(OptCharFact::decode(&words), Some(absent));
-    }
-
-    #[test]
-    fn opt_place_fact_reserves_an_invalid_place_word_and_round_trips() {
-        let mut words = [0];
-        let present = Some(DiagnosticPlace::Unknown);
-        OptPlaceFact::encode(&present, &mut words).expect("an unknown place fits one fact word");
-        assert_eq!(words, [0]);
-        assert_eq!(
-            OptPlaceFact::decode(&words),
-            Some(Some(StoredPlace::Unknown))
-        );
-
-        let absent: Option<DiagnosticPlace> = None;
-        OptPlaceFact::encode(&absent, &mut words).expect("absence fits one fact word");
-        assert_eq!(words, [ABSENT_PLACE_WORD]);
-        assert_eq!(PlaceFact::decode(&words), None);
-        assert_eq!(OptPlaceFact::decode(&words), Some(None));
     }
 }

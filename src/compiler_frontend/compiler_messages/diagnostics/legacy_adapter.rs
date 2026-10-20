@@ -1,13 +1,12 @@
-//! Compacts one pilot-family diagnostic into a store, so its family renderer can read it.
+//! Compacts a diagnostic when its kind and payload match a family adapter arm.
 //!
-//! WHAT: a pilot diagnostic is mapped onto its family draft, given its severity, labels and foreign sites, and its
-//! types are captured as display ids. The draft is then stored and read back through a typed view. Every other
-//! diagnostic returns `None`, and the caller keeps the legacy payload path. No label is declined: a label without a
-//! message is kept as `NONE`, and compaction checks that the family declares each label's role. A draft that faults
+//! WHAT: the adapter maps a matching diagnostic onto its family draft, severity, labels and foreign sites, and its
+//! types are captured as display ids. The draft is stored and read back through a typed view. When the adapter
+//! declines a diagnostic, the caller keeps the legacy payload path until P4.6. No label is declined: a label without
+//! a message is kept as `NONE`, and compaction checks that the family declares each label's role. A draft that faults
 //! while it is filled, or that the store refuses, is stored as its capacity record, which renders as a compiler limit.
-//! WHY: rendering switches to compact records one family at a time, so non-pilot diagnostics keep their legacy
-//! output until their families migrate. Each call builds a store for its one diagnostic; a shared store replaces it
-//! once the boundary owns one.
+//! WHY: matching diagnostics render from compact records; declined diagnostics keep their legacy output until P4.6.
+//! Each call builds a store for its one diagnostic; a shared store replaces it once the boundary owns one.
 
 use super::compaction::CompactOutcome;
 use super::draft::DiagnosticDraft;
@@ -36,9 +35,9 @@ impl CompactRender {
     }
 }
 
-/// Compacts `diagnostic` when its family is a pilot.
+/// Compacts `diagnostic` when its kind and payload match a family adapter arm.
 ///
-/// Returns `None` for every other diagnostic. The caller then keeps the legacy payload path.
+/// Returns `None` when the adapter declines the diagnostic. The caller then keeps the legacy payload path.
 pub(crate) fn compact_for_render(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,

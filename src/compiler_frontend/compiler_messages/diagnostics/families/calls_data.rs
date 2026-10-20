@@ -435,7 +435,7 @@ impl InvalidMultiBindCode {
 }
 
 diagnostic_family! {
-    pilot INVALID_MULTI_BIND {
+    INVALID_MULTI_BIND {
         internal: 3045,
         stable: "MOTH-RULE-0045",
         category: DiagnosticCategory::Rule,
@@ -849,7 +849,7 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
 }
 
 diagnostic_family! {
-    pilot INVALID_COLLECTION_TYPE {
+    INVALID_COLLECTION_TYPE {
         internal: 1016,
         stable: "MOTH-SYNTAX-0016",
         category: DiagnosticCategory::Syntax,
@@ -869,7 +869,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_MAP_LITERAL {
+    INVALID_MAP_LITERAL {
         internal: 1033,
         stable: "MOTH-SYNTAX-0033",
         category: DiagnosticCategory::Syntax,
@@ -885,7 +885,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_MAP_TYPE {
+    INVALID_MAP_TYPE {
         internal: 1039,
         stable: "MOTH-SYNTAX-0016-MAP",
         category: DiagnosticCategory::Syntax,
@@ -905,7 +905,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_BUILTIN_CALL {
+    INVALID_BUILTIN_CALL {
         internal: 3046,
         stable: "MOTH-RULE-0046",
         category: DiagnosticCategory::Rule,
@@ -924,7 +924,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_RECEIVER_CALL {
+    INVALID_RECEIVER_CALL {
         internal: 3047,
         stable: "MOTH-RULE-0047",
         category: DiagnosticCategory::Rule,
@@ -954,7 +954,7 @@ pub(crate) fn invalid_receiver_call_binding_name(string_ids: &[StringId]) -> Opt
 }
 
 diagnostic_family! {
-    pilot INVALID_FIELD_ACCESS {
+    INVALID_FIELD_ACCESS {
         internal: 3048,
         stable: "MOTH-RULE-0048",
         category: DiagnosticCategory::Rule,
@@ -974,7 +974,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_CALL_SHAPE {
+    INVALID_CALL_SHAPE {
         internal: 3054,
         stable: "MOTH-RULE-0054",
         category: DiagnosticCategory::Rule,
@@ -1091,7 +1091,7 @@ pub(crate) fn invalid_call_shape_reason(
 }
 
 diagnostic_family! {
-    pilot INVALID_RETURN_SHAPE {
+    INVALID_RETURN_SHAPE {
         internal: 3055,
         stable: "MOTH-RULE-0055",
         category: DiagnosticCategory::Rule,
@@ -1111,7 +1111,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_COPY_TARGET {
+    INVALID_COPY_TARGET {
         internal: 3056,
         stable: "MOTH-RULE-0056",
         category: DiagnosticCategory::Rule,
@@ -1127,7 +1127,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_RANGE_OPERAND {
+    INVALID_RANGE_OPERAND {
         internal: 3059,
         stable: "MOTH-RULE-0059",
         category: DiagnosticCategory::Rule,
@@ -1147,7 +1147,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_CAST {
+    INVALID_CAST {
         internal: 3083,
         stable: "MOTH-RULE-0083",
         category: DiagnosticCategory::Rule,
@@ -1167,7 +1167,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_VALUE_RECEIVER {
+    INVALID_VALUE_RECEIVER {
         internal: 3087,
         stable: "MOTH-RULE-0087",
         category: DiagnosticCategory::Rule,

@@ -222,7 +222,7 @@ fn foreign_primary_keeps_its_span_and_adds_a_site_row() {
 }
 
 #[test]
-fn foreign_label_and_primary_share_one_identity_row() {
+fn foreign_label_and_primary_share_one_identity_context() {
     let mut store = DiagnosticStore::new();
     let handle = identity();
     let draft = duplicate_declaration(StringId::from_index(1), Some(exact_span(10, 2)))

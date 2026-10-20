@@ -154,7 +154,7 @@ unit_code! {
 }
 
 diagnostic_family! {
-    pilot INVALID_DEPENDENCY_CLAUSE {
+    INVALID_DEPENDENCY_CLAUSE {
         internal: 1019,
         stable: "MOTH-SYNTAX-0019",
         category: DiagnosticCategory::Syntax,
@@ -186,7 +186,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_depe
 }
 
 diagnostic_family! {
-    pilot LEGACY_DEPENDENCY_CLAUSE {
+    LEGACY_DEPENDENCY_CLAUSE {
         internal: 1035,
         stable: "MOTH-SYNTAX-0035",
         category: DiagnosticCategory::Syntax,
@@ -218,7 +218,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn legacy_depen
 }
 
 diagnostic_family! {
-    pilot CIRCULAR_DEPENDENCY {
+    CIRCULAR_DEPENDENCY {
         internal: 3033,
         stable: "MOTH-RULE-0033",
         category: DiagnosticCategory::Rule,
@@ -336,7 +336,7 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
 }
 
 diagnostic_family! {
-    pilot UNSUPPORTED_BUILDER_PACKAGE {
+    UNSUPPORTED_BUILDER_PACKAGE {
         internal: 3060,
         stable: "MOTH-RULE-0060",
         category: DiagnosticCategory::Rule,
@@ -352,7 +352,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_PAGE_METADATA {
+    INVALID_PAGE_METADATA {
         internal: 3061,
         stable: "MOTH-RULE-0061",
         category: DiagnosticCategory::Rule,
@@ -371,7 +371,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_COMPILE_TIME_PATH {
+    INVALID_COMPILE_TIME_PATH {
         internal: 3063,
         stable: "MOTH-RULE-0063",
         category: DiagnosticCategory::Rule,
@@ -408,7 +408,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_comp
 }
 
 diagnostic_family! {
-    pilot DEPENDENCY_NAMESPACE_USED_AS_VALUE {
+    DEPENDENCY_NAMESPACE_USED_AS_VALUE {
         internal: 3065,
         stable: "MOTH-RULE-0065",
         category: DiagnosticCategory::Rule,
@@ -424,7 +424,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot NESTED_DEPENDENCY_TRAVERSAL {
+    NESTED_DEPENDENCY_TRAVERSAL {
         internal: 3066,
         stable: "MOTH-RULE-0066",
         category: DiagnosticCategory::Rule,
@@ -451,7 +451,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn nested_depen
 }
 
 diagnostic_family! {
-    pilot NAMESPACE_TYPE_VALUE_MISUSE {
+    NAMESPACE_TYPE_VALUE_MISUSE {
         internal: 3067,
         stable: "MOTH-RULE-0067",
         category: DiagnosticCategory::Rule,
@@ -471,7 +471,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot PROJECT_CONTEXT_ESCAPE {
+    PROJECT_CONTEXT_ESCAPE {
         internal: 3086,
         stable: "MOTH-RULE-0086",
         category: DiagnosticCategory::Rule,
@@ -881,7 +881,7 @@ impl InvalidConfigCode {
 }
 
 diagnostic_family! {
-    pilot INVALID_CONFIG {
+    INVALID_CONFIG {
         internal: 6001,
         stable: "MOTH-CONFIG-0001",
         category: DiagnosticCategory::Config,

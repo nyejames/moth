@@ -1,6 +1,6 @@
 //! Family rows for choice and control-flow diagnostics.
 //!
-//! WHAT: all 11 family rows for choice and control-flow diagnostics, including the match pilots.
+//! WHAT: the family rows, constructors and typed views for choice and control-flow diagnostics.
 //! WHY: related choice and control-flow diagnostics share one schema table and legacy adapter.
 
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
@@ -536,7 +536,7 @@ unit_code! {
 }
 
 diagnostic_family! {
-    pilot UNREACHABLE_MATCH_ARM {
+    UNREACHABLE_MATCH_ARM {
         internal: 3022,
         stable: "MOTH-RULE-0022",
         category: DiagnosticCategory::Rule,
@@ -601,7 +601,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_fall
     })
 }
 diagnostic_family! {
-    pilot NON_EXHAUSTIVE_MATCH {
+    NON_EXHAUSTIVE_MATCH {
         internal: 3050,
         stable: "MOTH-RULE-0050",
         category: DiagnosticCategory::Rule,
@@ -708,7 +708,7 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
 }
 
 diagnostic_family! {
-    pilot INVALID_STANDALONE_STATEMENT {
+    INVALID_STANDALONE_STATEMENT {
         internal: 1025,
         stable: "MOTH-SYNTAX-0025",
         category: DiagnosticCategory::Syntax,
@@ -724,7 +724,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_MATCH_ARM {
+    INVALID_MATCH_ARM {
         internal: 1028,
         stable: "MOTH-SYNTAX-0028",
         category: DiagnosticCategory::Syntax,
@@ -740,7 +740,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_LOOP_HEADER {
+    INVALID_LOOP_HEADER {
         internal: 1029,
         stable: "MOTH-SYNTAX-0029",
         category: DiagnosticCategory::Syntax,
@@ -759,7 +759,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_STATEMENT_POSITION {
+    INVALID_STATEMENT_POSITION {
         internal: 1030,
         stable: "MOTH-SYNTAX-0030",
         category: DiagnosticCategory::Syntax,
@@ -775,7 +775,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_CHOICE_VARIANT {
+    INVALID_CHOICE_VARIANT {
         internal: 3029,
         stable: "MOTH-RULE-0029",
         category: DiagnosticCategory::Rule,
@@ -795,7 +795,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_CONTROL_FLOW_STATEMENT {
+    INVALID_CONTROL_FLOW_STATEMENT {
         internal: 3042,
         stable: "MOTH-RULE-0042",
         category: DiagnosticCategory::Rule,
@@ -811,7 +811,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_MATCH_PATTERN {
+    INVALID_MATCH_PATTERN {
         internal: 3049,
         stable: "MOTH-RULE-0049",
         category: DiagnosticCategory::Rule,
@@ -831,7 +831,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot INVALID_FALLIBLE_HANDLING {
+    INVALID_FALLIBLE_HANDLING {
         internal: 3051,
         stable: "MOTH-RULE-0051",
         category: DiagnosticCategory::Rule,
@@ -858,7 +858,7 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    pilot COMPILE_TIME_EVALUATION_ERROR {
+    COMPILE_TIME_EVALUATION_ERROR {
         internal: 3053,
         stable: "MOTH-RULE-0053",
         category: DiagnosticCategory::Rule,

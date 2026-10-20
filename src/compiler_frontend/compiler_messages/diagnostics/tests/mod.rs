@@ -36,14 +36,17 @@ pub(super) fn identity() -> FrozenIdentityHandle {
     FrozenIdentityHandle::new()
 }
 
-/// A test-only family that declares the label roles no pilot permits. It is never registered,
+/// A test-only family that declares additional label roles for the label-code tests. It is never registered,
 /// so no render path can reach it.
 pub(super) static TEST_LABEL_FAMILY: FamilyRow = FamilyRow {
     code: DiagnosticCode::new(9001),
-    stable_code: "MOTH-TEST-9001",
     category: DiagnosticCategory::Rule,
     reserved: false,
-    descriptor: None,
+    descriptor: crate::compiler_frontend::compiler_messages::DiagnosticDescriptor::new(
+        "MOTH-TEST-9001",
+        "Test family",
+        crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error,
+    ),
     layout: &[],
     extra: ExtraDataKind::None,
     labels: &[
