@@ -7,17 +7,22 @@
 
 use super::exact_span;
 use crate::compiler_frontend::build_config::BuildConfigValueOrigin;
+use crate::compiler_frontend::compiler_messages::DiagnosticCategory;
 use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayId;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::extras::ExtraDataKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
-    CountFact, FactCapacityError, FactCodec, OptStringFact, OptTokenFact, PathFact, PlaceFact,
-    StoredPlace, StringFact, TokenFact, TypeFact, UnitCode, UnitFact, type_display_from_word,
-    type_display_word,
+    CharFact, CountFact, FactCapacityError, FactCodec, OptCountFact, OptStringFact, OptTokenFact,
+    OptTypeFact, PathFact, PlaceFact, StoredPlace, StringFact, TokenFact, TypeFact, UnitCode,
+    UnitFact, type_display_from_word, type_display_word,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::CapacityResourceFact;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::{
     DraftLabel, DraftSubstitution, DraftType, LabelMessageCode, SecondaryDiagnosticLabel,
     encode_label,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::record::DiagnosticCode;
+use crate::compiler_frontend::compiler_messages::diagnostics::schema::{FactDescriptor, FamilyRow};
 use crate::compiler_frontend::compiler_messages::{
     AstCapacityResource, CapacityResource, DiagnosticCapacityResource, DiagnosticLabelMessage,
     DiagnosticPlace, DiagnosticToken, GenericSubstitutionDiagnostic, HirCapacityResource, TokenTag,
@@ -387,8 +392,8 @@ fn generic_substitution_labels_append_pending_entries() {
     assert_eq!(label.pending_types, 0);
     assert_eq!(substitutions.len(), 3);
     assert_eq!(substitutions[1].parameter, 5);
-    assert_eq!(substitutions[1].concrete, DraftType::Pending(TypeId(7)));
-    assert_eq!(substitutions[2].concrete, DraftType::Pending(TypeId(8)));
+    assert_eq!(substitutions[1].concrete, DraftType::Pending(7));
+    assert_eq!(substitutions[2].concrete, DraftType::Pending(8));
 }
 
 #[test]
@@ -402,4 +407,119 @@ fn label_encoding_rejects_a_name_beyond_the_fact_range() {
         &mut substitutions,
     );
     assert!(result.is_err());
+}
+
+/// A test-only family whose one fact is an optional type. It is never registered, so no render path reaches it.
+static OPT_TYPE_FAMILY: FamilyRow = FamilyRow {
+    code: DiagnosticCode::new(9002),
+    stable_code: "MOTH-TEST-9002",
+    category: DiagnosticCategory::Rule,
+    reserved: false,
+    descriptor: None,
+    layout: &[FactDescriptor::of::<OptTypeFact>()],
+    extra: ExtraDataKind::None,
+    labels: &[],
+    render: None,
+};
+
+#[test]
+fn char_fact_round_trips_its_boundaries_and_rejects_non_scalars() {
+    let mut word = [0u32; 1];
+    for value in ['\0', 'A', char::MAX] {
+        CharFact::encode(&value, &mut word).expect("every char encodes");
+        assert_eq!(CharFact::decode(&word), Some(value));
+    }
+    assert!(CharFact::decode(&[0xD800]).is_none());
+    assert!(CharFact::decode(&[0x11_0000]).is_none());
+}
+
+#[test]
+fn optional_count_fact_round_trips_zero_none_and_the_largest_count() {
+    let mut word = [0u32; 1];
+    for value in [Some(0), None, Some(u32::MAX as usize - 1)] {
+        OptCountFact::encode(&value, &mut word).expect("every representable count encodes");
+        assert_eq!(OptCountFact::decode(&word), Some(value));
+    }
+}
+
+#[test]
+fn optional_count_fact_rejects_the_absent_marker_as_a_count() {
+    let mut word = [0u32; 1];
+    assert!(OptCountFact::encode(&Some(u32::MAX as usize), &mut word).is_err());
+    assert_eq!(OptCountFact::decode(&[u32::MAX]), Some(None));
+}
+
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn optional_count_fact_rejects_a_count_past_u32() {
+    let mut word = [0u32; 1];
+    assert!(OptCountFact::encode(&Some(1 << 32), &mut word).is_err());
+}
+
+#[test]
+fn optional_type_fact_encodes_absence_as_the_sentinel() {
+    let mut word = [0u32; 1];
+    OptTypeFact::encode(&None, &mut word).expect("absence always encodes");
+    assert_eq!(word, [u32::MAX]);
+
+    OptTypeFact::encode(&Some(TypeId(3)), &mut word).expect("a small type id encodes");
+    assert_eq!(word, [3]);
+}
+
+#[test]
+fn pending_type_words_refuse_the_absent_marker_as_an_id() {
+    let mut word = [0u32; 1];
+    assert!(TypeFact::encode(&TypeId(u32::MAX), &mut word).is_err());
+    assert!(OptTypeFact::encode(&Some(TypeId(u32::MAX)), &mut word).is_err());
+    let label = encode_label(
+        None,
+        Some(DiagnosticLabelMessage::TypedFailureProducer {
+            error_type_id: TypeId(u32::MAX),
+        }),
+        &mut Vec::new(),
+    );
+    assert!(label.is_err());
+}
+
+#[test]
+fn optional_type_fact_absent_survives_capture_without_calling_rewrite() {
+    let mut draft =
+        DiagnosticDraft::with_facts(&OPT_TYPE_FAMILY, Some(exact_span(0, 1)), |cursor| {
+            cursor.push::<OptTypeFact>(&None)
+        });
+    let mut rewrite_calls = 0;
+    draft
+        .capture_types(&mut |id: TypeId| {
+            rewrite_calls += 1;
+            TypeDisplayId::from_index(id.0 as usize)
+        })
+        .expect("an absent type captures without a rewrite");
+
+    assert_eq!(rewrite_calls, 0);
+    assert_eq!(draft.core.pending_facts, 0);
+    assert_eq!(draft.core.facts[0], 0, "no type captures as the zero word");
+    assert_eq!(OptTypeFact::decode(&draft.core.facts[..1]), Some(None));
+}
+
+#[test]
+fn optional_type_fact_rewrites_a_present_type_through_capture() {
+    let mut draft =
+        DiagnosticDraft::with_facts(&OPT_TYPE_FAMILY, Some(exact_span(0, 1)), |cursor| {
+            cursor.push::<OptTypeFact>(&Some(TypeId(3)))
+        });
+    let mut rewritten = Vec::new();
+    draft
+        .capture_types(&mut |id: TypeId| {
+            rewritten.push(id.0);
+            TypeDisplayId::from_index(id.0 as usize)
+        })
+        .expect("a small type id captures");
+
+    assert_eq!(rewritten, vec![3]);
+    assert_eq!(draft.core.pending_facts, 0);
+    assert_eq!(draft.core.facts[0], 4, "display words are one-based");
+    assert_eq!(
+        OptTypeFact::decode(&draft.core.facts[..1]).map(|id| id.map(|id| id.index())),
+        Some(Some(3))
+    );
 }

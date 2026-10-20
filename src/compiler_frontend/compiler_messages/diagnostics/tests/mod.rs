@@ -1,6 +1,6 @@
 //! Unit tests for the compact diagnostic store.
 //!
-//! WHAT: codecs, schema rows, family inventory, compaction, capacity limits and pilot parity, one submodule each.
+//! WHAT: codecs, schema rows, family inventory, compaction, capacity limits and reason-key parity, one submodule each.
 //! WHY: the store packs words and checks arena limits by hand, so a layout slip would otherwise
 //! surface only when a diagnostic is rendered.
 

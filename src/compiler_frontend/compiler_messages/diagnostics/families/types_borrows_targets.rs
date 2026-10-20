@@ -77,7 +77,7 @@ diagnostic_family! {
 
 /// The uninitialised-local draft. The place is stored in the place fact. A `RenderedText` place is stored as a local,
 /// since both render as the same backticked name (see `PlaceFact`).
-pub(crate) fn use_of_uninitialized_local(
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn use_of_uninitialized_local(
     place: DiagnosticPlace,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -215,7 +215,7 @@ diagnostic_family! {
     }
 }
 
-pub(crate) const FAMILIES: &[FamilyRow] = &[
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES: &[FamilyRow] = &[
     TYPE_MISMATCH,
     USE_OF_UNINITIALIZED_LOCAL,
     EMPTY_COLLECTION_TYPE_AMBIGUITY,

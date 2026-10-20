@@ -119,7 +119,7 @@ diagnostic_family! {
 
 /// The invalid-multi-bind draft for a rule-kind diagnostic. The arity counts are zero unless the reason is
 /// `ArityMismatch`.
-pub(crate) fn invalid_multi_bind(
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_multi_bind(
     reason: InvalidMultiBindReason,
     target_name: Option<StringId>,
     span: Option<SourceSpan>,
@@ -252,7 +252,7 @@ diagnostic_family! {
     }
 }
 
-pub(crate) const FAMILIES: &[FamilyRow] = &[
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES: &[FamilyRow] = &[
     INVALID_MULTI_BIND,
     INVALID_COLLECTION_TYPE,
     INVALID_MAP_LITERAL,

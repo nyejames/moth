@@ -5,19 +5,19 @@
 //! WHY: one compile error costs a handful of array writes rather than per-diagnostic allocations, and a failed
 //! compaction changes nothing, so the store never holds a partly written diagnostic.
 
-pub(crate) mod compaction;
-pub(crate) mod draft;
-pub(crate) mod extras;
-pub(crate) mod facts;
+mod compaction;
+mod draft;
+mod extras;
+mod facts;
 pub(crate) mod families;
 pub(crate) mod foreign;
 pub(crate) mod labels;
 pub(crate) mod legacy_adapter;
-pub(crate) mod record;
-pub(crate) mod registry;
-pub(crate) mod resource;
-pub(crate) mod schema;
-pub(crate) mod store;
+mod record;
+mod registry;
+mod resource;
+mod schema;
+mod store;
 pub(crate) mod view;
 
 #[cfg(test)]

@@ -1,10 +1,13 @@
 //! Family inventory: the registry holds one row per non-infrastructure diagnostic kind.
 //!
-//! WHAT: compares `FAMILY_GROUPS` with `DiagnosticKind::all()` on stable code, category, and count.
+//! WHAT: compares `FAMILY_GROUPS` with `DiagnosticKind::all()` on stable code, category, descriptor (where a row
+//! carries one), registry lookup, and count.
 //! WHY: a kind without a row has no schema identity, and a stray row owns a code no kind emits.
 
 use crate::compiler_frontend::compiler_messages::DiagnosticKind;
-use crate::compiler_frontend::compiler_messages::diagnostics::registry::FAMILY_GROUPS;
+use crate::compiler_frontend::compiler_messages::diagnostics::registry::{
+    FAMILY_GROUPS, family_for_code,
+};
 
 #[test]
 fn every_non_infrastructure_kind_has_exactly_one_family_row() {
@@ -40,7 +43,7 @@ fn every_family_row_belongs_to_a_non_infrastructure_kind() {
 }
 
 #[test]
-fn family_row_category_matches_its_kind() {
+fn family_row_matches_its_kind_on_category_descriptor_and_registry_code() {
     for kind in DiagnosticKind::all()
         .into_iter()
         .filter(|kind| !matches!(kind, DiagnosticKind::Infrastructure(_)))
@@ -52,6 +55,14 @@ fn family_row_category_matches_its_kind() {
             .find(|row| row.stable_code == kind.code())
             .unwrap_or_else(|| panic!("{kind:?} has no family row"));
         assert_eq!(row.category, kind.category(), "{kind:?} category");
+        if let Some(descriptor) = &row.descriptor {
+            assert_eq!(*descriptor, kind.descriptor(), "{kind:?} descriptor");
+        }
+        assert_eq!(
+            family_for_code(row.code).map(|found| found.stable_code),
+            Some(row.stable_code),
+            "{kind:?} registry lookup"
+        );
     }
 }
 

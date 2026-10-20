@@ -64,7 +64,7 @@ diagnostic_family! {
     }
 }
 
-pub(crate) const FAMILIES: &[FamilyRow] = &[
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES: &[FamilyRow] = &[
     MALFORMED_CSS_TEMPLATE,
     MALFORMED_HTML_TEMPLATE,
     INVALID_STYLE_DIRECTIVE,

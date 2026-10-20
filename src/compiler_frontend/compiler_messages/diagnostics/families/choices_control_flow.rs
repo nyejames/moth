@@ -61,7 +61,7 @@ diagnostic_family! {
 }
 
 /// The non-exhaustive-match draft. The missing variant names are stored as the extra string IDs.
-pub(crate) fn non_exhaustive_match(
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn non_exhaustive_match(
     reason: NonExhaustiveMatchReason,
     missing_variants: Vec<StringId>,
     span: Option<SourceSpan>,
@@ -167,7 +167,7 @@ diagnostic_family! {
     }
 }
 
-pub(crate) const FAMILIES: &[FamilyRow] = &[
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES: &[FamilyRow] = &[
     UNREACHABLE_MATCH_ARM,
     NON_EXHAUSTIVE_MATCH,
     INVALID_STANDALONE_STATEMENT,

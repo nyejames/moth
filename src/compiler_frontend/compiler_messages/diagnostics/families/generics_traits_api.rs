@@ -176,7 +176,7 @@ diagnostic_family! {
     }
 }
 
-pub(crate) const FAMILIES: &[FamilyRow] = &[
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES: &[FamilyRow] = &[
     INVALID_GENERIC_APPLICATION,
     INVALID_GENERIC_PARAMETER,
     INVALID_PARAMETER_CONTRACT,

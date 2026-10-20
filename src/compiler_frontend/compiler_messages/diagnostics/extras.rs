@@ -12,7 +12,7 @@ use std::ops::Range;
 
 /// A range into one arena. `start` and `len` count entries, not bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct DiagnosticListRange {
+pub(super) struct DiagnosticListRange {
     start: u32,
     len: u32,
 }
@@ -27,7 +27,7 @@ impl DiagnosticListRange {
         }
     }
 
-    pub(crate) fn range(self) -> Range<usize> {
+    pub(super) fn range(self) -> Range<usize> {
         let start = self.start as usize;
         start..start + self.len as usize
     }
@@ -36,16 +36,16 @@ impl DiagnosticListRange {
 /// The kind of list an extra record's data points at.
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ExtraDataKind {
+pub(super) enum ExtraDataKind {
     None = 0,
     StringIds = 1,
 }
 
 /// An extra record's data: the kind of list it holds and where that list lives.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ExtraDataRef {
-    pub(crate) kind: ExtraDataKind,
-    pub(crate) list: DiagnosticListRange,
+pub(super) struct ExtraDataRef {
+    pub(super) kind: ExtraDataKind,
+    pub(super) list: DiagnosticListRange,
 }
 
 const _: () = assert!(
@@ -55,10 +55,10 @@ const _: () = assert!(
 
 /// Cold per-diagnostic data, reached through a record's extra id.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct DiagnosticExtraRecord {
-    pub(crate) labels: DiagnosticListRange,
-    pub(crate) foreign_sites: DiagnosticListRange,
-    pub(crate) data: ExtraDataRef,
+pub(super) struct DiagnosticExtraRecord {
+    pub(super) labels: DiagnosticListRange,
+    pub(super) foreign_sites: DiagnosticListRange,
+    pub(super) data: ExtraDataRef,
 }
 
 const _: () = assert!(
@@ -68,7 +68,7 @@ const _: () = assert!(
 
 /// A one-based index into the extra-record arena. Records store it as an `Option`, so zero means no extra data.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct DiagnosticExtraId(NonZeroU32);
+pub(super) struct DiagnosticExtraId(NonZeroU32);
 
 impl DiagnosticExtraId {
     /// Names the extra record at zero-based `index`. Compaction keeps the arena below its u32 limit.

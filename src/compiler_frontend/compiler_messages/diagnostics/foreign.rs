@@ -10,14 +10,14 @@ use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan};
 
 /// Which span of a draft a foreign site belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ForeignSlot {
+pub(super) enum ForeignSlot {
     Primary,
     Label(usize),
 }
 
 /// A foreign site as a constructor supplies it. The span stays in the draft's primary or label field.
 #[derive(Clone, Debug)]
-pub(crate) struct ForeignSiteDraft {
+pub(super) struct ForeignSiteDraft {
     pub(super) slot: ForeignSlot,
     pub(super) context: FrozenIdentityHandle,
 }
@@ -25,7 +25,7 @@ pub(crate) struct ForeignSiteDraft {
 /// A foreign site as the store keeps it: a selector and an identity-context index. `selector` is 0 for the primary
 /// span and `label + 1` for a label. `context` indexes the store's identity-context table.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ForeignSiteRecord {
+pub(super) struct ForeignSiteRecord {
     pub(super) selector: u32,
     pub(super) context: u32,
 }

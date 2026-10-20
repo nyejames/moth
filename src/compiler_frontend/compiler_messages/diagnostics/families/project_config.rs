@@ -96,7 +96,7 @@ diagnostic_family! {
     }
 }
 
-pub(crate) const FAMILIES: &[FamilyRow] = &[
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES: &[FamilyRow] = &[
     INVALID_DEPENDENCY_CLAUSE,
     LEGACY_DEPENDENCY_CLAUSE,
     CIRCULAR_DEPENDENCY,

@@ -37,7 +37,9 @@ diagnostic_family! {
 
 /// The unused-import draft. No production path produces it yet, so only tests construct it.
 #[cfg(test)]
-pub(crate) fn unused_import(span: Option<SourceSpan>) -> DiagnosticDraft {
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn unused_import(
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
     DiagnosticDraft::with_facts(&UNUSED_IMPORT, span, |_cursor| Ok(()))
 }
 
@@ -244,7 +246,7 @@ diagnostic_family! {
     }
 }
 
-pub(crate) const FAMILIES: &[FamilyRow] = &[
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES: &[FamilyRow] = &[
     UNUSED_IMPORT,
     MISSING_IMPORT_TARGET,
     DEPENDENCY_ALIAS_CASE_MISMATCH,

@@ -70,7 +70,7 @@ diagnostic_family! {
 
 /// The duplicate-declaration draft. The primary site is the duplicate. The earlier declaration is not part of this
 /// constructor: the legacy adapter adds it as a label, and only when its span is known.
-pub(crate) fn duplicate_declaration(
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn duplicate_declaration(
     name: StringId,
     duplicate_span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -233,7 +233,7 @@ diagnostic_family! {
     }
 }
 
-pub(crate) const FAMILIES: &[FamilyRow] = &[
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES: &[FamilyRow] = &[
     DUPLICATE_DECLARATION,
     UNKNOWN_VALUE_NAME,
     UNKNOWN_TYPE_NAME,

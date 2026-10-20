@@ -21,7 +21,7 @@ use crate::compiler_frontend::symbols::string_interning::StringId;
 /// belongs to a different family.
 /// WHY: render functions receive named, decoded fields, and a wrong-family read fails loudly at the
 /// dispatch boundary rather than producing a silently wrong message.
-pub(crate) trait FamilyView: Sized {
+pub(super) trait FamilyView: Sized {
     fn from_record(record: RecordRef<'_>) -> Option<Self>;
 }
 
@@ -33,7 +33,7 @@ pub(crate) struct DiagnosticView<'a> {
 }
 
 impl<'a> DiagnosticView<'a> {
-    pub(crate) fn new(
+    pub(super) fn new(
         store: &'a DiagnosticStore,
         id: DiagnosticId,
         types: &'a TypeDisplaySnapshot,
@@ -77,7 +77,7 @@ impl<'a> DiagnosticView<'a> {
         self.record.durable_labels()
     }
 
-    pub(crate) fn family_view<View: FamilyView>(&self) -> Option<View> {
+    pub(super) fn family_view<View: FamilyView>(&self) -> Option<View> {
         View::from_record(self.record)
     }
 }

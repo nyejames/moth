@@ -7,38 +7,37 @@
 //! fixed-size words, and substitution entries live in the draft's extra part until compaction moves them into
 //! the store.
 
-use super::facts::{FactCapacityError, string_word, type_display_from_word};
+use super::facts::{FactCapacityError, pending_type_word, string_word, type_display_from_word};
 use super::foreign::SiteRef;
 use super::store::DiagnosticStore;
 use crate::compiler_frontend::build_config::BuildConfigValueOrigin;
 use crate::compiler_frontend::compiler_messages::DiagnosticLabelMessage;
 use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayId;
-use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
 /// The message of a compact label. Each variant of the legacy `DiagnosticLabelMessage` has one code, and a label
 /// without a message has `NONE`. Codes are internal to one compiler build and carry no meaning outside it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct LabelMessageCode(u8);
+pub(super) struct LabelMessageCode(u8);
 
 impl LabelMessageCode {
-    pub(crate) const NONE: Self = Self(0);
-    pub(crate) const PREVIOUS_DECLARATION: Self = Self(1);
-    pub(crate) const CONFLICTING_ACCESS: Self = Self(2);
-    pub(crate) const VALUE_MOVED_HERE: Self = Self(3);
-    pub(crate) const CONFIG_INPUT_ORIGIN: Self = Self(4);
-    pub(crate) const RENDERED_TEXT: Self = Self(5);
-    pub(crate) const GENERIC_INSTANTIATION_BODY_SITE: Self = Self(6);
-    pub(crate) const GENERIC_INSTANTIATION_DECLARATION_SITE: Self = Self(7);
-    pub(crate) const GENERIC_INSTANTIATION_SUBSTITUTIONS: Self = Self(8);
-    pub(crate) const GENERIC_INFERENCE_PREVIOUS_EVIDENCE: Self = Self(9);
-    pub(crate) const IMMUTABLE_BINDING_DECLARATION: Self = Self(10);
-    pub(crate) const TYPED_FAILURE_PRODUCER: Self = Self(11);
-    pub(crate) const IMPLICIT_FAILURE_PRODUCER: Self = Self(12);
-    pub(crate) const BUILTIN_FAILURE_CALL: Self = Self(13);
-    pub(crate) const BUILTIN_FAILURE_ORIGIN: Self = Self(14);
-    pub(crate) const BUILTIN_WRITE_BACK_ORIGIN: Self = Self(15);
+    pub(super) const NONE: Self = Self(0);
+    pub(super) const PREVIOUS_DECLARATION: Self = Self(1);
+    pub(super) const CONFLICTING_ACCESS: Self = Self(2);
+    pub(super) const VALUE_MOVED_HERE: Self = Self(3);
+    pub(super) const CONFIG_INPUT_ORIGIN: Self = Self(4);
+    pub(super) const RENDERED_TEXT: Self = Self(5);
+    pub(super) const GENERIC_INSTANTIATION_BODY_SITE: Self = Self(6);
+    pub(super) const GENERIC_INSTANTIATION_DECLARATION_SITE: Self = Self(7);
+    pub(super) const GENERIC_INSTANTIATION_SUBSTITUTIONS: Self = Self(8);
+    pub(super) const GENERIC_INFERENCE_PREVIOUS_EVIDENCE: Self = Self(9);
+    pub(super) const IMMUTABLE_BINDING_DECLARATION: Self = Self(10);
+    pub(super) const TYPED_FAILURE_PRODUCER: Self = Self(11);
+    pub(super) const IMPLICIT_FAILURE_PRODUCER: Self = Self(12);
+    pub(super) const BUILTIN_FAILURE_CALL: Self = Self(13);
+    pub(super) const BUILTIN_FAILURE_ORIGIN: Self = Self(14);
+    pub(super) const BUILTIN_WRITE_BACK_ORIGIN: Self = Self(15);
 
     /// Whether the label keeps a row in `label_data`. Config origin, rendered text, substitutions, typed failure
     /// producers and write-back origins carry data; the rest never read the row.
@@ -48,7 +47,7 @@ impl LabelMessageCode {
 
     /// Whether every family accepts the label, whatever its row declares. The generic instantiation labels are
     /// appended to any diagnostic, and a message-less label carries no role of its own.
-    pub(crate) fn is_universal(self) -> bool {
+    pub(super) fn is_universal(self) -> bool {
         matches!(
             self,
             Self::NONE
@@ -59,7 +58,7 @@ impl LabelMessageCode {
     }
 
     /// The constant's name, as a diagnostic about a missing label role names it.
-    pub(crate) fn name(self) -> &'static str {
+    pub(super) fn name(self) -> &'static str {
         match self {
             Self::NONE => "NONE",
             Self::PREVIOUS_DECLARATION => "PREVIOUS_DECLARATION",
@@ -87,7 +86,7 @@ impl LabelMessageCode {
 /// A label as a constructor builds it. `pending_types` marks the data words that hold a raw `TypeId` until
 /// `capture_types` rewrites them.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct DraftLabel {
+pub(super) struct DraftLabel {
     pub(super) span: Option<SourceSpan>,
     pub(super) message: LabelMessageCode,
     /// Bit `i` set means `data[i]` holds a `TypeId` word that still needs a display ID.
@@ -97,15 +96,15 @@ pub(crate) struct DraftLabel {
 
 /// One entry of a generic substitution list. Entries live in the draft's extra part until compaction.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct DraftSubstitution {
+pub(super) struct DraftSubstitution {
     pub(super) parameter: u32,
     pub(super) concrete: DraftType,
 }
 
 /// A type word inside a draft: a raw `TypeId` still to be captured, or a display word already captured.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum DraftType {
-    Pending(TypeId),
+pub(super) enum DraftType {
+    Pending(u32),
     Captured(u32),
 }
 
@@ -167,7 +166,7 @@ pub(super) fn encode_label(
             for entry in entries {
                 substitutions.push(DraftSubstitution {
                     parameter: string_word(entry.parameter_name)?,
-                    concrete: DraftType::Pending(entry.concrete_type_id),
+                    concrete: DraftType::Pending(pending_type_word(entry.concrete_type_id)?),
                 });
             }
             DraftLabel {
@@ -183,7 +182,7 @@ pub(super) fn encode_label(
         }
         DiagnosticLabelMessage::TypedFailureProducer { error_type_id } => DraftLabel {
             pending_types: 0b01,
-            data: [error_type_id.0, 0],
+            data: [pending_type_word(error_type_id)?, 0],
             ..plain(LabelMessageCode::TYPED_FAILURE_PRODUCER)
         },
         DiagnosticLabelMessage::ImplicitFailureProducer => {
@@ -195,7 +194,7 @@ pub(super) fn encode_label(
         }
         DiagnosticLabelMessage::BuiltinWriteBackOrigin { target_type_id } => DraftLabel {
             pending_types: 0b01,
-            data: [target_type_id.0, 0],
+            data: [pending_type_word(target_type_id)?, 0],
             ..plain(LabelMessageCode::BUILTIN_WRITE_BACK_ORIGIN)
         },
     })

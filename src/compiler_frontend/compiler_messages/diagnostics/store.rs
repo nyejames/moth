@@ -21,7 +21,7 @@ pub(super) const PRIMARY_SELECTOR: u32 = 0;
 
 /// The compacted diagnostics of one compilation. Ids are positions in push order and never change.
 #[derive(Debug)]
-pub(crate) struct DiagnosticStore {
+pub(super) struct DiagnosticStore {
     pub(super) records: Vec<DiagnosticRecord>,
     pub(super) extras: Vec<DiagnosticExtraRecord>,
     pub(super) labels: Vec<SecondaryDiagnosticLabel>,
@@ -38,7 +38,7 @@ pub(crate) struct DiagnosticStore {
 
 /// The position of a stored record. Compaction only appends, so an id never changes meaning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct DiagnosticId(u32);
+pub(super) struct DiagnosticId(u32);
 
 impl DiagnosticId {
     /// `index` is below the record limit, which keeps it inside `u32`.
@@ -53,13 +53,13 @@ impl DiagnosticId {
 
 impl DiagnosticStore {
     /// An empty store with production ceilings.
-    pub(crate) fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self::with_limits(DiagnosticLimits::production())
     }
 
     /// An empty store with the given ceilings. A store needs room for a draft and for the capacity record that
     /// replaces it, so it must allow at least two records.
-    pub(crate) fn with_limits(limits: DiagnosticLimits) -> Self {
+    pub(super) fn with_limits(limits: DiagnosticLimits) -> Self {
         assert!(
             limits.records >= 2,
             "a store must hold a draft and the capacity record that replaces it"
@@ -79,7 +79,7 @@ impl DiagnosticStore {
     }
 
     /// The record at `id`, read through the store's arenas.
-    pub(crate) fn record(&self, id: DiagnosticId) -> RecordRef<'_> {
+    pub(super) fn record(&self, id: DiagnosticId) -> RecordRef<'_> {
         RecordRef {
             store: self,
             record: &self.records[id.index()],
@@ -89,29 +89,29 @@ impl DiagnosticStore {
 
 /// A stored record with the store that owns its arenas. Copyable, so views can pass it along freely.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct RecordRef<'a> {
+pub(super) struct RecordRef<'a> {
     store: &'a DiagnosticStore,
     record: &'a DiagnosticRecord,
 }
 
 impl<'a> RecordRef<'a> {
-    pub(crate) fn code(self) -> DiagnosticCode {
+    pub(super) fn code(self) -> DiagnosticCode {
         self.record.code
     }
 
     /// The severity override the record stores. `Default` keeps the family descriptor's severity.
-    pub(crate) fn severity(self) -> SeverityOverride {
+    pub(super) fn severity(self) -> SeverityOverride {
         self.record.severity
     }
 
     /// A reader over the fact words. Each view reads the words its family declares, in layout order.
-    pub(crate) fn facts(self) -> FactReader<'a> {
+    pub(super) fn facts(self) -> FactReader<'a> {
         FactReader::new(&self.record.facts)
     }
 
     /// The primary site: foreign when a foreign-site row names the primary selector, otherwise local. The span stays
     /// in the record either way, so a foreign primary reads its span from the record.
-    pub(crate) fn primary(self) -> SiteRef<'a> {
+    pub(super) fn primary(self) -> SiteRef<'a> {
         self.site(self.record.primary, PRIMARY_SELECTOR)
     }
 
@@ -156,7 +156,7 @@ impl<'a> RecordRef<'a> {
     }
 
     /// The string list a family declares as extra data, or an empty slice.
-    pub(crate) fn string_ids(self) -> &'a [StringId] {
+    pub(super) fn string_ids(self) -> &'a [StringId] {
         let Some(extra) = self.extra() else {
             return &[];
         };

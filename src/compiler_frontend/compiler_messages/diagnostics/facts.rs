@@ -16,7 +16,7 @@ use std::cell::Cell;
 use std::marker::PhantomData;
 
 /// Words in a record's fact area.
-pub(crate) const FACT_WORDS: usize = 4;
+pub(super) const FACT_WORDS: usize = 4;
 
 /// A value does not fit the words its codec writes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,7 +38,7 @@ pub(crate) trait FactCodec {
 }
 
 /// A unit enum stored as one word. Codes are small non-zero integers chosen by the enum's `unit_code!` table.
-pub(crate) trait UnitCode: Sized + Copy {
+pub(super) trait UnitCode: Sized + Copy {
     fn code(self) -> u32;
     fn from_code(code: u32) -> Option<Self>;
 }
@@ -76,7 +76,7 @@ macro_rules! unit_code {
         }
     };
 }
-pub(crate) use unit_code;
+pub(super) use unit_code;
 
 /// Places pack a two-bit tag above a 30-bit value. Tag 0 with value 0 is the unknown place.
 const PLACE_TAG_SHIFT: u32 = 30;
@@ -102,6 +102,19 @@ pub(super) fn type_display_word(id: TypeDisplayId) -> Result<u32, FactCapacityEr
 pub(super) fn type_display_from_word(word: u32) -> Option<TypeDisplayId> {
     let index = word.checked_sub(1)?;
     TypeDisplayId::from_index(index as usize).ok()
+}
+
+/// The pending word of an absent type. `capture_types` rewrites it to `NO_TYPE_WORD` without calling `rewrite`.
+pub(super) const ABSENT_TYPE_WORD: u32 = u32::MAX;
+/// The captured word for "no type". Display words are one-based, so zero stays free.
+pub(super) const NO_TYPE_WORD: u32 = 0;
+
+/// Encodes a raw `TypeId` as a pending word. `ABSENT_TYPE_WORD` marks absence, so that one id is refused.
+pub(super) fn pending_type_word(id: TypeId) -> Result<u32, FactCapacityError> {
+    if id.0 == ABSENT_TYPE_WORD {
+        return Err(FactCapacityError);
+    }
+    Ok(id.0)
 }
 
 fn place_word(tag: u32, value: usize) -> Result<u32, FactCapacityError> {
@@ -236,6 +249,56 @@ impl FactCodec for CountFact {
     }
 }
 
+/// A character as one word. Decoding rejects words that are not Unicode scalar values.
+#[cfg_attr(not(test), allow(dead_code, reason = "P4.4 family rows use it"))]
+pub(crate) struct CharFact;
+
+impl FactCodec for CharFact {
+    type Draft = char;
+    type Durable = char;
+    const WORDS: usize = 1;
+
+    fn encode(draft: &char, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        words[0] = u32::from(*draft);
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<char> {
+        char::from_u32(words[0])
+    }
+}
+
+/// An optional count. `u32::MAX` marks absence, so a present count must stay below it.
+#[cfg_attr(not(test), allow(dead_code, reason = "P4.4 family rows use it"))]
+pub(crate) struct OptCountFact;
+
+impl FactCodec for OptCountFact {
+    type Draft = Option<usize>;
+    type Durable = Option<usize>;
+    const WORDS: usize = 1;
+
+    fn encode(draft: &Option<usize>, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        words[0] = match draft {
+            Some(count) => {
+                let word = u32::try_from(*count).map_err(|_| FactCapacityError)?;
+                if word == u32::MAX {
+                    return Err(FactCapacityError);
+                }
+                word
+            }
+            None => u32::MAX,
+        };
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<Option<usize>> {
+        match words[0] {
+            u32::MAX => Some(None),
+            word => Some(Some(word as usize)),
+        }
+    }
+}
+
 /// A type. The draft holds a raw `TypeId`, which compaction rewrites into a type display word.
 pub(crate) struct TypeFact;
 
@@ -246,12 +309,38 @@ impl FactCodec for TypeFact {
     const PENDING: bool = true;
 
     fn encode(draft: &TypeId, words: &mut [u32]) -> Result<(), FactCapacityError> {
-        words[0] = draft.0;
+        words[0] = pending_type_word(*draft)?;
         Ok(())
     }
 
     fn decode(words: &[u32]) -> Option<TypeDisplayId> {
         type_display_from_word(words[0])
+    }
+}
+
+/// An optional type. Absence is `ABSENT_TYPE_WORD`, which `capture_types` captures as `NO_TYPE_WORD`.
+#[cfg_attr(not(test), allow(dead_code, reason = "P4.4 family rows use it"))]
+pub(crate) struct OptTypeFact;
+
+impl FactCodec for OptTypeFact {
+    type Draft = Option<TypeId>;
+    type Durable = Option<TypeDisplayId>;
+    const WORDS: usize = 1;
+    const PENDING: bool = true;
+
+    fn encode(draft: &Option<TypeId>, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        words[0] = match draft {
+            Some(id) => pending_type_word(*id)?,
+            None => ABSENT_TYPE_WORD,
+        };
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<Option<TypeDisplayId>> {
+        match words[0] {
+            NO_TYPE_WORD => Some(None),
+            word => type_display_from_word(word).map(Some),
+        }
     }
 }
 
@@ -326,7 +415,7 @@ impl<T: UnitCode> FactCodec for UnitFact<T> {
 }
 
 /// Writes facts into a record's fact area in declaration order.
-pub(crate) struct FactCursor {
+pub(super) struct FactCursor {
     words: [u32; FACT_WORDS],
     used: usize,
     pending: u8,
@@ -374,7 +463,7 @@ impl FactCursor {
 }
 
 /// Reads facts from a record's fact area in declaration order.
-pub(crate) struct FactReader<'a> {
+pub(super) struct FactReader<'a> {
     words: &'a [u32; FACT_WORDS],
     used: Cell<usize>,
 }
@@ -387,7 +476,7 @@ impl<'a> FactReader<'a> {
         }
     }
 
-    pub(crate) fn read<C: FactCodec>(&self) -> C::Durable {
+    pub(super) fn read<C: FactCodec>(&self) -> C::Durable {
         let start = self.used.get();
         let end = start + C::WORDS;
         self.used.set(end);
@@ -396,7 +485,7 @@ impl<'a> FactReader<'a> {
     }
 
     /// Checks that no word was left unread. Unread words are always zero, because only codecs write words.
-    pub(crate) fn finish(self) {
+    pub(super) fn finish(self) {
         let used = self.used.get();
         assert!(
             self.words[used..].iter().all(|word| *word == 0),

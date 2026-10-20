@@ -23,7 +23,7 @@ use crate::compiler_frontend::source::FrozenIdentityHandle;
 
 /// The outcome of compacting one draft.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CompactOutcome {
+pub(super) enum CompactOutcome {
     /// The draft is stored at this id.
     Stored(DiagnosticId),
     /// The draft is not stored. The resource names the arena that refused it. The store is full from now on, and its
@@ -36,7 +36,7 @@ impl DiagnosticStore {
     ///
     /// The draft's types must already be captured. A pending mark is a caller bug, so it panics rather than storing a
     /// raw `TypeId` where a display ID belongs.
-    pub(crate) fn compact(&mut self, draft: DiagnosticDraft) -> CompactOutcome {
+    pub(super) fn compact(&mut self, draft: DiagnosticDraft) -> CompactOutcome {
         if let Some(resource) = self.full {
             return CompactOutcome::Rejected(resource);
         }

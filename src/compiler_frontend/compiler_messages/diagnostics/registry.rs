@@ -11,7 +11,7 @@ use super::record::DiagnosticCode;
 use super::schema::FamilyRow;
 
 /// Every group table. A group with no pilot rows holds an empty slice.
-pub(crate) const FAMILY_GROUPS: &[&[FamilyRow]] = &[
+pub(super) const FAMILY_GROUPS: &[&[FamilyRow]] = &[
     token_lexical::FAMILIES,
     imports::FAMILIES,
     names_declarations::FAMILIES,
@@ -24,7 +24,7 @@ pub(crate) const FAMILY_GROUPS: &[&[FamilyRow]] = &[
 ];
 
 /// The family row that declares `code`, if one does.
-pub(crate) fn family_for_code(code: DiagnosticCode) -> Option<&'static FamilyRow> {
+pub(super) fn family_for_code(code: DiagnosticCode) -> Option<&'static FamilyRow> {
     FAMILY_GROUPS
         .iter()
         .flat_map(|group| group.iter())

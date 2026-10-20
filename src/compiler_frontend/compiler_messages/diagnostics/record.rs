@@ -13,18 +13,18 @@ use std::num::NonZeroU16;
 
 /// A stable internal diagnostic code. Zero is never a valid code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct DiagnosticCode(NonZeroU16);
+pub(super) struct DiagnosticCode(NonZeroU16);
 
 impl DiagnosticCode {
     /// Panics on zero. Family rows are checked at compile time, so this panic is unreachable for real rows.
-    pub(crate) const fn new(code: u16) -> Self {
+    pub(super) const fn new(code: u16) -> Self {
         match NonZeroU16::new(code) {
             Some(code) => Self(code),
             None => panic!("diagnostic codes are never zero"),
         }
     }
 
-    pub(crate) const fn get(self) -> u16 {
+    pub(super) const fn get(self) -> u16 {
         self.0.get()
     }
 }
@@ -32,7 +32,7 @@ impl DiagnosticCode {
 /// A per-record severity override. `Default` keeps the family descriptor's severity.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum SeverityOverride {
+pub(super) enum SeverityOverride {
     #[default]
     Default = 0,
     Error = 1,
@@ -68,7 +68,7 @@ impl SeverityOverride {
 /// One compact diagnostic. Its size is locked at 32 bytes: the fields take 31 bytes, and
 /// the tail pads them to the 4-byte alignment of the span and fact words.
 #[derive(Debug)]
-pub(crate) struct DiagnosticRecord {
+pub(super) struct DiagnosticRecord {
     pub(super) code: DiagnosticCode,
     pub(super) severity: SeverityOverride,
     pub(super) primary: Option<SourceSpan>,

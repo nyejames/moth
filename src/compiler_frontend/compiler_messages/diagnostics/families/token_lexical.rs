@@ -121,7 +121,7 @@ diagnostic_family! {
 }
 
 /// The compiler-capacity draft for `resource` at `span`. Callers use it when a fixed-size limit is reached.
-pub(crate) fn compiler_capacity_exceeded(
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn compiler_capacity_exceeded(
     resource: impl Into<CapacityResource>,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -290,7 +290,7 @@ diagnostic_family! {
     }
 }
 
-pub(crate) const FAMILIES: &[FamilyRow] = &[
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES: &[FamilyRow] = &[
     EXPECTED_TOKEN,
     COMPILER_CAPACITY_EXCEEDED,
     UNEXPECTED_TOKEN,

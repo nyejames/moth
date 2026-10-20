@@ -20,13 +20,13 @@ use crate::compiler_frontend::compiler_messages::{
 
 /// One fact's storage shape, read from its codec.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct FactDescriptor {
-    pub(crate) words: u8,
-    pub(crate) pending: bool,
+pub(super) struct FactDescriptor {
+    pub(super) words: u8,
+    pub(super) pending: bool,
 }
 
 impl FactDescriptor {
-    pub(crate) const fn of<C: FactCodec>() -> Self {
+    pub(super) const fn of<C: FactCodec>() -> Self {
         Self {
             words: C::WORDS as u8,
             pending: C::PENDING,
@@ -35,26 +35,25 @@ impl FactDescriptor {
 }
 
 /// One family's renderer. It reads a record through the family's view and returns the message and guidance.
-pub(crate) type FamilyRenderer =
-    fn(&DiagnosticView<'_>, DiagnosticRenderContext<'_>) -> RenderedPayload;
+type FamilyRenderer = fn(&DiagnosticView<'_>, DiagnosticRenderContext<'_>) -> RenderedPayload;
 
 /// A family's static schema.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FamilyRow {
-    pub(crate) code: DiagnosticCode,
-    pub(crate) stable_code: &'static str,
+    pub(super) code: DiagnosticCode,
+    pub(super) stable_code: &'static str,
     #[cfg_attr(
         not(test),
         allow(dead_code, reason = "P4.6 producer sweep reads family categories")
     )]
-    pub(crate) category: DiagnosticCategory,
-    pub(crate) reserved: bool,
+    pub(super) category: DiagnosticCategory,
+    pub(super) reserved: bool,
     /// The legacy descriptor. Only pilot rows carry one.
-    pub(crate) descriptor: Option<DiagnosticDescriptor>,
-    pub(crate) layout: &'static [FactDescriptor],
-    pub(crate) extra: ExtraDataKind,
+    pub(super) descriptor: Option<DiagnosticDescriptor>,
+    pub(super) layout: &'static [FactDescriptor],
+    pub(super) extra: ExtraDataKind,
     /// Family-specific label codes that drafts of this family may declare. The universal codes apply to every family.
-    pub(crate) labels: &'static [LabelMessageCode],
+    pub(super) labels: &'static [LabelMessageCode],
     /// Renders the family's records from their typed view. Only pilot rows carry a renderer; identity rows have no
     /// records to render.
     pub(crate) render: Option<FamilyRenderer>,
@@ -62,7 +61,7 @@ pub(crate) struct FamilyRow {
 
 impl FamilyRow {
     /// Total fact words that this family's constructor must write.
-    pub(crate) const fn word_count(&self) -> usize {
+    pub(super) const fn word_count(&self) -> usize {
         let mut total = 0;
         let mut index = 0;
         while index < self.layout.len() {
@@ -73,7 +72,7 @@ impl FamilyRow {
     }
 
     /// Bit `n` is set when fact word `n` holds a raw type id.
-    pub(crate) const fn pending_mask(&self) -> u8 {
+    pub(super) const fn pending_mask(&self) -> u8 {
         let mut mask = 0;
         let mut word = 0;
         let mut index = 0;
@@ -102,12 +101,12 @@ impl FamilyRow {
     }
 
     /// The severity that the family's descriptor gives its records. Only pilot rows carry a descriptor.
-    pub(crate) const fn default_severity(&self) -> DiagnosticSeverity {
+    pub(super) const fn default_severity(&self) -> DiagnosticSeverity {
         self.pilot_descriptor().default_severity
     }
 
     /// Whether drafts of this family may carry a label with `code`: one of its declared roles or a universal role.
-    pub(crate) fn permits_label(&self, code: LabelMessageCode) -> bool {
+    pub(super) fn permits_label(&self, code: LabelMessageCode) -> bool {
         code.is_universal() || self.labels.contains(&code)
     }
 
@@ -115,13 +114,13 @@ impl FamilyRow {
         not(test),
         allow(dead_code, reason = "reserved flag (D9): only schema tests read it")
     )]
-    pub(crate) const fn is_reserved(&self) -> bool {
+    pub(super) const fn is_reserved(&self) -> bool {
         self.reserved
     }
 }
 
 /// The thousands band that codes in `category` occupy. For example, `Rule` owns `3000..=3999`.
-pub(crate) const fn band_of(category: DiagnosticCategory) -> u16 {
+pub(super) const fn band_of(category: DiagnosticCategory) -> u16 {
     match category {
         DiagnosticCategory::Syntax => 1000,
         DiagnosticCategory::Type => 2000,
@@ -145,7 +144,7 @@ macro_rules! reserved_flag {
         true
     };
 }
-pub(crate) use reserved_flag;
+pub(super) use reserved_flag;
 
 /// Expands to a family's renderer slot. `none` marks a reserved family with no records; any other renderer
 /// decodes the record into the family view and passes it to the renderer.
@@ -168,7 +167,7 @@ macro_rules! family_renderer {
         })
     };
 }
-pub(crate) use family_renderer;
+pub(super) use family_renderer;
 
 /// Declares a family row.
 ///
@@ -244,7 +243,7 @@ macro_rules! diagnostic_family {
             }
         }
 
-        pub(crate) fn $ctor(
+        pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn $ctor(
             $($field: <$codec as $crate::compiler_frontend::compiler_messages::diagnostics::facts::FactCodec>::Draft,)*
             span: Option<$crate::compiler_frontend::source::SourceSpan>,
         ) -> $crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft {
@@ -355,4 +354,4 @@ macro_rules! diagnostic_family {
             };
     };
 }
-pub(crate) use diagnostic_family;
+pub(super) use diagnostic_family;

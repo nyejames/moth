@@ -8,7 +8,9 @@
 //! table that will hold its types exists.
 
 use super::extras::{DiagnosticExtraDraft, ExtraDataDraft};
-use super::facts::{FACT_WORDS, FactCapacityError, FactCursor, type_display_word};
+use super::facts::{
+    ABSENT_TYPE_WORD, FACT_WORDS, FactCapacityError, FactCursor, NO_TYPE_WORD, type_display_word,
+};
 use super::families::token_lexical::{COMPILER_CAPACITY_EXCEEDED, CapacityResourceFact};
 use super::foreign::{ForeignSiteDraft, ForeignSlot};
 use super::labels::{DraftType, encode_label};
@@ -26,7 +28,7 @@ use crate::compiler_frontend::symbols::string_interning::StringId;
 
 /// A diagnostic under construction. Only `DiagnosticStore::compact` turns it into a stored record.
 #[derive(Debug)]
-pub(crate) struct DiagnosticDraft {
+pub(super) struct DiagnosticDraft {
     pub(super) core: DraftCore,
     pub(super) extra: Option<Box<DiagnosticExtraDraft>>,
 }
@@ -38,7 +40,7 @@ const _: () = assert!(
 
 /// The fixed-size part of a draft.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct DraftCore {
+pub(super) struct DraftCore {
     pub(super) family: &'static FamilyRow,
     pub(super) span: Option<SourceSpan>,
     pub(super) facts: [u32; FACT_WORDS],
@@ -129,7 +131,7 @@ impl DiagnosticDraft {
 impl DiagnosticDraft {
     /// Records `severity` as this draft's override. A severity equal to the family default stores nothing, so the
     /// record keeps the descriptor's severity. A faulted draft keeps its capacity severity.
-    pub(crate) fn with_severity(mut self, severity: DiagnosticSeverity) -> Self {
+    pub(super) fn with_severity(mut self, severity: DiagnosticSeverity) -> Self {
         if !self.core.faulted {
             self.core.severity =
                 SeverityOverride::for_severity(severity, self.core.family.default_severity());
@@ -203,14 +205,14 @@ impl DiagnosticDraft {
     /// rewrite succeeds. A failed call leaves the draft exactly as it was. Callers map the error to their own
     /// capacity handling: the render adapter expects success, since one diagnostic's types always fit the id space.
     /// The P4.6 producer emits `COMPILER_CAPACITY_EXCEEDED` (D5), and P4.5 bags latch their domain capacity.
-    pub(crate) fn capture_types(
+    pub(super) fn capture_types(
         &mut self,
         rewrite: &mut impl FnMut(TypeId) -> Result<TypeDisplayId, TypeDisplayCapacityError>,
     ) -> Result<(), TypeDisplayCapacityError> {
         let mut facts = self.core.facts;
         for (index, word) in facts.iter_mut().enumerate() {
             if is_marked(self.core.pending_facts, index) {
-                *word = captured_word(rewrite, TypeId(*word))?;
+                *word = captured_word(rewrite, *word)?;
             }
         }
 
@@ -224,14 +226,14 @@ impl DiagnosticDraft {
                 let mut data = label.data;
                 for (slot, word) in data.iter_mut().enumerate() {
                     if is_marked(label.pending_types, slot) {
-                        *word = captured_word(rewrite, TypeId(*word))?;
+                        *word = captured_word(rewrite, *word)?;
                     }
                 }
                 label_updates.push((index, data));
             }
             for (index, entry) in extra.substitutions.iter().enumerate() {
-                if let DraftType::Pending(type_id) = entry.concrete {
-                    substitution_updates.push((index, captured_word(rewrite, type_id)?));
+                if let DraftType::Pending(word) = entry.concrete {
+                    substitution_updates.push((index, captured_word(rewrite, word)?));
                 }
             }
         }
@@ -258,11 +260,14 @@ fn is_marked(mask: u8, bit: usize) -> bool {
     mask & (1 << bit) != 0
 }
 
-/// Rewrites one raw `TypeId` to its display word. Display words are `index + 1`, so zero stays free for "no type".
+/// Rewrites one pending word to its display word. The absent sentinel captures as `NO_TYPE_WORD` without a rewrite.
 fn captured_word(
     rewrite: &mut impl FnMut(TypeId) -> Result<TypeDisplayId, TypeDisplayCapacityError>,
-    type_id: TypeId,
+    word: u32,
 ) -> Result<u32, TypeDisplayCapacityError> {
-    let display = rewrite(type_id)?;
+    if word == ABSENT_TYPE_WORD {
+        return Ok(NO_TYPE_WORD);
+    }
+    let display = rewrite(TypeId(word))?;
     type_display_word(display).map_err(|FactCapacityError| TypeDisplayCapacityError)
 }
