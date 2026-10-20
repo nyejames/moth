@@ -18,7 +18,7 @@ The semantic rules are unchanged. A fallible call runs once and takes either its
 
 ## Status
 
-Proposed design pending approval. Implementation is deferred. The Wasm backend lowers no registered host-binding import and has no fallible, Error or boundary-handle lowering. No `ValidatedMemoryPlan` producer exists either. These layouts are the target contract for that producer. They don't authorise a temporary memory planner, a guessed layout or an executable artefact with placeholder ABI facts. Current support lives in the progress matrix.
+Accepted design with implementation deferred. The Wasm backend lowers no registered host-binding import and has no fallible, Error or boundary-handle lowering. No `ValidatedMemoryPlan` producer exists either. These layouts are the target contract for that producer. They don't authorise a temporary memory planner, a guessed layout or an executable artefact with placeholder ABI facts. Current support lives in the progress matrix.
 
 ## Profile and conventions
 

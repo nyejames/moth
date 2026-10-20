@@ -1,7 +1,7 @@
 # Lappet host ABI adapter responsibilities
 
-> Proposed design pending approval. Lappet has no runtime, adapter or
-> registration code yet. [The roadmap](../roadmap.md) owns status.
+> Accepted design with implementation deferred. Lappet has no runtime, adapter
+> or registration code yet. [The roadmap](../roadmap.md) owns status.
 
 This document owns Lappet's side of the V1 native host boundary: installing
 Rust implementations, checking and converting boundary values, the staging and

@@ -10,7 +10,7 @@ page_head #= theme_head
 #[section, $md:
     @../ (Memory management) / Native host ABI
 
-    Compiled Moth calls registered Rust host functions, and Rust calls builder-selected Moth exports, through one closed value boundary. Proposed design pending approval, with implementation deferred.
+    Compiled Moth calls registered Rust host functions, and Rust calls builder-selected Moth exports, through one closed value boundary. Accepted design with implementation deferred.
 ]
 
 #[section, reference_content]
