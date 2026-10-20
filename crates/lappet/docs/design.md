@@ -125,13 +125,16 @@ entry. Rust invokes only explicitly selected Moth callable exports through
 checked wrappers. A public Moth package declaration is not automatically a host
 export, network endpoint or a revived `moth_start` convention.
 
-The starting profile contains exact scalars, strings, supported optionals, the
-Moth error channel, explicit host context and opaque Rust-owned resources.
-Byte buffers, records, choices, collections and ordered multiple results are
-accepted priorities for the V1 binding design. Their concrete supported shapes,
-conversions, physical packing and cleanup need approval before implementation.
-This extends the existing restricted host profile deliberately rather than
-claiming that every Rust type already has a Moth representation.
+The V1 profile contains exact scalars except `F16`, strings, one optional layer,
+the builtin `Error!` channel, explicit host context and opaque Rust-owned
+resource parameters. Exports may also return ordered multiple results. The
+[native host ABI](../../../docs/src/developer-docs/memory-management/native-host-abi/native-host-abi.mtf)
+fixes their physical encoding and lists the V1 support table. Byte buffers,
+records, choices, collections, multiple results on host imports and resource
+results are deferred beyond V1. Each needs its own approved shape, conversion,
+layout and cleanup before any binding accepts it. This extends the existing
+restricted host profile deliberately rather than claiming that every Rust type
+already has a Moth representation.
 
 Keep these invariants throughout that work:
 
@@ -146,13 +149,16 @@ Keep these invariants throughout that work:
   copy-in/copy-out writeback.
 - Returned ordinary values become independent Moth storage through the approved
   allocation and result ABI. Opaque resources remain host-owned identities.
-- Validate ranges, finite floats, Unicode, lengths, handles and result shapes
-  before exposing a successful value. Preserve declared errors separately from
-  traps and boundary faults.
+- Validate ranges, Unicode, lengths, handles and result shapes before exposing
+  a successful value. Binary-float import results cross raw and the compiler's
+  external float guard decides their delivery. Preserve declared errors
+  separately from traps and boundary faults.
 
-The ABI checkpoint must define allocation and cleanup control flow as well as
-signatures. Runtime-internal marshalling helpers must not accidentally create
-an unrestricted callback or guest re-entry facility.
+The native host ABI defines allocation and cleanup control flow as well as
+signatures, through staged text and call scopes.
+[Host ABI adapter responsibilities](host-abi.md) owns Lappet's side of it.
+Runtime-internal marshalling helpers must not accidentally create an
+unrestricted callback or guest re-entry facility.
 
 ## Trusted host libraries and Core implementations
 
