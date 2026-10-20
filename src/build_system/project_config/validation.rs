@@ -7,8 +7,10 @@
 //! values against the builder surface's schema nodes without inspecting compiler AST internals.
 
 use crate::build_system::output::{
+    DEFAULT_DEV_OUTPUT, DEFAULT_RELEASE_OUTPUT, DEV_OUTPUT_FIELD, RELEASE_OUTPUT_FIELD,
     ValidatedDirectoryOutputSettings, ValidatedOutputFolder, canonical_output_root_for_identity,
-    classify_output_folder, output_path_identity, validate_output_folder_containment,
+    classify_output_folder, ensure_single_output_root_owner, output_path_identity,
+    validate_output_folder_containment,
 };
 use crate::compiler_frontend::single_source_compilation::{
     CompiledConfigSource, FoldedConfigDeclaration,
@@ -30,7 +32,7 @@ use crate::compiler_frontend::folded_value::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::settings::{
-    Config, HtmlSectionConfig, MAX_TEMPLATE_CONST_LOOP_ITERATIONS, ProjectMetadataField,
+    Config, MAX_TEMPLATE_CONST_LOOP_ITERATIONS, ProjectMetadataField,
     TEMPLATE_CONST_LOOP_ITERATION_LIMIT_KEY,
 };
 use moth_lexical::identifier::is_identifier;
@@ -73,12 +75,42 @@ pub(super) fn validate_and_apply_config_declarations(
 
     let mut errors = Vec::new();
     let mut saw_project_record = false;
-    let mut seen_sections: HashSet<&str> = HashSet::new();
+    // WHY: the output roots have one value and one authored span for the whole project, so two
+    // sections that own them would replace each other instead of failing.
+    ensure_single_output_root_owner(config_schemas.project_sections())
+        .map_err(ConfigApplyError::Compiler)?;
+    let authored_sections: HashSet<&str> = config_schemas
+        .project_sections()
+        .iter()
+        .map(|section| section.name.as_ref())
+        .filter(|name: &&str| {
+            compiled_config
+                .declarations
+                .iter()
+                .any(|declaration| string_table.resolve(declaration.name) == *name)
+        })
+        .collect();
 
     let project_field_indexes = SchemaFieldIndexes::build(config_schemas.project());
     let mut section_indexes = Vec::with_capacity(config_schemas.project_sections().len());
     for section in config_schemas.project_sections() {
         section_indexes.push(SchemaFieldIndexes::build(&section.schema));
+    }
+
+    for (section_index, section) in config_schemas.project_sections().iter().enumerate() {
+        if section.required || authored_sections.contains(section.name.as_ref()) {
+            continue;
+        }
+
+        if let Err(error) = apply_omitted_section_defaults(
+            config,
+            section,
+            &section_indexes[section_index],
+            string_table,
+            &mut errors,
+        ) {
+            return Err(ConfigApplyError::Compiler(error));
+        }
     }
 
     for declaration in &compiled_config.declarations {
@@ -113,7 +145,6 @@ pub(super) fn validate_and_apply_config_declarations(
             .enumerate()
             .find(|(_, section)| section.name == key)
         {
-            seen_sections.insert(section.name.as_ref());
             if matches!(declaration.value, PublicFoldedValue::Record(_)) {
                 if let Err(error) = validate_and_apply_named_section(
                     config,
@@ -162,7 +193,7 @@ pub(super) fn validate_and_apply_config_declarations(
     }
 
     for section in config_schemas.project_sections() {
-        if section.required && !seen_sections.contains(section.name.as_ref()) {
+        if section.required && !authored_sections.contains(section.name.as_ref()) {
             errors.push(config_diagnostic(
                 None,
                 InvalidConfigReason::MissingActiveBuilderSection {
@@ -384,42 +415,147 @@ fn validate_and_apply_named_section(
         section.schema.root(),
         &declaration.value,
         Some(&declaration.direct_field_spans),
-    ) && section.name == "html"
-    {
-        apply_html_section_fields(config, fields)?;
+    ) {
+        apply_builder_section_fields(config, section.name.as_ref(), fields)?;
     }
 
     Ok(())
 }
 
-/// Apply the validated fields of one grouped html section record.
+/// Apply the schema defaults of one optional builder section that the project did not author.
 ///
-/// WHAT: routes each owned field through the html application path in authored order, so the
-///       last authored spelling of a field owns the stored value.
-/// WHY: the HTML builder's typed section is the only settings store for html keys.
-fn apply_html_section_fields(
+/// WHAT: validates the section's defaulted root fields and applies them only when every one of
+///       them is valid. A required section never reaches this path, because its absence is an
+///       error and its defaults are never applied.
+/// WHY: an absent optional section still gives its builder the defaults its schema declares, so
+///      output roots resolve for every builder that registers them.
+fn apply_omitted_section_defaults(
     config: &mut Config,
+    section: &NamedConfigSectionSchema,
+    field_indexes: &SchemaFieldIndexes<'_>,
+    string_table: &mut StringTable,
+    errors: &mut Vec<CompilerDiagnostic>,
+) -> Result<(), CompilerError> {
+    let view = ConfigSchemaView {
+        schema: &section.schema,
+        field_indexes,
+    };
+    let mut diagnostics = ValueDiagnosticContext {
+        span: None,
+        string_table,
+        errors,
+    };
+    let root = section.schema.node(section.schema.root());
+    let mut defaults = Vec::new();
+    let mut failed = false;
+
+    for field_id in root.field_ids() {
+        let field = section.schema.field(*field_id);
+
+        if let Some(default) = &field.default {
+            match validate_field_default(&view, &mut diagnostics, field, default) {
+                Some(validated_default) => defaults.push(validated_default),
+                None => failed = true,
+            }
+        }
+    }
+
+    if failed {
+        return Ok(());
+    }
+
+    apply_builder_section_fields(config, section.name.as_ref(), defaults)
+}
+
+/// Apply the validated fields of one builder section record in field order.
+///
+/// WHAT: routes each field through the builder section path, so the last authored spelling of a
+///       field owns the stored value.
+/// WHY: every builder section stores its values through the same rules, whichever builder
+///      registered it.
+fn apply_builder_section_fields(
+    config: &mut Config,
+    section_name: &str,
     fields: Vec<ValidatedRecordField>,
 ) -> Result<(), CompilerError> {
     for field in fields {
-        apply_html_section_field(config, field)?;
+        apply_builder_section_field(config, section_name, field)?;
     }
     Ok(())
 }
 
-/// Apply one validated html section field to the config.
+/// Apply one validated builder section field to the config.
 ///
-/// WHAT: stores each html builder field on the typed [`HtmlSectionConfig`] result. The HTML
-///       builder's readers consume that section directly.
-/// WHY: html values must not be stringified into a settings map. An unmatched validated field
-///       means the schema and typed storage drifted, which is a compiler bug.
-fn apply_html_section_field(
+/// WHAT: output roots and the typed html fields store on their own config fields and keep their
+///       authored spans under the field name. Any other field of a builder section lands in the
+///       generic builder settings store, which records no span.
+/// WHY: a generic field must not replace or remove a project record span that shares its name,
+///      such as `name`, so only the fields this function owns update the span map.
+fn apply_builder_section_field(
     config: &mut Config,
+    section_name: &str,
     field: ValidatedRecordField,
 ) -> Result<(), CompilerError> {
     let name = field.name;
     let field_span = field.span;
     match (name.as_str(), field.value) {
+        (DEV_OUTPUT_FIELD, ValidatedConfigValue::String(text)) => {
+            config.output_roots.dev_output = Some(text);
+        }
+        (RELEASE_OUTPUT_FIELD, ValidatedConfigValue::String(text)) => {
+            config.output_roots.release_output = Some(text);
+        }
+        (_, value) if section_name == "html" => {
+            apply_html_section_value(config, &name, value)?;
+        }
+        (_, value) => return apply_generic_builder_value(config, section_name, &name, value),
+    }
+
+    if let Some(span) = field_span {
+        config.setting_spans.insert(name, span);
+    } else {
+        config.setting_spans.remove(&name);
+    }
+    Ok(())
+}
+
+/// Store one validated builder field in the generic builder settings store.
+///
+/// WHAT: strings and bools land under the field name, and an absent optional value clears any
+///       value already stored under that name.
+/// WHY: the store holds the value shapes that builders read by name. Any other shape is a
+///      builder schema the store cannot hold, so it fails loudly rather than being dropped.
+fn apply_generic_builder_value(
+    config: &mut Config,
+    section_name: &str,
+    name: &str,
+    value: ValidatedConfigValue,
+) -> Result<(), CompilerError> {
+    match value {
+        ValidatedConfigValue::String(text) => config.builder_settings.set_string(name, text),
+        ValidatedConfigValue::Bool(enabled) => config.builder_settings.set_bool(name, enabled),
+        ValidatedConfigValue::OptionNone => config.builder_settings.clear(name),
+        _ => {
+            return Err(CompilerError::compiler_error(format!(
+                "builder section '{section_name}' field '{name}' has an unstorable value shape"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Store one validated html section field on the typed html section config.
+///
+/// WHAT: matches each typed html field to its storage slot. Output roots never reach this point.
+/// WHY: the HTML builder's readers consume the typed section directly, so html values must not be
+///      stringified into the generic store. An unmatched field means the schema and typed storage
+///      drifted, which is a compiler bug.
+fn apply_html_section_value(
+    config: &mut Config,
+    name: &str,
+    value: ValidatedConfigValue,
+) -> Result<(), CompilerError> {
+    match (name, value) {
         ("origin", ValidatedConfigValue::String(text)) => {
             config.html_section.origin = Some(text);
         }
@@ -456,23 +592,11 @@ fn apply_html_section_field(
         ("html_body_style", ValidatedConfigValue::String(text)) => {
             config.html_section.html_body_style = Some(text);
         }
-        ("dev_output", ValidatedConfigValue::String(text)) => {
-            config.html_section.dev_output = Some(text);
-        }
-        ("release_output", ValidatedConfigValue::String(text)) => {
-            config.html_section.release_output = Some(text);
-        }
         (unknown, _) => {
             return Err(CompilerError::compiler_error(format!(
                 "html section applied unknown validated field '{unknown}'"
             )));
         }
-    }
-
-    if let Some(span) = field_span {
-        config.setting_spans.insert(name, span);
-    } else {
-        config.setting_spans.remove(&name);
     }
     Ok(())
 }
@@ -818,30 +942,9 @@ fn validate_record_fields(
         }
 
         if let Some(default) = &field.default {
-            let field_key = diagnostics.string_table.intern(field.name.as_ref());
-
-            match validate_value(
-                view,
-                diagnostics,
-                Some(field_key),
-                &field.shape,
-                field,
-                default,
-            ) {
-                ValueCheck::Valid(validated_default) => {
-                    validated_fields.push(ValidatedRecordField {
-                        name: field.name.to_string(),
-                        value: validated_default,
-                        span: None,
-                    });
-                }
-
-                ValueCheck::Mismatch => {
-                    failed = true;
-                    push_shape_failure(diagnostics, Some(field_key), &field.shape, field);
-                }
-
-                ValueCheck::Reported => failed = true,
+            match validate_field_default(view, diagnostics, field, default) {
+                Some(validated_default) => validated_fields.push(validated_default),
+                None => failed = true,
             }
         }
     }
@@ -852,6 +955,44 @@ fn validate_record_fields(
 
     ValueCheck::Valid(ValidatedConfigValue::Record(validated_fields))
 }
+
+/// Validate one schema default for a field that an authored record or section omitted.
+///
+/// WHAT: returns the validated field when the default matches its shape, and `None` after
+///       reporting the mismatch or the failure the validator already reported.
+/// WHY: authored records and omitted optional sections share this check, so each schema default
+///      is validated against its field shape in one place.
+fn validate_field_default(
+    view: &ConfigSchemaView<'_, '_>,
+    diagnostics: &mut ValueDiagnosticContext<'_>,
+    field: &ConfigSchemaField,
+    default: &PublicFoldedValue,
+) -> Option<ValidatedRecordField> {
+    let field_key = diagnostics.string_table.intern(field.name.as_ref());
+
+    match validate_value(
+        view,
+        diagnostics,
+        Some(field_key),
+        &field.shape,
+        field,
+        default,
+    ) {
+        ValueCheck::Valid(value) => Some(ValidatedRecordField {
+            name: field.name.to_string(),
+            value,
+            span: None,
+        }),
+
+        ValueCheck::Mismatch => {
+            push_shape_failure(diagnostics, Some(field_key), &field.shape, field);
+            None
+        }
+
+        ValueCheck::Reported => None,
+    }
+}
+
 fn push_shape_failure(
     diagnostics: &mut ValueDiagnosticContext<'_>,
     key: Option<StringId>,
@@ -1121,31 +1262,30 @@ struct EffectiveOutputSetting {
 
 /// Resolve the development and release output roots this config will actually use.
 ///
-/// WHAT: a validated grouped html section owns the output roots through its typed settings,
-/// with the section schema's defaults already applied for omitted fields; an absent section
-/// resolves through the same section defaults.
-/// WHY: dual-mode output resolution must validate the roots that will actually be written
-/// and point diagnostics at the authoring shape that provided each value.
+/// WHAT: each root is the value a builder section authored, or the output-root default when no
+///       section authored it. A builder without a section therefore resolves the same defaults.
+/// WHY: dual-mode output resolution must validate the roots that will actually be written and
+///      point diagnostics at the authoring shape that provided each value.
 fn effective_output_settings(config: &Config) -> (EffectiveOutputSetting, EffectiveOutputSetting) {
     let dev = EffectiveOutputSetting {
-        key: "dev_output",
+        key: DEV_OUTPUT_FIELD,
         folder: PathBuf::from(
             config
-                .html_section
+                .output_roots
                 .dev_output
                 .as_deref()
-                .unwrap_or(HtmlSectionConfig::DEFAULT_DEV_OUTPUT),
+                .unwrap_or(DEFAULT_DEV_OUTPUT),
         ),
     };
 
     let release = EffectiveOutputSetting {
-        key: "release_output",
+        key: RELEASE_OUTPUT_FIELD,
         folder: PathBuf::from(
             config
-                .html_section
+                .output_roots
                 .release_output
                 .as_deref()
-                .unwrap_or(HtmlSectionConfig::DEFAULT_RELEASE_OUTPUT),
+                .unwrap_or(DEFAULT_RELEASE_OUTPUT),
         ),
     };
 

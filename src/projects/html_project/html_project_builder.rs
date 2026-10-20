@@ -15,7 +15,7 @@ use crate::build_system::build::{
     ProjectEntry,
 };
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
-use crate::build_system::output::{BuilderIdentity, CleanupPolicy};
+use crate::build_system::output::{BuilderIdentity, CleanupPolicy, register_output_root_fields};
 use crate::builder_surface::config_schema::{
     ConfigSchema, ConfigSchemaField, NamedConfigSectionSchema, UnknownFieldPolicy,
 };
@@ -57,7 +57,7 @@ use crate::projects::html_project::wasm::artifacts::{
     CompiledHtmlWasmModule, compile_html_module_wasm,
 };
 use crate::projects::routing::parse_html_site_config;
-use crate::projects::settings::{Config, HtmlSectionConfig, ProjectConfigError};
+use crate::projects::settings::{Config, ProjectConfigError};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -406,23 +406,7 @@ impl HtmlProjectBuilder {
         Self::register_html_fields(&mut html_schema);
 
         let html_root = html_schema.root();
-        html_schema
-            .register_field(
-                html_root,
-                ConfigSchemaField::string_with_default(
-                    "dev_output",
-                    HtmlSectionConfig::DEFAULT_DEV_OUTPUT,
-                ),
-            )
-            .expect("html schema is under construction");
-        html_schema
-            .register_field(
-                html_root,
-                ConfigSchemaField::string_with_default(
-                    "release_output",
-                    HtmlSectionConfig::DEFAULT_RELEASE_OUTPUT,
-                ),
-            )
+        register_output_root_fields(&mut html_schema, html_root)
             .expect("html schema is under construction");
         html_schema
             .validate_and_freeze()

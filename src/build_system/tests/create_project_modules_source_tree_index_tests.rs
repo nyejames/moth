@@ -29,8 +29,8 @@ fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
     fs::write(nested.join("@nested.moth"), "").expect("should write nested root");
 
     let mut config = Config::new(root.clone());
-    config.html_section.dev_output = Some(String::from("scratch"));
-    config.html_section.release_output = Some(String::from("generated"));
+    config.output_roots.dev_output = Some(String::from("scratch"));
+    config.output_roots.release_output = Some(String::from("generated"));
     let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
     let canonical_entry_root =
         fs::canonicalize(&entry_root).expect("entry root should canonicalize");

@@ -27,12 +27,12 @@ fn parses_config_constant_declarations() {
     );
     assert_eq!(config.html_section.redirect_index_html, Some(true));
     assert_eq!(
-        config.html_section.dev_output.as_deref(),
+        config.output_roots.dev_output.as_deref(),
         Some("dev"),
         "the html section's schema defaults should own the output roots"
     );
     assert_eq!(
-        config.html_section.release_output.as_deref(),
+        config.output_roots.release_output.as_deref(),
         Some("release")
     );
     assert_eq!(config.template_const_loop_iteration_limit, 10001);

@@ -1435,8 +1435,8 @@ fn validated_output_settings_select_default_profile_roots() {
 fn validated_output_settings_preserve_configured_profile_roots() {
     let root = unused_temp_path("output_overrides");
     let mut config = Config::new(root.clone());
-    config.html_section.dev_output = Some("preview".to_owned());
-    config.html_section.release_output = Some("public".to_owned());
+    config.output_roots.dev_output = Some("preview".to_owned());
+    config.output_roots.release_output = Some("public".to_owned());
     let mut string_table = StringTable::new();
     let settings = crate::build_system::project_config::validate_directory_output_settings(
         &config,
@@ -1611,8 +1611,8 @@ fn validated_output_settings_reject_canonical_root_aliases() {
 
     let mut config = Config::new(root.clone());
     config.entry_root = PathBuf::from("src");
-    config.html_section.dev_output = Some("dev-alias".to_owned());
-    config.html_section.release_output = Some("release-alias".to_owned());
+    config.output_roots.dev_output = Some("dev-alias".to_owned());
+    config.output_roots.release_output = Some("release-alias".to_owned());
     let mut string_table = StringTable::new();
     let errors = crate::build_system::project_config::validate_directory_output_settings(
         &config,

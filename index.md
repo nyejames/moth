@@ -43,7 +43,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
     - [build_command.rs](src/projects/build_command.rs): owns build execution, output planning/writing and timing around the CLI's completed-outcome presentation.
     - [check.rs](src/projects/check.rs): frontend-only diagnostics.
     - [routing.rs](src/projects/routing.rs): path/origin rules.
-    - [settings.rs](src/projects/settings.rs): Config/defaults/known paths.
+    - [settings.rs](src/projects/settings.rs): Config/defaults/known paths and the builder section settings store.
     - [dev_server](src/projects/dev_server/): HTTP/SSE/watch rebuild loop, injected dev client and bounded runtime entry-error reports kept separate from build state. kw: serve, hot reload, runtime report.
         - [runtime_report_tests.rs](src/projects/dev_server/tests/runtime_report_tests.rs), [dev_client_tests.rs](src/projects/dev_server/tests/dev_client_tests.rs): socket-level runtime-report validation and served dev-client observable behaviour.
     - [html_project](src/projects/html_project/): HTML builder and HTML-Wasm integration. kw: shell, assets, wasm.
@@ -63,7 +63,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
         - [project_structure_diagnostics.rs](src/build_system/create_project_modules/project_structure_diagnostics.rs): structured layout, root and name-conflict diagnostics; project and package collision discovery lives in `source_tree_index.rs`.
         - [project_roots.rs](src/build_system/create_project_modules/project_roots.rs): project/entry roots.
         - [source_discovery_error.rs](src/build_system/create_project_modules/source_discovery_error.rs): diagnostic boundary.
-    - [output](src/build_system/output/): validated output plans, portable path policy, prepared artifact writing, write orchestration, and stale manifest cleanup.
+    - [output](src/build_system/output/): validated output plans, portable path policy, prepared artifact writing, write orchestration, stale manifest cleanup and the output-root fields every builder section registers.
 - [builder SDK](src/builder/): public `moth::builder` definitions and build driver for custom Rust builders. `BuilderDefinition` registers source packages, native host packages and source kinds through the builder surface and validates them in one `finish`.
     - [definition.rs](src/builder/definition.rs): the public definition draft and the registered builder surface.
     - [project.rs](src/builder/project.rs): the public `ProjectBuilder` trait and the `build_project` driver over the shared build orchestration.

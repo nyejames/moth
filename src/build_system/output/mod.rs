@@ -1,13 +1,14 @@
 //! Focused output policy, manifest and writer subsystem.
 //!
-//! WHAT: owns portable output-folder classification, validated plans, manifest recovery and
-//! filesystem-safe batch emission.
+//! WHAT: owns portable output-folder classification, validated plans, manifest recovery,
+//! filesystem-safe batch emission and the output-root fields every builder section registers.
 //! WHY: output ownership, cleanup and destination safety must exist once so CLI and the dev
 //! server never drift. Backend-specific route semantics stay with the builder.
 
 pub(crate) mod manifest;
 mod orchestrator;
 mod output_path;
+mod output_roots;
 mod policy;
 mod writer;
 pub(crate) use writer::OutputRejectionReason;
@@ -21,6 +22,10 @@ mod tests;
 pub(crate) use output_path::{
     OutputPathIdentity, PortableRelativePath, output_path_identity, parse_relative_path,
     percent_encode_url_segment,
+};
+pub(crate) use output_roots::{
+    DEFAULT_DEV_OUTPUT, DEFAULT_RELEASE_OUTPUT, DEV_OUTPUT_FIELD, OutputRootSettings,
+    RELEASE_OUTPUT_FIELD, ensure_single_output_root_owner, register_output_root_fields,
 };
 pub(crate) use policy::ValidatedOutputFolder;
 pub(crate) use policy::canonical_output_root_for_identity;

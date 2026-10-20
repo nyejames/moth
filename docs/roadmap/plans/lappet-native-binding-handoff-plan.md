@@ -7,7 +7,7 @@ the milestone and update `crates/lappet/roadmap.md` in the same commit.
 
 ## Status
 
-- Status: active. Phases 0, 1, 2A, 2B.0, 2B.1, 2B.2a and 2B.2d are delivered.
+- Status: active. Phases 0, 1, 2A, 2B.0, 2B.1, 2B.2a, 2B.2b and 2B.2d are delivered.
 - Current slice: Phase 2B.2, builder configuration sections and typed settings.
 - Blockers: none for Phase 2. Executable native Wasm lowering is blocked on the
   compiler prerequisites listed in the native host ABI. Phase 2 does not need it.
@@ -153,6 +153,11 @@ The user approved these. Do not reopen them without new evidence.
   one profile type. `BuildRequest::profile` selects it, the internal build runs
   with the matching flags, and `BuildContext::profile` reports the selected
   profile to the builder.
+- **Phase 2B.2b:** a builder configuration section is generic. Every section
+  stores its values, the output roots have one owner in
+  `src/build_system/output/output_roots.rs`, and the HTML section uses that
+  owner. A section the project omits yields the same values as an authored
+  empty record.
 
 ## Code map
 
@@ -170,7 +175,8 @@ The user approved these. Do not reopen them without new evidence.
 | Internal build driver | `src/build_system/build.rs` (`build_project`) |
 | Package facade assembly | `ProjectCompilation::package_assembly` in `build.rs`, reached through `CompiledProject::require_package` |
 | Output writing | `src/build_system/output/orchestrator.rs` (`write_project_outputs`) |
-| Output root settings | `effective_output_settings` in `src/build_system/project_config/validation.rs`, HTML-coupled |
+| Output root contract | `src/build_system/output/output_roots.rs` (`OutputRootSettings`, `register_output_root_fields`) |
+| Output root resolution | `effective_output_settings` in `src/build_system/project_config/validation.rs` |
 | Config schema | `src/builder_surface/config_schema.rs` |
 | First-party builder | `src/projects/html_project/html_project_builder.rs` |
 
