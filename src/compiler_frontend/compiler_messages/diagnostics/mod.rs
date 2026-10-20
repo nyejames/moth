@@ -15,6 +15,7 @@ pub(crate) mod labels;
 pub(crate) mod legacy_adapter;
 mod record;
 mod registry;
+pub(crate) mod report;
 mod resource;
 mod schema;
 mod store;

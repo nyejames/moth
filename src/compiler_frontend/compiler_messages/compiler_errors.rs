@@ -77,6 +77,7 @@
 //! CompilerMessages (ordered diagnostics + frozen identity rows + transitional StringTable)
 //! ```
 
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
@@ -184,6 +185,20 @@ pub(crate) struct InfrastructureErrors {
     pub(crate) additional: Vec<CompilerError>,
     source_contexts: Vec<InfrastructureSourceContext>,
 }
+
+/// Boundary failure carrying frozen user diagnostics and the transitional infrastructure lane.
+#[allow(
+    dead_code,
+    reason = "P4.5 S4 makes the build boundary return it; no test can use it before then"
+)]
+#[derive(Debug)]
+pub(crate) struct BoundaryFailure {
+    pub(crate) reports: DiagnosticReportSet,
+    /// Transitional infrastructure lane deleted by Phase 5 slices 5C, 5E, W5 and 5F.
+    pub(crate) infrastructure: Option<Box<InfrastructureErrors>>,
+}
+
+const _: () = assert!(std::mem::size_of::<BoundaryFailure>() <= 56);
 
 #[derive(Debug)]
 struct InfrastructureSourceContext {

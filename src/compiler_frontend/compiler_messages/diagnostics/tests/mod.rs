@@ -10,6 +10,7 @@ mod compaction_tests;
 mod family_inventory_tests;
 mod label_text_tests;
 mod parity_tests;
+mod report_tests;
 mod schema_tests;
 
 use crate::compiler_frontend::compiler_messages::DiagnosticCategory;
