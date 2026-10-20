@@ -7,6 +7,7 @@
 use super::subject::DiagnosticSubject;
 use super::*;
 use crate::builder_surface::SourceFileKind;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::UnescapedImplicitTemplateCloseView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::CompilerCapacityExceededView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
     InvalidCharacterView, MissingClosingDelimiterView, UnexpectedTrailingCommaView,
@@ -33,9 +34,6 @@ pub(crate) fn render_payload(
 ) -> RenderedPayload {
     let message = render_payload_message(payload, context);
     let guidance = match payload {
-        DiagnosticPayload::UnescapedImplicitTemplateClose { .. } => vec![
-            "Insert a literal closing bracket through a nested string expression such as `[\"]\"]`.".to_owned(),
-        ],
         DiagnosticPayload::InvalidValueReceiver { produced_count, .. } => {
             if *produced_count > 1 {
                 vec!["Use a multi-bind with one target per success slot.".to_owned()]
@@ -61,14 +59,6 @@ pub(crate) fn render_payload(
         DiagnosticPayload::EmptyCollectionTypeAmbiguity => {
             vec![
                 "Add an explicit type annotation, for example `scores {String = I32} = {}` for an empty map or `items {I32} = {}` for an empty collection.".to_owned(),
-            ]
-        }
-        DiagnosticPayload::InvalidTemplateDirective {
-            reason: crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason::UnknownDirective,
-            ..
-        } => {
-            vec![
-                "Known template directives include `$md`, `$raw`, `$children`, `$slot`, `$insert`, `$fresh`, `$html`, `$css`, `$escape_html`, `$code`, `$note`, `$todo`, and `$doc`.".to_owned(),
             ]
         }
         _ => Vec::new(),
@@ -195,12 +185,6 @@ fn render_payload_message(
     let string_table = context.string_table;
 
     match payload {
-        DiagnosticPayload::UnescapedImplicitTemplateClose { source_kind } => {
-            format!(
-                "{} starts inside an implicit template body, so an unescaped `]` would close a template that is not written in the source file.",
-                source_kind_name(*source_kind)
-            )
-        }
         DiagnosticPayload::UnknownName { name, namespace } => {
             unknown_name_message(*name, *namespace, string_table)
         }
@@ -257,13 +241,6 @@ fn render_payload_message(
             string_table.resolve(*alias),
             string_table.resolve(*symbol)
         ),
-        DiagnosticPayload::MalformedTemplate { reason } => {
-            malformed_template_message(*reason, string_table)
-        }
-        DiagnosticPayload::InvalidStyleDirective {
-            directive_name,
-            supported_directives,
-        } => invalid_style_directive_message(*directive_name, *supported_directives, string_table),
         DiagnosticPayload::InvalidGenericApplication { reason } => {
             invalid_generic_application_message(*reason).to_owned()
         }
@@ -289,13 +266,6 @@ fn render_payload_message(
         }
         DiagnosticPayload::InvalidGenericParameter { reason } => {
             invalid_generic_parameter_message(reason, string_table)
-        }
-        DiagnosticPayload::InvalidTemplateDirective {
-            directive_name,
-            reason,
-        } => invalid_template_directive_message(*directive_name, *reason, string_table),
-        DiagnosticPayload::InvalidTemplateStructure { reason } => {
-            invalid_template_structure_message(*reason, context)
         }
         DiagnosticPayload::InvalidFunctionSignature { reason } => {
             invalid_function_signature_message(reason, string_table)
@@ -515,9 +485,6 @@ fn render_payload_message(
         DiagnosticPayload::InvalidFallibleHandling { reason } => {
             invalid_fallible_handling_message(reason, context)
         }
-        DiagnosticPayload::InvalidTemplateSlot { reason, slot_name } => {
-            invalid_template_slot_message(*reason, *slot_name, string_table)
-        }
         DiagnosticPayload::CompileTimeEvaluationError {
             reason,
             operation,
@@ -724,6 +691,25 @@ fn source_kind_name(source_kind: SourceFileKind) -> &'static str {
         SourceFileKind::Moth => "Moth `.moth` source",
         SourceFileKind::MothTemplate => "Moth template `.mtf` source",
         SourceFileKind::PlainMarkdown => "plain Markdown `.md` source",
+    }
+}
+
+/// WHAT: renders the implicit-template-close diagnostic from its compact source-kind fact.
+/// WHY: its message and guidance are the legacy payload's complete output.
+pub(crate) fn render_unescaped_implicit_template_close(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &UnescapedImplicitTemplateCloseView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: format!(
+            "{} starts inside an implicit template body, so an unescaped `]` would close a template that is not written in the source file.",
+            source_kind_name(facts.source_kind)
+        ),
+        guidance: vec![
+            "Insert a literal closing bracket through a nested string expression such as `[\"]\"]`."
+                .to_owned(),
+        ],
     }
 }
 

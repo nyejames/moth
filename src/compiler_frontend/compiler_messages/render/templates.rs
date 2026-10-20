@@ -6,6 +6,11 @@
 
 use super::context::DiagnosticRenderContext;
 use super::named_value_or_default;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
+    InvalidTemplateSlotView, InvalidTemplateStructureCode, InvalidTemplateStructureView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
+use crate::compiler_frontend::compiler_messages::render::RenderedPayload;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, InvalidTemplateSlotReason, InvalidTemplateStructureReason,
 };
@@ -40,6 +45,19 @@ pub(crate) fn invalid_template_slot_message(
         InvalidTemplateSlotReason::SlotDefinitionOutsideTemplateBody => {
             "$slot markers are only valid as direct nested templates inside template bodies.".to_string()
         }
+    }
+}
+
+/// WHAT: renders a template-slot diagnostic from its compact facts.
+/// WHY: the reason and optional slot name are the legacy message helper's complete input.
+pub(crate) fn render_invalid_template_slot(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidTemplateSlotView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_template_slot_message(facts.reason, facts.slot_name, context.string_table),
+        guidance: Vec::new(),
     }
 }
 
@@ -175,6 +193,13 @@ pub(crate) fn compile_time_evaluation_error_suggestion(
     }
 }
 
+fn unsupported_template_head_type_message(type_name: &str) -> String {
+    format!(
+        "Template head expressions only accept final scalar or textual values. Found: {}",
+        type_name
+    )
+}
+
 pub(crate) fn invalid_template_structure_message(
     reason: InvalidTemplateStructureReason,
     context: DiagnosticRenderContext<'_>,
@@ -213,10 +238,7 @@ pub(crate) fn invalid_template_structure_message(
         }
         InvalidTemplateStructureReason::UnsupportedTypeInTemplateHead { type_id } => {
             let type_name = super::context::diagnostic_type_name(type_id, context);
-            format!(
-                "Template head expressions only accept final scalar or textual values. Found: {}",
-                type_name
-            )
+            unsupported_template_head_type_message(&type_name)
         }
         InvalidTemplateStructureReason::RuntimeTemplateInConst => {
             "Const templates can only capture compile-time templates.".to_string()
@@ -291,5 +313,37 @@ pub(crate) fn invalid_template_structure_message(
                 limit
             )
         }
+    }
+}
+
+/// WHAT: renders a compact template-structure diagnostic from its typed reason and associated facts.
+/// WHY: the code rebuilds the legacy prose reason, while type displays use the frozen display snapshot.
+pub(crate) fn render_invalid_template_structure(
+    diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidTemplateStructureView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let message = match facts.reason {
+        InvalidTemplateStructureCode::UnsupportedTypeInTemplateHead => {
+            let type_id = facts
+                .type_id
+                .expect("an unsupported template-head type code stores its type display");
+            let type_name = diagnostic.types().display_for_render(
+                type_id,
+                context.string_table,
+                context.path_table(),
+            );
+            unsupported_template_head_type_message(&type_name)
+        }
+        reason => {
+            let reason = reason
+                .to_reason(None, facts.limit)
+                .expect("the template-structure code stores the data its reason names");
+            invalid_template_structure_message(reason, context)
+        }
+    };
+    RenderedPayload {
+        message,
+        guidance: Vec::new(),
     }
 }

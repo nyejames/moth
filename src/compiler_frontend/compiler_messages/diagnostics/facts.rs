@@ -267,6 +267,28 @@ impl FactCodec for CharFact {
     }
 }
 
+/// An optional character as one word. `u32::MAX` encodes absence and is not a Unicode scalar.
+pub(crate) struct OptCharFact;
+
+impl FactCodec for OptCharFact {
+    type Draft = Option<char>;
+    type Durable = Option<char>;
+    const WORDS: usize = 1;
+
+    fn encode(draft: &Option<char>, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        words[0] = draft.map_or(u32::MAX, u32::from);
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<Option<char>> {
+        if words[0] == u32::MAX {
+            Some(None)
+        } else {
+            char::from_u32(words[0]).map(Some)
+        }
+    }
+}
+
 /// An optional count. `u32::MAX` marks absence, so a present count must stay below it.
 #[cfg_attr(not(test), allow(dead_code, reason = "P4.4 family rows use it"))]
 pub(crate) struct OptCountFact;
@@ -490,5 +512,22 @@ impl<'a> FactReader<'a> {
             self.words[used..].iter().all(|word| *word == 0),
             "unread fact words stay zero"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FactCodec, OptCharFact};
+
+    #[test]
+    fn opt_char_fact_round_trips_present_and_absent_values() {
+        let present = Some('\0');
+        let mut words = [0];
+        OptCharFact::encode(&present, &mut words).expect("a character fits one fact word");
+        assert_eq!(OptCharFact::decode(&words), Some(present));
+
+        let absent = None;
+        OptCharFact::encode(&absent, &mut words).expect("absence fits one fact word");
+        assert_eq!(OptCharFact::decode(&words), Some(absent));
     }
 }

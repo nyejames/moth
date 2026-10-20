@@ -7,6 +7,10 @@
 use super::*;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidMultiBindCode;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::InvalidTypeAnnotationCode;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
+    CssTemplateWarningCode, HtmlTemplateWarningCode, InvalidTemplateDirectiveCode,
+    InvalidTemplateStructureCode,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
     CommonSyntaxMistakeCode, InvalidStringEscapeCode, NumberLiteralCode,
 };
@@ -1043,35 +1047,44 @@ define_stable_reason_keys! {
     },
 
     InvalidTemplateDirectiveReason => {
-    &InvalidTemplateDirectiveReason::UnknownDirective => "invalid_template_directive.unknown_directive",
-    &InvalidTemplateDirectiveReason::MissingArgument => "invalid_template_directive.missing_argument",
-    &InvalidTemplateDirectiveReason::InvalidArgument { .. } => "invalid_template_directive.invalid_argument",
-    &InvalidTemplateDirectiveReason::DirectiveNotAllowedHere => "invalid_template_directive.directive_not_allowed_here",
-    &InvalidTemplateDirectiveReason::UnexpectedArguments => "invalid_template_directive.unexpected_arguments",
-    &InvalidTemplateDirectiveReason::EmptyArguments => "invalid_template_directive.empty_arguments",
-    &InvalidTemplateDirectiveReason::InvalidSlotTarget => "invalid_template_directive.invalid_slot_target",
-    &InvalidTemplateDirectiveReason::InvalidInsertTarget => "invalid_template_directive.invalid_insert_target",
-    &InvalidTemplateDirectiveReason::InvalidChildrenArgument => "invalid_template_directive.invalid_children_argument",
+        @delegate(reason => InvalidTemplateDirectiveCode::of(reason).stable_reason_key());
+    },
+    InvalidTemplateDirectiveCode => {
+        &InvalidTemplateDirectiveCode::UnknownDirective => "invalid_template_directive.unknown_directive",
+        &InvalidTemplateDirectiveCode::MissingArgument => "invalid_template_directive.missing_argument",
+        &InvalidTemplateDirectiveCode::InvalidArgument => "invalid_template_directive.invalid_argument",
+        &InvalidTemplateDirectiveCode::DirectiveNotAllowedHere => "invalid_template_directive.directive_not_allowed_here",
+        &InvalidTemplateDirectiveCode::UnexpectedArguments => "invalid_template_directive.unexpected_arguments",
+        &InvalidTemplateDirectiveCode::EmptyArguments => "invalid_template_directive.empty_arguments",
+        &InvalidTemplateDirectiveCode::InvalidSlotTarget => "invalid_template_directive.invalid_slot_target",
+        &InvalidTemplateDirectiveCode::InvalidInsertTarget => "invalid_template_directive.invalid_insert_target",
+        &InvalidTemplateDirectiveCode::InvalidChildrenArgument => "invalid_template_directive.invalid_children_argument",
     },
     CssTemplateWarning => {
-        &CssTemplateWarning::MismatchedClosingBrace { .. } => "malformed_template.css.mismatched_closing_brace",
-        &CssTemplateWarning::UnexpectedClosingBrace => "malformed_template.css.unexpected_closing_brace",
-        &CssTemplateWarning::MismatchedClosingParenthesis { .. } => "malformed_template.css.mismatched_closing_parenthesis",
-        &CssTemplateWarning::UnexpectedClosingParenthesis => "malformed_template.css.unexpected_closing_parenthesis",
-        &CssTemplateWarning::UnclosedDelimiter { .. } => "malformed_template.css.unclosed_delimiter",
-        &CssTemplateWarning::InlineSelectorBlock => "malformed_template.css.inline_selector_block",
-        &CssTemplateWarning::MissingSelectorOrAtRulePrelude => "malformed_template.css.missing_selector_or_at_rule_prelude",
-        &CssTemplateWarning::NestedBlock => "malformed_template.css.nested_block",
-        &CssTemplateWarning::TopLevelContent => "malformed_template.css.top_level_content",
-        &CssTemplateWarning::MalformedDeclaration => "malformed_template.css.malformed_declaration",
-        &CssTemplateWarning::InvalidPropertyName { .. } => "malformed_template.css.invalid_property_name",
-        &CssTemplateWarning::MissingDeclarationValue => "malformed_template.css.missing_declaration_value",
+        @delegate(reason => CssTemplateWarningCode::of(reason).stable_reason_key());
+    },
+    CssTemplateWarningCode => {
+        &CssTemplateWarningCode::MismatchedClosingBrace => "malformed_template.css.mismatched_closing_brace",
+        &CssTemplateWarningCode::UnexpectedClosingBrace => "malformed_template.css.unexpected_closing_brace",
+        &CssTemplateWarningCode::MismatchedClosingParenthesis => "malformed_template.css.mismatched_closing_parenthesis",
+        &CssTemplateWarningCode::UnexpectedClosingParenthesis => "malformed_template.css.unexpected_closing_parenthesis",
+        &CssTemplateWarningCode::UnclosedDelimiter => "malformed_template.css.unclosed_delimiter",
+        &CssTemplateWarningCode::InlineSelectorBlock => "malformed_template.css.inline_selector_block",
+        &CssTemplateWarningCode::MissingSelectorOrAtRulePrelude => "malformed_template.css.missing_selector_or_at_rule_prelude",
+        &CssTemplateWarningCode::NestedBlock => "malformed_template.css.nested_block",
+        &CssTemplateWarningCode::TopLevelContent => "malformed_template.css.top_level_content",
+        &CssTemplateWarningCode::MalformedDeclaration => "malformed_template.css.malformed_declaration",
+        &CssTemplateWarningCode::InvalidPropertyName => "malformed_template.css.invalid_property_name",
+        &CssTemplateWarningCode::MissingDeclarationValue => "malformed_template.css.missing_declaration_value",
     },
 
     HtmlTemplateWarning => {
-        &HtmlTemplateWarning::ScriptTag => "malformed_template.html.unsafe_script_tag",
-        &HtmlTemplateWarning::JavascriptUrl => "malformed_template.html.unsafe_javascript_url",
-        &HtmlTemplateWarning::InlineEventHandler => "malformed_template.html.unsafe_inline_event_handler",
+        @delegate(reason => HtmlTemplateWarningCode::of(reason).stable_reason_key());
+    },
+    HtmlTemplateWarningCode => {
+        &HtmlTemplateWarningCode::ScriptTag => "malformed_template.html.unsafe_script_tag",
+        &HtmlTemplateWarningCode::JavascriptUrl => "malformed_template.html.unsafe_javascript_url",
+        &HtmlTemplateWarningCode::InlineEventHandler => "malformed_template.html.unsafe_inline_event_handler",
     },
 
     MalformedTemplateReason => {
@@ -1081,37 +1094,40 @@ define_stable_reason_keys! {
 
 
     InvalidTemplateStructureReason => {
-    &InvalidTemplateStructureReason::MissingClosingBracket => "invalid_template_structure.missing_closing_bracket",
-    &InvalidTemplateStructureReason::SlotInHead => "invalid_template_structure.slot_in_head",
-    &InvalidTemplateStructureReason::MissingHandlerBody => "invalid_template_structure.missing_handler_body",
-    &InvalidTemplateStructureReason::InvalidChildDirective => "invalid_template_structure.invalid_child_directive",
-    &InvalidTemplateStructureReason::NestedTemplateNotAllowed => "invalid_template_structure.nested_template_not_allowed",
-    &InvalidTemplateStructureReason::HelperInConstTemplate => "invalid_template_structure.helper_in_const_template",
-    &InvalidTemplateStructureReason::NonFoldableConstTemplate => "invalid_template_structure.non_foldable_const_template",
-    &InvalidTemplateStructureReason::NonFoldableDocComment => "invalid_template_structure.non_foldable_doc_comment",
-    &InvalidTemplateStructureReason::FallibleValueInTemplateHead => "invalid_template_structure.fallible_value_in_template_head",
-    &InvalidTemplateStructureReason::UnsupportedTypeInTemplateHead { .. } => "invalid_template_structure.unsupported_type_in_template_head",
-    &InvalidTemplateStructureReason::RuntimeTemplateInConst => "invalid_template_structure.runtime_template_in_const",
-    &InvalidTemplateStructureReason::RuntimeValueInConstTemplateHead => "invalid_template_structure.runtime_value_in_const_template_head",
-    &InvalidTemplateStructureReason::EmptyPathInTemplateHead => "invalid_template_structure.empty_path_in_template_head",
-    &InvalidTemplateStructureReason::IncompatibleHeadItem => "invalid_template_structure.incompatible_head_item",
-    &InvalidTemplateStructureReason::HelperOutsideWrapperSlot => "invalid_template_structure.helper_outside_wrapper_slot",
-    &InvalidTemplateStructureReason::RuntimeControlFlowUnresolvedInsert => "invalid_template_structure.runtime_control_flow_unresolved_insert",
-    &InvalidTemplateStructureReason::MissingCommaBeforeControlFlowSuffix => "invalid_template_structure.missing_comma_before_control_flow_suffix",
-    &InvalidTemplateStructureReason::ControlFlowSuffixNotFinal => "invalid_template_structure.control_flow_suffix_not_final",
-    &InvalidTemplateStructureReason::MissingTemplateIfCondition => "invalid_template_structure.missing_template_if_condition",
-    &InvalidTemplateStructureReason::MissingTemplateLoopHeader => "invalid_template_structure.missing_template_loop_header",
-    &InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix => "invalid_template_structure.unexpected_token_after_control_flow_suffix",
-    &InvalidTemplateStructureReason::TemplateMatchStyleControlFlowUnsupported => "invalid_template_structure.template_match_style_control_flow_unsupported",
-    &InvalidTemplateStructureReason::TemplateIfConditionNotConst => "invalid_template_structure.template_if_condition_not_const",
-    &InvalidTemplateStructureReason::TemplateIfBranchNotConst => "invalid_template_structure.template_if_branch_not_const",
-    &InvalidTemplateStructureReason::TemplateOptionCaptureConstDeferred => "invalid_template_structure.template_option_capture_const_deferred",
-    &InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst => "invalid_template_structure.template_loop_range_bounds_not_const",
-    &InvalidTemplateStructureReason::TemplateLoopSourceNotConst => "invalid_template_structure.template_loop_source_not_const",
-    &InvalidTemplateStructureReason::TemplateLoopConditionNotConst => "invalid_template_structure.template_loop_condition_not_const",
-    &InvalidTemplateStructureReason::TemplateConditionalLoopConstTrue => "invalid_template_structure.template_conditional_loop_const_true",
-    &InvalidTemplateStructureReason::TemplateLoopBodyNotConst => "invalid_template_structure.template_loop_body_not_const",
-    &InvalidTemplateStructureReason::TemplateConstLoopExpansionLimitExceeded { .. } => "invalid_template_structure.template_const_loop_expansion_limit_exceeded",
+        @delegate(reason => InvalidTemplateStructureCode::of(reason).stable_reason_key());
+    },
+    InvalidTemplateStructureCode => {
+        &InvalidTemplateStructureCode::MissingClosingBracket => "invalid_template_structure.missing_closing_bracket",
+        &InvalidTemplateStructureCode::SlotInHead => "invalid_template_structure.slot_in_head",
+        &InvalidTemplateStructureCode::MissingHandlerBody => "invalid_template_structure.missing_handler_body",
+        &InvalidTemplateStructureCode::InvalidChildDirective => "invalid_template_structure.invalid_child_directive",
+        &InvalidTemplateStructureCode::NestedTemplateNotAllowed => "invalid_template_structure.nested_template_not_allowed",
+        &InvalidTemplateStructureCode::HelperInConstTemplate => "invalid_template_structure.helper_in_const_template",
+        &InvalidTemplateStructureCode::NonFoldableConstTemplate => "invalid_template_structure.non_foldable_const_template",
+        &InvalidTemplateStructureCode::NonFoldableDocComment => "invalid_template_structure.non_foldable_doc_comment",
+        &InvalidTemplateStructureCode::FallibleValueInTemplateHead => "invalid_template_structure.fallible_value_in_template_head",
+        &InvalidTemplateStructureCode::UnsupportedTypeInTemplateHead => "invalid_template_structure.unsupported_type_in_template_head",
+        &InvalidTemplateStructureCode::RuntimeTemplateInConst => "invalid_template_structure.runtime_template_in_const",
+        &InvalidTemplateStructureCode::RuntimeValueInConstTemplateHead => "invalid_template_structure.runtime_value_in_const_template_head",
+        &InvalidTemplateStructureCode::EmptyPathInTemplateHead => "invalid_template_structure.empty_path_in_template_head",
+        &InvalidTemplateStructureCode::IncompatibleHeadItem => "invalid_template_structure.incompatible_head_item",
+        &InvalidTemplateStructureCode::HelperOutsideWrapperSlot => "invalid_template_structure.helper_outside_wrapper_slot",
+        &InvalidTemplateStructureCode::RuntimeControlFlowUnresolvedInsert => "invalid_template_structure.runtime_control_flow_unresolved_insert",
+        &InvalidTemplateStructureCode::MissingCommaBeforeControlFlowSuffix => "invalid_template_structure.missing_comma_before_control_flow_suffix",
+        &InvalidTemplateStructureCode::ControlFlowSuffixNotFinal => "invalid_template_structure.control_flow_suffix_not_final",
+        &InvalidTemplateStructureCode::MissingTemplateIfCondition => "invalid_template_structure.missing_template_if_condition",
+        &InvalidTemplateStructureCode::MissingTemplateLoopHeader => "invalid_template_structure.missing_template_loop_header",
+        &InvalidTemplateStructureCode::UnexpectedTokenAfterControlFlowSuffix => "invalid_template_structure.unexpected_token_after_control_flow_suffix",
+        &InvalidTemplateStructureCode::TemplateMatchStyleControlFlowUnsupported => "invalid_template_structure.template_match_style_control_flow_unsupported",
+        &InvalidTemplateStructureCode::TemplateIfConditionNotConst => "invalid_template_structure.template_if_condition_not_const",
+        &InvalidTemplateStructureCode::TemplateIfBranchNotConst => "invalid_template_structure.template_if_branch_not_const",
+        &InvalidTemplateStructureCode::TemplateOptionCaptureConstDeferred => "invalid_template_structure.template_option_capture_const_deferred",
+        &InvalidTemplateStructureCode::TemplateLoopRangeBoundsNotConst => "invalid_template_structure.template_loop_range_bounds_not_const",
+        &InvalidTemplateStructureCode::TemplateLoopSourceNotConst => "invalid_template_structure.template_loop_source_not_const",
+        &InvalidTemplateStructureCode::TemplateLoopConditionNotConst => "invalid_template_structure.template_loop_condition_not_const",
+        &InvalidTemplateStructureCode::TemplateConditionalLoopConstTrue => "invalid_template_structure.template_conditional_loop_const_true",
+        &InvalidTemplateStructureCode::TemplateLoopBodyNotConst => "invalid_template_structure.template_loop_body_not_const",
+        &InvalidTemplateStructureCode::TemplateConstLoopExpansionLimitExceeded => "invalid_template_structure.template_const_loop_expansion_limit_exceeded",
     },
 
     InvalidSignatureMemberReason => {

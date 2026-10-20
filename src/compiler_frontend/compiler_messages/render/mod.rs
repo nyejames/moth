@@ -40,6 +40,10 @@ pub(crate) use suggestions::*;
 pub(crate) use syntax::*;
 pub(crate) use templates::*;
 
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
+    InvalidTemplateDirectiveCode, InvalidTemplateDirectiveView, MalformedCssTemplateView,
+    MalformedHtmlTemplateView,
+};
 use crate::compiler_frontend::compiler_messages::{
     AstCapacityResource, BorrowAccessKind, CapacityResource, CssTemplateWarning,
     DeferredFeatureReason, DiagnosticOperator, DiagnosticPlace, GenericApplicationErrorReason,
@@ -73,6 +77,46 @@ pub(crate) fn malformed_template_message(
     match reason {
         MalformedTemplateReason::Css(reason) => css_template_warning_message(reason, string_table),
         MalformedTemplateReason::Html(reason) => html_template_warning_message(reason),
+    }
+}
+
+/// WHAT: renders a compact CSS-template warning through the legacy warning helper.
+/// WHY: the warning code and its optional detail facts rebuild the legacy reason exactly.
+pub(crate) fn render_malformed_css_template(
+    _diagnostic: &crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView<
+        '_,
+    >,
+    facts: &MalformedCssTemplateView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = facts
+        .reason
+        .to_reason(facts.expected, facts.property_name)
+        .expect("a CSS template warning code stores its required detail");
+    RenderedPayload {
+        message: malformed_template_message(
+            MalformedTemplateReason::Css(reason),
+            context.string_table,
+        ),
+        guidance: Vec::new(),
+    }
+}
+
+/// WHAT: renders a compact HTML-template warning through the legacy warning helper.
+/// WHY: each HTML warning is fully represented by its one-word reason code.
+pub(crate) fn render_malformed_html_template(
+    _diagnostic: &crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView<
+        '_,
+    >,
+    facts: &MalformedHtmlTemplateView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: malformed_template_message(
+            MalformedTemplateReason::Html(facts.reason.to_reason()),
+            context.string_table,
+        ),
+        guidance: Vec::new(),
     }
 }
 
@@ -316,6 +360,33 @@ pub(crate) fn invalid_template_directive_message(
         InvalidTemplateDirectiveReason::InvalidChildrenArgument => {
             "`$children(...)` requires one wrapper template or string argument.\n                 Example: `$children([:<li>[$slot]</li>])`.".to_owned()
         }
+    }
+}
+
+/// WHAT: renders a compact template-directive diagnostic through its legacy prose helper.
+/// WHY: the reason code and optional detail reconstruct the data-carrying legacy reason.
+pub(crate) fn render_invalid_template_directive(
+    _diagnostic: &crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView<
+        '_,
+    >,
+    facts: &InvalidTemplateDirectiveView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = facts.reason.to_reason(facts.detail);
+    let guidance = if facts.reason == InvalidTemplateDirectiveCode::UnknownDirective {
+        vec![
+            "Known template directives include `$md`, `$raw`, `$children`, `$slot`, `$insert`, `$fresh`, `$html`, `$css`, `$escape_html`, `$code`, `$note`, `$todo`, and `$doc`.".to_owned(),
+        ]
+    } else {
+        Vec::new()
+    };
+    RenderedPayload {
+        message: invalid_template_directive_message(
+            facts.directive_name,
+            reason,
+            context.string_table,
+        ),
+        guidance,
     }
 }
 

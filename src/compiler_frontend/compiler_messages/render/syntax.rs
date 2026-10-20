@@ -9,6 +9,7 @@ use super::{
     invalid_expression_message, token_kind_name,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::InvalidTypeAnnotationView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::InvalidStyleDirectiveView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::ExpectedTokenView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidNumberLiteralView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
@@ -266,6 +267,22 @@ pub(crate) fn invalid_style_directive_message(
     format!("Style directive '${name}' is unsupported here. Registered directives are {supported}.")
 }
 
+/// WHAT: renders a style-directive diagnostic from its compact fact view.
+/// WHY: the row stores both string ids needed by the existing message helper.
+pub(crate) fn render_invalid_style_directive(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidStyleDirectiveView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_style_directive_message(
+            facts.directive_name,
+            facts.supported_directives,
+            context.string_table,
+        ),
+        guidance: Vec::new(),
+    }
+}
 pub(crate) fn invalid_type_annotation_message(
     reason: &InvalidTypeAnnotationReason,
     string_table: &dyn StringTableResolver,
