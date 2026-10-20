@@ -6,10 +6,14 @@
 
 use super::{
     DiagnosticRenderContext, RenderedPayload, diagnostic_type_name, expected_token_message,
-    token_kind_name,
+    invalid_expression_message, token_kind_name,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::ExpectedTokenView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidNumberLiteralView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    CommonSyntaxMistakeView, ExpectedSymbolStatementView, InvalidExpressionView,
+    InvalidStringEscapeView, MissingCollectionItemView, MissingOperatorOperandView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
     ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason, InvalidLoopHeaderReason,
@@ -36,6 +40,19 @@ pub(crate) fn render_expected_token(
             facts.found.as_ref(),
             context.string_table,
         ),
+        guidance: Vec::new(),
+    }
+}
+
+/// WHAT: renders the typed reason for an invalid expression.
+/// WHY: the compact row stores the same reason used by the legacy message helper.
+pub(crate) fn render_invalid_expression(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidExpressionView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_expression_message(facts.reason),
         guidance: Vec::new(),
     }
 }
@@ -110,6 +127,20 @@ pub(crate) fn invalid_string_escape_message(reason: InvalidStringEscapeReason) -
         InvalidStringEscapeReason::TrailingBackslash => {
             "The string ends with a backslash. Add a supported escaped character or remove the backslash.".to_owned()
         }
+    }
+}
+
+/// WHAT: renders an invalid escape from its reason code and character fact.
+/// WHY: the code distinguishes the escape reason that uses the otherwise neutral character fact.
+pub(crate) fn render_invalid_string_escape(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidStringEscapeView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = facts.reason.to_reason(facts.escaped);
+    RenderedPayload {
+        message: invalid_string_escape_message(reason),
+        guidance: Vec::new(),
     }
 }
 
@@ -464,6 +495,26 @@ pub(crate) fn common_syntax_mistake_suggestion(reason: &CommonSyntaxMistakeReaso
 }
 }
 
+/// WHAT: renders a common syntax mistake and its existing correction guidance.
+/// WHY: the row stores the reason code separately from its keyword, spacing and separator data.
+pub(crate) fn render_common_syntax_mistake(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &CommonSyntaxMistakeView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = facts
+        .reason
+        .to_reason(facts.keyword, facts.spacing_error, facts.choice_gap)
+        .expect("the common-syntax-mistake code has its required data");
+    RenderedPayload {
+        message: common_syntax_mistake_message(&reason, context.string_table),
+        guidance: vec![format!(
+            "Suggestion: {}",
+            common_syntax_mistake_suggestion(&reason)
+        )],
+    }
+}
+
 pub(crate) fn missing_operator_operand_message(
     operator: StringId,
     position: OperatorOperandPosition,
@@ -480,6 +531,23 @@ pub(crate) fn missing_operator_operand_message(
         OperatorOperandPosition::BinaryRight => {
             format!("Missing right-hand operand for operator '{op_str}'.")
         }
+    }
+}
+
+/// WHAT: renders the missing operator's position and authored spelling.
+/// WHY: the compact row retains only the string id and the three-way operand position.
+pub(crate) fn render_missing_operator_operand(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &MissingOperatorOperandView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: missing_operator_operand_message(
+            facts.operator,
+            facts.position,
+            context.string_table,
+        ),
+        guidance: Vec::new(),
     }
 }
 
@@ -503,8 +571,34 @@ pub(crate) fn expected_symbol_statement_message() -> String {
     "Expected a symbol-led statement.".to_string()
 }
 
+/// WHAT: renders the fixed symbol-led-statement message.
+/// WHY: the family has no payload facts, but its legacy message is not empty.
+pub(crate) fn render_expected_symbol_statement(
+    _diagnostic: &DiagnosticView<'_>,
+    _facts: &ExpectedSymbolStatementView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: expected_symbol_statement_message(),
+        guidance: Vec::new(),
+    }
+}
+
 pub(crate) fn missing_collection_item_message() -> String {
     "Expected a collection item after the comma".to_string()
+}
+
+/// WHAT: renders the fixed missing-collection-item message.
+/// WHY: the family has no payload facts, but its legacy message is not empty.
+pub(crate) fn render_missing_collection_item(
+    _diagnostic: &DiagnosticView<'_>,
+    _facts: &MissingCollectionItemView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: missing_collection_item_message(),
+        guidance: Vec::new(),
+    }
 }
 
 pub(crate) fn invalid_match_arm_message(reason: InvalidMatchArmReason) -> String {

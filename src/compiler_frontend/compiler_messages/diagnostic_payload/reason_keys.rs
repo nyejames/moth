@@ -6,7 +6,9 @@
 /// should have one declaration and one owning registry.
 use super::*;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidMultiBindCode;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::NumberLiteralCode;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    CommonSyntaxMistakeCode, InvalidStringEscapeCode, NumberLiteralCode,
+};
 #[doc(hidden)]
 #[macro_export]
 macro_rules! define_reasoned_diagnostic_registry {
@@ -909,9 +911,12 @@ define_stable_reason_keys! {
     &NumberLiteralCode::ParseOverflow => "invalid_number_literal.parse_overflow",
     },
     InvalidStringEscapeReason => {
-    &InvalidStringEscapeReason::UnsupportedEscape { .. } => "invalid_string_escape.unsupported_escape",
-    &InvalidStringEscapeReason::PhysicalNewline => "invalid_string_escape.physical_newline",
-    &InvalidStringEscapeReason::TrailingBackslash => "invalid_string_escape.trailing_backslash",
+        @delegate(reason => InvalidStringEscapeCode::of(reason).stable_reason_key());
+    },
+    InvalidStringEscapeCode => {
+    &InvalidStringEscapeCode::UnsupportedEscape => "invalid_string_escape.unsupported_escape",
+    &InvalidStringEscapeCode::PhysicalNewline => "invalid_string_escape.physical_newline",
+    &InvalidStringEscapeCode::TrailingBackslash => "invalid_string_escape.trailing_backslash",
     },
 
     GenericApplicationErrorReason => {
@@ -1585,29 +1590,32 @@ define_stable_reason_keys! {
     },
 
     CommonSyntaxMistakeReason => {
-    &CommonSyntaxMistakeReason::EqualityOperator => "common_syntax_mistake.equality_operator",
-    &CommonSyntaxMistakeReason::InequalityOperator => "common_syntax_mistake.inequality_operator",
-    &CommonSyntaxMistakeReason::LogicalAndOperator => "common_syntax_mistake.logical_and_operator",
-    &CommonSyntaxMistakeReason::LogicalOrOperator => "common_syntax_mistake.logical_or_operator",
-    &CommonSyntaxMistakeReason::BooleanBangNegation => "common_syntax_mistake.boolean_bang_negation",
-    &CommonSyntaxMistakeReason::ExpressionAssignment => "common_syntax_mistake.expression_assignment",
-    &CommonSyntaxMistakeReason::RustBorrowPrefix => "common_syntax_mistake.rust_borrow_prefix",
-    &CommonSyntaxMistakeReason::InvalidAsOperator => "common_syntax_mistake.invalid_as_operator",
-    &CommonSyntaxMistakeReason::StatementLineComment => "common_syntax_mistake.statement_line_comment",
-    &CommonSyntaxMistakeReason::FunctionKeyword { .. } => "common_syntax_mistake.function_keyword",
-    &CommonSyntaxMistakeReason::LetOrVarKeyword => "common_syntax_mistake.let_or_var_keyword",
-    &CommonSyntaxMistakeReason::ConstKeyword => "common_syntax_mistake.const_keyword",
-    &CommonSyntaxMistakeReason::MatchKeyword => "common_syntax_mistake.match_keyword",
-    &CommonSyntaxMistakeReason::StructKeyword { .. } => "common_syntax_mistake.struct_keyword",
-    &CommonSyntaxMistakeReason::SignatureParenthesisDelimiter => "common_syntax_mistake.signature_parenthesis_delimiter",
-    &CommonSyntaxMistakeReason::SignatureAsKeyword => "common_syntax_mistake.signature_as_keyword",
-    &CommonSyntaxMistakeReason::InvalidCompileTimeBindingSpacing => "common_syntax_mistake.invalid_compile_time_binding_spacing",
-    &CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing => "common_syntax_mistake.invalid_config_qualifier_spacing",
-    &CommonSyntaxMistakeReason::InvalidMutableBindingSpacing => "common_syntax_mistake.invalid_mutable_binding_spacing",
-    &CommonSyntaxMistakeReason::InvalidSymbolicSpacing { .. } => "common_syntax_mistake.invalid_symbolic_spacing",
-    &CommonSyntaxMistakeReason::InvalidChoiceVariantSpacing { .. } => "common_syntax_mistake.invalid_choice_variant_spacing",
-    &CommonSyntaxMistakeReason::InvalidUnaryNegationSpacing => "common_syntax_mistake.invalid_unary_negation_spacing",
-    &CommonSyntaxMistakeReason::UnsupportedUnaryPlus => "common_syntax_mistake.unsupported_unary_plus",
+        @delegate(reason => CommonSyntaxMistakeCode::of(reason).stable_reason_key());
+    },
+    CommonSyntaxMistakeCode => {
+    &CommonSyntaxMistakeCode::EqualityOperator => "common_syntax_mistake.equality_operator",
+    &CommonSyntaxMistakeCode::InequalityOperator => "common_syntax_mistake.inequality_operator",
+    &CommonSyntaxMistakeCode::LogicalAndOperator => "common_syntax_mistake.logical_and_operator",
+    &CommonSyntaxMistakeCode::LogicalOrOperator => "common_syntax_mistake.logical_or_operator",
+    &CommonSyntaxMistakeCode::BooleanBangNegation => "common_syntax_mistake.boolean_bang_negation",
+    &CommonSyntaxMistakeCode::ExpressionAssignment => "common_syntax_mistake.expression_assignment",
+    &CommonSyntaxMistakeCode::RustBorrowPrefix => "common_syntax_mistake.rust_borrow_prefix",
+    &CommonSyntaxMistakeCode::InvalidAsOperator => "common_syntax_mistake.invalid_as_operator",
+    &CommonSyntaxMistakeCode::StatementLineComment => "common_syntax_mistake.statement_line_comment",
+    &CommonSyntaxMistakeCode::FunctionKeyword => "common_syntax_mistake.function_keyword",
+    &CommonSyntaxMistakeCode::LetOrVarKeyword => "common_syntax_mistake.let_or_var_keyword",
+    &CommonSyntaxMistakeCode::ConstKeyword => "common_syntax_mistake.const_keyword",
+    &CommonSyntaxMistakeCode::MatchKeyword => "common_syntax_mistake.match_keyword",
+    &CommonSyntaxMistakeCode::StructKeyword => "common_syntax_mistake.struct_keyword",
+    &CommonSyntaxMistakeCode::SignatureParenthesisDelimiter => "common_syntax_mistake.signature_parenthesis_delimiter",
+    &CommonSyntaxMistakeCode::SignatureAsKeyword => "common_syntax_mistake.signature_as_keyword",
+    &CommonSyntaxMistakeCode::InvalidCompileTimeBindingSpacing => "common_syntax_mistake.invalid_compile_time_binding_spacing",
+    &CommonSyntaxMistakeCode::InvalidConfigQualifierSpacing => "common_syntax_mistake.invalid_config_qualifier_spacing",
+    &CommonSyntaxMistakeCode::InvalidMutableBindingSpacing => "common_syntax_mistake.invalid_mutable_binding_spacing",
+    &CommonSyntaxMistakeCode::InvalidSymbolicSpacing => "common_syntax_mistake.invalid_symbolic_spacing",
+    &CommonSyntaxMistakeCode::InvalidChoiceVariantSpacing => "common_syntax_mistake.invalid_choice_variant_spacing",
+    &CommonSyntaxMistakeCode::InvalidUnaryNegationSpacing => "common_syntax_mistake.invalid_unary_negation_spacing",
+    &CommonSyntaxMistakeCode::UnsupportedUnaryPlus => "common_syntax_mistake.unsupported_unary_plus",
     },
 
     InvalidGenericInstantiationReason => {

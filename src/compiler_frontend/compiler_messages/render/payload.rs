@@ -11,6 +11,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::token_le
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
     InvalidCharacterView, MissingClosingDelimiterView, UnexpectedTrailingCommaView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    SourceSpanCapacityView, UnexpectedEndOfFileView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::TypeMismatchView;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
@@ -30,12 +33,6 @@ pub(crate) fn render_payload(
 ) -> RenderedPayload {
     let message = render_payload_message(payload, context);
     let guidance = match payload {
-        DiagnosticPayload::CommonSyntaxMistake { reason } => {
-            vec![format!(
-                "Suggestion: {}",
-                common_syntax_mistake_suggestion(reason)
-            )]
-        }
         DiagnosticPayload::UnescapedImplicitTemplateClose { .. } => vec![
             "Insert a literal closing bracket through a nested string expression such as `[\"]\"]`.".to_owned(),
         ],
@@ -284,12 +281,6 @@ fn render_payload_message(
         DiagnosticPayload::MalformedTemplate { reason } => {
             malformed_template_message(*reason, string_table)
         }
-        DiagnosticPayload::SourceSpanCapacity {
-            start,
-            length,
-            resource,
-        } => source_span_capacity_message(*start, *length, *resource),
-        DiagnosticPayload::InvalidStringEscape { reason } => invalid_string_escape_message(*reason),
         DiagnosticPayload::InvalidStyleDirective {
             directive_name,
             supported_directives,
@@ -300,17 +291,6 @@ fn render_payload_message(
         DiagnosticPayload::InvalidParameterContract { reason } => {
             invalid_parameter_contract_message(*reason)
         }
-        DiagnosticPayload::UnexpectedEndOfFile { expected_delimiter } => {
-            if let Some(expected_delimiter) = expected_delimiter {
-                format!(
-                    "Unexpected end of file, expected '{}'",
-                    string_table.resolve(*expected_delimiter)
-                )
-            } else {
-                "Unexpected end of file".to_owned()
-            }
-        }
-        DiagnosticPayload::InvalidPath { path_kind } => invalid_path_message(*path_kind).to_owned(),
         DiagnosticPayload::InvalidDependencyClause { reason, .. } => {
             invalid_dependency_clause_message(*reason).to_owned()
         }
@@ -621,18 +601,9 @@ fn render_payload_message(
         DiagnosticPayload::InvalidCompileTimePath { path, reason } => {
             invalid_compile_time_path_message(*path, *reason, context)
         }
-        DiagnosticPayload::InvalidExpression { reason } => invalid_expression_message(*reason),
-        DiagnosticPayload::CommonSyntaxMistake { reason } => {
-            common_syntax_mistake_message(reason, string_table)
-        }
-        DiagnosticPayload::MissingOperatorOperand { operator, position } => {
-            missing_operator_operand_message(*operator, *position, string_table)
-        }
         DiagnosticPayload::InvalidStandaloneStatement { reason } => {
             invalid_standalone_statement_message(*reason)
         }
-        DiagnosticPayload::ExpectedSymbolStatement => expected_symbol_statement_message(),
-        DiagnosticPayload::MissingCollectionItem => missing_collection_item_message(),
         DiagnosticPayload::InvalidMatchArm { reason } => invalid_match_arm_message(*reason),
         DiagnosticPayload::InvalidLoopHeader { reason } => {
             invalid_loop_header_message(*reason, context)
@@ -677,6 +648,50 @@ fn source_span_capacity_message(
             "This source contains more than {length} tokens; the compact \
              source-owned token store cannot address another token."
         ),
+    }
+}
+
+/// WHAT: renders source-span capacity facts without widening the durable record.
+/// WHY: the rejected source range and exhausted resource are the complete legacy payload.
+pub(crate) fn render_source_span_capacity(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &SourceSpanCapacityView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let start = u32::try_from(facts.start)
+        .expect("stored source-span capacity starts originated as u32 values");
+    let length = u32::try_from(facts.length)
+        .expect("stored source-span capacity lengths originated as u32 values");
+    RenderedPayload {
+        message: source_span_capacity_message(start, length, facts.resource),
+        guidance: Vec::new(),
+    }
+}
+
+fn unexpected_end_of_file_message(
+    expected_delimiter: Option<StringId>,
+    string_table: &dyn StringTableResolver,
+) -> String {
+    if let Some(expected_delimiter) = expected_delimiter {
+        format!(
+            "Unexpected end of file, expected '{}'",
+            string_table.resolve(expected_delimiter)
+        )
+    } else {
+        "Unexpected end of file".to_owned()
+    }
+}
+
+/// WHAT: renders an optional expected delimiter from the compact EOF row.
+/// WHY: the reason text is the same regardless of whether the parser named a delimiter.
+pub(crate) fn render_unexpected_end_of_file(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &UnexpectedEndOfFileView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: unexpected_end_of_file_message(facts.expected_delimiter, context.string_table),
+        guidance: Vec::new(),
     }
 }
 

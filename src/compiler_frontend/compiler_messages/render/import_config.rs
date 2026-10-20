@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::MissingImportTargetView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidPathView;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 
 pub(crate) fn invalid_config_message(
@@ -490,6 +491,19 @@ pub(crate) fn invalid_path_message(path_kind: PathKind) -> &'static str {
              Depend on the module directory, for example `@pages`.\n\
              Normal module-root filenames such as `@page.moth` are not referenced directly."
         }
+    }
+}
+
+/// WHAT: renders the parser's invalid-path reason from its compact unit code.
+/// WHY: the path-kind helper owns the established wording for this family.
+pub(crate) fn render_invalid_path(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidPathView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_path_message(facts.path_kind).to_owned(),
+        guidance: Vec::new(),
     }
 }
 
