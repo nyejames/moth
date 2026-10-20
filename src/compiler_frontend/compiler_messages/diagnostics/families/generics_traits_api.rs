@@ -1,7 +1,7 @@
 //! Family rows for generics, traits and API diagnostics.
 //!
-//! WHAT: twenty of the 21 generics, trait and API families have compact rows, mirror constructors and
-//! legacy-adapter arms; InvalidTraitConformance is still an identity row.
+//! WHAT: every generics, trait and API family has a full compact row, mirror constructor and
+//! legacy-adapter arm.
 //! WHY: related diagnostics share one schema table and legacy adapter.
 
 use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayId;
@@ -20,18 +20,19 @@ use crate::compiler_frontend::compiler_messages::render::{
     render_invalid_generic_application, render_invalid_generic_instantiation,
     render_invalid_generic_parameter, render_invalid_parameter_contract,
     render_invalid_receiver_declaration, render_invalid_this_usage,
-    render_invalid_trait_incompatibility, render_invalid_trait_keyword_usage,
-    render_private_type_in_exported_api, render_title_only, render_trait_name_used_as_type,
-    render_trait_private_surface_leak, render_unknown_trait, render_unsupported_trait_feature,
+    render_invalid_trait_conformance, render_invalid_trait_incompatibility,
+    render_invalid_trait_keyword_usage, render_private_type_in_exported_api, render_title_only,
+    render_trait_name_used_as_type, render_trait_private_surface_leak, render_unknown_trait,
+    render_unsupported_trait_feature,
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticCategory, DiagnosticKind, DiagnosticLabelMessage,
     DiagnosticPayload, DiagnosticSeverity, GenericApplicationErrorReason, GenericInferenceSubject,
     InvalidFunctionSignatureReason, InvalidGenericInstantiationReason,
     InvalidGenericParameterReason, InvalidParameterContractReason,
-    InvalidReceiverDeclarationReason, InvalidThisUsageReason, InvalidTraitIncompatibilityReason,
-    InvalidTraitKeywordUsageReason, ParameterContractKind, PublicGenericOwnerKind,
-    RuleDiagnosticKind, SyntaxDiagnosticKind,
+    InvalidReceiverDeclarationReason, InvalidThisUsageReason, InvalidTraitConformanceReason,
+    InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, ParameterContractKind,
+    PublicGenericOwnerKind, RuleDiagnosticKind, SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -1013,11 +1014,443 @@ diagnostic_family! {
     }
 }
 
+unit_code! {
+    pub(crate) enum InvalidTraitConformanceCode {
+        ImportedModuleRoot = 1,
+        AliasTarget = 2,
+        NonCanonicalTarget = 3,
+        NonlocalSourceTarget = 4,
+        BuiltinTarget = 5,
+        ExternalOpaqueTarget = 6,
+        DuplicateCanonicalEvidence = 7,
+        BuiltinEvidenceOverride = 8,
+        IncompatibleTraitEvidence = 9,
+        MissingMethod = 10,
+        ReceiverMutabilityMismatch = 11,
+        ParameterCountMismatch = 12,
+        ParameterModeMismatch = 13,
+        ParameterContractMismatch = 14,
+        ParameterTypeMismatch = 15,
+        ReturnCountMismatch = 16,
+        ReturnTypeMismatch = 17,
+        ReturnChannelMismatch = 18,
+        InferredFailureInInfallibleCast = 19,
+    }
+}
+
+impl InvalidTraitConformanceCode {
+    pub(crate) fn of(reason: &InvalidTraitConformanceReason) -> Self {
+        use InvalidTraitConformanceReason as Reason;
+        match reason {
+            Reason::ImportedModuleRoot => Self::ImportedModuleRoot,
+            Reason::AliasTarget => Self::AliasTarget,
+            Reason::NonCanonicalTarget => Self::NonCanonicalTarget,
+            Reason::NonlocalSourceTarget => Self::NonlocalSourceTarget,
+            Reason::BuiltinTarget => Self::BuiltinTarget,
+            Reason::ExternalOpaqueTarget => Self::ExternalOpaqueTarget,
+            Reason::DuplicateCanonicalEvidence => Self::DuplicateCanonicalEvidence,
+            Reason::BuiltinEvidenceOverride => Self::BuiltinEvidenceOverride,
+            Reason::IncompatibleTraitEvidence { .. } => Self::IncompatibleTraitEvidence,
+            Reason::MissingMethod { .. } => Self::MissingMethod,
+            Reason::ReceiverMutabilityMismatch { .. } => Self::ReceiverMutabilityMismatch,
+            Reason::ParameterCountMismatch { .. } => Self::ParameterCountMismatch,
+            Reason::ParameterModeMismatch { .. } => Self::ParameterModeMismatch,
+            Reason::ParameterContractMismatch { .. } => Self::ParameterContractMismatch,
+            Reason::ParameterTypeMismatch { .. } => Self::ParameterTypeMismatch,
+            Reason::ReturnCountMismatch { .. } => Self::ReturnCountMismatch,
+            Reason::ReturnTypeMismatch { .. } => Self::ReturnTypeMismatch,
+            Reason::ReturnChannelMismatch { .. } => Self::ReturnChannelMismatch,
+            Reason::InferredFailureInInfallibleCast { .. } => Self::InferredFailureInInfallibleCast,
+        }
+    }
+}
+
+/// Word 0 stores the reason code; words 1–2 hold counts, word 1 holds an index, and words 2–3
+/// hold the two types when the reason compares types.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum InvalidTraitConformanceShape<Type> {
+    ImportedModuleRoot,
+    AliasTarget,
+    NonCanonicalTarget,
+    NonlocalSourceTarget,
+    BuiltinTarget,
+    ExternalOpaqueTarget,
+    DuplicateCanonicalEvidence,
+    BuiltinEvidenceOverride,
+    IncompatibleTraitEvidence,
+    MissingMethod,
+    ReceiverMutabilityMismatch,
+    ParameterCountMismatch {
+        expected: usize,
+        found: usize,
+    },
+    ParameterModeMismatch {
+        parameter_index: usize,
+    },
+    ParameterContractMismatch {
+        parameter_index: usize,
+    },
+    ParameterTypeMismatch {
+        parameter_index: usize,
+        expected_type: Type,
+        found_type: Type,
+    },
+    ReturnCountMismatch {
+        expected: usize,
+        found: usize,
+    },
+    ReturnTypeMismatch {
+        return_index: usize,
+        expected_type: Type,
+        found_type: Type,
+    },
+    ReturnChannelMismatch {
+        return_index: usize,
+    },
+    InferredFailureInInfallibleCast,
+}
+
+impl<Type> InvalidTraitConformanceShape<Type> {
+    pub(crate) fn code(&self) -> InvalidTraitConformanceCode {
+        use InvalidTraitConformanceShape as Shape;
+        match self {
+            Shape::ImportedModuleRoot => InvalidTraitConformanceCode::ImportedModuleRoot,
+            Shape::AliasTarget => InvalidTraitConformanceCode::AliasTarget,
+            Shape::NonCanonicalTarget => InvalidTraitConformanceCode::NonCanonicalTarget,
+            Shape::NonlocalSourceTarget => InvalidTraitConformanceCode::NonlocalSourceTarget,
+            Shape::BuiltinTarget => InvalidTraitConformanceCode::BuiltinTarget,
+            Shape::ExternalOpaqueTarget => InvalidTraitConformanceCode::ExternalOpaqueTarget,
+            Shape::DuplicateCanonicalEvidence => {
+                InvalidTraitConformanceCode::DuplicateCanonicalEvidence
+            }
+            Shape::BuiltinEvidenceOverride => InvalidTraitConformanceCode::BuiltinEvidenceOverride,
+            Shape::IncompatibleTraitEvidence => {
+                InvalidTraitConformanceCode::IncompatibleTraitEvidence
+            }
+            Shape::MissingMethod => InvalidTraitConformanceCode::MissingMethod,
+            Shape::ReceiverMutabilityMismatch => {
+                InvalidTraitConformanceCode::ReceiverMutabilityMismatch
+            }
+            Shape::ParameterCountMismatch { .. } => {
+                InvalidTraitConformanceCode::ParameterCountMismatch
+            }
+            Shape::ParameterModeMismatch { .. } => {
+                InvalidTraitConformanceCode::ParameterModeMismatch
+            }
+            Shape::ParameterContractMismatch { .. } => {
+                InvalidTraitConformanceCode::ParameterContractMismatch
+            }
+            Shape::ParameterTypeMismatch { .. } => {
+                InvalidTraitConformanceCode::ParameterTypeMismatch
+            }
+            Shape::ReturnCountMismatch { .. } => InvalidTraitConformanceCode::ReturnCountMismatch,
+            Shape::ReturnTypeMismatch { .. } => InvalidTraitConformanceCode::ReturnTypeMismatch,
+            Shape::ReturnChannelMismatch { .. } => {
+                InvalidTraitConformanceCode::ReturnChannelMismatch
+            }
+            Shape::InferredFailureInInfallibleCast => {
+                InvalidTraitConformanceCode::InferredFailureInInfallibleCast
+            }
+        }
+    }
+}
+
+/// Stores the D6 reason code and the variant's index, counts or types.
+pub(crate) struct InvalidTraitConformanceFact;
+
+impl FactCodec for InvalidTraitConformanceFact {
+    type Draft = InvalidTraitConformanceShape<TypeId>;
+    type Durable = InvalidTraitConformanceShape<TypeDisplayId>;
+    const WORDS: usize = 4;
+    const PENDING_MASK: u8 = 0b1100;
+
+    fn pending_mask(draft: &Self::Draft) -> u8 {
+        match draft {
+            InvalidTraitConformanceShape::ParameterTypeMismatch { .. }
+            | InvalidTraitConformanceShape::ReturnTypeMismatch { .. } => 0b1100,
+            _ => 0,
+        }
+    }
+
+    fn encode(draft: &Self::Draft, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        words.fill(0);
+        UnitFact::<InvalidTraitConformanceCode>::encode(&draft.code(), &mut words[0..1])?;
+        match draft {
+            InvalidTraitConformanceShape::ParameterCountMismatch { expected, found }
+            | InvalidTraitConformanceShape::ReturnCountMismatch { expected, found } => {
+                CountFact::encode(expected, &mut words[1..2])?;
+                CountFact::encode(found, &mut words[2..3])?;
+            }
+            InvalidTraitConformanceShape::ParameterModeMismatch { parameter_index }
+            | InvalidTraitConformanceShape::ParameterContractMismatch { parameter_index } => {
+                CountFact::encode(parameter_index, &mut words[1..2])?;
+            }
+            InvalidTraitConformanceShape::ParameterTypeMismatch {
+                parameter_index,
+                expected_type,
+                found_type,
+            } => {
+                CountFact::encode(parameter_index, &mut words[1..2])?;
+                TypeFact::encode(expected_type, &mut words[2..3])?;
+                TypeFact::encode(found_type, &mut words[3..4])?;
+            }
+            InvalidTraitConformanceShape::ReturnTypeMismatch {
+                return_index,
+                expected_type,
+                found_type,
+            } => {
+                CountFact::encode(return_index, &mut words[1..2])?;
+                TypeFact::encode(expected_type, &mut words[2..3])?;
+                TypeFact::encode(found_type, &mut words[3..4])?;
+            }
+            InvalidTraitConformanceShape::ReturnChannelMismatch { return_index } => {
+                CountFact::encode(return_index, &mut words[1..2])?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<Self::Durable> {
+        use InvalidTraitConformanceCode as Code;
+        use InvalidTraitConformanceShape as Shape;
+        let code = Code::from_code(*words.first()?)?;
+        Some(match code {
+            Code::ImportedModuleRoot => Shape::ImportedModuleRoot,
+            Code::AliasTarget => Shape::AliasTarget,
+            Code::NonCanonicalTarget => Shape::NonCanonicalTarget,
+            Code::NonlocalSourceTarget => Shape::NonlocalSourceTarget,
+            Code::BuiltinTarget => Shape::BuiltinTarget,
+            Code::ExternalOpaqueTarget => Shape::ExternalOpaqueTarget,
+            Code::DuplicateCanonicalEvidence => Shape::DuplicateCanonicalEvidence,
+            Code::BuiltinEvidenceOverride => Shape::BuiltinEvidenceOverride,
+            Code::IncompatibleTraitEvidence => Shape::IncompatibleTraitEvidence,
+            Code::MissingMethod => Shape::MissingMethod,
+            Code::ReceiverMutabilityMismatch => Shape::ReceiverMutabilityMismatch,
+            Code::ParameterCountMismatch => Shape::ParameterCountMismatch {
+                expected: CountFact::decode(words.get(1..2)?)?,
+                found: CountFact::decode(words.get(2..3)?)?,
+            },
+            Code::ParameterModeMismatch => Shape::ParameterModeMismatch {
+                parameter_index: CountFact::decode(words.get(1..2)?)?,
+            },
+            Code::ParameterContractMismatch => Shape::ParameterContractMismatch {
+                parameter_index: CountFact::decode(words.get(1..2)?)?,
+            },
+            Code::ParameterTypeMismatch => Shape::ParameterTypeMismatch {
+                parameter_index: CountFact::decode(words.get(1..2)?)?,
+                expected_type: TypeFact::decode(words.get(2..3)?)?,
+                found_type: TypeFact::decode(words.get(3..4)?)?,
+            },
+            Code::ReturnCountMismatch => Shape::ReturnCountMismatch {
+                expected: CountFact::decode(words.get(1..2)?)?,
+                found: CountFact::decode(words.get(2..3)?)?,
+            },
+            Code::ReturnTypeMismatch => Shape::ReturnTypeMismatch {
+                return_index: CountFact::decode(words.get(1..2)?)?,
+                expected_type: TypeFact::decode(words.get(2..3)?)?,
+                found_type: TypeFact::decode(words.get(3..4)?)?,
+            },
+            Code::ReturnChannelMismatch => Shape::ReturnChannelMismatch {
+                return_index: CountFact::decode(words.get(1..2)?)?,
+            },
+            Code::InferredFailureInInfallibleCast => Shape::InferredFailureInInfallibleCast,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct InvalidTraitConformanceNames {
+    pub(crate) target_name: StringId,
+    pub(crate) reason_name: Option<StringId>,
+    pub(crate) trait_name: Option<StringId>,
+}
+
+/// Decodes `[target_name, reason_name?, trait_name?]`; the reason name is the requirement name
+/// except for `IncompatibleTraitEvidence`, and the optional trait name is always last.
+pub(crate) fn decode_invalid_trait_conformance_names(
+    code: InvalidTraitConformanceCode,
+    ids: &[StringId],
+) -> Option<InvalidTraitConformanceNames> {
+    let has_reason_name = matches!(
+        code,
+        InvalidTraitConformanceCode::IncompatibleTraitEvidence
+            | InvalidTraitConformanceCode::MissingMethod
+            | InvalidTraitConformanceCode::ReceiverMutabilityMismatch
+            | InvalidTraitConformanceCode::ParameterCountMismatch
+            | InvalidTraitConformanceCode::ParameterModeMismatch
+            | InvalidTraitConformanceCode::ParameterContractMismatch
+            | InvalidTraitConformanceCode::ParameterTypeMismatch
+            | InvalidTraitConformanceCode::ReturnCountMismatch
+            | InvalidTraitConformanceCode::ReturnTypeMismatch
+            | InvalidTraitConformanceCode::ReturnChannelMismatch
+            | InvalidTraitConformanceCode::InferredFailureInInfallibleCast
+    );
+    match (has_reason_name, ids) {
+        (false, [target_name]) => Some(InvalidTraitConformanceNames {
+            target_name: *target_name,
+            reason_name: None,
+            trait_name: None,
+        }),
+        (false, [target_name, trait_name]) => Some(InvalidTraitConformanceNames {
+            target_name: *target_name,
+            reason_name: None,
+            trait_name: Some(*trait_name),
+        }),
+        (true, [target_name, reason_name]) => Some(InvalidTraitConformanceNames {
+            target_name: *target_name,
+            reason_name: Some(*reason_name),
+            trait_name: None,
+        }),
+        (true, [target_name, reason_name, trait_name]) => Some(InvalidTraitConformanceNames {
+            target_name: *target_name,
+            reason_name: Some(*reason_name),
+            trait_name: Some(*trait_name),
+        }),
+        _ => None,
+    }
+}
+
+fn split_invalid_trait_conformance(
+    reason: InvalidTraitConformanceReason,
+) -> (InvalidTraitConformanceShape<TypeId>, Option<StringId>) {
+    use InvalidTraitConformanceReason as Reason;
+    use InvalidTraitConformanceShape as Shape;
+    let mut reason_name = None;
+    let shape = match reason {
+        Reason::ImportedModuleRoot => Shape::ImportedModuleRoot,
+        Reason::AliasTarget => Shape::AliasTarget,
+        Reason::NonCanonicalTarget => Shape::NonCanonicalTarget,
+        Reason::NonlocalSourceTarget => Shape::NonlocalSourceTarget,
+        Reason::BuiltinTarget => Shape::BuiltinTarget,
+        Reason::ExternalOpaqueTarget => Shape::ExternalOpaqueTarget,
+        Reason::DuplicateCanonicalEvidence => Shape::DuplicateCanonicalEvidence,
+        Reason::BuiltinEvidenceOverride => Shape::BuiltinEvidenceOverride,
+        Reason::IncompatibleTraitEvidence {
+            incompatible_trait_name,
+        } => {
+            reason_name = Some(incompatible_trait_name);
+            Shape::IncompatibleTraitEvidence
+        }
+        Reason::MissingMethod { requirement_name } => {
+            reason_name = Some(requirement_name);
+            Shape::MissingMethod
+        }
+        Reason::ReceiverMutabilityMismatch { requirement_name } => {
+            reason_name = Some(requirement_name);
+            Shape::ReceiverMutabilityMismatch
+        }
+        Reason::ParameterCountMismatch {
+            requirement_name,
+            expected,
+            found,
+        } => {
+            reason_name = Some(requirement_name);
+            Shape::ParameterCountMismatch { expected, found }
+        }
+        Reason::ParameterModeMismatch {
+            requirement_name,
+            parameter_index,
+        } => {
+            reason_name = Some(requirement_name);
+            Shape::ParameterModeMismatch { parameter_index }
+        }
+        Reason::ParameterContractMismatch {
+            requirement_name,
+            parameter_index,
+        } => {
+            reason_name = Some(requirement_name);
+            Shape::ParameterContractMismatch { parameter_index }
+        }
+        Reason::ParameterTypeMismatch {
+            requirement_name,
+            parameter_index,
+            expected_type,
+            found_type,
+        } => {
+            reason_name = Some(requirement_name);
+            Shape::ParameterTypeMismatch {
+                parameter_index,
+                expected_type,
+                found_type,
+            }
+        }
+        Reason::ReturnCountMismatch {
+            requirement_name,
+            expected,
+            found,
+        } => {
+            reason_name = Some(requirement_name);
+            Shape::ReturnCountMismatch { expected, found }
+        }
+        Reason::ReturnTypeMismatch {
+            requirement_name,
+            return_index,
+            expected_type,
+            found_type,
+        } => {
+            reason_name = Some(requirement_name);
+            Shape::ReturnTypeMismatch {
+                return_index,
+                expected_type,
+                found_type,
+            }
+        }
+        Reason::ReturnChannelMismatch {
+            requirement_name,
+            return_index,
+        } => {
+            reason_name = Some(requirement_name);
+            Shape::ReturnChannelMismatch { return_index }
+        }
+        Reason::InferredFailureInInfallibleCast { requirement_name } => {
+            reason_name = Some(requirement_name);
+            Shape::InferredFailureInInfallibleCast
+        }
+    };
+    (shape, reason_name)
+}
+
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_trait_conformance(
+    target_name: StringId,
+    trait_name: Option<StringId>,
+    reason: InvalidTraitConformanceReason,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    let mut string_ids = Vec::with_capacity(3);
+    string_ids.push(target_name);
+    let (shape, reason_name) = split_invalid_trait_conformance(reason);
+    if let Some(reason_name) = reason_name {
+        string_ids.push(reason_name);
+    }
+    if let Some(trait_name) = trait_name {
+        string_ids.push(trait_name);
+    }
+    DiagnosticDraft::with_facts(&INVALID_TRAIT_CONFORMANCE, span, |cursor| {
+        cursor.push::<InvalidTraitConformanceFact>(&shape)
+    })
+    .with_string_ids(string_ids)
+}
+
 diagnostic_family! {
-    identity INVALID_TRAIT_CONFORMANCE {
+    pilot INVALID_TRAIT_CONFORMANCE {
         internal: 3073,
         stable: "MOTH-RULE-0073",
         category: DiagnosticCategory::Rule,
+        severity: DiagnosticSeverity::Error,
+        title: "Invalid trait conformance",
+        facts: [shape: InvalidTraitConformanceFact],
+        labels: [
+            LabelMessageCode::PREVIOUS_DECLARATION,
+            LabelMessageCode::RENDERED_TEXT,
+            LabelMessageCode::BUILTIN_FAILURE_CALL,
+            LabelMessageCode::BUILTIN_FAILURE_ORIGIN,
+            LabelMessageCode::BUILTIN_WRITE_BACK_ORIGIN,
+        ],
+        extra: StringIds,
+        ctor: manual,
+        view: InvalidTraitConformanceView,
+        render: render_invalid_trait_conformance,
     }
 }
 
@@ -1362,6 +1795,19 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
             };
             Some(draft)
         }
+        (
+            DiagnosticKind::Rule(RuleDiagnosticKind::InvalidTraitConformance),
+            DiagnosticPayload::InvalidTraitConformance {
+                target_name,
+                trait_name,
+                reason,
+            },
+        ) => Some(invalid_trait_conformance(
+            *target_name,
+            *trait_name,
+            reason.clone(),
+            span,
+        )),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::UnknownTrait),
             DiagnosticPayload::UnknownTrait { name },

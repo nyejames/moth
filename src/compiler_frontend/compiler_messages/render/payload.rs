@@ -10,9 +10,10 @@ use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidValueReceiverView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
     DuplicatePublicExportView, DuplicateTraitRequirementView, GenericBoundPrivateSurfaceLeakView,
+    InvalidTraitConformanceNames, InvalidTraitConformanceShape, InvalidTraitConformanceView,
     InvalidTraitIncompatibilityView, InvalidTraitKeywordUsageView, PrivateTypeInExportedApiView,
     TraitNameUsedAsTypeView, TraitPrivateSurfaceLeakView, UnknownTraitView,
-    UnsupportedTraitFeatureView,
+    UnsupportedTraitFeatureView, decode_invalid_trait_conformance_names,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
     AmbiguousImportTargetView, BareFileImportView, CrossModuleImportNotExportedView,
@@ -36,9 +37,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::types_bo
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticCapacityResource, DiagnosticPayload, InvalidTraitConformanceReason,
-    InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, ProjectContextEscapeReason,
-    PublicGenericOwnerKind, TypeMismatchContext, ValueReceiverContext,
+    DiagnosticCapacityResource, DiagnosticPayload, InvalidTraitIncompatibilityReason,
+    InvalidTraitKeywordUsageReason, ProjectContextEscapeReason, PublicGenericOwnerKind,
+    TypeMismatchContext, ValueReceiverContext,
 };
 
 pub(crate) struct RenderedPayload {
@@ -217,11 +218,6 @@ fn render_payload_message(
         DiagnosticPayload::InvalidFunctionSignature { reason } => {
             invalid_function_signature_message(reason, string_table)
         }
-        DiagnosticPayload::InvalidTraitConformance {
-            target_name,
-            trait_name,
-            reason,
-        } => invalid_trait_conformance_message(*target_name, *trait_name, reason, context),
         DiagnosticPayload::None => String::new(),
         _ => unreachable!(
             "migrated families render through the compact path; P4.6 deletes this function"
@@ -537,154 +533,142 @@ pub(crate) fn render_project_context_escape(
 }
 
 fn invalid_trait_conformance_message(
-    target_name: StringId,
-    trait_name: Option<StringId>,
-    reason: &InvalidTraitConformanceReason,
+    shape: &InvalidTraitConformanceShape<TypeDisplayId>,
+    names: InvalidTraitConformanceNames,
+    types: &TypeDisplaySnapshot,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
+    use InvalidTraitConformanceShape as Shape;
     let string_table = context.string_table;
-    let target = string_table.resolve(target_name);
-    let trait_text = trait_name
+    let target = string_table.resolve(names.target_name);
+    let trait_text = names
+        .trait_name
         .map(|name| format!(" to '{}'", string_table.resolve(name)))
         .unwrap_or_default();
+    let reason_name = || {
+        string_table.resolve(
+            names
+                .reason_name
+                .expect("reason-shaped conformance facts carry their name"),
+        )
+    };
 
-    match reason {
-        InvalidTraitConformanceReason::ImportedModuleRoot => {
+    match shape {
+        Shape::ImportedModuleRoot => {
             "Trait conformance declarations are not allowed in imported module root files."
                 .to_owned()
         }
-        InvalidTraitConformanceReason::AliasTarget => {
+        Shape::AliasTarget => {
             format!(
                 "Type alias '{target}' cannot declare trait conformance. Use the underlying nominal type."
             )
         }
-        InvalidTraitConformanceReason::NonCanonicalTarget => {
+        Shape::NonCanonicalTarget => {
             format!(
                 "'{target}' cannot produce trait evidence{trait_text}. User-authored conformance targets must be a user-defined struct, choice, or generic type constructor declared in the same file."
             )
         }
-        InvalidTraitConformanceReason::NonlocalSourceTarget => {
+        Shape::NonlocalSourceTarget => {
             format!(
                 "User-authored trait conformance for '{target}'{trait_text} is allowed only when the type is declared in the same file. Use a local wrapper choice or struct when adapting an imported type."
             )
         }
-        InvalidTraitConformanceReason::BuiltinTarget => {
+        Shape::BuiltinTarget => {
             format!(
                 "Builtin type '{target}' cannot declare user-authored trait conformance{trait_text}. Use a local wrapper choice or struct when adapting a builtin value."
             )
         }
-        InvalidTraitConformanceReason::ExternalOpaqueTarget => {
+        Shape::ExternalOpaqueTarget => {
             format!(
                 "External opaque type '{target}' cannot declare user-authored trait conformance{trait_text}. Use a local wrapper choice or struct when adapting an external type."
             )
         }
-        InvalidTraitConformanceReason::DuplicateCanonicalEvidence => {
+        Shape::DuplicateCanonicalEvidence => {
             format!("Duplicate canonical trait evidence for '{target}'{trait_text}.")
         }
-        InvalidTraitConformanceReason::BuiltinEvidenceOverride => {
+        Shape::BuiltinEvidenceOverride => {
             format!(
                 "User-authored trait evidence for '{target}'{trait_text} cannot override compiler-owned builtin evidence."
             )
         }
-        InvalidTraitConformanceReason::IncompatibleTraitEvidence {
-            incompatible_trait_name,
-        } => {
+        Shape::IncompatibleTraitEvidence => {
             format!(
                 "Type '{target}' cannot conform{trait_text} because it is incompatible with existing evidence for trait '{}'.",
-                string_table.resolve(*incompatible_trait_name)
+                reason_name()
             )
         }
-        InvalidTraitConformanceReason::MissingMethod { requirement_name } => {
-            format!(
-                "'{target}' cannot conform{trait_text} because same-file receiver method '{}' is missing.",
-                string_table.resolve(*requirement_name)
-            )
-        }
-        InvalidTraitConformanceReason::ReceiverMutabilityMismatch { requirement_name } => {
-            format!(
-                "'{target}' cannot conform{trait_text} because receiver mutability for '{}' does not match the trait requirement.",
-                string_table.resolve(*requirement_name)
-            )
-        }
-        InvalidTraitConformanceReason::ParameterCountMismatch {
-            requirement_name,
-            expected,
-            found,
-        } => {
-            format!(
-                "'{target}' cannot conform{trait_text} because '{}' expects {expected} non-receiver parameter(s) but the method has {found}.",
-                string_table.resolve(*requirement_name)
-            )
-        }
-        InvalidTraitConformanceReason::ParameterModeMismatch {
-            requirement_name,
-            parameter_index,
-        } => {
-            format!(
-                "'{target}' cannot conform{trait_text} because parameter {parameter_index} of '{}' has a different value mode.",
-                string_table.resolve(*requirement_name)
-            )
-        }
-        InvalidTraitConformanceReason::ParameterContractMismatch {
-            requirement_name,
-            parameter_index,
-        } => {
-            format!(
-                "'{target}' cannot conform{trait_text} because parameter {parameter_index} of '{}' uses a different parameter contract; a Wire, Route or value parameter must match the trait requirement exactly.",
-                string_table.resolve(*requirement_name)
-            )
-        }
-        InvalidTraitConformanceReason::ParameterTypeMismatch {
-            requirement_name,
+        Shape::MissingMethod => format!(
+            "'{target}' cannot conform{trait_text} because same-file receiver method '{}' is missing.",
+            reason_name()
+        ),
+        Shape::ReceiverMutabilityMismatch => format!(
+            "'{target}' cannot conform{trait_text} because receiver mutability for '{}' does not match the trait requirement.",
+            reason_name()
+        ),
+        Shape::ParameterCountMismatch { expected, found } => format!(
+            "'{target}' cannot conform{trait_text} because '{}' expects {expected} non-receiver parameter(s) but the method has {found}.",
+            reason_name()
+        ),
+        Shape::ParameterModeMismatch { parameter_index } => format!(
+            "'{target}' cannot conform{trait_text} because parameter {parameter_index} of '{}' has a different value mode.",
+            reason_name()
+        ),
+        Shape::ParameterContractMismatch { parameter_index } => format!(
+            "'{target}' cannot conform{trait_text} because parameter {parameter_index} of '{}' uses a different parameter contract; a Wire, Route or value parameter must match the trait requirement exactly.",
+            reason_name()
+        ),
+        Shape::ParameterTypeMismatch {
             parameter_index,
             expected_type,
             found_type,
-        } => {
-            format!(
-                "'{target}' cannot conform{trait_text} because parameter {parameter_index} of '{}' has type {}, expected {}.",
-                string_table.resolve(*requirement_name),
-                diagnostic_type_name(*found_type, context),
-                diagnostic_type_name(*expected_type, context)
-            )
-        }
-        InvalidTraitConformanceReason::ReturnCountMismatch {
-            requirement_name,
-            expected,
-            found,
-        } => {
-            format!(
-                "'{target}' cannot conform{trait_text} because '{}' expects {expected} return slot(s) but the method has {found}.",
-                string_table.resolve(*requirement_name)
-            )
-        }
-        InvalidTraitConformanceReason::ReturnTypeMismatch {
-            requirement_name,
+        } => format!(
+            "'{target}' cannot conform{trait_text} because parameter {parameter_index} of '{}' has type {}, expected {}.",
+            reason_name(),
+            diagnostic_type_display_name(types, *found_type, context),
+            diagnostic_type_display_name(types, *expected_type, context)
+        ),
+        Shape::ReturnCountMismatch { expected, found } => format!(
+            "'{target}' cannot conform{trait_text} because '{}' expects {expected} return slot(s) but the method has {found}.",
+            reason_name()
+        ),
+        Shape::ReturnTypeMismatch {
             return_index,
             expected_type,
             found_type,
-        } => {
-            format!(
-                "'{target}' cannot conform{trait_text} because return {return_index} of '{}' has type {}, expected {}.",
-                string_table.resolve(*requirement_name),
-                diagnostic_type_name(*found_type, context),
-                diagnostic_type_name(*expected_type, context)
-            )
-        }
-        InvalidTraitConformanceReason::ReturnChannelMismatch {
-            requirement_name,
-            return_index,
-        } => {
-            format!(
-                "'{target}' cannot conform{trait_text} because return {return_index} of '{}' uses a different return channel.",
-                string_table.resolve(*requirement_name)
-            )
-        }
-        InvalidTraitConformanceReason::InferredFailureInInfallibleCast { requirement_name } => {
-            format!(
-                "'{target}' cannot conform{trait_text} because method '{}' has escaping inferred failure, which violates the infallible cast evidence contract. Handle the failure locally or use the corresponding TRY_CASTABLE_TO_* trait with its try_to_* method and declared Error! return slot.",
-                string_table.resolve(*requirement_name)
-            )
-        }
+        } => format!(
+            "'{target}' cannot conform{trait_text} because return {return_index} of '{}' has type {}, expected {}.",
+            reason_name(),
+            diagnostic_type_display_name(types, *found_type, context),
+            diagnostic_type_display_name(types, *expected_type, context)
+        ),
+        Shape::ReturnChannelMismatch { return_index } => format!(
+            "'{target}' cannot conform{trait_text} because return {return_index} of '{}' uses a different return channel.",
+            reason_name()
+        ),
+        Shape::InferredFailureInInfallibleCast => format!(
+            "'{target}' cannot conform{trait_text} because method '{}' has escaping inferred failure, which violates the infallible cast evidence contract. Handle the failure locally or use the corresponding TRY_CASTABLE_TO_* trait with its try_to_* method and declared Error! return slot.",
+            reason_name()
+        ),
+    }
+}
+
+/// WHAT: renders trait conformance facts from the compact reason shape and its ordered names.
+/// WHY: the shared message helper retains the legacy prose without keeping the legacy payload arm.
+pub(crate) fn render_invalid_trait_conformance(
+    diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidTraitConformanceView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let names = decode_invalid_trait_conformance_names(facts.shape.code(), diagnostic.string_ids())
+        .expect("trait-conformance shape code and StringIds agree");
+    RenderedPayload {
+        message: invalid_trait_conformance_message(
+            &facts.shape,
+            names,
+            diagnostic.types(),
+            context,
+        ),
+        guidance: Vec::new(),
     }
 }
 

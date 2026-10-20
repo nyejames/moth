@@ -18,7 +18,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
     GenericInstantiationFact, GenericInstantiationShape, INVALID_GENERIC_INSTANTIATION,
-    decode_generic_instantiation_extra,
+    INVALID_TRAIT_CONFORMANCE, InvalidTraitConformanceFact, InvalidTraitConformanceNames,
+    InvalidTraitConformanceShape, decode_generic_instantiation_extra,
+    decode_invalid_trait_conformance_names,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::CapacityResourceFact;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::TYPE_MISMATCH;
@@ -673,6 +675,305 @@ fn generic_instantiation_shapes_capture_only_their_type_words() {
         assert!(
             GenericInstantiationFact::decode(&draft.core.facts[..4]).is_some(),
             "every encoded generic-instantiation shape decodes after capture"
+        );
+    }
+}
+
+#[test]
+fn invalid_trait_conformance_shapes_capture_only_their_type_words() {
+    use InvalidTraitConformanceShape as Shape;
+
+    let target_name = StringId::from_index(20);
+    let trait_name = StringId::from_index(21);
+    let requirement_name = StringId::from_index(22);
+    let incompatible_trait_name = StringId::from_index(23);
+    type Case = (
+        Shape<TypeId>,
+        Shape<TypeDisplayId>,
+        Vec<StringId>,
+        InvalidTraitConformanceNames,
+        u8,
+    );
+    let cases: Vec<Case> = vec![
+        (
+            Shape::ImportedModuleRoot,
+            Shape::ImportedModuleRoot,
+            vec![target_name],
+            InvalidTraitConformanceNames {
+                target_name,
+                reason_name: None,
+                trait_name: None,
+            },
+            0,
+        ),
+        (
+            Shape::AliasTarget,
+            Shape::AliasTarget,
+            vec![target_name, trait_name],
+            InvalidTraitConformanceNames {
+                target_name,
+                reason_name: None,
+                trait_name: Some(trait_name),
+            },
+            0,
+        ),
+        (
+            Shape::NonCanonicalTarget,
+            Shape::NonCanonicalTarget,
+            vec![target_name],
+            InvalidTraitConformanceNames {
+                target_name,
+                reason_name: None,
+                trait_name: None,
+            },
+            0,
+        ),
+        (
+            Shape::NonlocalSourceTarget,
+            Shape::NonlocalSourceTarget,
+            vec![target_name, trait_name],
+            InvalidTraitConformanceNames {
+                target_name,
+                reason_name: None,
+                trait_name: Some(trait_name),
+            },
+            0,
+        ),
+        (
+            Shape::BuiltinTarget,
+            Shape::BuiltinTarget,
+            vec![target_name, trait_name],
+            InvalidTraitConformanceNames {
+                target_name,
+                reason_name: None,
+                trait_name: Some(trait_name),
+            },
+            0,
+        ),
+        (
+            Shape::ExternalOpaqueTarget,
+            Shape::ExternalOpaqueTarget,
+            vec![target_name],
+            InvalidTraitConformanceNames {
+                target_name,
+                reason_name: None,
+                trait_name: None,
+            },
+            0,
+        ),
+        (
+            Shape::DuplicateCanonicalEvidence,
+            Shape::DuplicateCanonicalEvidence,
+            vec![target_name, trait_name],
+            InvalidTraitConformanceNames {
+                target_name,
+                reason_name: None,
+                trait_name: Some(trait_name),
+            },
+            0,
+        ),
+        (
+            Shape::BuiltinEvidenceOverride,
+            Shape::BuiltinEvidenceOverride,
+            vec![target_name],
+            InvalidTraitConformanceNames {
+                target_name,
+                reason_name: None,
+                trait_name: None,
+            },
+            0,
+        ),
+        (
+            Shape::IncompatibleTraitEvidence,
+            Shape::IncompatibleTraitEvidence,
+            vec![target_name, incompatible_trait_name, trait_name],
+            InvalidTraitConformanceNames {
+                target_name,
+                reason_name: Some(incompatible_trait_name),
+                trait_name: Some(trait_name),
+            },
+            0,
+        ),
+        (
+            Shape::MissingMethod,
+            Shape::MissingMethod,
+            vec![target_name, requirement_name],
+            InvalidTraitConformanceNames {
+                target_name,
+                reason_name: Some(requirement_name),
+                trait_name: None,
+            },
+            0,
+        ),
+        (
+            Shape::ReceiverMutabilityMismatch,
+            Shape::ReceiverMutabilityMismatch,
+            vec![target_name, requirement_name, trait_name],
+            InvalidTraitConformanceNames {
+                target_name,
+                reason_name: Some(requirement_name),
+                trait_name: Some(trait_name),
+            },
+            0,
+        ),
+        (
+            Shape::ParameterCountMismatch {
+                expected: 2,
+                found: 3,
+            },
+            Shape::ParameterCountMismatch {
+                expected: 2,
+                found: 3,
+            },
+            vec![target_name, requirement_name, trait_name],
+            InvalidTraitConformanceNames {
+                target_name,
+                reason_name: Some(requirement_name),
+                trait_name: Some(trait_name),
+            },
+            0,
+        ),
+        (
+            Shape::ParameterModeMismatch { parameter_index: 1 },
+            Shape::ParameterModeMismatch { parameter_index: 1 },
+            vec![target_name, requirement_name],
+            InvalidTraitConformanceNames {
+                target_name,
+                reason_name: Some(requirement_name),
+                trait_name: None,
+            },
+            0,
+        ),
+        (
+            Shape::ParameterContractMismatch { parameter_index: 2 },
+            Shape::ParameterContractMismatch { parameter_index: 2 },
+            vec![target_name, requirement_name, trait_name],
+            InvalidTraitConformanceNames {
+                target_name,
+                reason_name: Some(requirement_name),
+                trait_name: Some(trait_name),
+            },
+            0,
+        ),
+        (
+            Shape::ParameterTypeMismatch {
+                parameter_index: 3,
+                expected_type: TypeId(40),
+                found_type: TypeId(41),
+            },
+            Shape::ParameterTypeMismatch {
+                parameter_index: 3,
+                expected_type: TypeDisplayId::from_index(40).expect("display id fits"),
+                found_type: TypeDisplayId::from_index(41).expect("display id fits"),
+            },
+            vec![target_name, requirement_name, trait_name],
+            InvalidTraitConformanceNames {
+                target_name,
+                reason_name: Some(requirement_name),
+                trait_name: Some(trait_name),
+            },
+            0b1100,
+        ),
+        (
+            Shape::ReturnCountMismatch {
+                expected: 2,
+                found: 1,
+            },
+            Shape::ReturnCountMismatch {
+                expected: 2,
+                found: 1,
+            },
+            vec![target_name, requirement_name],
+            InvalidTraitConformanceNames {
+                target_name,
+                reason_name: Some(requirement_name),
+                trait_name: None,
+            },
+            0,
+        ),
+        (
+            Shape::ReturnTypeMismatch {
+                return_index: 4,
+                expected_type: TypeId(42),
+                found_type: TypeId(43),
+            },
+            Shape::ReturnTypeMismatch {
+                return_index: 4,
+                expected_type: TypeDisplayId::from_index(42).expect("display id fits"),
+                found_type: TypeDisplayId::from_index(43).expect("display id fits"),
+            },
+            vec![target_name, requirement_name, trait_name],
+            InvalidTraitConformanceNames {
+                target_name,
+                reason_name: Some(requirement_name),
+                trait_name: Some(trait_name),
+            },
+            0b1100,
+        ),
+        (
+            Shape::ReturnChannelMismatch { return_index: 5 },
+            Shape::ReturnChannelMismatch { return_index: 5 },
+            vec![target_name, requirement_name],
+            InvalidTraitConformanceNames {
+                target_name,
+                reason_name: Some(requirement_name),
+                trait_name: None,
+            },
+            0,
+        ),
+        (
+            Shape::InferredFailureInInfallibleCast,
+            Shape::InferredFailureInInfallibleCast,
+            vec![target_name, requirement_name, trait_name],
+            InvalidTraitConformanceNames {
+                target_name,
+                reason_name: Some(requirement_name),
+                trait_name: Some(trait_name),
+            },
+            0,
+        ),
+    ];
+
+    for (shape, durable_shape, extra, expected_names, pending_mask) in cases {
+        let code = shape.code();
+        assert_eq!(
+            decode_invalid_trait_conformance_names(code, &extra),
+            Some(expected_names)
+        );
+        assert_eq!(
+            InvalidTraitConformanceFact::pending_mask(&shape),
+            pending_mask
+        );
+        let mut draft = DiagnosticDraft::with_facts(&INVALID_TRAIT_CONFORMANCE, None, |cursor| {
+            cursor.push::<InvalidTraitConformanceFact>(&shape)
+        })
+        .with_string_ids(extra);
+        assert_eq!(draft.core.pending_facts, pending_mask);
+        let before = draft.core.facts;
+        let mut rewritten = Vec::new();
+        draft
+            .capture_types(&mut |type_id| {
+                rewritten.push(type_id);
+                TypeDisplayId::from_index(type_id.0 as usize)
+            })
+            .expect("test type ids fit the display id space");
+
+        assert_eq!(rewritten.len(), pending_mask.count_ones() as usize);
+        for (index, (before, after)) in before
+            .iter()
+            .zip(draft.core.facts.iter())
+            .enumerate()
+            .take(InvalidTraitConformanceFact::WORDS)
+        {
+            if pending_mask & (1 << index) != 0 {
+                assert_eq!(*after, *before + 1);
+            } else {
+                assert_eq!(*after, *before);
+            }
+        }
+        assert_eq!(
+            InvalidTraitConformanceFact::decode(&draft.core.facts[..4]),
+            Some(durable_shape)
         );
     }
 }

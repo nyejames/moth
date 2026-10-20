@@ -15,6 +15,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
     InvalidFunctionSignatureCode, InvalidGenericInstantiationCode, InvalidGenericParameterCode,
     InvalidParameterContractCode, InvalidReceiverDeclarationCode, InvalidThisUsageCode,
+    InvalidTraitConformanceCode,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
     InvalidExternalModuleCode, InvalidImportPathCode,
@@ -1338,25 +1339,29 @@ define_stable_reason_keys! {
     },
 
     InvalidTraitConformanceReason => {
-    &InvalidTraitConformanceReason::ImportedModuleRoot => "invalid_trait_conformance.imported_module_root",
-    &InvalidTraitConformanceReason::AliasTarget => "invalid_trait_conformance.alias_target",
-    &InvalidTraitConformanceReason::NonCanonicalTarget => "invalid_trait_conformance.non_canonical_target",
-    &InvalidTraitConformanceReason::NonlocalSourceTarget => "invalid_trait_conformance.nonlocal_source_target",
-    &InvalidTraitConformanceReason::BuiltinTarget => "invalid_trait_conformance.builtin_target",
-    &InvalidTraitConformanceReason::ExternalOpaqueTarget => "invalid_trait_conformance.external_opaque_target",
-    &InvalidTraitConformanceReason::DuplicateCanonicalEvidence => "invalid_trait_conformance.duplicate_canonical_evidence",
-    &InvalidTraitConformanceReason::BuiltinEvidenceOverride => "invalid_trait_conformance.builtin_evidence_override",
-    &InvalidTraitConformanceReason::IncompatibleTraitEvidence { .. } => "invalid_trait_conformance.incompatible_trait_evidence",
-    &InvalidTraitConformanceReason::MissingMethod { .. } => "invalid_trait_conformance.missing_method",
-    &InvalidTraitConformanceReason::ReceiverMutabilityMismatch { .. } => "invalid_trait_conformance.receiver_mutability_mismatch",
-    &InvalidTraitConformanceReason::ParameterCountMismatch { .. } => "invalid_trait_conformance.parameter_count_mismatch",
-    &InvalidTraitConformanceReason::ParameterModeMismatch { .. } => "invalid_trait_conformance.parameter_mode_mismatch",
-    &InvalidTraitConformanceReason::ParameterContractMismatch { .. } => "invalid_trait_conformance.parameter_contract_mismatch",
-    &InvalidTraitConformanceReason::ParameterTypeMismatch { .. } => "invalid_trait_conformance.parameter_type_mismatch",
-    &InvalidTraitConformanceReason::ReturnCountMismatch { .. } => "invalid_trait_conformance.return_count_mismatch",
-    &InvalidTraitConformanceReason::ReturnTypeMismatch { .. } => "invalid_trait_conformance.return_type_mismatch",
-    &InvalidTraitConformanceReason::ReturnChannelMismatch { .. } => "invalid_trait_conformance.return_channel_mismatch",
-    &InvalidTraitConformanceReason::InferredFailureInInfallibleCast { .. } => "invalid_trait_conformance.inferred_failure_in_infallible_cast",
+        @delegate(reason => InvalidTraitConformanceCode::of(reason).stable_reason_key());
+    },
+
+    InvalidTraitConformanceCode => {
+        &InvalidTraitConformanceCode::ImportedModuleRoot => "invalid_trait_conformance.imported_module_root",
+        &InvalidTraitConformanceCode::AliasTarget => "invalid_trait_conformance.alias_target",
+        &InvalidTraitConformanceCode::NonCanonicalTarget => "invalid_trait_conformance.non_canonical_target",
+        &InvalidTraitConformanceCode::NonlocalSourceTarget => "invalid_trait_conformance.nonlocal_source_target",
+        &InvalidTraitConformanceCode::BuiltinTarget => "invalid_trait_conformance.builtin_target",
+        &InvalidTraitConformanceCode::ExternalOpaqueTarget => "invalid_trait_conformance.external_opaque_target",
+        &InvalidTraitConformanceCode::DuplicateCanonicalEvidence => "invalid_trait_conformance.duplicate_canonical_evidence",
+        &InvalidTraitConformanceCode::BuiltinEvidenceOverride => "invalid_trait_conformance.builtin_evidence_override",
+        &InvalidTraitConformanceCode::IncompatibleTraitEvidence => "invalid_trait_conformance.incompatible_trait_evidence",
+        &InvalidTraitConformanceCode::MissingMethod => "invalid_trait_conformance.missing_method",
+        &InvalidTraitConformanceCode::ReceiverMutabilityMismatch => "invalid_trait_conformance.receiver_mutability_mismatch",
+        &InvalidTraitConformanceCode::ParameterCountMismatch => "invalid_trait_conformance.parameter_count_mismatch",
+        &InvalidTraitConformanceCode::ParameterModeMismatch => "invalid_trait_conformance.parameter_mode_mismatch",
+        &InvalidTraitConformanceCode::ParameterContractMismatch => "invalid_trait_conformance.parameter_contract_mismatch",
+        &InvalidTraitConformanceCode::ParameterTypeMismatch => "invalid_trait_conformance.parameter_type_mismatch",
+        &InvalidTraitConformanceCode::ReturnCountMismatch => "invalid_trait_conformance.return_count_mismatch",
+        &InvalidTraitConformanceCode::ReturnTypeMismatch => "invalid_trait_conformance.return_type_mismatch",
+        &InvalidTraitConformanceCode::ReturnChannelMismatch => "invalid_trait_conformance.return_channel_mismatch",
+        &InvalidTraitConformanceCode::InferredFailureInInfallibleCast => "invalid_trait_conformance.inferred_failure_in_infallible_cast",
     },
 
     InvalidAssignmentTargetReason => {
