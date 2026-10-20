@@ -125,6 +125,17 @@ impl ExternalImportProvider for JsExternalImportProvider {
             context.string_table,
         );
 
+        // WHY: the provider's package path embeds the logical source path, and canonical package
+        //      paths reserve `#` for host import names, so registration would otherwise fail as a
+        //      compiler error instead of a located diagnostic.
+        if request.logical_source_path.as_str().contains('#') {
+            diagnostics.push(CompilerDiagnostic::invalid_external_module(
+                js_source_path,
+                InvalidExternalModuleReason::PathContainsPackageSeparator,
+                request.source_span,
+            ));
+        }
+
         // Reject project-local JS imports that declare receiver-style signatures.
         // WHY: callable `@moth.sig` signatures must expose free functions rather than `this`
         //      receiver parameters. The parser classifies receiver-shaped signatures so every

@@ -8,7 +8,7 @@ use crate::build_system::create_project_modules::resource_inputs::{
     ResourceContentState, ResourceInputRegistry,
 };
 use crate::build_system::output::{
-    BuilderKind, CleanupPolicy, OutputOwner, OutputPlan, SingleFileOutputPlan, WriteMode,
+    BuilderIdentity, CleanupPolicy, OutputOwner, OutputPlan, SingleFileOutputPlan, WriteMode,
     WriteOptions, write_project_outputs,
 };
 use crate::compiler_frontend::Flag;
@@ -455,7 +455,7 @@ fn successful_resource_emit_reads_and_writes_bytes() {
             output_root: output_root.clone(),
             project_root: None,
             owner: OutputOwner {
-                builder: BuilderKind::Html,
+                builder: BuilderIdentity::html(),
                 profile: BuildProfile::Dev,
             },
             setting_span: None,
@@ -664,7 +664,7 @@ fn js_runtime_asset_is_deferred_and_written_verbatim() {
             output_root: output_root.clone(),
             project_root: None,
             owner: OutputOwner {
-                builder: BuilderKind::Html,
+                builder: BuilderIdentity::html(),
                 profile: BuildProfile::Dev,
             },
             setting_span: None,

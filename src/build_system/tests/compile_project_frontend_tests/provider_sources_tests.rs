@@ -856,11 +856,10 @@ fn linked_module_js_lowering_is_observed_separately() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
-    frontend_surface.source_packages.register_filesystem_root(
-        "phase6helper",
-        package_root.clone(),
-        PackageOrigin::Builder,
-    );
+    frontend_surface
+        .source_packages
+        .register_filesystem_root("phase6helper", package_root.clone(), PackageOrigin::Builder)
+        .expect("test source root should register");
 
     let timing_session =
         crate::timing::start_benchmark_collection(true).expect("timing session should start");

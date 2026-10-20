@@ -4,7 +4,7 @@ use super::{
 };
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{
-    BackendBuilder, Project, ProjectBuilder, ProjectCompilation, build_project,
+    BackendBuilder, BuilderSelection, Project, ProjectCompilation, build_project,
 };
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::CleanupPolicy;

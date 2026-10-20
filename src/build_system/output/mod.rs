@@ -28,7 +28,7 @@ pub(crate) use policy::classify_output_folder;
 pub(crate) use policy::validate_output_folder_containment;
 
 pub(crate) use policy::{
-    BuilderKind, CleanupPolicy, OutputOwner, OutputPlan, SingleFileOutputPlan,
+    BuilderIdentity, CleanupPolicy, OutputOwner, OutputPlan, SingleFileOutputPlan,
     ValidatedDirectoryOutputSettings, ValidatedOutputPlan,
 };
 

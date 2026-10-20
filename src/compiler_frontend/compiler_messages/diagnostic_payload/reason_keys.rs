@@ -963,6 +963,7 @@ define_stable_reason_keys! {
     InvalidExternalModuleReason => {
         &InvalidExternalModuleReason::ReceiverMethod { .. } => "invalid_external_module.receiver_method",
         &InvalidExternalModuleReason::ParserDiagnostic { .. } => "invalid_external_module.parser_diagnostic",
+        &InvalidExternalModuleReason::PathContainsPackageSeparator => "invalid_external_module.path_contains_package_separator",
     },
 
 

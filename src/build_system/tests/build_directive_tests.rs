@@ -3,7 +3,7 @@
 // Or these tests will fail on Windows due to attempts to delete non-empty temp directories while files are still open.
 
 use super::*;
-use crate::build_system::build::{ProjectBuilder, build_project};
+use crate::build_system::build::{BuilderSelection, build_project};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use std::fs;
@@ -22,7 +22,7 @@ fn html_project_directives_fail_when_builder_does_not_register_them() {
         let entry_file = root.join(format!("{directive_name}.moth"));
         fs::write(&entry_file, source).expect("should write source file");
 
-        let builder = ProjectBuilder::new(NoDirectiveBuilder);
+        let builder = BuilderSelection::new(NoDirectiveBuilder);
         let result = build_project(
             &builder,
             entry_file
@@ -62,7 +62,7 @@ fn frontend_builtin_directives_work_without_builder_registered_project_directive
     )
     .expect("should write source file");
 
-    let builder = ProjectBuilder::new(NoDirectiveBuilder);
+    let builder = BuilderSelection::new(NoDirectiveBuilder);
     let result = build_project(
         &builder,
         entry_file

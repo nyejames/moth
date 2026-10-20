@@ -1,0 +1,12 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-IMPORT-0022"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-IMPORT-0022"
+reason = "invalid_external_module.path_contains_package_separator"
+path = "input/@page.moth"
+line = 1
+column = 1
+count = 1

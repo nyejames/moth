@@ -3,7 +3,7 @@
 //! This module delegates compilation and artifact writing to the core build APIs, then translates
 //! build outcomes into dev-server state updates and SSE reload broadcasts.
 
-use crate::build_system::build::{self, BuildResult, ProjectBuilder};
+use crate::build_system::build::{self, BuildResult, BuilderSelection};
 use crate::build_system::output::{
     OutputPlan, OutputWriteSummary, SingleFileOutputPlan, WriteMode, WriteOptions,
     write_project_outputs,
@@ -85,13 +85,13 @@ pub trait DevBuildExecutor: Send {
     ) -> Result<OutputWriteSummary, CompilerMessages>;
 }
 pub struct ProjectBuildExecutor {
-    builder: ProjectBuilder,
+    builder: BuilderSelection,
     /// The typed explicit build inputs every dev build starts from.
     build_config_inputs: BuildConfigInputSet,
 }
 
 impl ProjectBuildExecutor {
-    pub fn new(builder: ProjectBuilder, build_config_inputs: BuildConfigInputSet) -> Self {
+    pub fn new(builder: BuilderSelection, build_config_inputs: BuildConfigInputSet) -> Self {
         Self {
             builder,
             build_config_inputs,
@@ -132,7 +132,7 @@ impl DevBuildExecutor for ProjectBuildExecutor {
                 OutputPlan::SingleFile(SingleFileOutputPlan {
                     output_root: project_root.join("dev"),
                     project_root: Some(project_root),
-                    owner: build_result.output_owner,
+                    owner: build_result.output_owner.clone(),
                     setting_span: None,
                 })
             };

@@ -66,3 +66,35 @@ impl PackageMetadata {
         }
     }
 }
+
+/// Validates a registered package path, given without its leading `@` introducer.
+///
+/// WHAT: one rule for source-backed and binding-backed registration. Components are nonempty
+/// and contain no `#`. `project` is reserved for project globals and `core` for the Core origin,
+/// including ASCII case-only variants.
+/// WHY: native host import names join the canonical package path and symbol path with `#`, and
+/// official Core certification must never follow from a builder choosing a `@core` path.
+pub(crate) fn validate_package_path(
+    path_without_introducer: &str,
+    origin: PackageOrigin,
+) -> Result<(), &'static str> {
+    if path_without_introducer
+        .split('/')
+        .any(|component| component.is_empty() || component.contains('#'))
+    {
+        return Err("must be '@' followed by nonempty '/'-separated components without '#'");
+    }
+    let root = path_without_introducer
+        .split('/')
+        .next()
+        .unwrap_or_default();
+    if root.eq_ignore_ascii_case(
+        crate::compiler_frontend::project_globals::PROJECT_GLOBALS_DEPENDENCY_NAME,
+    ) {
+        return Err("is reserved for the @project project-globals interface");
+    }
+    if root.eq_ignore_ascii_case("core") && origin != PackageOrigin::Core {
+        return Err("is reserved for official Core packages");
+    }
+    Ok(())
+}

@@ -743,11 +743,10 @@ fn rejects_builder_config_dependency_without_discovering_the_package_root() {
     fs::write(&config_path, "@defaults value\n").expect("should write config dependency");
 
     let mut frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
-    frontend_surface.source_packages.register_filesystem_root(
-        "defaults",
-        package_root,
-        PackageOrigin::Builder,
-    );
+    frontend_surface
+        .source_packages
+        .register_filesystem_root("defaults", package_root, PackageOrigin::Builder)
+        .expect("test source root should register");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
@@ -1413,11 +1412,9 @@ fn builder_package_prefix_is_independent_of_ordinary_lib_directory() {
     let _path_fork = PathInternerFork::empty();
 
     let mut builder_frontend_surface = crate::builder_surface::SourcePackageRegistry::new();
-    builder_frontend_surface.register_filesystem_root(
-        "html",
-        root.join("builder/html"),
-        PackageOrigin::Builder,
-    );
+    builder_frontend_surface
+        .register_filesystem_root("html", root.join("builder/html"), PackageOrigin::Builder)
+        .expect("test source root should register");
 
     let result = super::project_roots::build_project_path_resolver(
         &config,

@@ -18,41 +18,41 @@ use std::path::{Path, PathBuf};
 //  Output Ownership
 // -------------------------
 
-/// Identifies the production artefact builder that owns an output manifest.
+/// Stable declared identity of the artefact builder that owns an output manifest.
 ///
-/// WHAT: keeps manifest ownership closed over the builders that can produce project artefacts.
-/// WHY: a generic production fallback would let an unrelated builder claim an existing manifest
-/// without an explicit identity change.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BuilderKind {
-    Html,
-    #[cfg(test)]
-    Test,
-}
+/// WHAT: a validated identifier such as `html` or a custom builder's declared name.
+/// WHY: manifest ownership is keyed by builder identity, and a custom builder must be able to
+/// declare one without editing the compiler. An unrecognised or malformed manifest owner is
+/// foreign, never adopted.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BuilderIdentity(String);
 
-impl BuilderKind {
-    pub(crate) fn manifest_name(self) -> &'static str {
-        match self {
-            Self::Html => "html",
-            #[cfg(test)]
-            Self::Test => "test",
-        }
+impl BuilderIdentity {
+    /// Validates a declared builder identity. It must have Moth identifier shape.
+    pub(crate) fn new(name: &str) -> Option<Self> {
+        moth_lexical::identifier::is_identifier(name).then(|| Self(name.to_owned()))
     }
 
-    pub(crate) fn from_manifest_name(raw_value: &str) -> Option<Self> {
-        match raw_value.trim() {
-            "html" => Some(Self::Html),
-            #[cfg(test)]
-            "test" => Some(Self::Test),
-            _ => None,
-        }
+    pub(crate) fn html() -> Self {
+        Self("html".to_owned())
+    }
+
+    /// Unit-test builders use one synthetic owner so their fixtures cannot claim a production
+    /// HTML manifest.
+    #[cfg(test)]
+    pub(crate) fn test() -> Self {
+        Self("test".to_owned())
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
 /// The one builder/profile pair that owns a directory output root.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutputOwner {
-    pub builder: BuilderKind,
+    pub builder: BuilderIdentity,
     pub profile: BuildProfile,
 }
 
@@ -197,10 +197,10 @@ impl OutputPlan {
         }
     }
 
-    pub(crate) fn owner(&self) -> OutputOwner {
+    pub(crate) fn owner(&self) -> &OutputOwner {
         match self {
-            Self::Directory(plan) => plan.owner,
-            Self::SingleFile(plan) => plan.owner,
+            Self::Directory(plan) => &plan.owner,
+            Self::SingleFile(plan) => &plan.owner,
         }
     }
 

@@ -6,12 +6,12 @@ use super::{
 };
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{
-    BackendBuilder, BuildResult, FileKind, OutputFile, Project, ProjectBuilder,
+    BackendBuilder, BuildResult, BuilderSelection, FileKind, OutputFile, Project,
 };
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::{
-    BuilderKind, CleanupPolicy, OutputOwner, OutputPlan, OutputWriteSummary, SingleFileOutputPlan,
-    ValidatedOutputPlan, WriteMode, WriteOptions, write_project_outputs,
+    BuilderIdentity, CleanupPolicy, OutputOwner, OutputPlan, OutputWriteSummary,
+    SingleFileOutputPlan, ValidatedOutputPlan, WriteMode, WriteOptions, write_project_outputs,
 };
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::build_config::{
@@ -39,7 +39,7 @@ fn naming_convention_warning(name: StringId) -> CompilerDiagnostic {
 
 fn test_build_output_owner() -> OutputOwner {
     OutputOwner {
-        builder: BuilderKind::Html,
+        builder: BuilderIdentity::html(),
         profile: BuildProfile::Dev,
     }
 }
@@ -158,7 +158,7 @@ fn directory_build_result(project_root: &Path, output_folder: &str) -> BuildResu
         string_table: StringTable::new(),
         source_database: None,
         warning_source_contexts: Vec::new(),
-        output_owner: owner,
+        output_owner: owner.clone(),
         directory_output_plan: Some(ValidatedOutputPlan {
             output_root: project_root.join(output_folder),
             project_root: project_root.to_path_buf(),
@@ -231,7 +231,7 @@ impl DevBuildExecutor for FakeExecutor {
             OutputPlan::SingleFile(SingleFileOutputPlan {
                 output_root: project_root.join("dev"),
                 project_root: Some(project_root),
-                owner: build_result.output_owner,
+                owner: build_result.output_owner.clone(),
                 setting_span: None,
             })
         };
@@ -667,7 +667,7 @@ fn project_build_executor_preserves_non_utf8_entry_path_as_file_failure() {
 
     let entry_file = PathBuf::from(OsString::from_vec(b"entry-\xff.moth".to_vec()));
     let mut executor = ProjectBuildExecutor::new(
-        ProjectBuilder::new(HtmlProjectBuilder::new()),
+        BuilderSelection::new(HtmlProjectBuilder::new()),
         BuildConfigInputSet::new(),
     );
     let messages = match executor.build(&entry_file, &[]) {
@@ -694,7 +694,7 @@ fn project_build_executor_preserves_warnings_when_output_write_fails() {
     let timing_session =
         crate::timing::start_raw_benchmark_collection(true).expect("timing session should start");
     let mut executor = ProjectBuildExecutor::new(
-        ProjectBuilder::new(InvalidOutputWarningBuilder),
+        BuilderSelection::new(InvalidOutputWarningBuilder),
         BuildConfigInputSet::new(),
     );
     let mut compiled = executor
@@ -767,7 +767,7 @@ fn project_build_executor_writes_the_validated_directory_plan() {
         ))
         .expect("test command input should be unique");
     let mut executor = ProjectBuildExecutor::new(
-        ProjectBuilder::new(HtmlProjectBuilder::new()),
+        BuilderSelection::new(HtmlProjectBuilder::new()),
         build_config_inputs,
     );
     #[cfg(feature = "timers")]
@@ -868,7 +868,7 @@ fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
 
     let state = Arc::new(DevServerState::new(root.join("dev")));
     let mut executor = ProjectBuildExecutor::new(
-        ProjectBuilder::new(HtmlProjectBuilder::new()),
+        BuilderSelection::new(HtmlProjectBuilder::new()),
         BuildConfigInputSet::new(),
     );
 
@@ -1542,7 +1542,7 @@ fn m02_real_rebuild_write_serve_tracks_private_body_entry_outcomes_and_invalid_e
     let state = Arc::new(DevServerState::new(root.join("dev")));
     let mut executor = RecordingProjectExecutor {
         inner: ProjectBuildExecutor::new(
-            ProjectBuilder::new(HtmlProjectBuilder::new()),
+            BuilderSelection::new(HtmlProjectBuilder::new()),
             BuildConfigInputSet::new(),
         ),
         last_write: None,

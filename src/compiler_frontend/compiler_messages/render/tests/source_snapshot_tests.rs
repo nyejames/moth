@@ -107,11 +107,14 @@ fn materialised_diagnostic_renders_owned_requester_and_donor_snapshots_after_ser
         let mut config = Config::new(project_directory.path().to_path_buf());
         let mut strings = StringTable::new();
         let mut surface = BuilderSurface::with_mandatory_core();
-        surface.source_packages.register_filesystem_root(
-            "pkg",
-            donor_directory.path().to_path_buf(),
-            PackageOrigin::Builder,
-        );
+        surface
+            .source_packages
+            .register_filesystem_root(
+                "pkg",
+                donor_directory.path().to_path_buf(),
+                PackageOrigin::Builder,
+            )
+            .expect("test source root should register");
         let mut source_files = None;
         let frontend = compile_project_frontend_with_inputs(
             &mut config,

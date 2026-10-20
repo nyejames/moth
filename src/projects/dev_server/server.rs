@@ -4,7 +4,7 @@
 //! and serves HTTP/SSE traffic for hot reload.
 
 use crate::build_system::BuildProfile;
-use crate::build_system::build::{ProjectBuilder, bootstrap_project_build};
+use crate::build_system::build::{BuilderSelection, bootstrap_project_build};
 use crate::build_system::create_project_modules::resolve_project_entry_root;
 use crate::build_system::output::OutputOwner;
 use crate::build_system::path_validation::check_if_valid_path;
@@ -33,7 +33,7 @@ pub(crate) struct DevRuntimePaths {
 }
 
 pub fn run_dev_server(
-    builder: ProjectBuilder,
+    builder: BuilderSelection,
     entry_path: &str,
     flags: &[Flag],
     options: DevServerOptions,
@@ -146,7 +146,7 @@ pub fn run_dev_server(
 }
 
 pub(crate) fn resolve_dev_runtime_paths(
-    builder: &ProjectBuilder,
+    builder: &BuilderSelection,
     entry_target: &Path,
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
@@ -176,7 +176,7 @@ pub(crate) fn resolve_dev_runtime_paths(
         return Err(CompilerMessages::from_error(error, StringTable::new()));
     };
     let owner = OutputOwner {
-        builder: builder.backend.builder_kind(),
+        builder: builder.backend.builder_identity(),
         profile: BuildProfile::from_flags(flags),
     };
     let plan = validated_output_settings.select(

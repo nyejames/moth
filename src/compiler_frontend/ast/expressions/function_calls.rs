@@ -1186,17 +1186,15 @@ fn external_call_requires_float_validation(
 }
 
 /// Verifies every external success-return slot has a frontend-visible semantic type.
+///
+/// Registration already rejects slots without a Moth value. An `Inferred` slot can still fail to
+/// resolve a `TypeId`, which shortens the projected slot list.
 fn validate_external_return_slots_are_visible(
     external_function: &ExternalFunctionDef,
     result_type_ids: &[TypeId],
     span: Option<SourceSpan>,
 ) -> Result<(), ExpressionParseError> {
-    if external_function.returns.len() != result_type_ids.len()
-        || external_function
-            .returns
-            .iter()
-            .any(|slot| !slot.value_type.supports_success_return_type())
-    {
+    if external_function.returns.len() != result_type_ids.len() {
         return Err(CompilerError::compiler_error(format!(
             "External function '{}' declares a return slot that is not frontend-visible at {:?}.",
             external_function.name, span

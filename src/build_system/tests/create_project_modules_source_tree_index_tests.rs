@@ -145,11 +145,13 @@ fn source_tree_index_ignores_package_prefix_collision_in_skipped_directory() {
         fs::canonicalize(&entry_root).expect("entry root should canonicalize");
 
     let mut source_packages = crate::builder_surface::SourcePackageRegistry::default();
-    source_packages.register_filesystem_root(
-        "target",
-        fs::canonicalize(entry_root.join("target")).unwrap(),
-        PackageOrigin::Builder,
-    );
+    source_packages
+        .register_filesystem_root(
+            "target",
+            fs::canonicalize(entry_root.join("target")).unwrap(),
+            PackageOrigin::Builder,
+        )
+        .expect("test source root should register");
 
     let mut string_table = StringTable::new();
     super::source_tree_index::SourceTreeIndex::discover(

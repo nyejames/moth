@@ -7,7 +7,7 @@
 
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{
-    BuildBootstrap, ProjectAssemblyError, ProjectBuilder, bootstrap_project_build,
+    BuildBootstrap, BuilderSelection, ProjectAssemblyError, bootstrap_project_build,
     validate_frontend_facade_boundaries,
 };
 use crate::build_system::create_project_modules::{
@@ -61,12 +61,12 @@ fn attach_source_database_if_missing(
 pub fn run_check_command(
     path: &str,
     build_config_inputs: &BuildConfigInputSet,
-    project_builder: &ProjectBuilder,
+    builder_selection: &BuilderSelection,
     present: impl FnOnce(CheckCommandReport),
 ) -> ProjectCommandCompletion {
     command_timing_scope!(timing_session, crate::timing::TimingCommandKind::Check);
     let start = Instant::now();
-    let outcome = execute_check(path, build_config_inputs, project_builder);
+    let outcome = execute_check(path, build_config_inputs, builder_selection);
     let completion = check_completion(&outcome);
     let error_count = outcome.messages.error_count();
     let warning_count = outcome.messages.warning_count();
@@ -133,7 +133,7 @@ fn check_completion(outcome: &CheckOutcome) -> ProjectCommandCompletion {
 fn execute_check(
     path: &str,
     build_config_inputs: &BuildConfigInputSet,
-    project_builder: &ProjectBuilder,
+    builder_selection: &BuilderSelection,
 ) -> CheckOutcome {
     let normalized_path = normalize_entry_path(path);
 
@@ -155,7 +155,7 @@ fn execute_check(
         validated_directory_output_settings,
         mut project_source_files,
         build_config_inputs,
-    } = match bootstrap_project_build(project_builder, valid_path, build_config_inputs) {
+    } = match bootstrap_project_build(builder_selection, valid_path, build_config_inputs) {
         Ok(bootstrap) => bootstrap,
         Err(messages) => {
             return CheckOutcome {

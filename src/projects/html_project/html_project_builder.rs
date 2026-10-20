@@ -15,7 +15,7 @@ use crate::build_system::build::{
     ProjectEntry,
 };
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
-use crate::build_system::output::{BuilderKind, CleanupPolicy};
+use crate::build_system::output::{BuilderIdentity, CleanupPolicy};
 use crate::builder_surface::config_schema::{
     ConfigSchema, ConfigSchemaField, NamedConfigSectionSchema, UnknownFieldPolicy,
 };
@@ -113,8 +113,8 @@ impl HtmlProjectBuilder {
 }
 
 impl BackendBuilder for HtmlProjectBuilder {
-    fn builder_kind(&self) -> BuilderKind {
-        BuilderKind::Html
+    fn builder_identity(&self) -> BuilderIdentity {
+        BuilderIdentity::html()
     }
 
     fn build_backend(
@@ -352,11 +352,14 @@ impl BackendBuilder for HtmlProjectBuilder {
 
     fn frontend_surface(&self) -> BuilderSurface {
         let mut builder_surface = BuilderSurface::with_mandatory_core();
-        builder_surface.source_packages.register_filesystem_root(
-            HTML_SOURCE_PACKAGE_PREFIX,
-            BuilderSurface::builtin_source_package_root(HTML_SOURCE_PACKAGE_PREFIX),
-            crate::builder_surface::PackageOrigin::Builder,
-        );
+        builder_surface
+            .source_packages
+            .register_filesystem_root(
+                HTML_SOURCE_PACKAGE_PREFIX,
+                BuilderSurface::builtin_source_package_root(HTML_SOURCE_PACKAGE_PREFIX),
+                crate::builder_surface::PackageOrigin::Builder,
+            )
+            .expect("the built-in @html source package registers once");
         builder_surface.register_implicit_template_scope_source_package(HTML_SOURCE_PACKAGE_PREFIX);
 
         crate::builder_surface::core_packages::register_optional_core_packages(
@@ -390,7 +393,9 @@ impl BackendBuilder for HtmlProjectBuilder {
                 .with_test_packages_for_integration();
         }
 
-        builder_surface.finish_config_registration();
+        builder_surface
+            .validate()
+            .expect("the HTML builder surface is valid");
         builder_surface
     }
 }

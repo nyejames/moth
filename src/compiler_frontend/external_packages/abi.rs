@@ -83,17 +83,17 @@ pub enum ExternalSignatureType {
 }
 
 impl ExternalSignatureType {
-    /// Whether a signature type has a source-language success-return representation.
+    /// Whether a signature type names a Moth value usable as a parameter or success slot.
     ///
     /// Builtin `Error` belongs to the separate error channel; `Void` and opaque
     /// ABI handles do not represent source values. `Inferred` remains a placeholder
     /// here and is rejected later if it lacks a resolved semantic `TypeId`.
-    pub(crate) fn supports_success_return_type(&self) -> bool {
+    pub(crate) fn represents_moth_value(&self) -> bool {
         match self {
             Self::BuiltinError | Self::Abi(ExternalAbiType::Void | ExternalAbiType::Handle) => {
                 false
             }
-            Self::Optional(inner) => inner.supports_success_return_type(),
+            Self::Optional(inner) => inner.represents_moth_value(),
             _ => true,
         }
     }

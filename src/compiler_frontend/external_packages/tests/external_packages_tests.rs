@@ -184,13 +184,6 @@ fn const_eval_registration_requires_trusted_core_origin_and_exact_signature() {
             accepted: false,
         },
         Scenario {
-            name: "Core-looking path with Builder origin",
-            package_path: "@core/fake",
-            origin: PackageOrigin::Builder,
-            signature_change: SignatureChange::None,
-            accepted: false,
-        },
-        Scenario {
             name: "Mutable parameter",
             package_path: "@test/constant-eval",
             origin: PackageOrigin::Core,
@@ -368,7 +361,7 @@ fn const_eval_registration_requires_trusted_core_origin_and_exact_signature() {
 #[test]
 fn register_package_rejects_reserved_project_namespace() {
     let mut registry = ExternalPackageRegistry::new();
-    for path in ["@project", "@project/details", "project"] {
+    for path in ["@project", "@project/details", "@Project"] {
         let error = registry
             .register_package(path, crate::builder_surface::PackageOrigin::Builder)
             .expect_err("binding packages must not claim the @project namespace");
@@ -376,6 +369,100 @@ fn register_package_rejects_reserved_project_namespace() {
             error
                 .msg
                 .contains("reserved for the @project project-globals interface")
+        );
+    }
+}
+
+#[test]
+fn register_package_reserves_core_namespace_for_core_origin() {
+    let mut registry = ExternalPackageRegistry::new();
+    for (path, origin) in [
+        ("@core/extra", PackageOrigin::Builder),
+        ("@core", PackageOrigin::ProjectLocal),
+        ("@Core/extra", PackageOrigin::Builder),
+    ] {
+        registry
+            .register_package(path, origin)
+            .expect_err(&format!("only Core origin may claim {path}"));
+    }
+    registry
+        .register_package("@core/extra", PackageOrigin::Core)
+        .expect("Core origin owns @core paths");
+}
+
+#[test]
+fn register_package_rejects_malformed_paths() {
+    let mut registry = ExternalPackageRegistry::new();
+    for path in ["@", "@game//ui", "@game/", "@game#ui", "game"] {
+        registry
+            .register_package(path, PackageOrigin::Builder)
+            .expect_err(&format!("malformed package path {path:?} must be rejected"));
+    }
+}
+
+#[test]
+fn register_function_rejects_slots_without_a_moth_value() {
+    let shared = |language_type: ExternalSignatureType| ExternalParameter {
+        language_type,
+        access_kind: ExternalAccessKind::Shared,
+    };
+    let with_signature = |parameters: Vec<ExternalParameter>, returns: Vec<ExternalReturnSlot>| {
+        ExternalFunctionDef {
+            name: "invalid".to_owned(),
+            parameters,
+            returns,
+            error_return_type: None,
+            const_eval: None,
+            lowerings: ExternalFunctionLowerings::default(),
+        }
+    };
+    let invalid_signatures = [
+        with_signature(
+            vec![shared(ExternalSignatureType::BuiltinError)],
+            Vec::new(),
+        ),
+        with_signature(vec![shared(ExternalAbiType::Void.into())], Vec::new()),
+        with_signature(
+            Vec::new(),
+            vec![ExternalReturnSlot::fresh(ExternalAbiType::Void)],
+        ),
+        with_signature(
+            Vec::new(),
+            vec![ExternalReturnSlot::fresh(ExternalAbiType::Handle)],
+        ),
+        with_signature(
+            Vec::new(),
+            vec![ExternalReturnSlot::fresh(
+                ExternalSignatureType::BuiltinError,
+            )],
+        ),
+        with_signature(
+            vec![shared(ExternalAbiType::Utf8Str.into())],
+            vec![ExternalReturnSlot::alias_args(
+                ExternalAbiType::Utf8Str,
+                vec![1],
+            )],
+        ),
+    ];
+
+    for function in invalid_signatures {
+        let mut registry = ExternalPackageRegistry::new();
+        let package_id = registry
+            .register_package("@test/signature", PackageOrigin::Builder)
+            .expect("test package should register");
+        registry
+            .register_function_at_path(
+                package_id,
+                ExternalSymbolPath::from_components(vec!["invalid".to_owned()]),
+                ExternalFunctionId::Synthetic(0),
+                function.clone(),
+            )
+            .expect_err(&format!("signature should be rejected: {function:?}"));
+        assert!(
+            registry
+                .resolve_package_function("@test/signature", "invalid")
+                .is_none(),
+            "a rejected registration must not publish a function"
         );
     }
 }

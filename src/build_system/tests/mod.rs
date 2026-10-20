@@ -6,8 +6,9 @@ use crate::build_system::BuildProfile;
 use crate::build_system::build::{BackendBuilder, FileKind, OutputFile, Project};
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::{
-    BuilderKind, CleanupPolicy, OutputOwner, OutputPlan, OutputWriteSummary, SingleFileOutputPlan,
-    WriteMode, WriteOptions, write_project_outputs as write_project_outputs_with_table,
+    BuilderIdentity, CleanupPolicy, OutputOwner, OutputPlan, OutputWriteSummary,
+    SingleFileOutputPlan, WriteMode, WriteOptions,
+    write_project_outputs as write_project_outputs_with_table,
 };
 use crate::builder_surface::BuilderSurface;
 use crate::builder_surface::PackageOrigin;
@@ -200,7 +201,7 @@ fn test_output_plan(
         output_root,
         project_root,
         owner: OutputOwner {
-            builder: BuilderKind::Html,
+            builder: BuilderIdentity::html(),
             profile,
         },
         setting_span: None,
@@ -307,11 +308,10 @@ impl BackendBuilder for LateFailureBuilder {
 
     fn frontend_surface(&self) -> BuilderSurface {
         let mut surface = BuilderSurface::with_mandatory_core();
-        surface.source_packages.register_filesystem_root(
-            "warnpkg",
-            self.package_root.clone(),
-            PackageOrigin::Builder,
-        );
+        surface
+            .source_packages
+            .register_filesystem_root("warnpkg", self.package_root.clone(), PackageOrigin::Builder)
+            .expect("test source root should register");
         surface
     }
 

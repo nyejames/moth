@@ -17,6 +17,7 @@ use crate::builder_surface::source_file_kind_registry::SourceFileKindRegistry;
 use crate::compiler_frontend::build_config::{
     BuildInputName, BuilderConfigGlobalError, BuilderConfigGlobalSet, PrimitiveBuildValue,
 };
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::collections::BTreeSet;
@@ -71,11 +72,30 @@ impl BuilderSurface {
         }
     }
 
-    /// Seals config schemas after the selected builder and tooling overlays finish registering.
-    pub fn finish_config_registration(&mut self) {
-        self.config_schemas
-            .validate()
-            .expect("builder config schemas are valid");
+    /// Validates the complete surface after the selected builder finishes registering.
+    ///
+    /// WHAT: checks config schemas, then rejects a source-backed package and a binding-backed
+    /// package whose paths are equal or nest inside one another.
+    /// WHY: the two registries are separate, so neither can see a cross-kind overlap that would
+    /// make dependency resolution ambiguous.
+    pub fn validate(&self) -> Result<(), CompilerError> {
+        self.config_schemas.validate()?;
+        let binding_paths = self
+            .binding_packages
+            .package_paths()
+            .map(|path| path.strip_prefix('@').unwrap_or(path))
+            .collect::<BTreeSet<_>>();
+        for source in self.source_packages.iter() {
+            let source_path = source.package_prefix.as_str();
+            for &binding_path in &binding_paths {
+                if paths_overlap(source_path, binding_path) {
+                    return Err(CompilerError::compiler_error(format!(
+                        "Source package '@{source_path}' overlaps binding package '@{binding_path}'."
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Declare a source-backed package whose exported constants enter `.mtf` implicit scope.
@@ -109,6 +129,23 @@ impl BuilderSurface {
             .join(BUILTIN_SOURCE_PACKAGES_DIR)
             .join(prefix)
     }
+}
+
+/// Whether one `/`-separated package path equals the other or nests inside it, ignoring ASCII
+/// case like the namespace collision policy.
+fn paths_overlap(left: &str, right: &str) -> bool {
+    let (shorter, longer) = if left.len() <= right.len() {
+        (left, right)
+    } else {
+        (right, left)
+    };
+    longer
+        .get(..shorter.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(shorter))
+        && longer[shorter.len()..]
+            .chars()
+            .next()
+            .is_none_or(|next| next == '/')
 }
 
 /// The grouped `project #= (...)` record schema with compiler-owned fields only.
