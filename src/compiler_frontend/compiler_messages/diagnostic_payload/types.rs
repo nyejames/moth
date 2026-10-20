@@ -1241,7 +1241,7 @@ pub enum InvalidDeclarationReason {
     DeclarationRequiresModuleTopLevel,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidTraitIncompatibilityReason {
     SelfIncompatible,
     UnknownTrait,

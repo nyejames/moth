@@ -8,6 +8,11 @@ use super::subject::DiagnosticSubject;
 use super::*;
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidValueReceiverView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
+    DuplicatePublicExportView, GenericBoundPrivateSurfaceLeakView, InvalidTraitIncompatibilityView,
+    InvalidTraitKeywordUsageView, PrivateTypeInExportedApiView, TraitNameUsedAsTypeView,
+    UnsupportedTraitFeatureView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
     AmbiguousImportTargetView, BareFileImportView, CrossModuleImportNotExportedView,
     DependencyAliasCaseMismatchView, DirectSpecialFileImportView, ImportNameCollisionView,
@@ -250,66 +255,11 @@ fn render_payload_message(
             string_table.resolve(*trait_name),
             diagnostic_type_name(*surface_type, context)
         ),
-        DiagnosticPayload::GenericBoundPrivateSurfaceLeak {
-            owner_kind,
-            owner_name,
-            trait_name,
-        } => {
-            let (owner_label, kept_private) = match owner_kind {
-                PublicGenericOwnerKind::Function => ("function", "the function"),
-                PublicGenericOwnerKind::ReceiverMethod => ("receiver method", "the receiver type"),
-                PublicGenericOwnerKind::Struct => ("struct", "the struct"),
-                PublicGenericOwnerKind::Choice => ("choice", "the choice"),
-            };
-            format!(
-                "Public generic {} '{}' exposes private trait bound '{}'. Make the trait public in the module that declares it, or keep {} private.",
-                owner_label,
-                string_table.resolve(*owner_name),
-                string_table.resolve(*trait_name),
-                kept_private
-            )
-        }
-        DiagnosticPayload::PrivateTypeInExportedApi {
-            exported_name,
-            private_type,
-        } => format!(
-            "Exported declaration '{}' exposes private type {}. Export that type through the same public surface or hide it behind a public wrapper.",
-            string_table.resolve(*exported_name),
-            diagnostic_type_name(*private_type, context)
-        ),
-        DiagnosticPayload::UnsupportedTraitFeature {
-            trait_name,
-            feature,
-        } => format!(
-            "Trait '{}' uses unsupported feature '{}'.",
-            string_table.resolve(*trait_name),
-            string_table.resolve(*feature)
-        ),
-        DiagnosticPayload::InvalidTraitKeywordUsage { reason } => {
-            invalid_trait_keyword_usage_message(*reason).to_owned()
-        }
-        DiagnosticPayload::DuplicatePublicExport { name } => format!(
-            "Duplicate public export '{}' in module public surface. Each exported name must be unique.",
-            string_table.resolve(*name)
-        ),
         DiagnosticPayload::InvalidTraitConformance {
             target_name,
             trait_name,
             reason,
         } => invalid_trait_conformance_message(*target_name, *trait_name, reason, context),
-        DiagnosticPayload::InvalidTraitIncompatibility {
-            subject_name,
-            incompatible_trait_name,
-            reason,
-        } => invalid_trait_incompatibility_message(
-            *subject_name,
-            *incompatible_trait_name,
-            reason,
-            context,
-        ),
-        DiagnosticPayload::TraitNameUsedAsType { trait_name } => {
-            trait_name_used_as_type_message(*trait_name, context)
-        }
         DiagnosticPayload::InvalidThisUsage { reason } => {
             invalid_this_usage_message(*reason, string_table)
         }
@@ -715,6 +665,18 @@ fn invalid_trait_keyword_usage_message(reason: InvalidTraitKeywordUsageReason) -
         }
     }
 }
+/// WHAT: renders a trait-keyword misuse from its compact reason code.
+/// WHY: the shared helper preserves the legacy message for each keyword.
+pub(crate) fn render_invalid_trait_keyword_usage(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &InvalidTraitKeywordUsageView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_trait_keyword_usage_message(view.reason).to_owned(),
+        guidance: Vec::new(),
+    }
+}
 
 fn invalid_trait_incompatibility_message(
     subject_name: StringId,
@@ -749,6 +711,62 @@ fn invalid_trait_incompatibility_message(
         }
     }
 }
+/// WHAT: renders trait incompatibility facts through the existing legacy prose helper.
+/// WHY: the reason and names are the complete message input.
+pub(crate) fn render_invalid_trait_incompatibility(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &InvalidTraitIncompatibilityView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_trait_incompatibility_message(
+            view.subject_name,
+            view.incompatible_trait_name,
+            &view.reason,
+            context,
+        ),
+        guidance: Vec::new(),
+    }
+}
+
+fn generic_bound_private_surface_leak_message(
+    owner_kind: PublicGenericOwnerKind,
+    owner_name: StringId,
+    trait_name: StringId,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    let (owner_label, kept_private) = match owner_kind {
+        PublicGenericOwnerKind::Function => ("function", "the function"),
+        PublicGenericOwnerKind::ReceiverMethod => ("receiver method", "the receiver type"),
+        PublicGenericOwnerKind::Struct => ("struct", "the struct"),
+        PublicGenericOwnerKind::Choice => ("choice", "the choice"),
+    };
+    format!(
+        "Public generic {} '{}' exposes private trait bound '{}'. Make the trait public in the module that declares it, or keep {} private.",
+        owner_label,
+        context.string_table.resolve(owner_name),
+        context.string_table.resolve(trait_name),
+        kept_private
+    )
+}
+
+/// WHAT: renders a generic-bound visibility leak from its compact owner and name facts.
+/// WHY: the owner determines the exact legacy remediation wording.
+pub(crate) fn render_generic_bound_private_surface_leak(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &GenericBoundPrivateSurfaceLeakView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: generic_bound_private_surface_leak_message(
+            view.owner_kind,
+            view.owner_name,
+            view.trait_name,
+            context,
+        ),
+        guidance: Vec::new(),
+    }
+}
 
 fn trait_name_used_as_type_message(
     trait_name: StringId,
@@ -758,6 +776,88 @@ fn trait_name_used_as_type_message(
     format!(
         "Trait '{trait_text}' is a static contract and cannot be used as a value type. Use `type T is {trait_text}` for static reuse or a choice for runtime heterogeneity."
     )
+}
+/// WHAT: renders a trait-as-type diagnostic from its compact trait-name fact.
+/// WHY: the shared message helper is the byte-identical legacy wording.
+pub(crate) fn render_trait_name_used_as_type(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &TraitNameUsedAsTypeView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: trait_name_used_as_type_message(view.trait_name, context),
+        guidance: Vec::new(),
+    }
+}
+
+fn unsupported_trait_feature_message(
+    trait_name: StringId,
+    feature: StringId,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    format!(
+        "Trait '{}' uses unsupported feature '{}'.",
+        context.string_table.resolve(trait_name),
+        context.string_table.resolve(feature)
+    )
+}
+
+/// WHAT: renders an unsupported trait feature from its compact string facts.
+/// WHY: both names are the complete legacy message input.
+pub(crate) fn render_unsupported_trait_feature(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &UnsupportedTraitFeatureView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: unsupported_trait_feature_message(view.trait_name, view.feature, context),
+        guidance: Vec::new(),
+    }
+}
+fn duplicate_public_export_message(name: StringId, context: DiagnosticRenderContext<'_>) -> String {
+    format!(
+        "Duplicate public export '{}' in module public surface. Each exported name must be unique.",
+        context.string_table.resolve(name)
+    )
+}
+
+/// WHAT: renders duplicate public exports from the compact exported-name fact.
+/// WHY: the shared helper preserves the legacy message exactly.
+pub(crate) fn render_duplicate_public_export(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &DuplicatePublicExportView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: duplicate_public_export_message(view.name, context),
+        guidance: Vec::new(),
+    }
+}
+
+fn private_type_in_exported_api_message(exported_name: &str, private_type: &str) -> String {
+    format!(
+        "Exported declaration '{}' exposes private type {}. Export that type through the same public surface or hide it behind a public wrapper.",
+        exported_name, private_type
+    )
+}
+
+/// WHAT: renders an exported-API visibility leak from its name and type facts.
+/// WHY: the diagnostic type snapshot preserves the legacy type spelling after the live environment drops.
+pub(crate) fn render_private_type_in_exported_api(
+    diagnostic: &DiagnosticView<'_>,
+    view: &PrivateTypeInExportedApiView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let private_type = diagnostic.types().display_for_render(
+        view.private_type,
+        context.string_table,
+        context.path_table(),
+    );
+    let exported_name = context.string_table.resolve(view.exported_name);
+    RenderedPayload {
+        message: private_type_in_exported_api_message(exported_name, &private_type),
+        guidance: Vec::new(),
+    }
 }
 
 fn missing_package_symbol_message(

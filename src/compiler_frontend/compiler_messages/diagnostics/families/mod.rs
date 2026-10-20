@@ -26,5 +26,6 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
         .or_else(|| names_declarations::from_legacy(diagnostic))
         .or_else(|| calls_data::from_legacy(diagnostic))
         .or_else(|| choices_control_flow::from_legacy(diagnostic))
+        .or_else(|| generics_traits_api::from_legacy(diagnostic))
         .or_else(|| types_borrows_targets::from_legacy(diagnostic))
 }
