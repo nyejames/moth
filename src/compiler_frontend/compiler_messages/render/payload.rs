@@ -7,6 +7,9 @@
 use super::subject::DiagnosticSubject;
 use super::*;
 use crate::builder_surface::SourceFileKind;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::CircularDependencyView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::LegacyDependencyClauseView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::ProjectContextEscapeView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::UnescapedImplicitTemplateCloseView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::CompilerCapacityExceededView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
@@ -220,9 +223,6 @@ fn render_payload_message(
         | DiagnosticPayload::InvalidMutableAccess { .. } => {
             borrow_payload_message(payload, context)
         }
-        DiagnosticPayload::InvalidConfig { key, reason } => {
-            invalid_config_message(*key, reason, string_table)
-        }
         DiagnosticPayload::UnsupportedExternalFunction {
             function_name,
             package_path,
@@ -244,16 +244,6 @@ fn render_payload_message(
         DiagnosticPayload::InvalidParameterContract { reason } => {
             invalid_parameter_contract_message(*reason)
         }
-        DiagnosticPayload::InvalidDependencyClause { reason, .. } => {
-            invalid_dependency_clause_message(*reason).to_owned()
-        }
-        DiagnosticPayload::LegacyDependencyClause { replacement, .. } => match replacement {
-            Some(replacement) => format!(
-                "Source dependency clauses no longer use `import`. Write `{}`.",
-                string_table.resolve(*replacement)
-            ),
-            None => "Source dependency clauses no longer use `import`, and this clause has no automatic delimiter-free replacement. Choose either a namespace alias or direct flat selections beginning with `@`.".to_owned(),
-        },
         DiagnosticPayload::InvalidCollectionType { reason } => {
             invalid_collection_type_message(*reason).to_owned()
         }
@@ -279,20 +269,6 @@ fn render_payload_message(
             available_variants,
             string_table,
         ),
-        DiagnosticPayload::CircularDependency { path } => {
-            format!("Circular dependency at '{}'", context.render_path(*path))
-        }
-        DiagnosticPayload::DependencyNamespaceUsedAsValue { record_name } => {
-            dependency_namespace_used_as_value_message(*record_name, string_table)
-        }
-        DiagnosticPayload::NestedDependencyTraversal { record_name } => {
-            nested_dependency_traversal_message(*record_name, string_table)
-        }
-        DiagnosticPayload::NamespaceTypeValueMisuse {
-            name,
-            expected,
-            found,
-        } => namespace_type_value_misuse_message(*name, *expected, *found, string_table),
         DiagnosticPayload::UnknownTrait { name } => {
             format!("Unknown trait '{}'.", string_table.resolve(*name))
         }
@@ -339,9 +315,6 @@ fn render_payload_message(
             string_table.resolve(*exported_name),
             diagnostic_type_name(*private_type, context)
         ),
-        DiagnosticPayload::ProjectContextEscape { reason } => {
-            project_context_escape_message(*reason)
-        },
         DiagnosticPayload::UnsupportedTraitFeature {
             trait_name,
             feature,
@@ -438,14 +411,9 @@ fn render_payload_message(
         DiagnosticPayload::InvalidFallibleHandling { reason } => {
             invalid_fallible_handling_message(reason, context)
         }
-        DiagnosticPayload::CompileTimeEvaluationError {
-            reason,
-            operation,
-        } => compile_time_evaluation_error_message(
-            *reason,
-            *operation,
-            string_table,
-        ),
+        DiagnosticPayload::CompileTimeEvaluationError { reason, operation } => {
+            compile_time_evaluation_error_message(*reason, *operation, string_table)
+        }
         DiagnosticPayload::EmptyCollectionTypeAmbiguity => {
             "Cannot infer the type of an empty `{}` literal. Add an explicit type annotation."
                 .to_owned()
@@ -472,9 +440,6 @@ fn render_payload_message(
             found_type,
             reason,
         } => invalid_range_operand_message(*operand, *found_type, *reason, context),
-        DiagnosticPayload::UnsupportedBuilderPackage { package_path } => {
-            unsupported_builder_package_message(*package_path, string_table)
-        }
         DiagnosticPayload::UnsupportedBackendFeature {
             backend_name,
             reason,
@@ -483,12 +448,6 @@ fn render_payload_message(
             string_table.resolve(*backend_name),
             reason.feature_name()
         ),
-        DiagnosticPayload::InvalidPageMetadata { key, reason } => {
-            invalid_page_metadata_message(*key, *reason, string_table)
-        }
-        DiagnosticPayload::InvalidCompileTimePath { path, reason } => {
-            invalid_compile_time_path_message(*path, *reason, context)
-        }
         DiagnosticPayload::InvalidStandaloneStatement { reason } => {
             invalid_standalone_statement_message(*reason)
         }
@@ -503,6 +462,48 @@ fn render_payload_message(
         _ => unreachable!(
             "migrated families render through the compact path; P4.6 deletes this function"
         ),
+    }
+}
+fn circular_dependency_message(path: PathId, context: DiagnosticRenderContext<'_>) -> String {
+    format!("Circular dependency at '{}'", context.render_path(path))
+}
+
+/// WHAT: renders a circular dependency from its compact path fact.
+/// WHY: the path is the only variable part of this diagnostic's message.
+pub(crate) fn render_circular_dependency(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &CircularDependencyView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: circular_dependency_message(facts.path, context),
+        guidance: Vec::new(),
+    }
+}
+fn legacy_dependency_clause_message(
+    replacement: Option<StringId>,
+    string_table: &dyn StringTableResolver,
+) -> String {
+    match replacement {
+        Some(replacement) => format!(
+            "Source dependency clauses no longer use `import`. Write `{}`.",
+            string_table.resolve(replacement)
+        ),
+        None => "Source dependency clauses no longer use `import`, and this clause has no automatic delimiter-free replacement. Choose either a namespace alias or direct flat selections beginning with `@`.".to_owned(),
+    }
+}
+
+/// WHAT: renders a legacy dependency clause from its compact replacement fact.
+/// WHY: the legacy reason is fixed to the import keyword, and its replacement is the only message fact.
+pub(crate) fn render_legacy_dependency_clause(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &LegacyDependencyClauseView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let _ = facts.reason;
+    RenderedPayload {
+        message: legacy_dependency_clause_message(facts.replacement, context.string_table),
+        guidance: Vec::new(),
     }
 }
 
@@ -676,6 +677,18 @@ fn project_context_escape_message(reason: ProjectContextEscapeReason) -> String 
             "ProjectContext-dependent executable function cannot be reached through a package facade."
                 .to_owned()
         }
+    }
+}
+/// WHAT: renders a project-context escape from its compact reason code.
+/// WHY: the reason selects one of the legacy fixed messages.
+pub(crate) fn render_project_context_escape(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &ProjectContextEscapeView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: project_context_escape_message(facts.reason),
+        guidance: Vec::new(),
     }
 }
 

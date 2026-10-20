@@ -9,6 +9,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_da
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
     DeferredFeatureCode, InvalidDeclarationCode, InvalidTypeAnnotationCode,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidCompileTimePathCode, InvalidConfigCode,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
     CssTemplateWarningCode, HtmlTemplateWarningCode, InvalidTemplateDirectiveCode,
     InvalidTemplateStructureCode,
@@ -811,69 +814,91 @@ macro_rules! define_stable_reason_keys {
 
 define_stable_reason_keys! {
     InvalidConfigReason => {
-        @delegate(&InvalidConfigReason::InvalidOutputFolder { reason, .. } => reason.stable_reason_key());
-        &InvalidConfigReason::MissingKey => "invalid_config.missing_key",
-        &InvalidConfigReason::MissingConfigFile => "invalid_config.missing_config_file",
-        &InvalidConfigReason::MissingProjectRecord => "invalid_config.missing_project_record",
-        &InvalidConfigReason::MissingActiveBuilderSection { .. } => "invalid_config.missing_active_builder_section",
-        &InvalidConfigReason::DuplicateKey => "invalid_config.duplicate_key",
-        &InvalidConfigReason::FunctionUnsupported => "invalid_config.function_unsupported",
-        &InvalidConfigReason::TraitDeclarationUnsupported => "invalid_config.trait_declaration_unsupported",
-        &InvalidConfigReason::TraitConformanceUnsupported => "invalid_config.trait_conformance_unsupported",
-        &InvalidConfigReason::TraitIncompatibilityUnsupported => "invalid_config.trait_incompatibility_unsupported",
-        &InvalidConfigReason::NamedTypeUnsupported => "invalid_config.named_type_unsupported",
-        &InvalidConfigReason::MutableBindingUnsupported => "invalid_config.mutable_binding_unsupported",
-        &InvalidConfigReason::PlainBindingUnsupported => "invalid_config.plain_binding_unsupported",
-        &InvalidConfigReason::UnsupportedStatement => "invalid_config.unsupported_statement",
-        &InvalidConfigReason::StandaloneTemplateUnsupported => "invalid_config.standalone_template_unsupported",
-        &InvalidConfigReason::MissingValue => "invalid_config.missing_value",
-        &InvalidConfigReason::UnsupportedScalarValue => "invalid_config.unsupported_scalar_value",
-        &InvalidConfigReason::NotCompileTimeConstant => "invalid_config.not_compile_time_constant",
-        &InvalidConfigReason::ValueCouldNotFold => "invalid_config.value_could_not_fold",
-        &InvalidConfigReason::EmptyProjectSetting => "invalid_config.empty_project_setting",
-        &InvalidConfigReason::ConfigQualifierFixedField => "invalid_config.config_qualifier_fixed_field",
-        &InvalidConfigReason::ProjectGlobalsNameReserved => "invalid_config.project_globals_name_reserved",
-        &InvalidConfigReason::ConfigContractNameInvalid => "invalid_config.config_contract_name_invalid",
-        &InvalidConfigReason::ConfigQualifierInvalidPlacement => "invalid_config.config_qualifier_invalid_placement",
-        &InvalidConfigReason::ConfigQualifierUnsupportedType => "invalid_config.config_qualifier_unsupported_type",
-        &InvalidConfigReason::ConfigContractConflict { .. } => "invalid_config.config_contract_conflict",
-        &InvalidConfigReason::UnknownBuildConfigInput { .. } => "invalid_config.unknown_build_config_input",
-        &InvalidConfigReason::ConfigInputTypeMismatch { .. } => "invalid_config.config_input_type_mismatch",
-        &InvalidConfigReason::ConfigInputOutOfRange { .. } => "invalid_config.config_input_out_of_range",
-        &InvalidConfigReason::MissingConfigInput => "invalid_config.missing_config_input",
-        &InvalidConfigReason::UnknownKey { .. } => "invalid_config.unknown_key",
-        &InvalidConfigReason::UnknownRecordField { .. } => "invalid_config.unknown_record_field",
-        &InvalidConfigReason::MissingRequiredRecordField { .. } => "invalid_config.missing_required_record_field",
-        &InvalidConfigReason::InvalidConfigValueShape { .. } => "invalid_config.invalid_config_value_shape",
-        &InvalidConfigReason::InvalidProjectSettingValue { .. } => "invalid_config.invalid_project_setting_value",
-        &InvalidConfigReason::MissingHtmlHomepage { .. } => "invalid_config.missing_html_homepage",
-        &InvalidConfigReason::DuplicateHtmlOutputPath { .. } => "invalid_config.duplicate_html_output_path",
-        &InvalidConfigReason::ResourceOutputPathCollision { .. } => "invalid_config.resource_output_path_collision",
-        &InvalidConfigReason::ResourceOutputPathReserved { .. } => "invalid_config.resource_output_path_reserved",
-        &InvalidConfigReason::ConfiguredEntryRootMissing { .. } => "invalid_config.configured_entry_root_missing",
-        &InvalidConfigReason::EntryRootPackagePrefixCollision { .. } => "invalid_config.entry_root_package_prefix_collision",
-        &InvalidConfigReason::SourcePackageMissingRoot { .. } => "invalid_config.source_package_missing_root",
-        &InvalidConfigReason::SourcePackageMultipleRoots { .. } => "invalid_config.source_package_multiple_roots",
-        &InvalidConfigReason::NoRootModuleEntries { .. } => "invalid_config.no_root_module_entries",
-        &InvalidConfigReason::MultipleModuleRootFiles { .. } => "invalid_config.multiple_module_root_files",
-        &InvalidConfigReason::ConfigImportUnsupported => "invalid_config.config_import_unsupported",
-        &InvalidConfigReason::FileValuePathUnsupported => "invalid_config.file_value_path_unsupported",
-        &InvalidConfigReason::SourceFileFolderCollision { .. } => "invalid_config.source_file_folder_collision",
-        &InvalidConfigReason::LegacyModuleRootFileName { .. } => "invalid_config.legacy_module_root_file_name",
-        &InvalidConfigReason::OutputFoldersNotDistinct { .. } => "invalid_config.output_folders_not_distinct",
-        &InvalidConfigReason::OutputManifestOwnerConflict { .. } => "invalid_config.output_manifest_owner_conflict",
+        @delegate(reason => InvalidConfigCode::of(reason).stable_reason_key());
+    },
+
+    InvalidConfigCode => {
+        &InvalidConfigCode::MissingKey => "invalid_config.missing_key",
+        &InvalidConfigCode::MissingConfigFile => "invalid_config.missing_config_file",
+        &InvalidConfigCode::MissingProjectRecord => "invalid_config.missing_project_record",
+        &InvalidConfigCode::MissingActiveBuilderSection => "invalid_config.missing_active_builder_section",
+        &InvalidConfigCode::DuplicateKey => "invalid_config.duplicate_key",
+        &InvalidConfigCode::FunctionUnsupported => "invalid_config.function_unsupported",
+        &InvalidConfigCode::TraitDeclarationUnsupported => "invalid_config.trait_declaration_unsupported",
+        &InvalidConfigCode::TraitConformanceUnsupported => "invalid_config.trait_conformance_unsupported",
+        &InvalidConfigCode::TraitIncompatibilityUnsupported => "invalid_config.trait_incompatibility_unsupported",
+        &InvalidConfigCode::NamedTypeUnsupported => "invalid_config.named_type_unsupported",
+        &InvalidConfigCode::MutableBindingUnsupported => "invalid_config.mutable_binding_unsupported",
+        &InvalidConfigCode::PlainBindingUnsupported => "invalid_config.plain_binding_unsupported",
+        &InvalidConfigCode::UnsupportedStatement => "invalid_config.unsupported_statement",
+        &InvalidConfigCode::StandaloneTemplateUnsupported => "invalid_config.standalone_template_unsupported",
+        &InvalidConfigCode::MissingValue => "invalid_config.missing_value",
+        &InvalidConfigCode::UnsupportedScalarValue => "invalid_config.unsupported_scalar_value",
+        &InvalidConfigCode::NotCompileTimeConstant => "invalid_config.not_compile_time_constant",
+        &InvalidConfigCode::ValueCouldNotFold => "invalid_config.value_could_not_fold",
+        &InvalidConfigCode::EmptyProjectSetting => "invalid_config.empty_project_setting",
+        &InvalidConfigCode::ConfigQualifierFixedField => "invalid_config.config_qualifier_fixed_field",
+        &InvalidConfigCode::ProjectGlobalsNameReserved => "invalid_config.project_globals_name_reserved",
+        &InvalidConfigCode::ConfigContractNameInvalid => "invalid_config.config_contract_name_invalid",
+        &InvalidConfigCode::ConfigQualifierInvalidPlacement => "invalid_config.config_qualifier_invalid_placement",
+        &InvalidConfigCode::ConfigQualifierUnsupportedType => "invalid_config.config_qualifier_unsupported_type",
+        &InvalidConfigCode::ConfigContractConflict => "invalid_config.config_contract_conflict",
+        &InvalidConfigCode::UnknownBuildConfigInput => "invalid_config.unknown_build_config_input",
+        &InvalidConfigCode::ConfigInputTypeMismatch => "invalid_config.config_input_type_mismatch",
+        &InvalidConfigCode::ConfigInputOutOfRangeSeparatorNotBetweenDigits
+        | &InvalidConfigCode::ConfigInputOutOfRangeMultipleDecimalPoints
+        | &InvalidConfigCode::ConfigInputOutOfRangeDecimalPointNotAfterDigit
+        | &InvalidConfigCode::ConfigInputOutOfRangeEndsWithSeparator
+        | &InvalidConfigCode::ConfigInputOutOfRangeMissingFractionalDigits
+        | &InvalidConfigCode::ConfigInputOutOfRangeUppercaseExponentMarker
+        | &InvalidConfigCode::ConfigInputOutOfRangeMissingExponentDigits
+        | &InvalidConfigCode::ConfigInputOutOfRangeInvalidExponentSignPlacement
+        | &InvalidConfigCode::ConfigInputOutOfRangeInvalidSeparatorPlacement
+        | &InvalidConfigCode::ConfigInputOutOfRangeParseOverflow
+        | &InvalidConfigCode::ConfigInputOutOfRangeOutsideFixedScalarRange
+        | &InvalidConfigCode::ConfigInputOutOfRangeNegativeUnsignedLiteral
+        | &InvalidConfigCode::ConfigInputOutOfRangeNonFiniteFixedFloat
+        | &InvalidConfigCode::ConfigInputOutOfRangeInexactNumberScale => "invalid_config.config_input_out_of_range",
+        &InvalidConfigCode::MissingConfigInput => "invalid_config.missing_config_input",
+        &InvalidConfigCode::UnknownKey => "invalid_config.unknown_key",
+        &InvalidConfigCode::UnknownRecordField => "invalid_config.unknown_record_field",
+        &InvalidConfigCode::MissingRequiredRecordField => "invalid_config.missing_required_record_field",
+        &InvalidConfigCode::InvalidConfigValueShape => "invalid_config.invalid_config_value_shape",
+        &InvalidConfigCode::InvalidProjectSettingValue => "invalid_config.invalid_project_setting_value",
+        &InvalidConfigCode::MissingHtmlHomepage => "invalid_config.missing_html_homepage",
+        &InvalidConfigCode::DuplicateHtmlOutputPath => "invalid_config.duplicate_html_output_path",
+        &InvalidConfigCode::ResourceOutputPathCollision => "invalid_config.resource_output_path_collision",
+        &InvalidConfigCode::ResourceOutputPathReserved => "invalid_config.resource_output_path_reserved",
+        &InvalidConfigCode::ConfiguredEntryRootMissing => "invalid_config.configured_entry_root_missing",
+        &InvalidConfigCode::EntryRootPackagePrefixCollision => "invalid_config.entry_root_package_prefix_collision",
+        &InvalidConfigCode::SourcePackageMissingRoot => "invalid_config.source_package_missing_root",
+        &InvalidConfigCode::SourcePackageMultipleRoots => "invalid_config.source_package_multiple_roots",
+        &InvalidConfigCode::NoRootModuleEntries => "invalid_config.no_root_module_entries",
+        &InvalidConfigCode::MultipleModuleRootFiles => "invalid_config.multiple_module_root_files",
+        &InvalidConfigCode::ConfigImportUnsupported => "invalid_config.config_import_unsupported",
+        &InvalidConfigCode::FileValuePathUnsupported => "invalid_config.file_value_path_unsupported",
+        &InvalidConfigCode::SourceFileFolderCollision => "invalid_config.source_file_folder_collision",
+        &InvalidConfigCode::LegacyModuleRootFileName => "invalid_config.legacy_module_root_file_name",
+        &InvalidConfigCode::InvalidOutputFolderEmpty => "invalid_config.invalid_output_folder.empty",
+        &InvalidConfigCode::InvalidOutputFolderNonUtf8 => "invalid_config.invalid_output_folder.non_utf8",
+        &InvalidConfigCode::InvalidOutputFolderAbsolutePathWithoutFolder
+        | &InvalidConfigCode::InvalidOutputFolderAbsolutePathWithFolder => "invalid_config.invalid_output_folder.absolute_path",
+        &InvalidConfigCode::InvalidOutputFolderRootOrPrefix => "invalid_config.invalid_output_folder.root_or_prefix",
+        &InvalidConfigCode::InvalidOutputFolderParentDirectorySegmentWithoutFolder
+        | &InvalidConfigCode::InvalidOutputFolderParentDirectorySegmentWithFolder => "invalid_config.invalid_output_folder.parent_directory_segment",
+        &InvalidConfigCode::InvalidOutputFolderCurrentDirectory => "invalid_config.invalid_output_folder.current_directory",
+        &InvalidConfigCode::InvalidOutputFolderInvalidPathComponentWithoutFolder
+        | &InvalidConfigCode::InvalidOutputFolderInvalidPathComponentWithFolder => "invalid_config.invalid_output_folder.invalid_path_component",
+        &InvalidConfigCode::InvalidOutputFolderInsideOrEqualToEntryRootWithoutFolder
+        | &InvalidConfigCode::InvalidOutputFolderInsideOrEqualToEntryRootWithFolder => "invalid_config.invalid_output_folder.inside_or_equal_to_entry_root",
+        &InvalidConfigCode::InvalidOutputFolderResolvesOutsideProjectRootWithoutFolder
+        | &InvalidConfigCode::InvalidOutputFolderResolvesOutsideProjectRootWithFolder => "invalid_config.invalid_output_folder.resolves_outside_project_root",
+        &InvalidConfigCode::OutputFoldersNotDistinct => "invalid_config.output_folders_not_distinct",
+        &InvalidConfigCode::OutputManifestOwnerConflict => "invalid_config.output_manifest_owner_conflict",
     },
 
     InvalidOutputFolderReason => {
-    &InvalidOutputFolderReason::Empty => "invalid_config.invalid_output_folder.empty",
-    &InvalidOutputFolderReason::NonUtf8 => "invalid_config.invalid_output_folder.non_utf8",
-    &InvalidOutputFolderReason::AbsolutePath => "invalid_config.invalid_output_folder.absolute_path",
-    &InvalidOutputFolderReason::RootOrPrefix => "invalid_config.invalid_output_folder.root_or_prefix",
-    &InvalidOutputFolderReason::ParentDirectorySegment => "invalid_config.invalid_output_folder.parent_directory_segment",
-    &InvalidOutputFolderReason::CurrentDirectory => "invalid_config.invalid_output_folder.current_directory",
-    &InvalidOutputFolderReason::InvalidPathComponent => "invalid_config.invalid_output_folder.invalid_path_component",
-    &InvalidOutputFolderReason::InsideOrEqualToEntryRoot => "invalid_config.invalid_output_folder.inside_or_equal_to_entry_root",
-    &InvalidOutputFolderReason::ResolvesOutsideProjectRoot => "invalid_config.invalid_output_folder.resolves_outside_project_root",
+        @delegate(reason => InvalidConfigCode::output_folder_code(*reason).stable_reason_key());
     },
 
     InvalidMutableAccessReason => {
@@ -990,15 +1015,19 @@ define_stable_reason_keys! {
 
 
     InvalidCompileTimePathReason => {
-    &InvalidCompileTimePathReason::MissingTarget => "invalid_compile_time_path.missing_target",
-    &InvalidCompileTimePathReason::TargetIsDirectory => "invalid_compile_time_path.target_is_directory",
-    &InvalidCompileTimePathReason::TargetNotRegular => "invalid_compile_time_path.target_not_regular",
-    &InvalidCompileTimePathReason::CurrentDirectorySegment => "invalid_compile_time_path.current_directory_segment",
-    &InvalidCompileTimePathReason::ParentDirectorySegment => "invalid_compile_time_path.parent_directory_segment",
-    &InvalidCompileTimePathReason::CaseMismatch { .. } => "invalid_compile_time_path.case_mismatch",
-    &InvalidCompileTimePathReason::EscapesModuleBoundary => "invalid_compile_time_path.escapes_module_boundary",
-    &InvalidCompileTimePathReason::EscapesSymlink => "invalid_compile_time_path.escapes_symlink",
-    &InvalidCompileTimePathReason::EscapesProjectRoot => "invalid_compile_time_path.escapes_project_root",
+        @delegate(reason => InvalidCompileTimePathCode::of(reason).stable_reason_key());
+    },
+
+    InvalidCompileTimePathCode => {
+        &InvalidCompileTimePathCode::MissingTarget => "invalid_compile_time_path.missing_target",
+        &InvalidCompileTimePathCode::TargetIsDirectory => "invalid_compile_time_path.target_is_directory",
+        &InvalidCompileTimePathCode::TargetNotRegular => "invalid_compile_time_path.target_not_regular",
+        &InvalidCompileTimePathCode::CurrentDirectorySegment => "invalid_compile_time_path.current_directory_segment",
+        &InvalidCompileTimePathCode::ParentDirectorySegment => "invalid_compile_time_path.parent_directory_segment",
+        &InvalidCompileTimePathCode::CaseMismatch => "invalid_compile_time_path.case_mismatch",
+        &InvalidCompileTimePathCode::EscapesModuleBoundary => "invalid_compile_time_path.escapes_module_boundary",
+        &InvalidCompileTimePathCode::EscapesSymlink => "invalid_compile_time_path.escapes_symlink",
+        &InvalidCompileTimePathCode::EscapesProjectRoot => "invalid_compile_time_path.escapes_project_root",
     },
 
     InvalidTypeAnnotationReason => {

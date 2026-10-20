@@ -7,6 +7,12 @@
 use super::*;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::MissingImportTargetView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::ConstRecordUsedAsValueView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidCompileTimePathView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidDependencyClauseView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    DependencyNamespaceUsedAsValueView, InvalidConfigView, NamespaceTypeValueMisuseView,
+    NestedDependencyTraversalView, decode_invalid_config,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidPathView;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 
@@ -327,6 +333,21 @@ pub(crate) fn invalid_config_message(
     }
 }
 
+/// WHAT: renders invalid configuration from its compact reason code and ordered string facts.
+/// WHY: only the existing prose helper needs the reconstructed legacy reason.
+pub(crate) fn render_invalid_config(
+    diagnostic: &DiagnosticView<'_>,
+    view: &InvalidConfigView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let (key, reason) = decode_invalid_config(view, diagnostic.string_ids())
+        .expect("invalid config row stores every string required by its reason code");
+    RenderedPayload {
+        message: invalid_config_message(key, &reason, context.string_table),
+        guidance: Vec::new(),
+    }
+}
+
 fn invalid_output_folder_message(
     key_label: &str,
     folder: Option<StringId>,
@@ -454,6 +475,22 @@ pub(crate) fn invalid_compile_time_path_message(
         InvalidCompileTimePathReason::EscapesProjectRoot => format!(
             "Compile-time path '{path_text}' escapes the project root. Use a path inside the project root or move the target into the project."
         ),
+    }
+}
+/// WHAT: renders a compile-time path error from the compact path, reason code and optional case facts.
+/// WHY: only the legacy prose helper needs the reconstructed data-carrying reason.
+pub(crate) fn render_invalid_compile_time_path(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidCompileTimePathView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = facts
+        .reason
+        .to_reason(facts.provided, facts.expected)
+        .expect("compile-time path reason stores all required case-mismatch facts");
+    RenderedPayload {
+        message: invalid_compile_time_path_message(facts.path, reason, context),
+        guidance: Vec::new(),
     }
 }
 
@@ -670,6 +707,21 @@ pub(crate) fn dependency_namespace_used_as_value_message(
          Alternative: `@path content as {name}`",
     )
 }
+/// WHAT: renders a dependency namespace used as a value from its compact name fact.
+/// WHY: the name is interpolated throughout the legacy guidance text.
+pub(crate) fn render_dependency_namespace_used_as_value(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &DependencyNamespaceUsedAsValueView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: dependency_namespace_used_as_value_message(
+            facts.record_name,
+            context.string_table,
+        ),
+        guidance: Vec::new(),
+    }
+}
 
 pub(crate) fn const_record_used_as_value_message(
     record_name: StringId,
@@ -735,15 +787,43 @@ pub(crate) fn namespace_type_value_misuse_message(
         _ => format!("`{name}` cannot be used in this context."),
     }
 }
+/// WHAT: renders namespace type/value misuse from its name and usage-kind facts.
+/// WHY: the legacy message helper owns all six expected/found combinations.
+pub(crate) fn render_namespace_type_value_misuse(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &NamespaceTypeValueMisuseView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: namespace_type_value_misuse_message(
+            facts.name,
+            facts.expected,
+            facts.found,
+            context.string_table,
+        ),
+        guidance: Vec::new(),
+    }
+}
 
-pub(crate) fn nested_dependency_traversal_message(
-    _record_name: StringId,
-    _string_table: &dyn StringTableResolver,
-) -> String {
+pub(crate) fn nested_dependency_traversal_message() -> String {
     String::from(
         "Dependency namespace records do not expose nested filesystem paths as fields.\n\
          Bind the child path directly as a separate clause, for example `@child/path as child`.",
     )
+}
+
+/// WHAT: renders the fixed nested dependency traversal message.
+/// WHY: its legacy prose ignores the record-name fact retained by the typed row.
+pub(crate) fn render_nested_dependency_traversal(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &NestedDependencyTraversalView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let _ = facts.record_name;
+    RenderedPayload {
+        message: nested_dependency_traversal_message(),
+        guidance: Vec::new(),
+    }
 }
 
 pub(crate) fn invalid_dependency_clause_message(
@@ -802,6 +882,19 @@ pub(crate) fn invalid_dependency_clause_message(
         InvalidDependencyClauseReason::ContinuationEnteredStatement => {
             "The comma continued the dependency clause, so this name was consumed as the next selected dependency name. Remove the comma to end the clause and start the following statement."
         }
+    }
+}
+/// WHAT: renders an invalid dependency clause from its compact reason code.
+/// WHY: the row retains clause kind, while legacy wording depends only on reason.
+pub(crate) fn render_invalid_dependency_clause(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidDependencyClauseView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let _ = facts.clause_kind;
+    RenderedPayload {
+        message: invalid_dependency_clause_message(facts.reason).to_owned(),
+        guidance: Vec::new(),
     }
 }
 

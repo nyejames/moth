@@ -22,6 +22,7 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
     token_lexical::from_legacy(diagnostic)
         .or_else(|| imports::from_legacy(diagnostic))
         .or_else(|| templates::from_legacy(diagnostic))
+        .or_else(|| project_config::from_legacy(diagnostic))
         .or_else(|| names_declarations::from_legacy(diagnostic))
         .or_else(|| calls_data::from_legacy(diagnostic))
         .or_else(|| choices_control_flow::from_legacy(diagnostic))

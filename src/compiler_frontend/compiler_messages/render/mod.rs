@@ -41,6 +41,9 @@ pub(crate) use syntax::*;
 pub(crate) use templates::*;
 
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::DeferredFeatureView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidPageMetadataView, UnsupportedBuilderPackageView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
     InvalidTemplateDirectiveCode, InvalidTemplateDirectiveView, MalformedCssTemplateView,
     MalformedHtmlTemplateView,
@@ -858,6 +861,18 @@ pub(crate) fn unsupported_builder_package_message(
          Use a builder that exposes this core package or remove the dependency clause."
     )
 }
+/// WHAT: renders an unsupported builder package from its compact path fact.
+/// WHY: the package path is the message's only variable data.
+pub(crate) fn render_unsupported_builder_package(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &UnsupportedBuilderPackageView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: unsupported_builder_package_message(facts.package_path, context.string_table),
+        guidance: Vec::new(),
+    }
+}
 
 pub(crate) fn invalid_page_metadata_message(
     key: StringId,
@@ -874,6 +889,18 @@ pub(crate) fn invalid_page_metadata_message(
                 "Reserved HTML page metadata constant '{key_str}' is declared more than once for this entry page."
             )
         }
+    }
+}
+/// WHAT: renders invalid page metadata from its key and reason facts.
+/// WHY: the legacy prose helper owns both substitutions.
+pub(crate) fn render_invalid_page_metadata(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidPageMetadataView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_page_metadata_message(facts.key, facts.reason, context.string_table),
+        guidance: Vec::new(),
     }
 }
 
