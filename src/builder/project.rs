@@ -9,8 +9,7 @@
 //! so the public trait needs no `Send` or `Sync` bound.
 
 use super::compiled_project::{BuildArtifacts, BuildContext, CompiledProject};
-use super::{BuilderDefinition, Error};
-use crate::build_system::BuildProfile;
+use super::{BuildProfile, BuilderDefinition, Error};
 use crate::build_system::build::{self, BackendBuilder, Project, ProjectCompilation};
 use crate::build_system::output::{BuilderIdentity, CleanupPolicy};
 use crate::builder_surface::BuilderSurface;
@@ -42,10 +41,14 @@ pub trait ProjectBuilder {
 
 /// The inputs to one `build_project` call.
 ///
-/// WHAT: names the project root to compile. Every build runs in the Dev profile.
+/// WHAT: names the project root and build profile. The profile defaults to Dev, and
+/// [`BuildRequest::profile`] selects another one.
+/// WHY: the request carries the selected profile through compilation and into the builder's
+/// `build` step.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildRequest {
     project_root: PathBuf,
+    profile: BuildProfile,
 }
 
 impl BuildRequest {
@@ -53,7 +56,17 @@ impl BuildRequest {
     pub fn new(project_root: impl Into<PathBuf>) -> Self {
         Self {
             project_root: project_root.into(),
+            profile: BuildProfile::Dev,
         }
+    }
+
+    /// Selects the build profile for this request.
+    ///
+    /// WHAT: replaces the default Dev profile with `profile`.
+    /// WHY: the request carries one profile choice through compilation and the build step.
+    pub fn profile(mut self, profile: BuildProfile) -> Self {
+        self.profile = profile;
+        self
     }
 }
 
@@ -95,8 +108,13 @@ pub fn build_project(
         definition,
         builder_error: Cell::new(None),
     };
+    let release_flags = [Flag::Release];
+    let flags: &[Flag] = match request.profile {
+        BuildProfile::Dev => &[],
+        BuildProfile::Release => &release_flags,
+    };
     let build_result =
-        build::build_project(&adapter, project_root, &[], &BuildConfigInputSet::new());
+        build::build_project(&adapter, project_root, flags, &BuildConfigInputSet::new());
 
     // WHY: `CompilerMessages` cannot carry the SDK error, so `build_backend` parks it in the
     // adapter and returns a placeholder failure. The parked error is checked first, so the
@@ -141,13 +159,13 @@ impl BackendBuilder for ProjectBuilderAdapter<'_> {
         &self,
         mut project_compilation: ProjectCompilation,
         _config: &Config,
-        _build_profile: BuildProfile,
+        build_profile: BuildProfile,
         _flags: &[Flag],
         _string_table: &mut StringTable,
     ) -> Result<Project, CompilerMessages> {
         let resource_inputs = project_compilation.take_resource_inputs();
         let compiled_project = CompiledProject::new(project_compilation);
-        let mut context = BuildContext::new();
+        let mut context = BuildContext::new(build_profile);
 
         match self.builder.build(&compiled_project, &mut context) {
             // WHY: the driver does not write outputs yet, so the artifacts are dropped here.

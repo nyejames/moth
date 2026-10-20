@@ -6,7 +6,7 @@
 //! WHY: builders receive only these typed handles, so compiler-private compilation, HIR and
 //! string-table types never appear in the public SDK surface.
 
-use super::Error;
+use super::{BuildProfile, Error};
 use crate::build_system::build::ProjectCompilation;
 use std::fmt;
 use std::marker::PhantomData;
@@ -58,16 +58,21 @@ pub struct ProjectPackage<'project> {
 
 /// Per-build state passed to `ProjectBuilder::build`.
 ///
-/// WHY: only the driver constructs it, so a builder cannot create one outside a build. It has no
-/// public methods yet.
+/// WHAT: carries the selected build profile into the builder's `build` step.
+/// WHY: builders can apply their own profile policy without re-deriving the build system's choice.
 #[derive(Debug)]
 pub struct BuildContext {
-    _private: (),
+    profile: BuildProfile,
 }
 
 impl BuildContext {
-    pub(crate) fn new() -> Self {
-        Self { _private: () }
+    pub(crate) fn new(profile: BuildProfile) -> Self {
+        Self { profile }
+    }
+
+    /// Returns the profile selected for this build.
+    pub fn profile(&self) -> BuildProfile {
+        self.profile
     }
 }
 

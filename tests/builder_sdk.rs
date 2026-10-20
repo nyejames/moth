@@ -1,8 +1,9 @@
 //! Proves a separate crate can describe a builder through public SDK names only.
 
 use moth::builder::{
-    BuildArtifacts, BuildContext, BuildRequest, BuilderDefinition, BuilderDefinitionDraft,
-    CompiledProject, Error, ErrorKind, HostPackage, ProjectBuilder, SourcePackage, build_project,
+    BuildArtifacts, BuildContext, BuildProfile, BuildRequest, BuilderDefinition,
+    BuilderDefinitionDraft, CompiledProject, Error, ErrorKind, HostPackage, ProjectBuilder,
+    SourcePackage, build_project,
 };
 use moth::host::{HostFunction, HostType};
 use std::cell::Cell;
@@ -99,6 +100,57 @@ fn write_project(project_root: &Path, page_source: &str, with_facade: bool) {
         )
         .expect("should write package facade");
     }
+}
+
+/// Records the profile observed when the public driver reaches `build`.
+///
+/// WHAT: stores the profile provided through `BuildContext`.
+/// WHY: the external SDK tests verify request selection crosses the build adapter.
+struct ProfileRecordingBuilder {
+    observed_profile: Cell<Option<BuildProfile>>,
+}
+
+impl ProjectBuilder for ProfileRecordingBuilder {
+    fn definition(&self) -> Result<BuilderDefinition, Error> {
+        BuilderDefinition::new("game").finish()
+    }
+
+    fn build(
+        &self,
+        _project: &CompiledProject,
+        context: &mut BuildContext,
+    ) -> Result<BuildArtifacts, Error> {
+        self.observed_profile.set(Some(context.profile()));
+        Ok(BuildArtifacts::new())
+    }
+}
+
+#[test]
+fn external_builder_observes_requested_release_profile() {
+    let project_dir = tempfile::tempdir().expect("should create project directory");
+    write_project(project_dir.path(), PAGE_SOURCE, false);
+    let builder = ProfileRecordingBuilder {
+        observed_profile: Cell::new(None),
+    };
+
+    let request = BuildRequest::new(project_dir.path()).profile(BuildProfile::Release);
+    build_project(&builder, request).expect("release profile project should build");
+
+    assert_eq!(builder.observed_profile.get(), Some(BuildProfile::Release));
+}
+
+#[test]
+fn external_builder_observes_default_dev_profile() {
+    let project_dir = tempfile::tempdir().expect("should create project directory");
+    write_project(project_dir.path(), PAGE_SOURCE, false);
+    let builder = ProfileRecordingBuilder {
+        observed_profile: Cell::new(None),
+    };
+
+    build_project(&builder, BuildRequest::new(project_dir.path()))
+        .expect("default profile project should build");
+
+    assert_eq!(builder.observed_profile.get(), Some(BuildProfile::Dev));
 }
 
 #[test]

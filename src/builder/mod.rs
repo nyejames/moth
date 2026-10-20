@@ -11,6 +11,11 @@ mod definition;
 mod error;
 mod project;
 
+/// Deliberately re-exports the build system's single profile type.
+///
+/// WHAT: provides the canonical `moth::builder::BuildProfile` path.
+/// WHY: the public SDK must use the existing profile type rather than define a second one.
+pub use crate::build_system::build_profile::BuildProfile;
 pub use compiled_project::{BuildArtifacts, BuildContext, CompiledProject, ProjectPackage};
 pub use definition::{BuilderDefinition, BuilderDefinitionDraft, HostPackage, SourcePackage};
 pub use error::{Error, ErrorKind};

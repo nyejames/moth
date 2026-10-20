@@ -73,7 +73,7 @@ pub(super) fn validate_and_apply_config_declarations(
 
     let mut errors = Vec::new();
     let mut saw_project_record = false;
-    let mut seen_sections = HashSet::new();
+    let mut seen_sections: HashSet<&str> = HashSet::new();
 
     let project_field_indexes = SchemaFieldIndexes::build(config_schemas.project());
     let mut section_indexes = Vec::with_capacity(config_schemas.project_sections().len());
@@ -113,7 +113,7 @@ pub(super) fn validate_and_apply_config_declarations(
             .enumerate()
             .find(|(_, section)| section.name == key)
         {
-            seen_sections.insert(section.name);
+            seen_sections.insert(section.name.as_ref());
             if matches!(declaration.value, PublicFoldedValue::Record(_)) {
                 if let Err(error) = validate_and_apply_named_section(
                     config,
@@ -162,11 +162,11 @@ pub(super) fn validate_and_apply_config_declarations(
     }
 
     for section in config_schemas.project_sections() {
-        if section.required && !seen_sections.contains(section.name) {
+        if section.required && !seen_sections.contains(section.name.as_ref()) {
             errors.push(config_diagnostic(
                 None,
                 InvalidConfigReason::MissingActiveBuilderSection {
-                    section: string_table.intern(section.name),
+                    section: string_table.intern(section.name.as_ref()),
                 },
                 None,
             ));
@@ -189,19 +189,19 @@ pub(super) fn validate_and_apply_config_declarations(
 /// WHAT: maps each node's declared field names to their dense schema field IDs.
 /// WHY: the recursive walk resolves field names by dense ID lookup without scanning the schema
 ///      vectors per field; the index is rebuilt once per validation operation.
-struct SchemaFieldIndexes {
-    by_node: Vec<HashMap<&'static str, ConfigSchemaFieldId>>,
+struct SchemaFieldIndexes<'a> {
+    by_node: Vec<HashMap<&'a str, ConfigSchemaFieldId>>,
 }
 
-impl SchemaFieldIndexes {
-    fn build(schema: &ConfigSchema) -> Self {
+impl<'a> SchemaFieldIndexes<'a> {
+    fn build(schema: &'a ConfigSchema) -> Self {
         let mut by_node = Vec::with_capacity(schema.nodes().len());
 
         for node in schema.nodes() {
             let mut index = HashMap::with_capacity(node.field_ids().len());
             for field_id in node.field_ids() {
                 index
-                    .entry(schema.field(*field_id).name)
+                    .entry(schema.field(*field_id).name.as_ref())
                     .or_insert(*field_id);
             }
             by_node.push(index);
@@ -224,7 +224,7 @@ fn validate_and_apply_project_record(
     config: &mut Config,
     declaration: &FoldedConfigDeclaration,
     project_schema: &ConfigSchema,
-    field_indexes: &SchemaFieldIndexes,
+    field_indexes: &SchemaFieldIndexes<'_>,
     string_table: &mut StringTable,
     errors: &mut Vec<CompilerDiagnostic>,
 ) {
@@ -363,7 +363,7 @@ fn validate_and_apply_named_section(
     config: &mut Config,
     declaration: &FoldedConfigDeclaration,
     section: &NamedConfigSectionSchema,
-    field_indexes: &SchemaFieldIndexes,
+    field_indexes: &SchemaFieldIndexes<'_>,
     string_table: &mut StringTable,
     errors: &mut Vec<CompilerDiagnostic>,
 ) -> Result<(), CompilerError> {
@@ -486,9 +486,9 @@ fn apply_html_section_field(
 /// WHAT: bundles the schema and its transient field-name index.
 /// WHY: the recursive helpers read schema state through one shared view while the diagnostic
 /// lane stays separately mutable.
-struct ConfigSchemaView<'a> {
-    schema: &'a ConfigSchema,
-    field_indexes: &'a SchemaFieldIndexes,
+struct ConfigSchemaView<'schema, 'indexes> {
+    schema: &'schema ConfigSchema,
+    field_indexes: &'indexes SchemaFieldIndexes<'schema>,
 }
 
 /// Mutable diagnostic lane for one recursive value-validation walk.
@@ -570,7 +570,7 @@ fn push_spanned_shape_failure(
 /// directly and return [`ValueCheck::Reported`]. Schema defaults and generated values have no
 /// authored span.
 fn validate_value(
-    view: &ConfigSchemaView<'_>,
+    view: &ConfigSchemaView<'_, '_>,
     diagnostics: &mut ValueDiagnosticContext<'_>,
     key: Option<StringId>,
     shape: &ConfigFieldShape,
@@ -585,7 +585,7 @@ fn validate_value(
 /// `field_span` is the authored field's retained span when the caller owns one; schema
 /// defaults and nested collection elements pass `None` so no diagnostic gains fake provenance.
 fn validate_value_with_span(
-    view: &ConfigSchemaView<'_>,
+    view: &ConfigSchemaView<'_, '_>,
     diagnostics: &mut ValueDiagnosticContext<'_>,
     key: Option<StringId>,
     shape: &ConfigFieldShape,
@@ -645,7 +645,7 @@ fn validate_value_with_span(
 /// Collections report the element shape, or keep nested diagnostics already pushed by
 /// record-valued elements. A scalar is not promoted to a one-element collection.
 fn validate_collection(
-    view: &ConfigSchemaView<'_>,
+    view: &ConfigSchemaView<'_, '_>,
     diagnostics: &mut ValueDiagnosticContext<'_>,
     key: Option<StringId>,
     element_shape: &ConfigFieldShape,
@@ -683,7 +683,7 @@ fn validate_collection(
 
 /// Validate one record value against one schema node, field by field.
 fn validate_record_fields(
-    view: &ConfigSchemaView<'_>,
+    view: &ConfigSchemaView<'_, '_>,
     diagnostics: &mut ValueDiagnosticContext<'_>,
     node_id: ConfigSchemaNodeId,
     value: &PublicFoldedValue,
@@ -810,7 +810,7 @@ fn validate_record_fields(
                 None,
                 InvalidConfigReason::MissingRequiredRecordField {
                     record: record_name,
-                    field: diagnostics.string_table.intern(field.name),
+                    field: diagnostics.string_table.intern(field.name.as_ref()),
                 },
                 diagnostics.span,
             ));
@@ -818,7 +818,7 @@ fn validate_record_fields(
         }
 
         if let Some(default) = &field.default {
-            let field_key = diagnostics.string_table.intern(field.name);
+            let field_key = diagnostics.string_table.intern(field.name.as_ref());
 
             match validate_value(
                 view,

@@ -7,12 +7,12 @@ the milestone and update `crates/lappet/roadmap.md` in the same commit.
 
 ## Status
 
-- Status: active. Phases 0, 1, 2A, 2B.0 and 2B.1 are delivered.
-- Current slice: Phase 2B.2, builder configuration sections and the build profile.
+- Status: active. Phases 0, 1, 2A, 2B.0, 2B.1, 2B.2a and 2B.2d are delivered.
+- Current slice: Phase 2B.2, builder configuration sections and typed settings.
 - Blockers: none for Phase 2. Executable native Wasm lowering is blocked on the
   compiler prerequisites listed in the native host ABI. Phase 2 does not need it.
 - Next action: implement the `.config(name, |config| ...)` helper, the generic
-  output roots, `CompiledProject::settings` and the public `BuildProfile`.
+  output roots and `CompiledProject::settings`.
 
 ## Goal
 
@@ -94,8 +94,8 @@ The user approved these. Do not reopen them without new evidence.
   HostFunction}` vocabulary maps one to one onto `ExternalFunctionSpec`.
 - **Outputs:** builders register their own configuration section with
   output-root fields. That needs dynamic section and field names, because
-  `NamedConfigSectionSchema.name` and `ConfigSchemaField.name` are
-  `&'static str` today. Every builder section gains `dev_output` and
+  `NamedConfigSectionSchema.name` and `ConfigSchemaField.name` were
+  `&'static str`. Every builder section gains `dev_output` and
   `release_output` with the HTML defaults, and HTML moves onto the same generic
   path. A builder without a section uses the defaults.
 - **Phase 2B SDK shape:** `ProjectBuilder` has `definition` and `build`.
@@ -145,6 +145,14 @@ The user approved these. Do not reopen them without new evidence.
   `CompilerBug`, and `Error::messages` carries the rendered terse compiler lines.
   A missing package facade is a `Build` error. Tests live in
   `src/builder/tests/` and `tests/builder_sdk.rs`.
+- **Phase 2B.2a:** `NamedConfigSectionSchema.name` and `ConfigSchemaField.name`
+  accept a name chosen at runtime. The transient schema field index borrows
+  its field names from the schema, so the widening adds no clone per
+  validation pass.
+- **Phase 2B.2d:** `moth::builder::BuildProfile` re-exports the build system's
+  one profile type. `BuildRequest::profile` selects it, the internal build runs
+  with the matching flags, and `BuildContext::profile` reports the selected
+  profile to the builder.
 
 ## Code map
 
@@ -177,11 +185,14 @@ The user approved these. Do not reopen them without new evidence.
   adapter over the existing orchestration. Do not add a forwarding framework.
   `CompiledProject::require_package` uses `package_assembly` and reports a
   missing facade as a builder error.
+- [x] Allow a builder section and its fields to be named at runtime, so
+  `NamedConfigSectionSchema.name` and `ConfigSchemaField.name` accept a name
+  chosen at build time.
 - [ ] Add the builder configuration section helper,
   `.config("game", |config| ...)`, with dynamic section and field names and
   output-root fields. Decouple `effective_output_settings` from the HTML
   section so a custom builder's roots come from its own section.
-- [ ] Re-export the existing `BuildProfile` enum as `moth::builder::BuildProfile`.
+- [x] Re-export the existing `BuildProfile` enum as `moth::builder::BuildProfile`.
   `BuildRequest::profile` selects it and `BuildContext::profile` reads it.
 - [x] Add error kinds for compilation failure that carry the compiler messages
   without exposing internal types.

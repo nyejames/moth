@@ -431,7 +431,7 @@ impl HtmlProjectBuilder {
         builder_surface
             .config_schemas
             .register_project_section(NamedConfigSectionSchema {
-                name: "html",
+                name: "html".into(),
                 schema: html_schema,
                 required: true,
             });

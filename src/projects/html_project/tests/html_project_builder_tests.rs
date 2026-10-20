@@ -1111,7 +1111,7 @@ fn html_builder_registers_closed_html_section_schema() {
     let html_names: Vec<&str> = html_root
         .field_ids()
         .iter()
-        .map(|field_id| html.field(*field_id).name)
+        .map(|field_id| html.field(*field_id).name.as_ref())
         .collect();
     assert!(
         html_names.contains(&"origin") && html_names.contains(&"page_url_style"),
@@ -1148,7 +1148,7 @@ fn html_builder_registers_closed_html_section_schema() {
         .node(project.root())
         .field_ids()
         .iter()
-        .map(|field_id| project.field(*field_id).name)
+        .map(|field_id| project.field(*field_id).name.as_ref())
         .collect();
     assert!(
         !project_names.contains(&"origin") && !project_names.contains(&"page_url_style"),
