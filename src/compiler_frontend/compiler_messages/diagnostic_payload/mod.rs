@@ -11,7 +11,7 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
-mod reason_keys;
+pub(crate) mod reason_keys;
 use self::reason_keys::StableReasonKey;
 mod remap;
 mod types;

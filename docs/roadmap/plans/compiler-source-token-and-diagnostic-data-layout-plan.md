@@ -108,9 +108,10 @@ ACTIVE_PLAN:
 - Execution order: Phase 4 runs as the steps in `PHASE_4_EXECUTION_ORDER` below. The slice
   checklists remain the acceptance contract. Only their order and grouping changed, under the
   architecture document's repository-discovered corrections rule.
-- NEXT_SUBSTEP: P4.1, the diagnostic vocabulary, compact storage and pilot families (4A/4B). P4.2
-  (4C) is accepted in the checkpoint "Phase 4 P4.2: type-display snapshots and shared formatter";
-  it landed first because it does not depend on P4.1. Render equivalence for that checkpoint was
+- NEXT_SUBSTEP: P4.3, the render side: view renderers, the private legacy adapter and
+  per-diagnostic dual dispatch. P4.2 (4C) is accepted in the checkpoint
+  "Phase 4 P4.2: type-display snapshots and shared formatter" and P4.1 (4A/4B) in "Phase 4 P4.1:
+  compact diagnostic vocabulary, storage and pilots". Render equivalence for each checkpoint is
   checked by rendering every diagnosed integration case (1,655 cases) before and after: identical.
 - Phase 4 non-goals: `CompilationOutcome::Success`, typed failure lanes and `compiler_bug!`
   (Phase 5), frozen tooling sessions (Phase 6) and user-facing diagnostic prose changes (paused
@@ -123,7 +124,7 @@ PHASE_4_EXECUTION_ORDER:
 
 | Step | Slices | Content |
 |---|---|---|
-| P4.1 | 4A vocabulary, 4B | `compiler_messages/diagnostics/`: code, record, draft, facts and codecs, labels, extras, place, list ranges, store, compaction with the type-rewrite hook, capacity policy, foreign-site cold store, the `diagnostic_family!` vocabulary, the registry, per-group declaration files, identity rows for every family and twelve pilot families |
+| P4.1 | 4A vocabulary, 4B | `compiler_messages/diagnostics/`: code, record, draft with `capture_types`, facts and codecs, labels, extras, place, list ranges, store, hookless compaction, capacity policy, foreign-site cold rows, the `diagnostic_family!` vocabulary, the registry, per-group declaration files, identity rows for every family and twelve pilot families |
 | P4.2 | 4C | `compiler_messages/diagnostic_types/` snapshot store and builder; one shared formatter in `datatypes/display.rs` over live and snapshot views |
 | P4.3 | 4H render side | view renderers and per-diagnostic dual dispatch: migrated families convert through the private Phase 4 legacy adapter, compact with a type snapshot and render through the view renderer; pilot renderers are ported |
 | P4.4 | 4G1–4G8 family groups | per group: schema declarations, mirror constructors, durable views, reason codecs, adapter arms, a renderer port that deletes the old payload arms, and tests |
@@ -137,9 +138,19 @@ PHASE_4_MIGRATION_STATE:
   dispatch, P4.5 moves it to bag entry and P4.6 (Slice 4I) deletes it. It never crosses the
   Phase 4 boundary.
 - Unconsumed new items: declarations added by P4.1 and P4.2 that have no production consumer yet
-  carry item-level `cfg_attr(not(test), allow(dead_code, reason = "..."))` attributes naming the
-  slice that consumes them (P4.3 render dispatch, P4.5 capture and merge, or P4.6). No
+  carry item-level dead-code allowances naming the slice that consumes them (P4.3 render
+  dispatch, P4.5 capture and merge, or P4.6). Most use `cfg_attr(not(test), ...)`; the generated
+  views and constructors, `GenericSubstitutionRecord`, `SiteRef` and `use_of_uninitialized_local`
+  use an unconditional item-level allowance because tests cannot reach every item yet. No
   module-level suppression is used. Each slice removes the attributes that name it.
+- Identity rows: 129 families carry only code, stable code, category and reserved flag until their
+  P4.4 group upgrades them. `FamilyRow.descriptor` is an `Option` and `pilot_descriptor()` panics
+  on an identity row until P4.4 completes. The pilot parity tests and
+  `diagnostics/tests/family_inventory_tests.rs` compare the schema with the legacy `DiagnosticKind`
+  inventory and are deleted with it in P4.6.
+- Foreign-site contexts: the diagnostic store keeps a deduplicated `Vec<FrozenIdentityHandle>`
+  behind its 8-byte cold rows. P4.5 replaces it with the report-owned context references of the
+  frozen report.
 - Type-display fallback: the live `diagnostic_type_name` still renders `TypeId(N)` when a render
   context has no type environment, no path table, or an environment without the type. P4.3
   reproduces that at render time with one transitional snapshot record created only by the render
@@ -1110,8 +1121,8 @@ result model early.
 
 ### Slice 4A — Declare the complete diagnostic schema with optional stable reason keys
 
-- [ ] inventory every current stable diagnostic family from the fresh reactivation inventory
-- [ ] assign explicit non-zero internal `DiagnosticCode` values; never derive them from enum order
+- [x] inventory every current stable diagnostic family from the fresh reactivation inventory
+- [x] assign explicit non-zero internal `DiagnosticCode` values; never derive them from enum order
 - [ ] preserve each external `MOTH-*` code, category, title and default severity
 - [ ] make the schema's stable `reason_key` contract optional; preserve every existing reason key
   exactly and independently of rendered wording. Diagnostics without a reason-key contract remain
@@ -1122,31 +1133,33 @@ result model early.
 - [ ] replace compiler-generated prose stored in payload/label string fields with typed
   reason/message codes and facts; an authored string may remain a `StringId`, but `RenderedText`
   is not a generic escape hatch
-- [ ] use one small `macro_rules!` vocabulary and const tables
-- [ ] keep one registry module and split domain declaration files once the registry would exceed
+- [x] use one small `macro_rules!` vocabulary and const tables
+- [x] keep one registry module and split domain declaration files once the registry would exceed
   the repository's practical file-size guidance; each family still has exactly one declaration
 - [ ] generate/validate descriptor lookup, all-code iteration, typed draft constructors, durable
   accessors and schema tests
-- [ ] prohibit raw fact indexing outside diagnostic storage modules
+- [x] prohibit raw fact indexing outside diagnostic storage modules
 
 ### Slice 4B — Define distinct draft/durable fact types and implement compact records
 
-- [ ] define distinct draft and durable fact/core types so a pre-compaction stage-local `TypeId`
+- [x] define distinct draft and durable fact/core types so a pre-compaction stage-local `TypeId`
   can never be assigned where a durable `DiagnosticRecord` fact is required; the draft type set is
   not implicitly interchangeable with the durable fact set (R10b)
-- [ ] implement `DiagnosticRecord`, `DiagnosticDraft`, `DiagnosticId`, `DiagnosticExtraId` and
+- [x] implement `DiagnosticRecord`, `DiagnosticDraft`, `DiagnosticId`, `DiagnosticExtraId` and
   hard layout assertions
-- [ ] implement packed code/severity flags with reserved-bit validation
-- [ ] implement fixed `DiagnosticExtraRecord`, typed list ranges and typed arenas
-- [ ] implement 12-byte secondary labels; primary span exists only in the record and every
+- [x] implement packed code/severity flags with reserved-bit validation (implemented as a typed
+  `DiagnosticCode` and `SeverityOverride` pair inside the 32-byte record, so invalid bit patterns
+  are unrepresentable)
+- [x] implement fixed `DiagnosticExtraRecord`, typed list ranges and typed arenas
+- [x] implement 12-byte secondary labels; primary span exists only in the record and every
   compiler-owned label phrase uses a compact `LabelMessageCode` plus typed immediate/side data
-- [ ] implement 4-byte `DiagnosticPlace` and checked optional/packed ID codecs
+- [x] implement 4-byte `DiagnosticPlace` and checked optional/packed ID codecs
 - [ ] implement the final typed cold-store encoding for rare foreign-domain primary/secondary
   sites, replacing the transitional `FrozenIdentityHandle` without widening 32-byte records or
   12-byte labels; carry project/package/generated-generic regression coverage for every mixed-domain
   site class
-- [ ] implement deterministic capacity-exhaustion diagnostics without recursive extra allocation
-- [ ] make common drafts allocate nothing and rare drafts allocate at most one root auxiliary
+- [x] implement deterministic capacity-exhaustion diagnostics without recursive extra allocation
+- [x] make common drafts allocate nothing and rare drafts allocate at most one root auxiliary
   object
 - [ ] remove broad `Clone` from drafts, bags and owning stores
 

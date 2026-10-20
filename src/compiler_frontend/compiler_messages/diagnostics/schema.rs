@@ -1,0 +1,316 @@
+//! Family rows: the static schema each compact diagnostic family is checked against.
+//!
+//! WHAT: a `FamilyRow` names a family's internal code, stable code, category, fact layout, extra-data kind and
+//! declared label codes. A pilot row also carries the legacy descriptor that the descriptor sites serve, and a
+//! typed view that reads its records back.
+//! WHY: one row per family is the single source of stable codes and titles for pilot families. Compaction
+//! checks every draft against its row before it writes anything.
+
+use super::extras::ExtraDataKind;
+use super::facts::FactCodec;
+use super::labels::LabelMessageCode;
+use super::record::DiagnosticCode;
+use crate::compiler_frontend::compiler_messages::{DiagnosticCategory, DiagnosticDescriptor};
+
+/// One fact's storage shape, read from its codec.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FactDescriptor {
+    pub(crate) words: u8,
+    pub(crate) pending: bool,
+}
+
+impl FactDescriptor {
+    pub(crate) const fn of<C: FactCodec>() -> Self {
+        Self {
+            words: C::WORDS as u8,
+            pending: C::PENDING,
+        }
+    }
+}
+
+/// A family's static schema.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct FamilyRow {
+    pub(crate) code: DiagnosticCode,
+    pub(crate) stable_code: &'static str,
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.3 render dispatch reads family metadata")
+    )]
+    pub(crate) category: DiagnosticCategory,
+    pub(crate) reserved: bool,
+    /// The legacy descriptor. Only pilot rows carry one.
+    pub(crate) descriptor: Option<DiagnosticDescriptor>,
+    pub(crate) layout: &'static [FactDescriptor],
+    pub(crate) extra: ExtraDataKind,
+    /// Label codes that drafts of this family may declare.
+    pub(crate) labels: &'static [LabelMessageCode],
+}
+
+impl FamilyRow {
+    /// Total fact words that this family's constructor must write.
+    pub(crate) const fn word_count(&self) -> usize {
+        let mut total = 0;
+        let mut index = 0;
+        while index < self.layout.len() {
+            total += self.layout[index].words as usize;
+            index += 1;
+        }
+        total
+    }
+
+    /// Bit `n` is set when fact word `n` holds a raw type id.
+    pub(crate) const fn pending_mask(&self) -> u8 {
+        let mut mask = 0;
+        let mut word = 0;
+        let mut index = 0;
+        while index < self.layout.len() {
+            let fact = self.layout[index];
+            let words = fact.words as usize;
+            let mut offset = 0;
+            while offset < words {
+                if fact.pending {
+                    mask |= 1 << (word + offset);
+                }
+                offset += 1;
+            }
+            word += words;
+            index += 1;
+        }
+        mask
+    }
+
+    /// The legacy descriptor of a pilot row.
+    pub(crate) const fn pilot_descriptor(&self) -> DiagnosticDescriptor {
+        match self.descriptor {
+            Some(descriptor) => descriptor,
+            None => panic!("only pilot rows serve a legacy descriptor"),
+        }
+    }
+
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.3 render dispatch skips reserved families")
+    )]
+    pub(crate) const fn is_reserved(&self) -> bool {
+        self.reserved
+    }
+}
+
+/// The thousands band that codes in `category` occupy. For example, `Rule` owns `3000..=3999`.
+pub(crate) const fn band_of(category: DiagnosticCategory) -> u16 {
+    match category {
+        DiagnosticCategory::Syntax => 1000,
+        DiagnosticCategory::Type => 2000,
+        DiagnosticCategory::Rule => 3000,
+        DiagnosticCategory::Import => 4000,
+        DiagnosticCategory::Borrow => 5000,
+        DiagnosticCategory::Config => 6000,
+        DiagnosticCategory::DeferredFeature => 7000,
+        DiagnosticCategory::Infrastructure => {
+            panic!("P4.1 defines no compact rows for Infrastructure")
+        }
+    }
+}
+
+/// Expands to `false`, or to `true` when a family is marked `reserved`: its code is held, but nothing produces it.
+macro_rules! reserved_flag {
+    () => {
+        false
+    };
+    (reserved) => {
+        true
+    };
+}
+pub(crate) use reserved_flag;
+
+/// Declares a family row.
+///
+/// `pilot` rows serve the legacy descriptor and get a typed view. Their constructor is generated (`ctor: generated`)
+/// or written by hand in the group module (`ctor: manual`). `identity` rows declare only the code and category.
+macro_rules! diagnostic_family {
+    (
+        pilot $name:ident {
+            internal: $internal:literal,
+            stable: $stable:literal,
+            category: $category:expr,
+            severity: $severity:expr,
+            title: $title:literal,
+            facts: [$($field:ident : $codec:ty),* $(,)?],
+            labels: [$($label:expr),* $(,)?],
+            extra: $extra:ident,
+            ctor: generated $ctor:ident,
+            view: $view:ident $(, $reserved:ident)? $(,)?
+        }
+    ) => {
+        const _: () = assert!(
+            ($internal / 1000) * 1000
+                == $crate::compiler_frontend::compiler_messages::diagnostics::schema::band_of($category),
+            "pilot family code must sit in its category's band"
+        );
+
+        pub(crate) const $name: $crate::compiler_frontend::compiler_messages::diagnostics::schema::FamilyRow =
+            $crate::compiler_frontend::compiler_messages::diagnostics::schema::FamilyRow {
+                code: $crate::compiler_frontend::compiler_messages::diagnostics::record::DiagnosticCode::new($internal),
+                stable_code: $stable,
+                category: $category,
+                reserved: $crate::compiler_frontend::compiler_messages::diagnostics::schema::reserved_flag!(
+                    $($reserved)?
+                ),
+                descriptor: Some($crate::compiler_frontend::compiler_messages::DiagnosticDescriptor::new(
+                    $stable,
+                    $title,
+                    $severity,
+                )),
+                layout: &[$(
+                    $crate::compiler_frontend::compiler_messages::diagnostics::schema::FactDescriptor::of::<$codec>()
+                ),*],
+                extra: $crate::compiler_frontend::compiler_messages::diagnostics::extras::ExtraDataKind::$extra,
+                labels: &[$($label),*],
+            };
+
+        #[allow(dead_code, reason = "P4.3 render views read pilot records")]
+        pub(crate) struct $view<'a> {
+            pub(crate) record: $crate::compiler_frontend::compiler_messages::diagnostics::store::RecordRef<'a>,
+            pub(crate) primary: $crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef<'a>,
+            pub(crate) labels: &'a [$crate::compiler_frontend::compiler_messages::diagnostics::labels::SecondaryDiagnosticLabel],
+            pub(crate) string_ids: &'a [$crate::compiler_frontend::symbols::string_interning::StringId],
+            $(pub(crate) $field: <$codec as $crate::compiler_frontend::compiler_messages::diagnostics::facts::FactCodec>::Durable,)*
+        }
+
+        #[allow(dead_code, reason = "P4.3 render views read pilot records")]
+        impl<'a> $view<'a> {
+            pub(crate) fn from_record(
+                record: $crate::compiler_frontend::compiler_messages::diagnostics::store::RecordRef<'a>,
+            ) -> Option<Self> {
+                if record.code() != $name.code {
+                    return None;
+                }
+                let facts = record.facts();
+                $(let $field = facts.read::<$codec>();)*
+                facts.finish();
+                Some(Self {
+                    record,
+                    primary: record.primary(),
+                    labels: record.labels(),
+                    string_ids: record.string_ids(),
+                    $($field,)*
+                })
+            }
+        }
+
+        #[allow(dead_code, reason = "P4.6 producer switch: generated family constructor")]
+        pub(crate) fn $ctor(
+            $($field: <$codec as $crate::compiler_frontend::compiler_messages::diagnostics::facts::FactCodec>::Draft,)*
+            span: Option<$crate::compiler_frontend::source::SourceSpan>,
+        ) -> $crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft {
+            // The cursor is underscore-prefixed so that a family with no facts does not warn as unused.
+            $crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft::with_facts(
+                &$name,
+                span,
+                |_cursor| {
+                    $(_cursor.push::<$codec>(&$field)?;)*
+                    Ok(())
+                },
+            )
+        }
+    };
+    (
+        pilot $name:ident {
+            internal: $internal:literal,
+            stable: $stable:literal,
+            category: $category:expr,
+            severity: $severity:expr,
+            title: $title:literal,
+            facts: [$($field:ident : $codec:ty),* $(,)?],
+            labels: [$($label:expr),* $(,)?],
+            extra: $extra:ident,
+            ctor: manual,
+            view: $view:ident $(, $reserved:ident)? $(,)?
+        }
+    ) => {
+        const _: () = assert!(
+            ($internal / 1000) * 1000
+                == $crate::compiler_frontend::compiler_messages::diagnostics::schema::band_of($category),
+            "pilot family code must sit in its category's band"
+        );
+
+        pub(crate) const $name: $crate::compiler_frontend::compiler_messages::diagnostics::schema::FamilyRow =
+            $crate::compiler_frontend::compiler_messages::diagnostics::schema::FamilyRow {
+                code: $crate::compiler_frontend::compiler_messages::diagnostics::record::DiagnosticCode::new($internal),
+                stable_code: $stable,
+                category: $category,
+                reserved: $crate::compiler_frontend::compiler_messages::diagnostics::schema::reserved_flag!(
+                    $($reserved)?
+                ),
+                descriptor: Some($crate::compiler_frontend::compiler_messages::DiagnosticDescriptor::new(
+                    $stable,
+                    $title,
+                    $severity,
+                )),
+                layout: &[$(
+                    $crate::compiler_frontend::compiler_messages::diagnostics::schema::FactDescriptor::of::<$codec>()
+                ),*],
+                extra: $crate::compiler_frontend::compiler_messages::diagnostics::extras::ExtraDataKind::$extra,
+                labels: &[$($label),*],
+            };
+
+        #[allow(dead_code, reason = "P4.3 render views read pilot records")]
+        pub(crate) struct $view<'a> {
+            pub(crate) record: $crate::compiler_frontend::compiler_messages::diagnostics::store::RecordRef<'a>,
+            pub(crate) primary: $crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef<'a>,
+            pub(crate) labels: &'a [$crate::compiler_frontend::compiler_messages::diagnostics::labels::SecondaryDiagnosticLabel],
+            pub(crate) string_ids: &'a [$crate::compiler_frontend::symbols::string_interning::StringId],
+            $(pub(crate) $field: <$codec as $crate::compiler_frontend::compiler_messages::diagnostics::facts::FactCodec>::Durable,)*
+        }
+
+        #[allow(dead_code, reason = "P4.3 render views read pilot records")]
+        impl<'a> $view<'a> {
+            pub(crate) fn from_record(
+                record: $crate::compiler_frontend::compiler_messages::diagnostics::store::RecordRef<'a>,
+            ) -> Option<Self> {
+                if record.code() != $name.code {
+                    return None;
+                }
+                let facts = record.facts();
+                $(let $field = facts.read::<$codec>();)*
+                facts.finish();
+                Some(Self {
+                    record,
+                    primary: record.primary(),
+                    labels: record.labels(),
+                    string_ids: record.string_ids(),
+                    $($field,)*
+                })
+            }
+        }
+    };
+    (
+        identity $name:ident {
+            internal: $internal:literal,
+            stable: $stable:literal,
+            category: $category:expr $(, $reserved:ident)? $(,)?
+        }
+    ) => {
+        const _: () = assert!(
+            ($internal / 1000) * 1000
+                == $crate::compiler_frontend::compiler_messages::diagnostics::schema::band_of($category),
+            "identity family code must sit in its category's band"
+        );
+
+        pub(crate) const $name: $crate::compiler_frontend::compiler_messages::diagnostics::schema::FamilyRow =
+            $crate::compiler_frontend::compiler_messages::diagnostics::schema::FamilyRow {
+                code: $crate::compiler_frontend::compiler_messages::diagnostics::record::DiagnosticCode::new($internal),
+                stable_code: $stable,
+                category: $category,
+                reserved: $crate::compiler_frontend::compiler_messages::diagnostics::schema::reserved_flag!(
+                    $($reserved)?
+                ),
+                descriptor: None,
+                layout: &[],
+                extra: $crate::compiler_frontend::compiler_messages::diagnostics::extras::ExtraDataKind::None,
+                labels: &[],
+            };
+    };
+}
+pub(crate) use diagnostic_family;

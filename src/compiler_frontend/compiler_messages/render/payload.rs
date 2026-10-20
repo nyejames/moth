@@ -7,7 +7,7 @@
 use super::*;
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticPayload, InvalidTraitConformanceReason,
+    DiagnosticCapacityResource, DiagnosticKind, DiagnosticPayload, InvalidTraitConformanceReason,
     InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, NamingConvention,
     ProjectContextEscapeReason, PublicGenericOwnerKind, ReservedNameOwner,
 };
@@ -631,6 +631,7 @@ fn capacity_message(resource: CapacityResource) -> String {
     match resource {
         CapacityResource::Hir(resource) => hir_capacity_message(resource),
         CapacityResource::Ast(resource) => ast_capacity_message(resource),
+        CapacityResource::Store(resource) => store_capacity_message(resource),
     }
 }
 
@@ -645,6 +646,21 @@ fn hir_capacity_message(resource: HirCapacityResource) -> String {
         HirCapacityResource::PlaceProjections => "place projections",
     };
     format!("This source exceeds the compiler's capacity for HIR {resource_name}.")
+}
+
+fn store_capacity_message(resource: DiagnosticCapacityResource) -> String {
+    let resource_name = match resource {
+        DiagnosticCapacityResource::Records => "records",
+        DiagnosticCapacityResource::Extras => "extra data rows",
+        DiagnosticCapacityResource::Labels => "secondary labels",
+        DiagnosticCapacityResource::LabelData => "label data rows",
+        DiagnosticCapacityResource::StringIds => "string id lists",
+        DiagnosticCapacityResource::Substitutions => "generic substitution rows",
+        DiagnosticCapacityResource::ForeignSites => "foreign diagnostic sites",
+        DiagnosticCapacityResource::IdentityContexts => "identity contexts",
+        DiagnosticCapacityResource::FactValue => "fact values",
+    };
+    format!("This source exceeds the compiler's capacity for diagnostic {resource_name}.")
 }
 
 fn ast_capacity_message(resource: AstCapacityResource) -> String {

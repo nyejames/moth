@@ -4604,6 +4604,7 @@ impl RuleDiagnosticKind {
             Self::DuplicateExportBlock,
             Self::PrivateTypeInExportedApi,
             Self::ProjectContextEscape,
+            Self::UnsupportedBackendFeature,
         ]
         .into_iter()
     }
@@ -4635,6 +4636,7 @@ impl ImportDiagnosticKind {
             Self::DuplicateMothTemplateInputPath,
             Self::UnsupportedExternalExtension,
             Self::InvalidExternalModule,
+            Self::MothTemplateInputsShareNoCommonAncestor,
         ]
         .into_iter()
     }

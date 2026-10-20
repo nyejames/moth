@@ -1,0 +1,268 @@
+//! Compact diagnostic drafts: what a constructor builds before compaction stores it.
+//!
+//! WHAT: a draft is a fixed-size core (family, span, fact words and pending marks) plus an optional boxed extra
+//! part for labels, foreign sites and data lists. Constructors fill a draft; `DiagnosticStore::compact` consumes
+//! it and writes the record.
+//! WHY: the core is small and copyable, so the common case needs no allocation beyond the store's own growth.
+//! Type words stay pending until `capture_types` rewrites them, so a draft can be built before the type display
+//! table that will hold its types exists.
+
+use super::extras::{DiagnosticExtraDraft, ExtraDataDraft};
+use super::facts::{FACT_WORDS, FactCapacityError, FactCursor, type_display_word};
+use super::families::token_lexical::{COMPILER_CAPACITY_EXCEEDED, CapacityResourceFact};
+use super::foreign::{ForeignSiteDraft, ForeignSlot};
+use super::labels::{DraftType, encode_label};
+use super::record::SeverityOverride;
+use super::schema::FamilyRow;
+use crate::compiler_frontend::compiler_messages::diagnostic_types::{
+    TypeDisplayCapacityError, TypeDisplayId,
+};
+use crate::compiler_frontend::compiler_messages::{
+    CapacityResource, DiagnosticCapacityResource, DiagnosticLabelMessage,
+};
+use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::string_interning::StringId;
+
+/// A diagnostic under construction. Only `DiagnosticStore::compact` turns it into a stored record.
+#[derive(Debug)]
+pub(crate) struct DiagnosticDraft {
+    pub(super) core: DraftCore,
+    pub(super) extra: Option<Box<DiagnosticExtraDraft>>,
+}
+
+const _: () = assert!(
+    size_of::<DiagnosticDraft>() <= 48,
+    "diagnostic drafts stay within 48 bytes"
+);
+
+/// The fixed-size part of a draft.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct DraftCore {
+    pub(super) family: &'static FamilyRow,
+    pub(super) span: Option<SourceSpan>,
+    pub(super) facts: [u32; FACT_WORDS],
+    /// Bit `i` set means fact word `i` holds a raw `TypeId` that `capture_types` must rewrite.
+    pub(super) pending_facts: u8,
+    /// Set once a value failed to encode. The draft then stores as a capacity record and takes no more parts.
+    pub(super) faulted: bool,
+    /// The severity override the record carries. Constructors keep `Default`, which keeps the family's severity.
+    pub(super) severity: SeverityOverride,
+}
+
+impl DiagnosticDraft {
+    /// Starts a draft for `family` and fills its fact words through `fill`.
+    ///
+    /// A value that cannot be encoded does not panic. The draft becomes a `COMPILER_CAPACITY_EXCEEDED` record at
+    /// the same span, so the user still sees a compiler limit where the diagnostic was.
+    pub(super) fn with_facts(
+        family: &'static FamilyRow,
+        span: Option<SourceSpan>,
+        fill: impl FnOnce(&mut FactCursor) -> Result<(), FactCapacityError>,
+    ) -> Self {
+        let mut cursor = FactCursor::new();
+        match fill(&mut cursor) {
+            Ok(()) => {
+                let (facts, pending_facts) = cursor.finish_for(family);
+                Self {
+                    core: DraftCore {
+                        family,
+                        span,
+                        facts,
+                        pending_facts,
+                        faulted: false,
+                        severity: SeverityOverride::Default,
+                    },
+                    extra: None,
+                }
+            }
+            Err(FactCapacityError) => Self::capacity_fault(
+                span,
+                CapacityResource::Store(DiagnosticCapacityResource::FactValue),
+            ),
+        }
+    }
+
+    /// The stand-in draft for a value the store could not hold. It is an ordinary `COMPILER_CAPACITY_EXCEEDED`
+    /// record with no labels or foreign sites, so it reaches the user as a compiler limit at `span`.
+    pub(super) fn capacity_fault(span: Option<SourceSpan>, resource: CapacityResource) -> Self {
+        let mut cursor = FactCursor::new();
+        cursor
+            .push::<CapacityResourceFact>(&resource)
+            .expect("a capacity resource always fits in one fact word");
+        let (facts, pending_facts) = cursor.finish_for(&COMPILER_CAPACITY_EXCEEDED);
+        Self {
+            core: DraftCore {
+                family: &COMPILER_CAPACITY_EXCEEDED,
+                span,
+                facts,
+                pending_facts,
+                faulted: true,
+                severity: SeverityOverride::Default,
+            },
+            extra: None,
+        }
+    }
+
+    /// The primary span a capacity record may keep. A foreign primary keeps its span in the draft, but the capacity
+    /// record has no foreign-site row for it, so that span is dropped rather than reported as local.
+    pub(super) fn capacity_span(&self) -> Option<SourceSpan> {
+        let foreign_primary = self.extra.as_ref().is_some_and(|extra| {
+            extra
+                .foreign_sites
+                .iter()
+                .any(|site| matches!(site.slot, ForeignSlot::Primary))
+        });
+        if foreign_primary {
+            None
+        } else {
+            self.core.span
+        }
+    }
+
+    /// Replaces this draft with the capacity stand-in, keeping the draft's local primary span.
+    fn faulted_by(self, resource: DiagnosticCapacityResource) -> Self {
+        Self::capacity_fault(self.capacity_span(), CapacityResource::Store(resource))
+    }
+}
+
+impl DiagnosticDraft {
+    /// Adds a secondary label in this draft's own identity. A label from another identity takes its span here too,
+    /// then goes through `with_foreign`, which records the identity and leaves the span in place.
+    pub(super) fn with_label(
+        mut self,
+        span: Option<SourceSpan>,
+        message: DiagnosticLabelMessage,
+    ) -> Self {
+        if self.core.faulted {
+            return self;
+        }
+        let extra = self.extra.get_or_insert_with(Box::default);
+        match encode_label(span, message, &mut extra.substitutions) {
+            Ok(label) => {
+                extra.labels.push(label);
+                self
+            }
+            Err(FactCapacityError) => self.faulted_by(DiagnosticCapacityResource::FactValue),
+        }
+    }
+
+    /// Marks a span as belonging to another identity. The span stays in the draft's primary or label field. The
+    /// foreign-site row records which slot it occupies and which identity context owns it.
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.3 adapter attaches foreign sites")
+    )]
+    pub(super) fn with_foreign(mut self, site: ForeignSiteDraft) -> Self {
+        if self.core.faulted {
+            // A capacity-fault draft carries no ownership rows, so its foreign primary is dropped
+            // like the stand-in record's, rather than being read later as a local span.
+            if matches!(site.slot, ForeignSlot::Primary) {
+                self.core.span = None;
+            }
+            return self;
+        }
+        if let ForeignSlot::Label(index) = site.slot {
+            let label_count = self.extra.as_ref().map_or(0, |extra| extra.labels.len());
+            assert!(
+                index < label_count,
+                "a foreign label site names a label that was added first"
+            );
+        }
+        self.extra
+            .get_or_insert_with(Box::default)
+            .foreign_sites
+            .push(site);
+        self
+    }
+
+    /// Attaches the string IDs that a family declares as its extra data. An empty list stores nothing.
+    pub(super) fn with_string_ids(mut self, ids: Vec<StringId>) -> Self {
+        if self.core.faulted || ids.is_empty() {
+            return self;
+        }
+        if u32::try_from(ids.len()).is_err() {
+            return self.faulted_by(DiagnosticCapacityResource::FactValue);
+        }
+        self.extra.get_or_insert_with(Box::default).data = ExtraDataDraft::StringIds(ids);
+        self
+    }
+}
+
+impl DiagnosticDraft {
+    /// Rewrites every pending type word through `rewrite`, which maps a `TypeId` to its display ID.
+    ///
+    /// All-or-nothing: the new words are computed into temporaries first, and the draft changes only when every
+    /// rewrite succeeds. A failed call leaves the draft exactly as it was. Callers map the error to their own
+    /// capacity handling: the P4.3 adapter turns it into a `COMPILER_CAPACITY_EXCEEDED` draft and P4.5 bags
+    /// latch their domain capacity.
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "P4.3 adapter and P4.5 bags capture types before compaction"
+        )
+    )]
+    pub(crate) fn capture_types(
+        &mut self,
+        rewrite: &mut impl FnMut(TypeId) -> Result<TypeDisplayId, TypeDisplayCapacityError>,
+    ) -> Result<(), TypeDisplayCapacityError> {
+        let mut facts = self.core.facts;
+        for (index, word) in facts.iter_mut().enumerate() {
+            if is_marked(self.core.pending_facts, index) {
+                *word = captured_word(rewrite, TypeId(*word))?;
+            }
+        }
+
+        let mut label_updates = Vec::new();
+        let mut substitution_updates = Vec::new();
+        if let Some(extra) = self.extra.as_deref() {
+            for (index, label) in extra.labels.iter().enumerate() {
+                if label.pending_types == 0 {
+                    continue;
+                }
+                let mut data = label.data;
+                for (slot, word) in data.iter_mut().enumerate() {
+                    if is_marked(label.pending_types, slot) {
+                        *word = captured_word(rewrite, TypeId(*word))?;
+                    }
+                }
+                label_updates.push((index, data));
+            }
+            for (index, entry) in extra.substitutions.iter().enumerate() {
+                if let DraftType::Pending(type_id) = entry.concrete {
+                    substitution_updates.push((index, captured_word(rewrite, type_id)?));
+                }
+            }
+        }
+
+        // Every rewrite has succeeded, so the commit below cannot fail.
+        self.core.facts = facts;
+        self.core.pending_facts = 0;
+        if let Some(extra) = self.extra.as_deref_mut() {
+            for (index, data) in label_updates {
+                let label = &mut extra.labels[index];
+                label.data = data;
+                label.pending_types = 0;
+            }
+            for (index, word) in substitution_updates {
+                extra.substitutions[index].concrete = DraftType::Captured(word);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Whether bit `bit` of a pending mask is set.
+fn is_marked(mask: u8, bit: usize) -> bool {
+    mask & (1 << bit) != 0
+}
+
+/// Rewrites one raw `TypeId` to its display word. Display words are `index + 1`, so zero stays free for "no type".
+fn captured_word(
+    rewrite: &mut impl FnMut(TypeId) -> Result<TypeDisplayId, TypeDisplayCapacityError>,
+    type_id: TypeId,
+) -> Result<u32, TypeDisplayCapacityError> {
+    let display = rewrite(type_id)?;
+    type_display_word(display).map_err(|FactCapacityError| TypeDisplayCapacityError)
+}

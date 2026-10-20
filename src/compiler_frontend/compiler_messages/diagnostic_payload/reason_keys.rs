@@ -5,6 +5,7 @@
 /// WHY: diagnostic identity must remain independent of rendered wording, while each key spelling
 /// should have one declaration and one owning registry.
 use super::*;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidMultiBindCode;
 #[doc(hidden)]
 #[macro_export]
 macro_rules! define_reasoned_diagnostic_registry {
@@ -327,7 +328,7 @@ macro_rules! define_reasoned_diagnostic_registry {
                         *name = remap.get(*name);
                     }
                 }
-                descriptor: { "MOTH-RULE-0045", "Invalid multi-bind", Error }
+                descriptor: { INVALID_MULTI_BIND.pilot_descriptor() }
             },
             Rule::InvalidBuiltinCall => {
                 payload: InvalidBuiltinCall;
@@ -433,7 +434,7 @@ macro_rules! define_reasoned_diagnostic_registry {
                         *variant = remap.get(*variant);
                     }
                 }
-                descriptor: { "MOTH-RULE-0050", "Non-exhaustive match", Error }
+                descriptor: { NON_EXHAUSTIVE_MATCH.pilot_descriptor() }
             },
             Rule::InvalidFallibleHandling => {
                 payload: InvalidFallibleHandling;
@@ -756,7 +757,7 @@ macro_rules! define_reasoned_diagnostic_registry {
     };
 }
 
-pub(super) trait StableReasonKey {
+pub(crate) trait StableReasonKey {
     fn stable_reason_key(&self) -> &'static str;
 }
 
@@ -1258,22 +1259,26 @@ define_stable_reason_keys! {
     &InvalidAssignmentTargetReason::MutableMarkerOnAssignmentTarget => "invalid_assignment_target.mutable_marker_on_assignment_target",
     },
 
+    InvalidMultiBindCode => {
+    &InvalidMultiBindCode::ThisTargetReserved => "invalid_multi_bind.this_target_reserved",
+    &InvalidMultiBindCode::ExpectedTargetName => "invalid_multi_bind.expected_target_name",
+    &InvalidMultiBindCode::MissingTargetAfterComma => "invalid_multi_bind.missing_target_after_comma",
+    &InvalidMultiBindCode::MissingAssignmentOperator => "invalid_multi_bind.missing_assignment_operator",
+    &InvalidMultiBindCode::InvalidTokenAfterTarget => "invalid_multi_bind.invalid_token_after_target",
+    &InvalidMultiBindCode::MissingRightHandExpression => "invalid_multi_bind.missing_right_hand_expression",
+    &InvalidMultiBindCode::MultipleRightHandExpressions => "invalid_multi_bind.multiple_right_hand_expressions",
+    &InvalidMultiBindCode::MutableTargetNeedsExplicitType => "invalid_multi_bind.mutable_target_needs_explicit_type",
+    &InvalidMultiBindCode::CompileTimeMarkerOnTarget => "invalid_multi_bind.compile_time_marker_on_target",
+    &InvalidMultiBindCode::DuplicateTarget => "invalid_multi_bind.duplicate_target",
+    &InvalidMultiBindCode::UnsupportedRhs => "invalid_multi_bind.unsupported_rhs",
+    &InvalidMultiBindCode::ExistingTargetMutableMarker => "invalid_multi_bind.existing_target_mutable_marker",
+    &InvalidMultiBindCode::ExistingTargetImmutable => "invalid_multi_bind.existing_target_immutable",
+    &InvalidMultiBindCode::ArityMismatch => "invalid_multi_bind.arity_mismatch",
+    &InvalidMultiBindCode::RhsNotMultiValue => "invalid_multi_bind.rhs_not_multi_value",
+    },
+
     InvalidMultiBindReason => {
-    &InvalidMultiBindReason::ThisTargetReserved => "invalid_multi_bind.this_target_reserved",
-    &InvalidMultiBindReason::ExpectedTargetName => "invalid_multi_bind.expected_target_name",
-    &InvalidMultiBindReason::MissingTargetAfterComma => "invalid_multi_bind.missing_target_after_comma",
-    &InvalidMultiBindReason::MissingAssignmentOperator => "invalid_multi_bind.missing_assignment_operator",
-    &InvalidMultiBindReason::InvalidTokenAfterTarget => "invalid_multi_bind.invalid_token_after_target",
-    &InvalidMultiBindReason::MissingRightHandExpression => "invalid_multi_bind.missing_right_hand_expression",
-    &InvalidMultiBindReason::MultipleRightHandExpressions => "invalid_multi_bind.multiple_right_hand_expressions",
-    &InvalidMultiBindReason::MutableTargetNeedsExplicitType => "invalid_multi_bind.mutable_target_needs_explicit_type",
-    &InvalidMultiBindReason::CompileTimeMarkerOnTarget => "invalid_multi_bind.compile_time_marker_on_target",
-    &InvalidMultiBindReason::DuplicateTarget => "invalid_multi_bind.duplicate_target",
-    &InvalidMultiBindReason::UnsupportedRhs => "invalid_multi_bind.unsupported_rhs",
-    &InvalidMultiBindReason::ExistingTargetMutableMarker => "invalid_multi_bind.existing_target_mutable_marker",
-    &InvalidMultiBindReason::ExistingTargetImmutable => "invalid_multi_bind.existing_target_immutable",
-    &InvalidMultiBindReason::ArityMismatch { .. } => "invalid_multi_bind.arity_mismatch",
-    &InvalidMultiBindReason::RhsNotMultiValue => "invalid_multi_bind.rhs_not_multi_value",
+        @delegate(reason => InvalidMultiBindCode::of(reason).stable_reason_key());
     },
 
     InvalidBuiltinCallReason => {

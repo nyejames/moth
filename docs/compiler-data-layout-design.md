@@ -165,7 +165,7 @@ integers must also retain their stated logical size on supported 32-bit targets.
 | `TokenShape` | 8 bytes | fixed tag, flags and one `u32` payload |
 | `DiagnosticToken` | 8 bytes | compact diagnostic projection of a token |
 | `DiagnosticCode` | 2 bytes | explicit non-zero internal code |
-| `DiagnosticExtraId` | 4 bytes | zero means no extra data |
+| `DiagnosticExtraId` | 4 bytes | optional; `None` means no extra data |
 | `SecondaryDiagnosticLabel` | 12 bytes | global span plus compact message/data word |
 | `DiagnosticRecord` | 32 bytes | fixed common durable diagnostic record |
 | `DiagnosticDraft` | at most 48 bytes | move-only common record plus rare draft indirection |
@@ -1034,13 +1034,13 @@ draft data may use one heap allocation because only the exceptional case pays fo
 `DiagnosticRecord` is the durable fixed record stored densely in `DiagnosticStore`.
 
 ```rust
-#[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Debug)]
 pub struct DiagnosticRecord {
-    primary: SourceSpan,          // 8 bytes
-    code_and_flags: u32,          // 4 bytes
-    facts: [u32; 4],              // 16 bytes
-    extra: DiagnosticExtraId,     // 4 bytes
+    code: DiagnosticCode,              // 2 bytes
+    severity: SeverityOverride,        // 1 byte
+    primary: Option<SourceSpan>,       // 8 bytes; None when the span is absent or foreign
+    facts: [u32; 4],                   // 16 bytes
+    extra: Option<DiagnosticExtraId>,  // 4 bytes
 }
 ```
 
@@ -1133,10 +1133,14 @@ The schema tests validate that unused words and reserved bits are zero.
 
 ```rust
 pub struct DiagnosticDraft {
-    record: DiagnosticRecord,
+    core: DraftCore,
     extra: Option<Box<DiagnosticExtraDraft>>,
 }
 ```
+
+`DraftCore` is `Copy`. It holds the family row, the span, the fact words, the pending type-slot marks,
+the fault flag and the severity override. `compact` writes the code, span, facts and severity into the
+stored record.
 
 The exact private representation may use another one-pointer rare-data owner, but it must remain no
 larger than 48 bytes on supported 64-bit targets.
@@ -1155,19 +1159,18 @@ rare data that the schema explicitly places in a side store.
 ### Diagnostic IDs and store
 
 ```rust
-#[repr(transparent)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct DiagnosticId(NonZeroU32);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DiagnosticId(u32);
 
 pub struct DiagnosticStore {
     records: Vec<DiagnosticRecord>,
     extras: Vec<DiagnosticExtraRecord>,
     labels: Vec<SecondaryDiagnosticLabel>,
+    label_data: Vec<[u32; 2]>,   // rows for labels whose code carries data
     string_ids: Vec<StringId>,
-    path_ids: Vec<PathId>,
-    type_ids: Vec<TypeDisplayId>,
     substitutions: Vec<GenericSubstitutionRecord>,
-    diagnostic_tokens: Vec<DiagnosticToken>,
+    foreign_sites: Vec<ForeignSiteRecord>,
+    identity_contexts: Vec<FrozenIdentityHandle>,
     // Additional typed cold stores declared by the schema.
 }
 ```
@@ -1207,24 +1210,29 @@ The exact external stable code is assigned through the diagnostic schema during 
 ```rust
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct DiagnosticExtraId(u32);
+pub struct DiagnosticExtraId(NonZeroU32);
 ```
 
-`0` means no extra data. Other values are one-based indexes.
+Records store it as `Option<DiagnosticExtraId>`, so `None` means no extra data. Other values are one-based indexes.
 
 The baseline extra record is:
 
 ```rust
 #[repr(C)]
 struct DiagnosticExtraRecord {
-    labels: LabelRange,     // start: u32, length: u32
-    data: ExtraDataRef,     // kind/flags plus one u32 index
+    labels: DiagnosticListRange,         // start: u32, len: u32
+    foreign_sites: DiagnosticListRange,  // start: u32, len: u32
+    data: ExtraDataRef,                  // kind: u32, then a DiagnosticListRange
 }
 ```
 
-`ExtraDataRef::NONE` means the diagnostic has labels only. A diagnostic that needs both labels and a
-variable fact list uses one extra record that points to both. An unusual diagnostic does not force a
-second word into every common record.
+`ExtraDataKind::None` means the diagnostic has no data list. `ExtraDataKind::StringIds` names a run of
+the string-id arena. One extra record can point at its labels, foreign sites and string list together,
+so an unusual diagnostic does not force a second word into every common record.
+
+A foreign site is an 8-byte `ForeignSiteRecord`: a selector word (0 for the primary span, `label + 1` for a label)
+and an index into `identity_contexts`. The span stays in the record's primary field or in its label, so the row never
+carries a span. Equal frozen identities share one `identity_contexts` entry.
 
 Before creating a new extra kind, the owner must check whether the diagnostic can carry a smaller,
 clearer semantic fact instead. Side storage is an escape hatch for genuinely variable or unusual
@@ -1239,7 +1247,7 @@ A diagnostic with no related source site has no label allocation.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct SecondaryDiagnosticLabel {
-    span: SourceSpan,
+    span: Option<SourceSpan>,
     message_and_data: u32,
 }
 ```
@@ -1247,8 +1255,8 @@ pub struct SecondaryDiagnosticLabel {
 `message_and_data` uses:
 
 ```text
-bits  0..7    LabelMessageCode; 0 means no message
-bits  8..31   24-bit immediate value or one-based LabelDataId
+bits 24..31  LabelMessageCode; never 0
+bits  0..23  24-bit immediate value or one-based LabelDataId; zero for codes without data
 ```
 
 The label schema decides whether the upper field is immediate or indexes typed label data.
@@ -1304,8 +1312,9 @@ Initial tags:
 11  reserved for a future typed place table
 ```
 
-If an ID domain cannot fit 30 bits, the place uses the reserved tag and a side-table ID. It does not
-widen the fact word. The storage module owns construction and decoding.
+If an ID domain cannot fit 30 bits, encoding fails with `FactCapacityError` and the draft becomes a
+capacity fault. Tag `11` stays reserved, and no side table is used. The storage module owns construction
+and decoding.
 
 ### Variable lists
 
@@ -2122,6 +2131,9 @@ assert_eq!(size_of::<TokenShape>(), 8);
 assert_eq!(size_of::<DiagnosticToken>(), 8);
 assert_eq!(size_of::<SecondaryDiagnosticLabel>(), 12);
 assert_eq!(size_of::<DiagnosticRecord>(), 32);
+assert_eq!(size_of::<ExtraDataRef>(), 12);
+assert_eq!(size_of::<DiagnosticExtraRecord>(), 28);
+assert_eq!(size_of::<ForeignSiteRecord>(), 8);
 assert!(size_of::<DiagnosticDraft>() <= 48);
 ```
 
@@ -2318,17 +2330,36 @@ src/compiler_frontend/tokenizer/
 src/compiler_frontend/compiler_messages/
     diagnostics/
         mod.rs
-        code.rs
-        schema.rs
-        draft.rs
-        record.rs
-        facts.rs
-        labels.rs
-        extras.rs
-        store.rs
         compaction.rs
-        token.rs
+        store.rs
+        schema.rs
+        registry.rs
+        record.rs
+        labels.rs
+        foreign.rs
+        facts.rs
+        extras.rs
+        draft.rs
+        resource.rs
+        families/
+            mod.rs
+            calls_data.rs
+            choices_control_flow.rs
+            generics_traits_api.rs
+            imports.rs
+            names_declarations.rs
+            project_config.rs
+            templates.rs
+            token_lexical.rs
+            types_borrows_targets.rs
         tests/
+            mod.rs
+            capacity_tests.rs
+            codec_tests.rs
+            compaction_tests.rs
+            family_inventory_tests.rs
+            parity_tests.rs
+            schema_tests.rs
     diagnostic_types/
         mod.rs
         id.rs

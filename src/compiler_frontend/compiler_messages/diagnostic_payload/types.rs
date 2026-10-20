@@ -71,11 +71,35 @@ pub enum AstCapacityResource {
     GroupDistances,
 }
 
+/// Which store arena or fact slot of the compact diagnostic store could not hold another row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DiagnosticCapacityResource {
+    /// Fixed-size diagnostic records.
+    Records,
+    /// Extra-data rows that point at labels, foreign sites, and string lists.
+    Extras,
+    /// Secondary label rows.
+    Labels,
+    /// Typed label data rows.
+    LabelData,
+    /// String identifiers carried by list facts.
+    StringIds,
+    /// Generic substitution rows referenced by label data.
+    Substitutions,
+    /// Foreign-domain site rows.
+    ForeignSites,
+    /// Frozen identity contexts shared by foreign sites.
+    IdentityContexts,
+    /// A fact value that does not fit its compact encoding.
+    FactValue,
+}
+
 /// The compact buffer that overflowed, tagged with the stage that owns it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CapacityResource {
     Hir(HirCapacityResource),
     Ast(AstCapacityResource),
+    Store(DiagnosticCapacityResource),
 }
 
 impl From<HirCapacityResource> for CapacityResource {

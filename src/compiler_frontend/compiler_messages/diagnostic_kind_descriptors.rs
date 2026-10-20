@@ -10,6 +10,14 @@ use super::diagnostic_kind::{
     ImportDiagnosticKind, InfrastructureDiagnosticKind, RuleDiagnosticKind, SyntaxDiagnosticKind,
     TypeDiagnosticKind,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    calls_data::INVALID_MULTI_BIND,
+    choices_control_flow::{NON_EXHAUSTIVE_MATCH, UNREACHABLE_MATCH_ARM},
+    imports::{MISSING_IMPORT_TARGET, UNUSED_IMPORT},
+    names_declarations::{DUPLICATE_DECLARATION, UNKNOWN_TYPE_NAME, UNKNOWN_VALUE_NAME},
+    token_lexical::{COMPILER_CAPACITY_EXCEEDED, EXPECTED_TOKEN},
+    types_borrows_targets::{TYPE_MISMATCH, USE_OF_UNINITIALIZED_LOCAL},
+};
 use crate::compiler_frontend::compiler_messages::{DiagnosticDescriptor, DiagnosticSeverity};
 
 macro_rules! reasoned_diagnostic_kind {
@@ -89,6 +97,27 @@ macro_rules! emit_reasoned_descriptors {
             $( $rest )*
         );
     };
+    (
+        @collect [$( $arms:tt )*]
+        $category:ident::$kind:ident => {
+            payload: $payload:ident;
+            fields: $fields:tt
+            bindings: $bindings:tt
+            remap: $remap:tt
+            descriptor: {
+                $descriptor:expr
+            }
+        },
+        $( $rest:tt )*
+    ) => {
+        emit_reasoned_descriptors!(
+            @collect [
+                $( $arms )*
+                reasoned_diagnostic_kind!($category::$kind) => Some($descriptor),
+            ]
+            $( $rest )*
+        );
+    };
 }
 
 crate::define_reasoned_diagnostic_registry!(emit_reasoned_descriptors);
@@ -111,11 +140,7 @@ pub(super) fn descriptor_for_kind(kind: DiagnosticKind) -> DiagnosticDescriptor 
 
 fn syntax_descriptor(kind: SyntaxDiagnosticKind) -> DiagnosticDescriptor {
     match kind {
-        SyntaxDiagnosticKind::ExpectedToken => DiagnosticDescriptor::new(
-            "MOTH-SYNTAX-0001",
-            "Expected token",
-            DiagnosticSeverity::Error,
-        ),
+        SyntaxDiagnosticKind::ExpectedToken => EXPECTED_TOKEN.pilot_descriptor(),
         SyntaxDiagnosticKind::UnexpectedToken => DiagnosticDescriptor::new(
             "MOTH-SYNTAX-0002",
             "Unexpected token",
@@ -206,20 +231,16 @@ fn syntax_descriptor(kind: SyntaxDiagnosticKind) -> DiagnosticDescriptor {
             "Source span capacity exceeded",
             DiagnosticSeverity::Error,
         ),
-        SyntaxDiagnosticKind::CompilerCapacityExceeded => DiagnosticDescriptor::new(
-            "MOTH-SYNTAX-0037",
-            "Compiler capacity exceeded",
-            DiagnosticSeverity::Error,
-        ),
+        SyntaxDiagnosticKind::CompilerCapacityExceeded => {
+            COMPILER_CAPACITY_EXCEEDED.pilot_descriptor()
+        }
         _ => unreachable!("reasoned syntax descriptors come from the central registry"),
     }
 }
 
 fn type_descriptor(kind: TypeDiagnosticKind) -> DiagnosticDescriptor {
     match kind {
-        TypeDiagnosticKind::TypeMismatch => {
-            DiagnosticDescriptor::new("MOTH-TYPE-0001", "Type mismatch", DiagnosticSeverity::Error)
-        }
+        TypeDiagnosticKind::TypeMismatch => TYPE_MISMATCH.pilot_descriptor(),
         TypeDiagnosticKind::EmptyCollectionTypeAmbiguity => DiagnosticDescriptor::new(
             "MOTH-TYPE-0002",
             "Empty collection type ambiguity",
@@ -244,21 +265,13 @@ fn rule_descriptor(kind: RuleDiagnosticKind) -> DiagnosticDescriptor {
             "Invalid value receiver",
             DiagnosticSeverity::Error,
         ),
-        RuleDiagnosticKind::DuplicateDeclaration => DiagnosticDescriptor::new(
-            "MOTH-RULE-0002",
-            "Duplicate declaration",
-            DiagnosticSeverity::Error,
-        ),
+        RuleDiagnosticKind::DuplicateDeclaration => DUPLICATE_DECLARATION.pilot_descriptor(),
         RuleDiagnosticKind::IdentifierNamingConvention => DiagnosticDescriptor::new(
             "MOTH-RULE-0021",
             "Identifier naming convention",
             DiagnosticSeverity::Warning,
         ),
-        RuleDiagnosticKind::UnreachableMatchArm => DiagnosticDescriptor::new(
-            "MOTH-RULE-0022",
-            "Unreachable match arm",
-            DiagnosticSeverity::Warning,
-        ),
+        RuleDiagnosticKind::UnreachableMatchArm => UNREACHABLE_MATCH_ARM.pilot_descriptor(),
         RuleDiagnosticKind::InvalidTopLevelRuntimeStatement => DiagnosticDescriptor::new(
             "MOTH-RULE-0023",
             "Invalid top-level runtime statement",
@@ -284,16 +297,8 @@ fn rule_descriptor(kind: RuleDiagnosticKind) -> DiagnosticDescriptor {
             "Circular dependency",
             DiagnosticSeverity::Error,
         ),
-        RuleDiagnosticKind::UnknownValueName => DiagnosticDescriptor::new(
-            "MOTH-RULE-0034",
-            "Unknown value name",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::UnknownTypeName => DiagnosticDescriptor::new(
-            "MOTH-RULE-0035",
-            "Unknown type name",
-            DiagnosticSeverity::Error,
-        ),
+        RuleDiagnosticKind::UnknownValueName => UNKNOWN_VALUE_NAME.pilot_descriptor(),
+        RuleDiagnosticKind::UnknownTypeName => UNKNOWN_TYPE_NAME.pilot_descriptor(),
         RuleDiagnosticKind::ValueUsedAsType => DiagnosticDescriptor::new(
             "MOTH-RULE-0036",
             "Value used as type",
@@ -401,22 +406,14 @@ fn rule_descriptor(kind: RuleDiagnosticKind) -> DiagnosticDescriptor {
 
 fn import_descriptor(kind: ImportDiagnosticKind) -> DiagnosticDescriptor {
     match kind {
-        ImportDiagnosticKind::UnusedImport => DiagnosticDescriptor::new(
-            "MOTH-IMPORT-0002",
-            "Unused dependency binding",
-            DiagnosticSeverity::Warning,
-        ),
+        ImportDiagnosticKind::UnusedImport => UNUSED_IMPORT.pilot_descriptor(),
         ImportDiagnosticKind::DependencyAliasCaseMismatch => DiagnosticDescriptor::new(
             "MOTH-IMPORT-0003",
             "Dependency alias case mismatch",
             DiagnosticSeverity::Warning,
         ),
 
-        ImportDiagnosticKind::MissingImportTarget => DiagnosticDescriptor::new(
-            "MOTH-IMPORT-0005",
-            "Missing dependency target",
-            DiagnosticSeverity::Error,
-        ),
+        ImportDiagnosticKind::MissingImportTarget => MISSING_IMPORT_TARGET.pilot_descriptor(),
         ImportDiagnosticKind::AmbiguousImportTarget => DiagnosticDescriptor::new(
             "MOTH-IMPORT-0006",
             "Ambiguous dependency target",
@@ -548,11 +545,9 @@ fn borrow_descriptor(kind: BorrowDiagnosticKind) -> DiagnosticDescriptor {
             "Whole-value access conflict",
             DiagnosticSeverity::Error,
         ),
-        BorrowDiagnosticKind::UseOfUninitializedLocal => DiagnosticDescriptor::new(
-            "MOTH-BORROW-0009",
-            "Use of uninitialized local",
-            DiagnosticSeverity::Error,
-        ),
+        BorrowDiagnosticKind::UseOfUninitializedLocal => {
+            USE_OF_UNINITIALIZED_LOCAL.pilot_descriptor()
+        }
         _ => {
             unreachable!("every remaining borrow descriptor is generated from the reason registry")
         }

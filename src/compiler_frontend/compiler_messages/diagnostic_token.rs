@@ -219,4 +219,20 @@ impl DiagnosticToken {
     pub(crate) fn bool_value(self) -> bool {
         self.data != 0
     }
+
+    /// Raw words for the compact diagnostic store. Only the store encodes and decodes these.
+    pub(in crate::compiler_frontend::compiler_messages) fn raw_words(self) -> [u32; 2] {
+        [self.tag_and_flags, self.data]
+    }
+
+    /// Rebuilds a token from raw words. An unknown tag decodes to `None`.
+    pub(in crate::compiler_frontend::compiler_messages) fn from_raw_words(
+        words: [u32; 2],
+    ) -> Option<Self> {
+        TokenTag::from_raw((words[0] & TAG_MASK) as u16)?;
+        Some(Self {
+            tag_and_flags: words[0],
+            data: words[1],
+        })
+    }
 }

@@ -24,6 +24,7 @@ pub(crate) mod diagnostic_payload;
 pub(crate) mod diagnostic_severity;
 pub(crate) mod diagnostic_token;
 pub(crate) mod diagnostic_types;
+pub(crate) mod diagnostics;
 pub(crate) mod display_messages;
 pub(crate) mod module_diagnostics;
 pub(crate) mod render;
@@ -48,9 +49,9 @@ pub(crate) use diagnostic_payload::{
     AstCapacityResource, BorrowAccessKind, BuiltinFailureOriginKind, BuiltinFailureWitness,
     CapacityResource, ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason,
     CompileTimeEvaluationErrorReason, CssTemplateWarning, DeferredFeatureReason,
-    DependencyClauseKind, DiagnosticCompoundAssignmentOperator, DiagnosticOperator,
-    DiagnosticPayload, DiagnosticPlace, GenericApplicationErrorReason, GenericInferenceSubject,
-    HirCapacityResource, HtmlTemplateWarning, ImportPublicSurfaceType,
+    DependencyClauseKind, DiagnosticCapacityResource, DiagnosticCompoundAssignmentOperator,
+    DiagnosticOperator, DiagnosticPayload, DiagnosticPlace, GenericApplicationErrorReason,
+    GenericInferenceSubject, HirCapacityResource, HtmlTemplateWarning, ImportPublicSurfaceType,
     IncompatibleChoiceComparisonReason, InvalidAssignmentTargetReason, InvalidBuiltinCallReason,
     InvalidCallShapeReason, InvalidCastReason, InvalidChoiceVariantReason,
     InvalidCollectionTypeReason, InvalidCompileTimePathReason, InvalidConfigReason,
