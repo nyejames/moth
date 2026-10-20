@@ -77,9 +77,6 @@ pub(crate) fn render_payload(
 ) -> RenderedPayload {
     let message = render_payload_message(payload, context);
     let guidance = match payload {
-        DiagnosticPayload::CompileTimeEvaluationError { reason, .. } => {
-            vec![compile_time_evaluation_error_suggestion(*reason).to_owned()]
-        }
         DiagnosticPayload::InvalidGenericInstantiation {
             reason:
                 crate::compiler_frontend::compiler_messages::InvalidGenericInstantiationReason::CannotInferFunctionArguments {
@@ -255,18 +252,6 @@ fn render_payload_message(
         DiagnosticPayload::InvalidFunctionSignature { reason } => {
             invalid_function_signature_message(reason, string_table)
         }
-        DiagnosticPayload::InvalidChoiceVariant {
-            reason,
-            choice_name,
-            variant_name,
-            available_variants,
-        } => invalid_choice_variant_message(
-            *reason,
-            *choice_name,
-            *variant_name,
-            available_variants,
-            string_table,
-        ),
         DiagnosticPayload::UnknownTrait { name } => {
             format!("Unknown trait '{}'.", string_table.resolve(*name))
         }
@@ -352,20 +337,6 @@ fn render_payload_message(
         DiagnosticPayload::InvalidReceiverDeclaration { reason } => {
             invalid_receiver_declaration_message(*reason, context)
         }
-        DiagnosticPayload::InvalidControlFlowStatement { reason } => {
-            invalid_control_flow_statement_message(*reason)
-        }
-        DiagnosticPayload::InvalidMatchPattern {
-            reason,
-            variant_name,
-            ..
-        } => invalid_match_pattern_message(*reason, *variant_name, string_table),
-        DiagnosticPayload::InvalidFallibleHandling { reason } => {
-            invalid_fallible_handling_message(reason, context)
-        }
-        DiagnosticPayload::CompileTimeEvaluationError { reason, operation } => {
-            compile_time_evaluation_error_message(*reason, *operation, string_table)
-        }
         DiagnosticPayload::EmptyCollectionTypeAmbiguity => {
             "Cannot infer the type of an empty `{}` literal. Add an explicit type annotation."
                 .to_owned()
@@ -390,16 +361,6 @@ fn render_payload_message(
             string_table.resolve(*backend_name),
             reason.feature_name()
         ),
-        DiagnosticPayload::InvalidStandaloneStatement { reason } => {
-            invalid_standalone_statement_message(*reason)
-        }
-        DiagnosticPayload::InvalidMatchArm { reason } => invalid_match_arm_message(*reason),
-        DiagnosticPayload::InvalidLoopHeader { reason } => {
-            invalid_loop_header_message(*reason, context)
-        }
-        DiagnosticPayload::InvalidStatementPosition { reason } => {
-            invalid_statement_position_message(*reason)
-        }
         DiagnosticPayload::None => String::new(),
         _ => unreachable!(
             "migrated families render through the compact path; P4.6 deletes this function"

@@ -5,16 +5,14 @@
 //! declaration/type/call validation.
 
 use crate::compiler_frontend::compiler_messages::{
-    InvalidControlFlowStatementReason, InvalidFallibleHandlingReason, InvalidMatchPatternReason,
-    NonExhaustiveMatchReason,
+    InvalidControlFlowStatementReason, InvalidMatchPatternReason, NonExhaustiveMatchReason,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
-use super::{
-    DiagnosticRenderContext, RenderedPayload, diagnostic_type_name, named_value_or_default,
-};
+use super::{DiagnosticRenderContext, RenderedPayload, named_value_or_default};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
-    NonExhaustiveMatchView, UnreachableMatchArmView,
+    InvalidControlFlowStatementView, InvalidFallibleHandlingCode, InvalidFallibleHandlingView,
+    InvalidMatchPatternView, NonExhaustiveMatchView, UnreachableMatchArmView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 
@@ -94,76 +92,117 @@ pub(crate) fn invalid_control_flow_statement_message(
     }
 }
 
-pub(crate) fn invalid_fallible_handling_message(
-    reason: &InvalidFallibleHandlingReason,
-    context: DiagnosticRenderContext<'_>,
+/// WHAT: renders an invalid control-flow statement from its compact reason code.
+/// WHY: the compact view carries the legacy reason used by the shared message helper.
+pub(crate) fn render_invalid_control_flow_statement(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidControlFlowStatementView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_control_flow_statement_message(facts.reason),
+        guidance: Vec::new(),
+    }
+}
+
+fn invalid_fallible_handling_message(
+    reason: InvalidFallibleHandlingCode,
+    first_error_type: Option<&str>,
+    second_error_type: Option<&str>,
+    count: Option<usize>,
 ) -> String {
     match reason {
-        InvalidFallibleHandlingReason::FunctionHasMultipleSuccessReturns { count } => {
-            format!(
-                "This `?` propagation is inside a function with {count} authored success return slots, but requires exactly one optional success return slot. Inspect the option locally or use a single optional success return slot."
-            )
-        }
-
-        InvalidFallibleHandlingReason::EntryHasIncompatibleError {
-            produced_error_type,
-            entry_error_type,
-        } => {
-            let produced_error = diagnostic_type_name(*produced_error_type, context);
-            let entry_error = diagnostic_type_name(*entry_error_type, context);
+        InvalidFallibleHandlingCode::EntryHasIncompatibleError => {
+            let produced_error =
+                first_error_type.expect("entry error reason stores its produced type");
+            let entry_error =
+                second_error_type.expect("entry error reason stores its boundary type");
             format!(
                 "This `!` propagation produces `{produced_error}!`, which is incompatible with the entry's built-in `start` `{entry_error}!` boundary. Handle `{produced_error}` locally with `catch` or recover explicitly."
             )
         }
-
-        InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes {
-            first_error_type_id,
-            second_error_type_id,
-            ..
-        } => {
-            let first_error = diagnostic_type_name(*first_error_type_id, context);
-            let second_error = diagnostic_type_name(*second_error_type_id, context);
+        InvalidFallibleHandlingCode::FunctionHasMultipleSuccessReturns => {
+            let count = count.expect("multiple-success-return reason stores its count");
+            format!(
+                "This `?` propagation is inside a function with {count} authored success return slots, but requires exactly one optional success return slot. Inspect the option locally or use a single optional success return slot."
+            )
+        }
+        InvalidFallibleHandlingCode::IncompatibleCatchErrorTypes => {
+            let first_error =
+                first_error_type.expect("incompatible catch reason stores its first error type");
+            let second_error =
+                second_error_type.expect("incompatible catch reason stores its second error type");
             format!(
                 "This catch protects incompatible typed error producers: `{first_error}!` and `{second_error}!`. Split the work into separately handled expressions or convert the errors explicitly."
             )
         }
-
-        InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
-            error_type_id,
-            ..
-        } => {
-            let error_type = diagnostic_type_name(*error_type_id, context);
+        InvalidFallibleHandlingCode::CustomErrorMixedWithImplicitFailure => {
+            let error_type =
+                first_error_type.expect("mixed catch reason stores its typed error type");
             format!(
                 "This catch mixes a `{error_type}!` producer with implicit built-in failure (`Error`). Split the work into separately handled expressions or convert the errors explicitly."
             )
         }
-
-        InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
-            error_type_id,
-            witness,
-        } => {
-            let error_type = diagnostic_type_name(*error_type_id, context);
+        InvalidFallibleHandlingCode::UnhandledBuiltinFailureInCustomErrorFunction => {
+            let error_type =
+                first_error_type.expect("custom error function reason stores its error type");
             let mut message = format!(
                 "Implicit built-in failure cannot escape through the custom `{error_type}!` slot. Recover locally with `catch` or convert the failure explicitly to `{error_type}` with `catch` and `return!`. Alternatively, change the final error slot to `Error!`. Use an assertion only if unrecoverable failure is an explicit invariant choice."
             );
-            append_elided_builtin_failure_hops(&mut message, witness.elided_call_hops);
+            append_elided_builtin_failure_hops(
+                &mut message,
+                count.expect("builtin failure reason stores its elided-hop count"),
+            );
             message
         }
-
-        InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness } => {
-            let mut message = reason.message().to_owned();
+        InvalidFallibleHandlingCode::UnhandledBuiltinFailureInExportedFunction => {
+            let mut message = "This exported function has no error slot but implicit built-in failure may escape. Recover locally with catch or declare a final Error! return slot.".to_owned();
             message.push_str(
                 " Use an assertion only if unrecoverable failure is an explicit invariant choice.",
             );
-            append_elided_builtin_failure_hops(&mut message, witness.elided_call_hops);
+            append_elided_builtin_failure_hops(
+                &mut message,
+                count.expect("builtin failure reason stores its elided-hop count"),
+            );
             message
         }
-
-        _ => reason.message().to_owned(),
+        _ => reason
+            .unit_reason()
+            .expect("unit fallible code has its matching legacy reason")
+            .message()
+            .to_owned(),
     }
 }
 
-fn append_elided_builtin_failure_hops(message: &mut String, elided_call_hops: u32) {
+/// WHAT: renders fallible-handling facts and type data from their compact row.
+/// WHY: the code selects which optional types and count contribute to the legacy message.
+pub(crate) fn render_invalid_fallible_handling(
+    diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidFallibleHandlingView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let first_error_type = facts.first_error_type.map(|type_id| {
+        diagnostic
+            .types()
+            .display_for_render(type_id, context.string_table, context.path_table())
+    });
+    let second_error_type = facts.second_error_type.map(|type_id| {
+        diagnostic
+            .types()
+            .display_for_render(type_id, context.string_table, context.path_table())
+    });
+    RenderedPayload {
+        message: invalid_fallible_handling_message(
+            facts.reason,
+            first_error_type.as_deref(),
+            second_error_type.as_deref(),
+            facts.count,
+        ),
+        guidance: Vec::new(),
+    }
+}
+
+fn append_elided_builtin_failure_hops(message: &mut String, elided_call_hops: usize) {
     if elided_call_hops != 0 {
         use std::fmt::Write;
 
@@ -177,6 +216,7 @@ fn append_elided_builtin_failure_hops(message: &mut String, elided_call_hops: u3
 pub(crate) fn invalid_match_pattern_message(
     reason: InvalidMatchPatternReason,
     variant_name: Option<StringId>,
+    _scrutinee_name: Option<StringId>,
     string_table: &dyn StringTableResolver,
 ) -> String {
     let variant_text = named_value_or_default(variant_name, string_table, "this variant");
@@ -264,6 +304,24 @@ pub(crate) fn invalid_match_pattern_message(
         InvalidMatchPatternReason::ExpectedBindingInOptionPresentCapture => {
             "Expected a binding name inside `|...|`.".to_string()
         }
+    }
+}
+
+/// WHAT: renders an invalid match pattern from its compact reason and variant name.
+/// WHY: both facts are the values used by the legacy message helper.
+pub(crate) fn render_invalid_match_pattern(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidMatchPatternView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_match_pattern_message(
+            facts.reason,
+            facts.variant_name,
+            facts.scrutinee_name,
+            context.string_table,
+        ),
+        guidance: Vec::new(),
     }
 }
 

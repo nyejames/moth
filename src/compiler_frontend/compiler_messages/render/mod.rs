@@ -44,6 +44,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_da
     InvalidCollectionTypeView, InvalidMapLiteralView, InvalidMapTypeCode, InvalidMapTypeView,
     InvalidRangeOperandView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
+    InvalidChoiceVariantView, invalid_choice_variant_available_variants,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::DeferredFeatureView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
     InvalidPageMetadataView, UnsupportedBuilderPackageView,
@@ -768,6 +771,25 @@ pub(crate) fn invalid_choice_variant_message(
                 "Payload variant '{choice_name}::{variant_name}' requires constructor arguments."
             )
         }
+    }
+}
+
+/// WHAT: renders an invalid choice variant from its compact facts and available-name list.
+/// WHY: the row preserves the reason, names, and suggestion candidates used by the legacy helper.
+pub(crate) fn render_invalid_choice_variant(
+    diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidChoiceVariantView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_choice_variant_message(
+            facts.reason,
+            facts.choice_name,
+            facts.variant_name,
+            invalid_choice_variant_available_variants(diagnostic),
+            context.string_table,
+        ),
+        guidance: Vec::new(),
     }
 }
 

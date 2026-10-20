@@ -6,6 +6,7 @@
 
 use super::context::DiagnosticRenderContext;
 use super::named_value_or_default;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::CompileTimeEvaluationErrorView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
     InvalidTemplateSlotView, InvalidTemplateStructureCode, InvalidTemplateStructureView,
 };
@@ -190,6 +191,23 @@ pub(crate) fn compile_time_evaluation_error_suggestion(
         CompileTimeEvaluationErrorReason::EvaluationOutputBoundExceeded => {
             "Use an input whose compile-time result fits the operation's supported range"
         }
+    }
+}
+
+/// WHAT: renders a compile-time evaluation error from its compact reason and operation.
+/// WHY: the row keeps both the message input and guidance selection without a legacy payload read.
+pub(crate) fn render_compile_time_evaluation_error(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &CompileTimeEvaluationErrorView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: compile_time_evaluation_error_message(
+            facts.reason,
+            facts.operation,
+            context.string_table,
+        ),
+        guidance: vec![compile_time_evaluation_error_suggestion(facts.reason).to_owned()],
     }
 }
 

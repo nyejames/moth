@@ -8,6 +8,10 @@ use super::{
     DiagnosticRenderContext, RenderedPayload, diagnostic_type_name, expected_token_message,
     invalid_expression_message, token_kind_name,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
+    InvalidLoopHeaderCode, InvalidLoopHeaderView, InvalidMatchArmView,
+    InvalidStandaloneStatementView, InvalidStatementPositionView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::InvalidTypeAnnotationView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::InvalidStyleDirectiveView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::ExpectedTokenView;
@@ -602,6 +606,19 @@ pub(crate) fn invalid_standalone_statement_message(
     }
 }
 
+/// WHAT: renders an invalid standalone statement from its compact reason code.
+/// WHY: the compact view carries the legacy reason used by the shared message helper.
+pub(crate) fn render_invalid_standalone_statement(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidStandaloneStatementView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_standalone_statement_message(facts.reason),
+        guidance: Vec::new(),
+    }
+}
+
 pub(crate) fn expected_symbol_statement_message() -> String {
     "Expected a symbol-led statement.".to_string()
 }
@@ -656,6 +673,19 @@ pub(crate) fn invalid_match_arm_message(reason: InvalidMatchArmReason) -> String
         InvalidMatchArmReason::ExpectedArmHeader => {
             "Expected a match arm like `<pattern> => <body>` or `else => <body>`.".to_string()
         }
+    }
+}
+
+/// WHAT: renders an invalid match arm from its compact reason code.
+/// WHY: the compact view carries the legacy reason used by the shared message helper.
+pub(crate) fn render_invalid_match_arm(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidMatchArmView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_match_arm_message(facts.reason),
+        guidance: Vec::new(),
     }
 }
 
@@ -715,13 +745,9 @@ pub(crate) fn invalid_loop_header_message(
         InvalidLoopHeaderReason::CollectionSourceNotCollection { found_type } => match found_type {
             Some(found_type) => {
                 let found_type = diagnostic_type_name(found_type, context);
-                format!("Collection loop source must be a collection. Found '{found_type}'.")
+                invalid_loop_header_collection_source_message(Some(&found_type))
             }
-            // The source's exact type is selected at the owning body root, so the message names
-            // the unresolved expression instead of a fabricated default width.
-            None => "Collection loop source must be a collection. Found an unresolved expression \
-                     whose exact type is selected at the end of the enclosing body."
-                .to_string(),
+            None => invalid_loop_header_collection_source_message(None),
         },
         InvalidLoopHeaderReason::MissingRangeSeparator => {
             "Range loops must include 'to' between bounds.".to_string()
@@ -741,6 +767,43 @@ pub(crate) fn invalid_loop_header_message(
         InvalidLoopHeaderReason::ExpectedHeaderExpression => {
             "Expected an expression in loop header.".to_string()
         }
+    }
+}
+
+fn invalid_loop_header_collection_source_message(found_type: Option<&str>) -> String {
+    match found_type {
+        Some(found_type) => {
+            format!("Collection loop source must be a collection. Found '{found_type}'.")
+        }
+        None => "Collection loop source must be a collection. Found an unresolved expression \
+                 whose exact type is selected at the end of the enclosing body."
+            .to_string(),
+    }
+}
+
+/// WHAT: renders an invalid loop header from its compact reason and captured source type.
+/// WHY: the code selects the reason text and the optional type display retains the legacy detail.
+pub(crate) fn render_invalid_loop_header(
+    diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidLoopHeaderView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let message = match facts.reason {
+        InvalidLoopHeaderCode::CollectionSourceNotCollection => {
+            let found_type = facts.found_type.map(|found_type| {
+                diagnostic.types().display_for_render(
+                    found_type,
+                    context.string_table,
+                    context.path_table(),
+                )
+            });
+            invalid_loop_header_collection_source_message(found_type.as_deref())
+        }
+        reason => invalid_loop_header_message(reason.to_reason(None), context),
+    };
+    RenderedPayload {
+        message,
+        guidance: Vec::new(),
     }
 }
 
@@ -779,6 +842,19 @@ pub(crate) fn invalid_statement_position_message(reason: InvalidStatementPositio
         InvalidStatementPositionReason::UnexpectedScopeCloseInTemplate => {
             "Unexpected use of ';' inside a template. Templates are not closed with ';'.".to_string()
         }
+    }
+}
+
+/// WHAT: renders an invalid statement position from its compact reason code.
+/// WHY: the compact view carries the legacy reason used by the shared message helper.
+pub(crate) fn render_invalid_statement_position(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidStatementPositionView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_statement_position_message(facts.reason),
+        guidance: Vec::new(),
     }
 }
 
