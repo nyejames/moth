@@ -55,21 +55,30 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::template
     InvalidTemplateDirectiveCode, InvalidTemplateDirectiveView, MalformedCssTemplateView,
     MalformedHtmlTemplateView,
 };
+
+use crate::compiler_frontend::compiler_messages::diagnostic_types::{
+    TypeDisplayId, type_display_snapshot::TypeDisplaySnapshot,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
+    IncompatibleChoiceComparisonCode, IncompatibleChoiceComparisonView, InvalidRouteOutputView,
+    UnsupportedBackendFeatureView, UnsupportedExternalFunctionView, UnsupportedOperatorTypesView,
+    incompatible_choice_comparison_field_name,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
     AstCapacityResource, BorrowAccessKind, CapacityResource, CssTemplateWarning,
     DeferredFeatureReason, DiagnosticOperator, DiagnosticPlace, GenericApplicationErrorReason,
-    HirCapacityResource, HtmlTemplateWarning, IncompatibleChoiceComparisonReason,
-    InvalidChoiceVariantReason, InvalidCollectionTypeReason, InvalidCompileTimePathReason,
-    InvalidConfigReason, InvalidDependencyClauseReason, InvalidExpressionReason,
-    InvalidExternalModuleReason, InvalidGenericParameterReason, InvalidImportPathReason,
-    InvalidMapLiteralReason, InvalidMutableAccessReason, InvalidOutputFolderReason,
-    InvalidPageMetadataReason, InvalidRangeOperandReason, InvalidRouteOutputReason,
-    InvalidTemplateDirectiveReason, MalformedTemplateReason, NameNamespace,
-    NamespaceTypeValueMisuseKind, PathKind, RangeOperandKind, SourceSpanCapacityResource,
+    HirCapacityResource, HtmlTemplateWarning, InvalidChoiceVariantReason,
+    InvalidCollectionTypeReason, InvalidCompileTimePathReason, InvalidConfigReason,
+    InvalidDependencyClauseReason, InvalidExpressionReason, InvalidExternalModuleReason,
+    InvalidGenericParameterReason, InvalidImportPathReason, InvalidMapLiteralReason,
+    InvalidMutableAccessReason, InvalidOutputFolderReason, InvalidPageMetadataReason,
+    InvalidRangeOperandReason, InvalidRouteOutputReason, InvalidTemplateDirectiveReason,
+    MalformedTemplateReason, NameNamespace, NamespaceTypeValueMisuseKind, PathKind,
+    RangeOperandKind, SourceSpanCapacityResource, UnsupportedBackendFeatureReason,
 };
 use crate::compiler_frontend::compiler_messages::{DiagnosticToken, TokenDescriptorPayload};
-use crate::compiler_frontend::datatypes::display::TypeDisplayView;
+use crate::compiler_frontend::datatypes::display::{TypeDisplayShape, TypeDisplayView};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -475,95 +484,109 @@ pub(crate) fn namespace_misuse_message(
 
 pub(crate) fn unsupported_operator_types_message(
     operator: DiagnosticOperator,
-    lhs: TypeId,
-    rhs: Option<TypeId>,
+    lhs: TypeDisplayId,
+    rhs: Option<TypeDisplayId>,
+    types: &TypeDisplaySnapshot,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
-    // Generic parameter operands explain that operators are compiler-owned and bounds do not
-    // grant operator support, then recommend a concrete type or bound-provided receiver method.
-    if let Some(message) = generic_parameter_operator_message(operator, lhs, rhs, context) {
+    if let Some(message) = generic_parameter_operator_message(operator, lhs, rhs, types, context) {
         return message;
     }
 
     let operator_spelling = operator.source_spelling();
-
-    // Unary `not` always requires a Bool operand.
     if operator == DiagnosticOperator::Not {
         let expected = diagnostic_type_name(builtin_type_ids::BOOL, context);
-        let found = diagnostic_type_name(lhs, context);
+        let found = diagnostic_type_display_name(types, lhs, context);
         return format!(
             "Operator `{operator_spelling}` requires a `{expected}` operand, found `{found}`."
         );
     }
 
-    // Mixed String `+` is not concatenation; templates own textual interpolation.
     if operator == DiagnosticOperator::Add
         && let Some(rhs) = rhs
-        && exactly_one_operand_is_plain_string(lhs, rhs)
+        && exactly_one_operand_is_plain_string(lhs, rhs, types)
     {
-        let left = diagnostic_type_name(lhs, context);
-        let right = diagnostic_type_name(rhs, context);
+        let left = diagnostic_type_display_name(types, lhs, context);
+        let right = diagnostic_type_display_name(types, rhs, context);
         return format!(
             "Operator `{operator_spelling}` cannot concatenate `{left}` and `{right}`. Use a template for mixed textual interpolation."
         );
     }
 
-    // Byte is deliberately not an arithmetic scalar, including under unary minus.
-    let byte_type = builtin_type_ids::fixed_scalar(FixedScalar::Byte);
     let is_unary_minus = operator == DiagnosticOperator::Subtract && rhs.is_none();
-    if is_arithmetic_operator(operator) && (lhs == byte_type || rhs == Some(byte_type)) {
+    if is_arithmetic_operator(operator)
+        && (diagnostic_fixed_scalar(types, lhs) == Some(FixedScalar::Byte)
+            || rhs
+                .is_some_and(|rhs| diagnostic_fixed_scalar(types, rhs) == Some(FixedScalar::Byte)))
+    {
         return "`Byte` has no arithmetic operators.".to_owned();
     }
 
-    // Unary minus never promotes an unsigned value to a signed domain.
     if is_unary_minus
-        && let Some(scalar) = diagnostic_fixed_scalar(lhs)
+        && let Some(scalar) = diagnostic_fixed_scalar(types, lhs)
         && scalar.class() == FixedScalarClass::UnsignedInteger
     {
-        let operand = diagnostic_type_name(lhs, context);
+        let operand = diagnostic_type_display_name(types, lhs, context);
         return format!(
             "Unary `-` does not apply to unsigned `{operand}`. Convert the value to a signed type with `cast` first."
         );
     }
 
-    // Arithmetic requires one complete common type for fixed integer operand ranges.
     if is_arithmetic_operator(operator)
         && let Some(rhs) = rhs
-        && let (Some(left_scalar), Some(right_scalar)) =
-            (diagnostic_fixed_scalar(lhs), diagnostic_fixed_scalar(rhs))
+        && let (Some(left_scalar), Some(right_scalar)) = (
+            diagnostic_fixed_scalar(types, lhs),
+            diagnostic_fixed_scalar(types, rhs),
+        )
         && is_fixed_integer(left_scalar)
         && is_fixed_integer(right_scalar)
         && common_fixed_integer(left_scalar, right_scalar).is_none()
     {
-        let left = diagnostic_type_name(lhs, context);
-        let right = diagnostic_type_name(rhs, context);
+        let left = diagnostic_type_display_name(types, lhs, context);
+        let right = diagnostic_type_display_name(types, rhs, context);
         return format!(
             "`{left}` and `{right}` have no common integer type for `{operator_spelling}`. Convert one operand with `cast` first."
         );
     }
 
-    // Fixed-width integer and binary-float values do not implicitly mix with each other.
     if (is_arithmetic_operator(operator) || is_comparison_operator(operator))
         && let Some(rhs) = rhs
-        && implicitly_mixed_numeric_pair(lhs, rhs)
+        && implicitly_mixed_numeric_pair(types, lhs, rhs)
     {
-        let left = diagnostic_type_name(lhs, context);
-        let right = diagnostic_type_name(rhs, context);
+        let left = diagnostic_type_display_name(types, lhs, context);
+        let right = diagnostic_type_display_name(types, rhs, context);
         return format!(
             "`{left}` and `{right}` do not mix implicitly. Convert one operand with `cast` first."
         );
     }
 
-    // Factual exact-operator fallback for every other unsupported operand combination.
     if let Some(rhs) = rhs {
-        let left = diagnostic_type_name(lhs, context);
-        let right = diagnostic_type_name(rhs, context);
+        let left = diagnostic_type_display_name(types, lhs, context);
+        let right = diagnostic_type_display_name(types, rhs, context);
         format!(
             "Operator `{operator_spelling}` does not support operand types `{left}` and `{right}`."
         )
     } else {
-        let operand = diagnostic_type_name(lhs, context);
+        let operand = diagnostic_type_display_name(types, lhs, context);
         format!("Operator `{operator_spelling}` does not support operand type `{operand}`.")
+    }
+}
+
+/// Renders operator failure from its typed operator and type-display facts.
+pub(crate) fn render_unsupported_operator_types(
+    diagnostic: &DiagnosticView<'_>,
+    facts: &UnsupportedOperatorTypesView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: unsupported_operator_types_message(
+            facts.operator,
+            facts.lhs,
+            facts.rhs,
+            diagnostic.types(),
+            context,
+        ),
+        guidance: Vec::new(),
     }
 }
 
@@ -592,10 +615,20 @@ fn is_comparison_operator(operator: DiagnosticOperator) -> bool {
     )
 }
 
-fn diagnostic_fixed_scalar(type_id: TypeId) -> Option<FixedScalar> {
-    FixedScalar::ALL
-        .into_iter()
-        .find(|scalar| builtin_type_ids::fixed_scalar(*scalar) == type_id)
+fn diagnostic_fixed_scalar(
+    types: &TypeDisplaySnapshot,
+    type_id: TypeDisplayId,
+) -> Option<FixedScalar> {
+    if let Some(type_id) = types.unresolved_type_id(type_id) {
+        return FixedScalar::ALL
+            .into_iter()
+            .find(|scalar| builtin_type_ids::fixed_scalar(*scalar) == type_id);
+    }
+
+    match types.shape(type_id) {
+        TypeDisplayShape::FixedScalar(scalar) => Some(scalar),
+        _ => None,
+    }
 }
 
 fn is_fixed_integer(scalar: FixedScalar) -> bool {
@@ -605,8 +638,15 @@ fn is_fixed_integer(scalar: FixedScalar) -> bool {
     )
 }
 
-fn implicitly_mixed_numeric_pair(lhs: TypeId, rhs: TypeId) -> bool {
-    match (diagnostic_fixed_scalar(lhs), diagnostic_fixed_scalar(rhs)) {
+fn implicitly_mixed_numeric_pair(
+    types: &TypeDisplaySnapshot,
+    lhs: TypeDisplayId,
+    rhs: TypeDisplayId,
+) -> bool {
+    match (
+        diagnostic_fixed_scalar(types, lhs),
+        diagnostic_fixed_scalar(types, rhs),
+    ) {
         (Some(left), Some(right)) => {
             (is_fixed_integer(left) && right.class() == FixedScalarClass::BinaryFloat)
                 || (left.class() == FixedScalarClass::BinaryFloat && is_fixed_integer(right))
@@ -617,53 +657,66 @@ fn implicitly_mixed_numeric_pair(lhs: TypeId, rhs: TypeId) -> bool {
 
 fn generic_parameter_operator_message(
     operator: DiagnosticOperator,
-    lhs: TypeId,
-    rhs: Option<TypeId>,
+    lhs: TypeDisplayId,
+    rhs: Option<TypeDisplayId>,
+    types: &TypeDisplaySnapshot,
     context: DiagnosticRenderContext<'_>,
 ) -> Option<String> {
-    let mut parameter_names = Vec::new();
-
-    if let Some(name) = generic_parameter_name(lhs, context) {
-        parameter_names.push(name);
-    }
-
-    if let Some(rhs) = rhs
-        && rhs != lhs
-        && let Some(name) = generic_parameter_name(rhs, context)
-    {
-        parameter_names.push(name);
-    }
-
-    if parameter_names.is_empty() {
-        return None;
-    }
-
-    let operator_spelling = operator.source_spelling();
-    let subject = if parameter_names.len() == 1 {
-        format!("generic parameter `{}`", parameter_names[0])
-    } else {
-        format!(
-            "generic parameters `{}` and `{}`",
-            parameter_names[0], parameter_names[1]
-        )
+    let lhs_name = generic_parameter_name(lhs, types, context);
+    let rhs_name = rhs
+        .filter(|rhs| *rhs != lhs)
+        .and_then(|rhs| generic_parameter_name(rhs, types, context));
+    let subject = match (lhs_name.as_deref(), rhs_name.as_deref()) {
+        (None, None) => return None,
+        (Some(name), None) | (None, Some(name)) => format!("generic parameter `{name}`"),
+        (Some(lhs), Some(rhs)) => format!("generic parameters `{lhs}` and `{rhs}`"),
     };
-
     Some(format!(
-        "Operator `{operator_spelling}` is not available for {subject}. Moth operators are compiler-owned and generic bounds do not provide operator support. Use a concrete type or a receiver method provided by an explicit bound."
+        "Operator `{}` is not available for {subject}. Moth operators are compiler-owned and generic bounds do not provide operator support. Use a concrete type or a receiver method provided by an explicit bound.",
+        operator.source_spelling()
     ))
 }
 
-fn exactly_one_operand_is_plain_string(lhs: TypeId, rhs: TypeId) -> bool {
-    (lhs == builtin_type_ids::STRING) != (rhs == builtin_type_ids::STRING)
+fn exactly_one_operand_is_plain_string(
+    lhs: TypeDisplayId,
+    rhs: TypeDisplayId,
+    types: &TypeDisplaySnapshot,
+) -> bool {
+    is_plain_string(types, lhs) != is_plain_string(types, rhs)
 }
 
-fn generic_parameter_name(type_id: TypeId, context: DiagnosticRenderContext<'_>) -> Option<String> {
+fn is_plain_string(types: &TypeDisplaySnapshot, type_id: TypeDisplayId) -> bool {
+    match types.unresolved_type_id(type_id) {
+        Some(type_id) => type_id == builtin_type_ids::STRING,
+        None => matches!(types.shape(type_id), TypeDisplayShape::String),
+    }
+}
+
+fn generic_parameter_name(
+    type_id: TypeDisplayId,
+    types: &TypeDisplaySnapshot,
+    context: DiagnosticRenderContext<'_>,
+) -> Option<String> {
     let type_environment = context.type_environment?;
-    type_environment
-        .is_generic_parameter(type_id)
-        .then(|| diagnostic_type_name(type_id, context))
+    match types.unresolved_type_id(type_id) {
+        Some(type_id) => matches!(
+            type_environment.shape(type_id),
+            TypeDisplayShape::GenericParameter { .. }
+        )
+        .then(|| diagnostic_type_name(type_id, context)),
+        None => types
+            .is_generic_parameter(type_id)
+            .then(|| diagnostic_type_display_name(types, type_id, context)),
+    }
 }
 
+fn diagnostic_type_display_name(
+    types: &TypeDisplaySnapshot,
+    type_id: TypeDisplayId,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    types.display_for_render(type_id, context.string_table, context.path_table())
+}
 fn namespace_name(namespace: NameNamespace) -> &'static str {
     match namespace {
         NameNamespace::Value => "value",
@@ -696,6 +749,51 @@ pub(crate) fn unsupported_external_function_message(
         format!(
             "External function '{function_name}' is not supported by the {backend_name} backend."
         )
+    }
+}
+
+/// Renders an unsupported external function from its name, optional package and backend facts.
+pub(crate) fn render_unsupported_external_function(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &UnsupportedExternalFunctionView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: unsupported_external_function_message(
+            facts.function_name,
+            facts.package_path,
+            facts.backend_name,
+            context.string_table,
+        ),
+        guidance: Vec::new(),
+    }
+}
+
+fn unsupported_backend_feature_message(
+    backend_name: StringId,
+    reason: UnsupportedBackendFeatureReason,
+    string_table: &dyn StringTableResolver,
+) -> String {
+    format!(
+        "Backend '{}' does not support {} yet.",
+        string_table.resolve(backend_name),
+        reason.feature_name()
+    )
+}
+
+/// Renders a backend limitation from its backend and reason facts.
+pub(crate) fn render_unsupported_backend_feature(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &UnsupportedBackendFeatureView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: unsupported_backend_feature_message(
+            facts.backend_name,
+            facts.reason,
+            context.string_table,
+        ),
+        guidance: Vec::new(),
     }
 }
 
@@ -794,29 +892,27 @@ pub(crate) fn render_invalid_choice_variant(
 }
 
 pub(crate) fn incompatible_choice_comparison_message(
-    reason: &IncompatibleChoiceComparisonReason,
-    lhs: TypeId,
-    rhs: TypeId,
-    context: DiagnosticRenderContext<'_>,
+    reason: IncompatibleChoiceComparisonCode,
+    lhs_name: &str,
+    rhs_name: &str,
+    field_name: Option<StringId>,
+    field_type_name: Option<&str>,
+    string_table: &dyn StringTableResolver,
 ) -> String {
-    let lhs_name = diagnostic_type_name(lhs, context);
-    let rhs_name = diagnostic_type_name(rhs, context);
-
     match reason {
-        IncompatibleChoiceComparisonReason::DifferentChoiceTypes => {
+        IncompatibleChoiceComparisonCode::DifferentChoiceTypes => {
             format!("Cannot compare choices of different types: '{lhs_name}' and '{rhs_name}'.")
         }
-        IncompatibleChoiceComparisonReason::ChoiceWithNonChoice => {
+        IncompatibleChoiceComparisonCode::ChoiceWithNonChoice => {
             format!(
                 "Cannot compare choice '{lhs_name}' with '{rhs_name}'. Choices can only be compared with values of the same choice type."
             )
         }
-        IncompatibleChoiceComparisonReason::PayloadEqualityNotSupported {
-            field_name,
-            field_type,
-        } => {
-            let field_name = context.string_table.resolve(*field_name);
-            let field_type_name = diagnostic_type_name(*field_type, context);
+        IncompatibleChoiceComparisonCode::PayloadEqualityNotSupported => {
+            let field_name = string_table
+                .resolve(field_name.expect("payload-equality code stores its field name"));
+            let field_type_name =
+                field_type_name.expect("payload-equality code stores its field type");
             format!(
                 "Choice payload equality is not supported because field '{field_name}' has type '{field_type_name}', which does not support equality."
             )
@@ -824,16 +920,53 @@ pub(crate) fn incompatible_choice_comparison_message(
     }
 }
 
-pub(crate) fn invalid_route_output_message(
-    reason: &InvalidRouteOutputReason,
-    output: TypeId,
+/// Renders an incompatible choice comparison from the code and type-display facts.
+pub(crate) fn render_incompatible_choice_comparison(
+    diagnostic: &DiagnosticView<'_>,
+    facts: &IncompatibleChoiceComparisonView,
     context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let field_name =
+        incompatible_choice_comparison_field_name(facts.reason, diagnostic.string_ids());
+    let lhs_name = diagnostic_type_display_name(diagnostic.types(), facts.lhs, context);
+    let rhs_name = diagnostic_type_display_name(diagnostic.types(), facts.rhs, context);
+    let field_type_name = facts
+        .field_type
+        .map(|field_type| diagnostic_type_display_name(diagnostic.types(), field_type, context));
+    RenderedPayload {
+        message: incompatible_choice_comparison_message(
+            facts.reason,
+            &lhs_name,
+            &rhs_name,
+            field_name,
+            field_type_name.as_deref(),
+            context.string_table,
+        ),
+        guidance: Vec::new(),
+    }
+}
+
+pub(crate) fn invalid_route_output_message(
+    reason: InvalidRouteOutputReason,
+    output_name: &str,
 ) -> String {
-    let output_name = diagnostic_type_name(output, context);
     match reason {
         InvalidRouteOutputReason::NotChoiceOrGeneric => format!(
             "`Route` output type '{output_name}' must be a choice type or a generic parameter."
         ),
+    }
+}
+
+/// Renders an invalid route output from its reason and type-display facts.
+pub(crate) fn render_invalid_route_output(
+    diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidRouteOutputView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let output_name = diagnostic_type_display_name(diagnostic.types(), facts.output, context);
+    RenderedPayload {
+        message: invalid_route_output_message(facts.reason, &output_name),
+        guidance: Vec::new(),
     }
 }
 

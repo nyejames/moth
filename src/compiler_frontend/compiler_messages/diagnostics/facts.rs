@@ -416,6 +416,35 @@ impl FactCodec for PlaceFact {
         }
     }
 }
+/// The tag-0 word with value 1; `PlaceFact` emits only tag-0 value 0 or tag-1/tag-2 words.
+const ABSENT_PLACE_WORD: u32 = 1;
+
+/// A place that may be absent. Tag 0 with nonzero value is not a valid `PlaceFact` encoding.
+pub(crate) struct OptPlaceFact;
+
+impl FactCodec for OptPlaceFact {
+    type Draft = Option<DiagnosticPlace>;
+    type Durable = Option<StoredPlace>;
+    const WORDS: usize = 1;
+
+    fn encode(draft: &Option<DiagnosticPlace>, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        match draft {
+            Some(place) => PlaceFact::encode(place, words),
+            None => {
+                words[0] = ABSENT_PLACE_WORD;
+                Ok(())
+            }
+        }
+    }
+
+    fn decode(words: &[u32]) -> Option<Option<StoredPlace>> {
+        if words[0] == ABSENT_PLACE_WORD {
+            Some(None)
+        } else {
+            PlaceFact::decode(words).map(Some)
+        }
+    }
+}
 
 /// A unit enum stored as its one-word code.
 pub(crate) struct UnitFact<T>(PhantomData<T>);
@@ -541,7 +570,10 @@ impl<'a> FactReader<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FactCodec, OptCharFact, OptUnitFact, UnitCode};
+    use super::{
+        ABSENT_PLACE_WORD, DiagnosticPlace, FactCodec, OptCharFact, OptPlaceFact, OptUnitFact,
+        PlaceFact, StoredPlace, UnitCode,
+    };
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum TestCode {
@@ -589,5 +621,23 @@ mod tests {
         let absent = None;
         OptCharFact::encode(&absent, &mut words).expect("absence fits one fact word");
         assert_eq!(OptCharFact::decode(&words), Some(absent));
+    }
+
+    #[test]
+    fn opt_place_fact_reserves_an_invalid_place_word_and_round_trips() {
+        let mut words = [0];
+        let present = Some(DiagnosticPlace::Unknown);
+        OptPlaceFact::encode(&present, &mut words).expect("an unknown place fits one fact word");
+        assert_eq!(words, [0]);
+        assert_eq!(
+            OptPlaceFact::decode(&words),
+            Some(Some(StoredPlace::Unknown))
+        );
+
+        let absent: Option<DiagnosticPlace> = None;
+        OptPlaceFact::encode(&absent, &mut words).expect("absence fits one fact word");
+        assert_eq!(words, [ABSENT_PLACE_WORD]);
+        assert_eq!(PlaceFact::decode(&words), None);
+        assert_eq!(OptPlaceFact::decode(&words), Some(None));
     }
 }

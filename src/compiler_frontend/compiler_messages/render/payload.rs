@@ -25,7 +25,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::token_le
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
     SourceSpanCapacityView, UnexpectedEndOfFileView,
 };
-use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::TypeMismatchView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
+    EmptyCollectionTypeAmbiguityView, TypeMismatchView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticCapacityResource, DiagnosticPayload, InvalidTraitConformanceReason,
@@ -87,11 +89,6 @@ pub(crate) fn render_payload(
             vec![
                 "Add a type annotation to the receiving declaration, for example `value I32 = ...`."
                     .to_owned(),
-            ]
-        }
-        DiagnosticPayload::EmptyCollectionTypeAmbiguity => {
-            vec![
-                "Add an explicit type annotation, for example `scores {String = I32} = {}` for an empty map or `items {I32} = {}` for an empty collection.".to_owned(),
             ]
         }
         _ => Vec::new(),
@@ -221,25 +218,7 @@ fn render_payload_message(
         DiagnosticPayload::UnknownName { name, namespace } => {
             unknown_name_message(*name, *namespace, string_table)
         }
-        DiagnosticPayload::BorrowConflict { .. }
-        | DiagnosticPayload::MultipleMutableBorrows { .. }
-        | DiagnosticPayload::SharedMutableConflict { .. }
-        | DiagnosticPayload::UseAfterPossibleMove { .. }
-        | DiagnosticPayload::MoveWhileBorrowed { .. }
-        | DiagnosticPayload::WholeObjectBorrowConflict { .. }
-        | DiagnosticPayload::InvalidMutableAccess { .. } => {
-            borrow_payload_message(payload, context)
-        }
-        DiagnosticPayload::UnsupportedExternalFunction {
-            function_name,
-            package_path,
-            backend_name,
-        } => unsupported_external_function_message(
-            *function_name,
-            *package_path,
-            *backend_name,
-            string_table,
-        ),
+        DiagnosticPayload::BorrowConflict { .. } => borrow_payload_message(payload, context),
         DiagnosticPayload::InvalidGenericApplication { reason } => {
             invalid_generic_application_message(*reason).to_owned()
         }
@@ -337,30 +316,9 @@ fn render_payload_message(
         DiagnosticPayload::InvalidReceiverDeclaration { reason } => {
             invalid_receiver_declaration_message(*reason, context)
         }
-        DiagnosticPayload::EmptyCollectionTypeAmbiguity => {
-            "Cannot infer the type of an empty `{}` literal. Add an explicit type annotation."
-                .to_owned()
-        }
-        DiagnosticPayload::UnsupportedOperatorTypes { operator, lhs, rhs } => {
-            unsupported_operator_types_message(*operator, *lhs, *rhs, context)
-        }
-        DiagnosticPayload::IncompatibleChoiceComparison { reason, lhs, rhs } => {
-            incompatible_choice_comparison_message(reason, *lhs, *rhs, context)
-        }
-        DiagnosticPayload::InvalidRouteOutput { reason, output } => {
-            invalid_route_output_message(reason, *output, context)
-        }
         DiagnosticPayload::InvalidGenericInstantiation { type_name, reason } => {
             invalid_generic_instantiation_message(*type_name, reason, context)
         }
-        DiagnosticPayload::UnsupportedBackendFeature {
-            backend_name,
-            reason,
-        } => format!(
-            "Backend '{}' does not support {} yet.",
-            string_table.resolve(*backend_name),
-            reason.feature_name()
-        ),
         DiagnosticPayload::None => String::new(),
         _ => unreachable!(
             "migrated families render through the compact path; P4.6 deletes this function"
@@ -1045,40 +1003,6 @@ fn borrow_payload_message(
             requested_access,
             ..
         } => borrow_conflict_message(place, *existing_access, *requested_access, context),
-        DiagnosticPayload::MultipleMutableBorrows {
-            place,
-            conflicting_place,
-        } => multiple_mutable_borrows_message(place, conflicting_place.as_ref(), context),
-        DiagnosticPayload::SharedMutableConflict {
-            place,
-            existing_access,
-            requested_access,
-            conflicting_place,
-        } => shared_mutable_conflict_message(
-            place,
-            *existing_access,
-            *requested_access,
-            conflicting_place.as_ref(),
-            context,
-        ),
-        DiagnosticPayload::UseAfterPossibleMove { place, .. } => {
-            use_after_possible_move_message(place, context)
-        }
-        DiagnosticPayload::MoveWhileBorrowed {
-            place,
-            existing_access,
-            ..
-        } => move_while_borrowed_message(place, *existing_access, context),
-        DiagnosticPayload::WholeObjectBorrowConflict {
-            whole_place,
-            part_place,
-            ..
-        } => whole_object_borrow_conflict_message(whole_place, part_place, context),
-        DiagnosticPayload::InvalidMutableAccess {
-            place,
-            reason,
-            conflicting_place,
-        } => invalid_mutable_access_message(place, *reason, conflicting_place.as_ref(), context),
         _ => unreachable!(
             "migrated families render through the compact path; P4.6 deletes this function"
         ),
@@ -1095,5 +1019,23 @@ pub(crate) fn render_title_only<V>(
     RenderedPayload {
         message: String::new(),
         guidance: Vec::new(),
+    }
+}
+
+fn empty_collection_type_ambiguity_message() -> String {
+    "Cannot infer the type of an empty `{}` literal. Add an explicit type annotation.".to_owned()
+}
+
+/// Renders the fixed empty-collection message and its explicit-type guidance.
+pub(crate) fn render_empty_collection_type_ambiguity(
+    _diagnostic: &DiagnosticView<'_>,
+    _view: &EmptyCollectionTypeAmbiguityView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: empty_collection_type_ambiguity_message(),
+        guidance: vec![
+            "Add an explicit type annotation, for example `scores {String = I32} = {}` for an empty map or `items {I32} = {}` for an empty collection.".to_owned(),
+        ],
     }
 }

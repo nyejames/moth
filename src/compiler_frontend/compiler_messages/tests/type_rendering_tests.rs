@@ -15,6 +15,7 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticOperator, InvalidAssignmentTargetReason, InvalidFallibleHandlingReason,
     InvalidFieldAccessReason, InvalidReceiverDeclarationReason, TypeDiagnosticKind,
     TypeMismatchContext,
+    diagnostic_types::type_display_snapshot_builder::TypeDisplaySnapshotBuilder,
 };
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition,
@@ -451,6 +452,16 @@ fn unsupported_operator_message(
     rhs: Option<TypeId>,
 ) -> String {
     let type_environment = TypeEnvironment::new();
+    let mut builder = TypeDisplaySnapshotBuilder::new(Some(&type_environment));
+    let lhs = builder
+        .display_top_level(lhs)
+        .expect("test type snapshot fits");
+    let rhs = rhs.map(|rhs| {
+        builder
+            .display_top_level(rhs)
+            .expect("test type snapshot fits")
+    });
+    let types = builder.finish();
     let string_table = StringTable::new();
     let path_fork = PathInternerFork::empty();
     let path_table = path_fork.snapshot_table();
@@ -458,5 +469,5 @@ fn unsupported_operator_message(
         .with_optional_type_environment(Some(&type_environment))
         .with_path_table(&path_table);
 
-    unsupported_operator_types_message(operator, lhs, rhs, context)
+    unsupported_operator_types_message(operator, lhs, rhs, &types, context)
 }

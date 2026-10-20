@@ -5,7 +5,10 @@
 //! for turning those facts into stable text.
 
 use super::*;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::UseOfUninitializedLocalView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
+    InvalidMutableAccessView, MultipleMutableBorrowsView, SharedMutableConflictView,
+    UseOfUninitializedLocalView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 
 pub(crate) fn diagnostic_place_name(
@@ -63,6 +66,22 @@ pub(crate) fn multiple_mutable_borrows_message(
     }
 }
 
+/// Renders a mutable-borrow conflict from its stored places.
+pub(crate) fn render_multiple_mutable_borrows(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &MultipleMutableBorrowsView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let place = facts.place.diagnostic_place();
+    let conflicting_place = facts
+        .conflicting_place
+        .map(|place| place.diagnostic_place());
+    RenderedPayload {
+        message: multiple_mutable_borrows_message(&place, conflicting_place.as_ref(), context),
+        guidance: Vec::new(),
+    }
+}
+
 pub(crate) fn shared_mutable_conflict_message(
     place: &DiagnosticPlace,
     existing_access: BorrowAccessKind,
@@ -93,38 +112,26 @@ pub(crate) fn shared_mutable_conflict_message(
     }
 }
 
-pub(crate) fn use_after_possible_move_message(
-    place: &DiagnosticPlace,
+/// Renders a shared/mutable access conflict from its typed access and place facts.
+pub(crate) fn render_shared_mutable_conflict(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &SharedMutableConflictView,
     context: DiagnosticRenderContext<'_>,
-) -> String {
-    format!(
-        "Cannot use {} because it may have been moved or left its valid scope.",
-        diagnostic_place_name(place, context)
-    )
-}
-
-pub(crate) fn move_while_borrowed_message(
-    place: &DiagnosticPlace,
-    existing_access: BorrowAccessKind,
-    context: DiagnosticRenderContext<'_>,
-) -> String {
-    format!(
-        "Cannot transfer ownership of {} while it has an active {} access.",
-        diagnostic_place_name(place, context),
-        borrow_access_name(existing_access)
-    )
-}
-
-pub(crate) fn whole_object_borrow_conflict_message(
-    whole_place: &DiagnosticPlace,
-    part_place: &DiagnosticPlace,
-    context: DiagnosticRenderContext<'_>,
-) -> String {
-    format!(
-        "Cannot access whole value {} while part {} is already active.",
-        diagnostic_place_name(whole_place, context),
-        diagnostic_place_name(part_place, context)
-    )
+) -> RenderedPayload {
+    let place = facts.place.diagnostic_place();
+    let conflicting_place = facts
+        .conflicting_place
+        .map(|place| place.diagnostic_place());
+    RenderedPayload {
+        message: shared_mutable_conflict_message(
+            &place,
+            facts.existing_access,
+            facts.requested_access,
+            conflicting_place.as_ref(),
+            context,
+        ),
+        guidance: Vec::new(),
+    }
 }
 
 pub(crate) fn invalid_mutable_access_message(
@@ -152,6 +159,27 @@ pub(crate) fn invalid_mutable_access_message(
                 "Cannot mutably access {place_name} because {conflicting_name} may alias the same value."
             )
         }
+    }
+}
+
+/// Renders an invalid mutable access from its stored reason and places.
+pub(crate) fn render_invalid_mutable_access(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidMutableAccessView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let place = facts.place.diagnostic_place();
+    let conflicting_place = facts
+        .conflicting_place
+        .map(|place| place.diagnostic_place());
+    RenderedPayload {
+        message: invalid_mutable_access_message(
+            &place,
+            facts.reason,
+            conflicting_place.as_ref(),
+            context,
+        ),
+        guidance: Vec::new(),
     }
 }
 

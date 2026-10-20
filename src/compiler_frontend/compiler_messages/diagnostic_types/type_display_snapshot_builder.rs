@@ -5,8 +5,9 @@
 //! WHY: diagnostics render type spellings after the live environment is gone. The snapshot stores
 //! the same spelling facts the live formatter reads, so both render identically.
 //! OWNERSHIP: the builder borrows the environment for the build. It owns the snapshot under
-//! construction, a memo from `TypeId` to `TypeDisplayId`, and a scratch stack of child ids.
-//! `finish` consumes the builder, so the memo and the scratch stack cannot outlive the build.
+//! construction, memos from `TypeId` to `TypeDisplayId` for resolved types and unresolved roots,
+//! and a scratch stack of child ids. `finish` consumes the builder, so the memos and scratch stack
+//! cannot outlive the build.
 //! EXCLUSIONS: string and path ids are copied as they are. The builder never remaps or merges them,
 //! and it does not deduplicate distinct `TypeId`s that share a spelling. Struct and choice records
 //! hold their path, and a choice also holds its variant names, but never member types. Recursive
@@ -29,6 +30,8 @@ pub(crate) struct TypeDisplaySnapshotBuilder<'environment> {
     environment: Option<&'environment TypeEnvironment>,
     snapshot: TypeDisplaySnapshot,
     memo: FxHashMap<TypeId, TypeDisplayId>,
+    /// Separate from `memo`: unresolved roots and encoded unknown children have different shapes.
+    unresolved_memo: FxHashMap<TypeId, TypeDisplayId>,
     /// Display ids of the child frames being collected, innermost frame last.
     scratch: Vec<TypeDisplayId>,
 }
@@ -40,6 +43,7 @@ impl<'environment> TypeDisplaySnapshotBuilder<'environment> {
             environment,
             snapshot: TypeDisplaySnapshot::default(),
             memo: FxHashMap::default(),
+            unresolved_memo: FxHashMap::default(),
             scratch: Vec::new(),
         }
     }
@@ -85,17 +89,22 @@ impl<'environment> TypeDisplaySnapshotBuilder<'environment> {
         }
     }
 
-    /// Pushes the transitional unresolved root for `type_id`. The root is not memoised: it has no spelling of its own.
+    /// Pushes or reuses an unresolved root, separate from any encoded unknown child record.
     fn push_unresolved(
         &mut self,
         type_id: TypeId,
     ) -> Result<TypeDisplayId, TypeDisplayCapacityError> {
+        if let Some(existing) = self.unresolved_memo.get(&type_id) {
+            return Ok(*existing);
+        }
+
         let id = TypeDisplayId::from_index(self.snapshot.records.len())?;
         self.snapshot.records.push(DiagnosticTypeRecord::new(
             DiagnosticTypeTag::UnresolvedTypeId,
             type_id.0,
             0,
         ));
+        self.unresolved_memo.insert(type_id, id);
         Ok(id)
     }
 

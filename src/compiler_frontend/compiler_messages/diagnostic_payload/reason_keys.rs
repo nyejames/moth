@@ -28,6 +28,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::template
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
     CommonSyntaxMistakeCode, InvalidStringEscapeCode, NumberLiteralCode,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::IncompatibleChoiceComparisonCode;
 #[doc(hidden)]
 #[macro_export]
 macro_rules! define_reasoned_diagnostic_registry {
@@ -1548,9 +1549,13 @@ define_stable_reason_keys! {
 
 
     IncompatibleChoiceComparisonReason => {
-    &IncompatibleChoiceComparisonReason::DifferentChoiceTypes => "incompatible_choice_comparison.different_choice_types",
-    &IncompatibleChoiceComparisonReason::ChoiceWithNonChoice => "incompatible_choice_comparison.choice_with_non_choice",
-    &IncompatibleChoiceComparisonReason::PayloadEqualityNotSupported { .. } => "incompatible_choice_comparison.payload_equality_not_supported",
+        @delegate(reason => IncompatibleChoiceComparisonCode::split(reason).0.stable_reason_key());
+    },
+
+    IncompatibleChoiceComparisonCode => {
+    &IncompatibleChoiceComparisonCode::DifferentChoiceTypes => "incompatible_choice_comparison.different_choice_types",
+    &IncompatibleChoiceComparisonCode::ChoiceWithNonChoice => "incompatible_choice_comparison.choice_with_non_choice",
+    &IncompatibleChoiceComparisonCode::PayloadEqualityNotSupported => "incompatible_choice_comparison.payload_equality_not_supported",
     },
 
     InvalidRouteOutputReason => {

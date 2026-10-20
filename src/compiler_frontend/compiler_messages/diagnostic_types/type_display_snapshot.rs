@@ -14,6 +14,7 @@ use super::{TypeDisplayCapacityError, TypeDisplayId};
 use crate::compiler_frontend::datatypes::display::{
     ChoiceVariantShape, TypeDisplayShape, TypeDisplayView, display_view_type,
 };
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{
     StringId, StringIdRemap, StringTableResolver,
@@ -232,6 +233,12 @@ impl TypeDisplaySnapshot {
                 path_table.expect("resolved type spellings need the path table"),
             ),
         }
+    }
+
+    /// Transitional: serves only the `TypeId(N)` fallback; P4.5 deletes it with that fallback.
+    pub(crate) fn unresolved_type_id(&self, type_id: TypeDisplayId) -> Option<TypeId> {
+        let record = self.record(type_id);
+        (record.tag == DiagnosticTypeTag::UnresolvedTypeId).then_some(TypeId(record.data_0))
     }
 
     fn record(&self, type_id: TypeDisplayId) -> &DiagnosticTypeRecord {
