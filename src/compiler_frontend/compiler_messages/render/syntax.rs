@@ -9,6 +9,7 @@ use super::{
     token_kind_name,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::ExpectedTokenView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidNumberLiteralView;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
     ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason, InvalidLoopHeaderReason,
@@ -189,6 +190,23 @@ pub(crate) fn invalid_number_literal_message(
         NumberLiteralErrorReason::ParseOverflow => {
             format!("Numeric literal '{literal}' is too large to represent.")
         }
+    }
+}
+
+/// WHAT: renders an invalid number literal from its compact facts.
+/// WHY: the literal text and the reason are the whole message; the reason is rebuilt from its code and data.
+pub(crate) fn render_invalid_number_literal(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &InvalidNumberLiteralView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = view
+        .code
+        .to_reason(view.scalar, view.scale)
+        .expect("an invalid-number-literal record stores the data its reason code names");
+    RenderedPayload {
+        message: invalid_number_literal_message(view.literal_text, reason, context.string_table),
+        guidance: Vec::new(),
     }
 }
 

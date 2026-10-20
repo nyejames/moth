@@ -8,6 +8,9 @@ use super::subject::DiagnosticSubject;
 use super::*;
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::CompilerCapacityExceededView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    InvalidCharacterView, MissingClosingDelimiterView, UnexpectedTrailingCommaView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::TypeMismatchView;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
@@ -90,6 +93,48 @@ pub(crate) fn render_compiler_capacity_exceeded(
     }
 }
 
+/// WHAT: renders the fixed unexpected-trailing-comma message.
+/// WHY: the row carries no facts, so the message is constant.
+pub(crate) fn render_unexpected_trailing_comma(
+    _diagnostic: &DiagnosticView<'_>,
+    _view: &UnexpectedTrailingCommaView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: "Unexpected trailing comma".to_owned(),
+        guidance: Vec::new(),
+    }
+}
+
+/// WHAT: renders an invalid character from its compact fact.
+/// WHY: the character is the whole message.
+pub(crate) fn render_invalid_character(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &InvalidCharacterView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: format!("Invalid character: '{}'", view.character),
+        guidance: Vec::new(),
+    }
+}
+
+/// WHAT: renders a missing closing delimiter from its compact fact.
+/// WHY: the delimiter text is the only variable part of the message.
+pub(crate) fn render_missing_closing_delimiter(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &MissingClosingDelimiterView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: format!(
+            "Missing closing delimiter '{}'",
+            context.string_table.resolve(view.expected_delimiter)
+        ),
+        guidance: Vec::new(),
+    }
+}
+
 /// WHAT: renders a type mismatch from its compact facts.
 /// WHY: each type is spelled through the snapshot's display rules. A type prints as a raw
 /// `TypeId` unless both the live type environment and the path table are available.
@@ -153,10 +198,6 @@ fn render_payload_message(
     let string_table = context.string_table;
 
     match payload {
-        DiagnosticPayload::UnexpectedToken { found } => {
-            unexpected_token_message(found, string_table)
-        }
-        DiagnosticPayload::UnexpectedTrailingComma => "Unexpected trailing comma".to_owned(),
         DiagnosticPayload::UnescapedImplicitTemplateClose { source_kind } => {
             format!(
                 "{} starts inside an implicit template body, so an unescaped `]` would close a template that is not written in the source file.",
@@ -243,29 +284,16 @@ fn render_payload_message(
         DiagnosticPayload::MalformedTemplate { reason } => {
             malformed_template_message(*reason, string_table)
         }
-        DiagnosticPayload::InvalidCharacter { character } => {
-            format!("Invalid character: '{character}'")
-        }
         DiagnosticPayload::SourceSpanCapacity {
             start,
             length,
             resource,
         } => source_span_capacity_message(*start, *length, *resource),
         DiagnosticPayload::InvalidStringEscape { reason } => invalid_string_escape_message(*reason),
-        DiagnosticPayload::InvalidNumberLiteral {
-            literal_text,
-            reason,
-        } => invalid_number_literal_message(*literal_text, *reason, string_table),
         DiagnosticPayload::InvalidStyleDirective {
             directive_name,
             supported_directives,
         } => invalid_style_directive_message(*directive_name, *supported_directives, string_table),
-        DiagnosticPayload::MissingClosingDelimiter { expected_delimiter } => {
-            format!(
-                "Missing closing delimiter '{}'",
-                string_table.resolve(*expected_delimiter)
-            )
-        }
         DiagnosticPayload::InvalidGenericApplication { reason } => {
             invalid_generic_application_message(*reason).to_owned()
         }
@@ -495,10 +523,6 @@ fn render_payload_message(
                 "Invalid {receiver_name} receiver: expected {target_count} success slot(s), but this expression produces {produced_count}."
             )
         }
-        DiagnosticPayload::InvalidMultiBind {
-            reason,
-            target_name,
-        } => invalid_multi_bind_message(*reason, *target_name, string_table),
         DiagnosticPayload::InvalidBuiltinCall {
             reason,
             builtin_name,
@@ -1107,5 +1131,18 @@ fn borrow_payload_message(
         _ => unreachable!(
             "migrated families render through the compact path; P4.6 deletes this function"
         ),
+    }
+}
+
+/// WHAT: renders a family whose legacy payload carried no message.
+/// WHY: an empty message leaves the descriptor title as the only text, as the `None` payload did.
+pub(crate) fn render_title_only<V>(
+    _diagnostic: &DiagnosticView<'_>,
+    _view: &V,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: String::new(),
+        guidance: Vec::new(),
     }
 }

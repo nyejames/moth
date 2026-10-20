@@ -250,7 +250,6 @@ impl FactCodec for CountFact {
 }
 
 /// A character as one word. Decoding rejects words that are not Unicode scalar values.
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.4 family rows use it"))]
 pub(crate) struct CharFact;
 
 impl FactCodec for CharFact {

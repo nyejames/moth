@@ -39,9 +39,8 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, render_payload,
-};
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
+use crate::compiler_frontend::compiler_messages::render::terminal::format_diagnostic_guidance;
 use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
 use crate::compiler_frontend::datatypes::{builtin_type_ids, environment::TypeEnvironment};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -1081,11 +1080,11 @@ fn canonical_string_only_donors_borrow_identity_without_retaining_file_tokens() 
         .expect("materialised body diagnostic projection should succeed")
         .expect("materialised body should expose its current token");
     let diagnostic = CompilerDiagnostic::unexpected_token_from_tag(projected, None);
-    let rendered = render_payload(
-        &diagnostic.payload,
+    let rendered = format_diagnostic_guidance(
+        &diagnostic,
         DiagnosticRenderContext::new(&materialised_strings),
     )
-    .message;
+    .join("\n");
     assert!(
         rendered.contains("donor"),
         "materialised-body diagnostics must render donor spelling, got {rendered:?}",
@@ -1266,11 +1265,11 @@ fn donor_numeric_literal_text_renders_through_borrowed_origin() {
         .expect("donor numeric diagnostic projection should succeed")
         .expect("the current numeric token should project into a diagnostic token");
     let diagnostic = CompilerDiagnostic::unexpected_token_from_tag(projected, None);
-    let rendered = render_payload(
-        &diagnostic.payload,
+    let rendered = format_diagnostic_guidance(
+        &diagnostic,
         DiagnosticRenderContext::new(&materialised_strings),
     )
-    .message;
+    .join("\n");
     assert!(
         rendered.contains("-12.5"),
         "numeric donor diagnostics must render donor-authored text, got {rendered:?}",

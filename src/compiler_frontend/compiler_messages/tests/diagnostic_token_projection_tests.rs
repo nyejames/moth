@@ -108,7 +108,6 @@ fn every_token_payload_render_survives_store_drop() {
                 .expect("fixture token index should resolve");
             let projected = DiagnosticToken::from_token_ref(token_ref);
             let payloads = [
-                DiagnosticPayload::UnexpectedToken { found: projected },
                 DiagnosticPayload::InvalidTypeAnnotation {
                     context: TypeAnnotationContext::DeclarationTarget,
                     reason: InvalidTypeAnnotationReason::InvalidTokenAfterName { token: projected },

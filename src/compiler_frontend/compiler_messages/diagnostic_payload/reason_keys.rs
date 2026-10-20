@@ -6,6 +6,7 @@
 /// should have one declaration and one owning registry.
 use super::*;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidMultiBindCode;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::NumberLiteralCode;
 #[doc(hidden)]
 #[macro_export]
 macro_rules! define_reasoned_diagnostic_registry {
@@ -888,20 +889,24 @@ define_stable_reason_keys! {
     },
 
     NumberLiteralErrorReason => {
-    @delegate(&NumberLiteralErrorReason::NonFiniteFixedFloat(_) => "invalid_number_literal.non_finite_float");
-    &NumberLiteralErrorReason::SeparatorNotBetweenDigits => "invalid_number_literal.separator_not_between_digits",
-    &NumberLiteralErrorReason::MultipleDecimalPoints => "invalid_number_literal.multiple_decimal_points",
-    &NumberLiteralErrorReason::DecimalPointNotAfterDigit => "invalid_number_literal.decimal_point_not_after_digit",
-    &NumberLiteralErrorReason::EndsWithSeparator => "invalid_number_literal.ends_with_separator",
-    &NumberLiteralErrorReason::MissingFractionalDigits => "invalid_number_literal.missing_fractional_digits",
-    &NumberLiteralErrorReason::UppercaseExponentMarker => "invalid_number_literal.uppercase_exponent_marker",
-    &NumberLiteralErrorReason::MissingExponentDigits => "invalid_number_literal.missing_exponent_digits",
-    &NumberLiteralErrorReason::InvalidExponentSignPlacement => "invalid_number_literal.invalid_exponent_sign_placement",
-    &NumberLiteralErrorReason::InvalidSeparatorPlacement => "invalid_number_literal.invalid_separator_placement",
-    &NumberLiteralErrorReason::OutsideFixedScalarRange(_) => "invalid_number_literal.outside_fixed_scalar_range",
-    &NumberLiteralErrorReason::NegativeUnsignedLiteral(_) => "invalid_number_literal.negative_unsigned_literal",
-    &NumberLiteralErrorReason::InexactNumberScale(_) => "invalid_number_literal.inexact_number_scale",
-    &NumberLiteralErrorReason::ParseOverflow => "invalid_number_literal.parse_overflow",
+        @delegate(reason => NumberLiteralCode::split(reason).0.stable_reason_key());
+    },
+
+    NumberLiteralCode => {
+    &NumberLiteralCode::SeparatorNotBetweenDigits => "invalid_number_literal.separator_not_between_digits",
+    &NumberLiteralCode::MultipleDecimalPoints => "invalid_number_literal.multiple_decimal_points",
+    &NumberLiteralCode::DecimalPointNotAfterDigit => "invalid_number_literal.decimal_point_not_after_digit",
+    &NumberLiteralCode::EndsWithSeparator => "invalid_number_literal.ends_with_separator",
+    &NumberLiteralCode::MissingFractionalDigits => "invalid_number_literal.missing_fractional_digits",
+    &NumberLiteralCode::UppercaseExponentMarker => "invalid_number_literal.uppercase_exponent_marker",
+    &NumberLiteralCode::MissingExponentDigits => "invalid_number_literal.missing_exponent_digits",
+    &NumberLiteralCode::InvalidExponentSignPlacement => "invalid_number_literal.invalid_exponent_sign_placement",
+    &NumberLiteralCode::InvalidSeparatorPlacement => "invalid_number_literal.invalid_separator_placement",
+    &NumberLiteralCode::OutsideFixedScalarRange => "invalid_number_literal.outside_fixed_scalar_range",
+    &NumberLiteralCode::NegativeUnsignedLiteral => "invalid_number_literal.negative_unsigned_literal",
+    &NumberLiteralCode::NonFiniteFixedFloat => "invalid_number_literal.non_finite_float",
+    &NumberLiteralCode::InexactNumberScale => "invalid_number_literal.inexact_number_scale",
+    &NumberLiteralCode::ParseOverflow => "invalid_number_literal.parse_overflow",
     },
     InvalidStringEscapeReason => {
     &InvalidStringEscapeReason::UnsupportedEscape { .. } => "invalid_string_escape.unsupported_escape",

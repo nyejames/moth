@@ -8,8 +8,12 @@
 use super::*;
 use crate::compiler_frontend::build_config::BuildConfigValueOrigin;
 use crate::compiler_frontend::compiler_messages::diagnostic_types::type_display_snapshot::TypeDisplaySnapshot;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    UnexpectedTokenShape, UnexpectedTokenView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage, DiagnosticLabelStyle,
 };
@@ -844,6 +848,32 @@ pub(crate) fn unexpected_token_message(
 ) -> String {
     let found = token_kind_name(found, string_table);
     format!("Unexpected token {found}.")
+}
+
+/// WHAT: renders an unexpected-token diagnostic from its compact shape.
+/// WHY: a plain token and a multi-bind misuse share one row, so the shape selects the prose.
+pub(crate) fn render_unexpected_token(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &UnexpectedTokenView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let message = match &view.shape {
+        UnexpectedTokenShape::Token(found) => unexpected_token_message(found, context.string_table),
+        UnexpectedTokenShape::MultiBind {
+            code,
+            target_name,
+            expected,
+            found,
+        } => invalid_multi_bind_message(
+            code.to_reason(*expected, *found),
+            *target_name,
+            context.string_table,
+        ),
+    };
+    RenderedPayload {
+        message,
+        guidance: Vec::new(),
+    }
 }
 
 pub(crate) fn unknown_name_message(
