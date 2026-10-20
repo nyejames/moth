@@ -155,7 +155,11 @@ fn execute_check(
         validated_directory_output_settings,
         mut project_source_files,
         build_config_inputs,
-    } = match bootstrap_project_build(builder_selection, valid_path, build_config_inputs) {
+    } = match bootstrap_project_build(
+        builder_selection.backend.as_ref(),
+        valid_path,
+        build_config_inputs,
+    ) {
         Ok(bootstrap) => bootstrap,
         Err(messages) => {
             return CheckOutcome {

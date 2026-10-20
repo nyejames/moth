@@ -32,7 +32,12 @@ pub(crate) fn execute_test_case(case: &TestCaseSpec) -> CaseExecutionResult {
     };
 
     let execution = catch_unwind(AssertUnwindSafe(|| {
-        build_project(&builder, entry_path, &flags, &BuildConfigInputSet::new())
+        build_project(
+            builder.backend.as_ref(),
+            entry_path,
+            &flags,
+            &BuildConfigInputSet::new(),
+        )
     }));
 
     // Policy: unsupported or incomplete user input must surface structured compiler diagnostics.

@@ -464,7 +464,11 @@ fn run_frontend_benchmark_with_owner_internal(
         validated_directory_output_settings,
         mut project_source_files,
         build_config_inputs,
-    } = match bootstrap_project_build(&builder_selection, valid_path, &requested_inputs) {
+    } = match bootstrap_project_build(
+        builder_selection.backend.as_ref(),
+        valid_path,
+        &requested_inputs,
+    ) {
         Ok(bootstrap) => bootstrap,
         Err(messages) => {
             let diagnostic_codes = collect_diagnostic_codes(&messages);

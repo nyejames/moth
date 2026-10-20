@@ -64,7 +64,11 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
         - [project_roots.rs](src/build_system/create_project_modules/project_roots.rs): project/entry roots.
         - [source_discovery_error.rs](src/build_system/create_project_modules/source_discovery_error.rs): diagnostic boundary.
     - [output](src/build_system/output/): validated output plans, portable path policy, prepared artifact writing, write orchestration, and stale manifest cleanup.
-- [builder SDK](src/builder/): public `moth::builder` definitions for custom Rust builders. `BuilderDefinition` registers source packages, native host packages and source kinds through the builder surface and validates them in one `finish`.
+- [builder SDK](src/builder/): public `moth::builder` definitions and build driver for custom Rust builders. `BuilderDefinition` registers source packages, native host packages and source kinds through the builder surface and validates them in one `finish`.
+    - [definition.rs](src/builder/definition.rs): the public definition draft and the registered builder surface.
+    - [project.rs](src/builder/project.rs): the public `ProjectBuilder` trait and the `build_project` driver over the shared build orchestration.
+    - [compiled_project.rs](src/builder/compiled_project.rs): the compiled project handle, the owner-bound package facade handle, the build context and the artifact set.
+    - [error.rs](src/builder/error.rs): the public error kinds and the rendered compiler messages.
 - [host descriptors](src/host/mod.rs): public `moth::host` closed V1 vocabulary for manual native Rust host function descriptors, mapped onto the external-package registry specification.
 - [builder surface](src/builder_surface/): core packages, external import providers and package metadata.
     - [core_packages/](src/builder_surface/core_packages/): prelude, io, math, collections, text, random and time.

@@ -112,7 +112,12 @@ impl DevBuildExecutor for ProjectBuildExecutor {
             CompilerMessages::from_error(error, Default::default())
         })?;
 
-        build::build_project(&self.builder, entry_path, flags, &self.build_config_inputs)
+        build::build_project(
+            self.builder.backend.as_ref(),
+            entry_path,
+            flags,
+            &self.build_config_inputs,
+        )
     }
 
     fn write_outputs(

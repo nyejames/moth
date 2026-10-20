@@ -40,9 +40,13 @@ impl BuilderDefinition {
         self.identity.as_str()
     }
 
-    #[cfg_attr(not(test), allow(dead_code))] // consumed by the build driver in the next slice
     pub(crate) fn surface(&self) -> &BuilderSurface {
         &self.surface
+    }
+
+    /// The stable identity the compiler uses to name this builder's outputs.
+    pub(crate) fn builder_identity(&self) -> BuilderIdentity {
+        self.identity.clone()
     }
 }
 

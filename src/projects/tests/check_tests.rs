@@ -492,7 +492,7 @@ fn diagnostic_identity_sequence_frozen<'a>(
 
 #[test]
 fn check_and_build_frontends_produce_identical_diagnostics_and_check_writes_no_artifacts() {
-    let builder = BuilderSelection::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
 
     // --------------------------------------------
     //  Warning parity: success with frontend warnings

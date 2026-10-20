@@ -58,7 +58,11 @@ fn compile_boracle_input(
         mut string_table,
         mut frontend_surface,
         ..
-    } = bootstrap_project_build(&builder_selection, valid_path, &BuildConfigInputSet::new())?;
+    } = bootstrap_project_build(
+        builder_selection.backend.as_ref(),
+        valid_path,
+        &BuildConfigInputSet::new(),
+    )?;
 
     if config.entry_dir.is_dir() {
         let error = CompilerError::compiler_error(

@@ -14,9 +14,7 @@ use super::super::{BackendId, SuccessExpectation, WarningExpectation};
 use super::synthetic_build_results::success_test_case;
 use crate::backends::js::ENTRY_FAILURE_NOTICE;
 use crate::build_system::BuildProfile;
-use crate::build_system::build::{
-    BackendBuilder, BuildResult, BuilderSelection, FileKind, build_project,
-};
+use crate::build_system::build::{BackendBuilder, BuildResult, FileKind, build_project};
 use crate::build_system::create_project_modules::{
     ProjectFrontendCompilation, compile_project_frontend,
 };
@@ -177,7 +175,7 @@ impl EntryFixture {
 
     fn build_result(&self, flags: &[Flag]) -> Result<BuildResult, CompilerMessages> {
         build_project(
-            &BuilderSelection::new(HtmlProjectBuilder::new()),
+            &HtmlProjectBuilder::new(),
             self.entry.to_str().expect("fixture entry should be UTF-8"),
             flags,
             &BuildConfigInputSet::new(),
@@ -799,7 +797,7 @@ fn synthetic_start_authored_return_stays_a_source_diagnostic() {
         ] {
             let fixture = EntryFixture::new(source, directory_entry);
             let result = build_project(
-                &BuilderSelection::new(HtmlProjectBuilder::new()),
+                &HtmlProjectBuilder::new(),
                 fixture
                     .entry
                     .to_str()
@@ -876,7 +874,7 @@ fn synthetic_start_wasm_rejects_reachable_failure_before_lir() {
         ] {
             let fixture = EntryFixture::new(source, directory_entry);
             let result = build_project(
-                &BuilderSelection::new(HtmlProjectBuilder::new()),
+                &HtmlProjectBuilder::new(),
                 fixture
                     .entry
                     .to_str()

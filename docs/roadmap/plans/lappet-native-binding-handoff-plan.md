@@ -7,12 +7,12 @@ the milestone and update `crates/lappet/roadmap.md` in the same commit.
 
 ## Status
 
-- Status: active. Phases 0, 1, 2A and 2B.0 are delivered.
-- Current slice: Phase 2B.1, the `ProjectBuilder` trait and build driver.
+- Status: active. Phases 0, 1, 2A, 2B.0 and 2B.1 are delivered.
+- Current slice: Phase 2B.2, builder configuration sections and the build profile.
 - Blockers: none for Phase 2. Executable native Wasm lowering is blocked on the
   compiler prerequisites listed in the native host ABI. Phase 2 does not need it.
-- Next action: write the failing external-crate `ProjectBuilder` tests for
-  Phase 2B.1.
+- Next action: implement the `.config(name, |config| ...)` helper, the generic
+  output roots, `CompiledProject::settings` and the public `BuildProfile`.
 
 ## Goal
 
@@ -111,6 +111,17 @@ The user approved these. Do not reopen them without new evidence.
   diagnostic view comes later. A missing facade is a `Build` error.
 - **Definition rules:** `finish` rejects relative `from_dir` paths and
   `available_in_templates` without `moth_templates`.
+- **Build profile:** the SDK re-exports the existing `BuildProfile` enum.
+  `BuildRequest::profile` selects it and builders read it through
+  `BuildContext::profile`.
+- **Configuration helper:** `.config(name, |config| ...)` passes a
+  `&mut ConfigSection`. `config.string` returns `&mut StringSetting` and
+  `config.bool` returns `&mut BoolSetting`. A definition has at most one
+  section. Its name is any Moth identifier except `project` and the
+  first-party builder identities. The section must be authored only when it
+  declares a required field, and an omitted section yields its declared
+  defaults. A field cannot be both required and defaulted. `dev_output` and
+  `release_output` are reserved for the automatic output roots.
 
 ## Delivered so far
 
@@ -125,6 +136,15 @@ The user approved these. Do not reopen them without new evidence.
 - **Phase 2B.0:** `finish` rejections use builder-facing terms and name the
   offending package, path or function. `BuilderDefinition` has a compact
   `Debug`. The definition rules above are enforced and documented.
+- **Phase 2B.1:** `moth::builder::{ProjectBuilder, BuildRequest, BuiltProject,
+  build_project}`, `CompiledProject`, `ProjectPackage`, `BuildContext` and
+  `BuildArtifacts` run a project through the shared build orchestration. A
+  private adapter presents the builder to that orchestration as a
+  `BackendBuilder`, so the SDK path cannot drift from the CLI. `ErrorKind` covers
+  `InvalidDefinition`, `Compilation`, `Build`, `Infrastructure` and
+  `CompilerBug`, and `Error::messages` carries the rendered terse compiler lines.
+  A missing package facade is a `Build` error. Tests live in
+  `src/builder/tests/` and `tests/builder_sdk.rs`.
 
 ## Code map
 
@@ -133,12 +153,14 @@ The user approved these. Do not reopen them without new evidence.
 | Builder identity and output ownership | `src/build_system/output/policy.rs` (`BuilderIdentity`, `OutputOwner`) |
 | Manifest ownership and recovery | `src/build_system/output/manifest.rs` |
 | Public definition SDK | `src/builder/definition.rs`, `src/builder/error.rs` |
+| Public SDK build driver | `src/builder/project.rs` (`build_project`, `ProjectBuilderAdapter`) |
+| Public compiled project handles | `src/builder/compiled_project.rs` (`CompiledProject`, `ProjectPackage`, `BuildContext`, `BuildArtifacts`) |
 | Host descriptors | `src/host/mod.rs` |
 | Package path rule | `src/builder_surface/package_metadata.rs` (`validate_package_path`) |
 | Surface validation | `src/builder_surface/definition.rs` (`BuilderSurface::validate`) |
 | Internal backend trait | `src/build_system/build.rs` (`BackendBuilder`) |
-| Build driver | `src/build_system/build.rs` (`build_project`) |
-| Package facade assembly | `ProjectCompilation::package_assembly` in `build.rs`, currently unused |
+| Internal build driver | `src/build_system/build.rs` (`build_project`) |
+| Package facade assembly | `ProjectCompilation::package_assembly` in `build.rs`, reached through `CompiledProject::require_package` |
 | Output writing | `src/build_system/output/orchestrator.rs` (`write_project_outputs`) |
 | Output root settings | `effective_output_settings` in `src/build_system/project_config/validation.rs`, HTML-coupled |
 | Config schema | `src/builder_surface/config_schema.rs` |
@@ -146,11 +168,11 @@ The user approved these. Do not reopen them without new evidence.
 
 ## Phase 2B: immutable compiled project and build context
 
-- [ ] Write a failing external-crate test that implements
+- [x] Write a failing external-crate test that implements
   `moth::builder::ProjectBuilder` with `definition` and `build`. A valid
   project reaches `build` with an immutable compiled project. Invalid source
   never calls `build`.
-- [ ] Implement `ProjectBuilder`, `CompiledProject`, `BuildContext`,
+- [x] Implement `ProjectBuilder`, `CompiledProject`, `BuildContext`,
   `BuildRequest` and `build_project` through one internal `BackendBuilder`
   adapter over the existing orchestration. Do not add a forwarding framework.
   `CompiledProject::require_package` uses `package_assembly` and reports a
@@ -159,12 +181,14 @@ The user approved these. Do not reopen them without new evidence.
   `.config("game", |config| ...)`, with dynamic section and field names and
   output-root fields. Decouple `effective_output_settings` from the HTML
   section so a custom builder's roots come from its own section.
-- [ ] Add error kinds for compilation failure that carry the compiler messages
+- [ ] Re-export the existing `BuildProfile` enum as `moth::builder::BuildProfile`.
+  `BuildRequest::profile` selects it and `BuildContext::profile` reads it.
+- [x] Add error kinds for compilation failure that carry the compiler messages
   without exposing internal types.
-- [ ] Test independent definitions in one process, deterministic package
+- [x] Test independent definitions in one process, deterministic package
   identities, no access to private module arrays or mutable HIR, and a Byte
   versus U8 type-check case through a real build.
-- [ ] Remove the `dead_code` allow on `BuilderDefinition::surface`.
+- [x] Remove the `dead_code` allow on `BuilderDefinition::surface`.
 
 ## Phase 2C: artefact publication
 
@@ -231,6 +255,15 @@ Phase 2 is complete only when a real external crate runs the whole workflow.
 
 - The source and host overlap check does not cover JS packages registered
   during compilation.
+- A project with a `+<name>.moth` facade but no normal `@*.moth` root fails
+  with `NoRootModuleEntries`, because the project boundary always requires a
+  normal entry module. The SDK inherits that rule from the shared
+  orchestration, and so does the CLI, so a facade-only package cannot build
+  through either path. Deciding whether normal-entry admission belongs to the
+  HTML builder or to every project is a build-system behaviour change that
+  needs its own authority reading, so it is not decided in Phase 2B. The
+  artefact-publication and native-Wasm fixtures need a project with both a
+  facade and at least one normal module.
 - Documentation follow-ups to report rather than edit: the host manifest is not
   yet described in `docs/build-system-design.md` or
   `docs/compiler-design-overview.md`, the reserved first-party identities are

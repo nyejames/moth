@@ -125,7 +125,12 @@ fn build_command_outcome(
     build_config_inputs: &BuildConfigInputSet,
     output_plan_builder: impl FnOnce(&mut BuildResult) -> Result<OutputPlan, CompilerError>,
 ) -> BuildCommandOutcome {
-    match build_project(builder_selection, entry_path, flags, build_config_inputs) {
+    match build_project(
+        builder_selection.backend.as_ref(),
+        entry_path,
+        flags,
+        build_config_inputs,
+    ) {
         Ok(mut build_result) => {
             write_build_outputs_with_plan(&mut build_result, output_plan_builder)
         }

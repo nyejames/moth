@@ -5,8 +5,7 @@
 use super::*;
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{
-    BuildResult, BuilderSelection, DeferredResourceOutput, FileKind, OutputFile, Project,
-    build_project,
+    BuildResult, DeferredResourceOutput, FileKind, OutputFile, Project, build_project,
 };
 use crate::build_system::create_project_modules::resource_inputs::ResourceContentState;
 #[cfg(unix)]
@@ -94,7 +93,7 @@ fn build_project_returns_result_without_writing_files() {
     let entry_file = root.join("main.moth");
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
 
-    let builder = BuilderSelection::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let mut result = build_project(
         &builder,
         entry_file
@@ -133,7 +132,7 @@ fn build_project_preserves_builder_warnings_in_build_result() {
         let _cwd_guard = CurrentDirGuard::set_to(&root);
 
         let result = build_project(
-            &BuilderSelection::new(WarningBuilder),
+            &WarningBuilder,
             "main.moth",
             &[],
             &BuildConfigInputSet::new(),
@@ -408,9 +407,9 @@ fn build_project_preserves_package_warnings_on_late_backend_failure() {
     )
     .expect("should write warning package root");
 
-    let builder = BuilderSelection::new(LateFailureBuilder {
+    let builder = LateFailureBuilder {
         package_root: package,
-    });
+    };
     let Err(messages) = build_project(
         &builder,
         root.to_str().expect("project path should be valid UTF-8"),
@@ -462,10 +461,10 @@ fn build_project_calls_validate_project_config() {
         let validated = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let built = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
-        let builder = BuilderSelection::new(ValidationTrackingBuilder {
+        let builder = ValidationTrackingBuilder {
             validated: validated.clone(),
             built: built.clone(),
-        });
+        };
 
         build_project(&builder, "main.moth", &[], &BuildConfigInputSet::new())
             .expect("build should succeed");
@@ -497,10 +496,10 @@ fn project_compilation_selects_only_modules_with_root_activity_as_entries() {
 
     let module_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let entry_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let builder = BuilderSelection::new(EntryTrackingBuilder {
+    let builder = EntryTrackingBuilder {
         module_count: module_count.clone(),
         entry_count: entry_count.clone(),
-    });
+    };
 
     build_project(
         &builder,
@@ -533,10 +532,10 @@ fn diagnosed_module_prevents_project_compilation_from_reaching_backend() {
 
     let validated = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let built = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let builder = BuilderSelection::new(ValidationTrackingBuilder {
+    let builder = ValidationTrackingBuilder {
         validated: validated.clone(),
         built: built.clone(),
-    });
+    };
 
     let result = build_project(
         &builder,
@@ -1340,7 +1339,7 @@ fn build_project_preserves_frozen_identity_for_frontend_signature_diagnostics() 
 
     {
         let _cwd_guard = CurrentDirGuard::set_to(&root);
-        let builder = BuilderSelection::new(HtmlProjectBuilder::new());
+        let builder = HtmlProjectBuilder::new();
         let Err(messages) = build_project(&builder, "main.moth", &[], &BuildConfigInputSet::new())
         else {
             panic!("build should fail with a frontend signature diagnostic");
@@ -1386,7 +1385,7 @@ fn config_validation_failure_returns_config_error_before_compilation() {
     {
         let _cwd_guard = CurrentDirGuard::set_to(&root);
 
-        let builder = BuilderSelection::new(FailingValidationBuilder);
+        let builder = FailingValidationBuilder;
         let result = build_project(&builder, "main.moth", &[], &BuildConfigInputSet::new());
 
         let Err(messages) = result else {
@@ -1477,7 +1476,7 @@ html #= (
     )
     .expect("should write source-looking stale output");
 
-    let builder = BuilderSelection::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let result = build_project(
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
@@ -1527,7 +1526,7 @@ html #= (
     )
     .expect("should write source-looking stale output");
 
-    let builder = BuilderSelection::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let result = build_project(
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
@@ -1579,7 +1578,7 @@ html #= (
     )
     .expect("should write source-looking stale output");
 
-    let builder = BuilderSelection::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let result = build_project(
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
@@ -1675,7 +1674,7 @@ fn build_directory_project_requires_artifact_root_in_configured_entry_root() {
     fs::write(src.join("about").join("@page.moth"), "#[:<h1>About</h1>]\n")
         .expect("should write about");
 
-    let builder = BuilderSelection::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let result = build_project(
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
@@ -1706,7 +1705,7 @@ fn build_project_routes_invalid_page_url_style_through_typed_config_diagnostic()
     .expect("should write config");
     fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
 
-    let builder = BuilderSelection::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let result = build_project(
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
@@ -2365,7 +2364,7 @@ fn empty_directory_output_setting_is_rejected() {
     .expect("should write config");
     fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
 
-    let builder = BuilderSelection::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let result = build_project(
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
@@ -2392,7 +2391,7 @@ fn absolute_output_setting_is_rejected() {
     .expect("should write config");
     fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
 
-    let builder = BuilderSelection::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let result = build_project(
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
@@ -2419,7 +2418,7 @@ fn output_folder_inside_entry_root_is_rejected() {
     .expect("should write config");
     fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
 
-    let builder = BuilderSelection::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let result = build_project(
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
@@ -2446,7 +2445,7 @@ fn identical_dev_and_release_folders_are_rejected() {
     .expect("should write config");
     fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
 
-    let builder = BuilderSelection::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let result = build_project(
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
@@ -2473,7 +2472,7 @@ fn valid_distinct_output_folders_resolve_unchanged() {
     .expect("should write config");
     fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
 
-    let builder = BuilderSelection::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let build_result = build_project(
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
@@ -2507,7 +2506,7 @@ fn late_output_failure_keeps_authored_setting_source_owner() {
     fs::write(source_root.join("@page.moth"), "#[:<h1>Home</h1>]\n")
         .expect("should write home page");
 
-    let builder = BuilderSelection::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let first_build = build_project(
         &builder,
         root.to_str().expect("project path should be valid UTF-8"),
@@ -2593,7 +2592,7 @@ fn first_dev_and_release_builds_create_independent_owned_manifests() {
     fs::write(source_root.join("@page.moth"), "#[:<h1>Home</h1>]\n")
         .expect("should write home page");
 
-    let builder = BuilderSelection::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let dev_build = build_project(
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),

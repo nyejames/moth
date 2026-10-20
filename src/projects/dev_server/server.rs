@@ -163,8 +163,11 @@ pub(crate) fn resolve_dev_runtime_paths(
         });
     }
 
-    let bootstrap =
-        bootstrap_project_build(builder, entry_target.to_path_buf(), build_config_inputs)?;
+    let bootstrap = bootstrap_project_build(
+        builder.backend.as_ref(),
+        entry_target.to_path_buf(),
+        build_config_inputs,
+    )?;
     let Some(validated_output_settings) = bootstrap.validated_directory_output_settings else {
         let mut error = CompilerError::compiler_error(
             "Directory output settings were not available after bootstrap validation.",

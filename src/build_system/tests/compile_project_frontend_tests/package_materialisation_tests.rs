@@ -443,11 +443,10 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
         let config = Config::new(src.join("@page.moth"));
         let mut string_table = StringTable::new();
         let mut frontend_surface = BuilderSurface::with_mandatory_core();
-        frontend_surface.source_packages.register_filesystem_root(
-            "broken",
-            package,
-            PackageOrigin::Builder,
-        );
+        frontend_surface
+            .source_packages
+            .register_filesystem_root("broken", package, PackageOrigin::Builder)
+            .expect("the broken package registers once");
         let result = crate::build_system::create_project_modules::compile_single_file_boracle(
             &config,
             &StyleDirectiveRegistry::built_ins(),
@@ -2025,9 +2024,7 @@ result = combine(Box(Label("payload")))
     }
 
     // Use the existing rendered-output owner rather than inspecting generated JS text.
-    let builder = BuilderSelection::new(
-        crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new(),
-    );
+    let builder = crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new();
     let mut built = build_project(
         &builder,
         root.to_str()
@@ -3033,7 +3030,7 @@ fn successful_source_package_warning_uses_package_snapshot_for_colliding_logical
         .expect("should write project module");
     fs::write(package_root.join("@mod.moth"), package_text).expect("should write package module");
 
-    let builder = BuilderSelection::new(SuccessfulPackageWarningBuilder { package_root });
+    let builder = SuccessfulPackageWarningBuilder { package_root };
     let build_result = build_project(
         &builder,
         project_root
