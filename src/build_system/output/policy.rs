@@ -27,14 +27,33 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BuilderIdentity(String);
 
+const HTML_BUILDER_IDENTITY: &str = "html";
+
+/// Identities only first-party Moth builders may declare.
+const FIRST_PARTY_BUILDER_IDENTITIES: &[&str] = &[HTML_BUILDER_IDENTITY];
+
 impl BuilderIdentity {
-    /// Validates a declared builder identity. It must have Moth identifier shape.
+    /// Validates an identity read back from a manifest. It must have Moth identifier shape.
     pub(crate) fn new(name: &str) -> Option<Self> {
         moth_lexical::identifier::is_identifier(name).then(|| Self(name.to_owned()))
     }
 
+    /// Validates the identity a custom builder declares.
+    ///
+    /// First-party identities and their ASCII case-only variants are rejected, so a custom
+    /// builder can never adopt a first-party builder's output manifests.
+    pub(crate) fn custom(name: &str) -> Result<Self, &'static str> {
+        if FIRST_PARTY_BUILDER_IDENTITIES
+            .iter()
+            .any(|reserved| reserved.eq_ignore_ascii_case(name))
+        {
+            return Err("is reserved for a first-party Moth builder");
+        }
+        Self::new(name).ok_or("must be a Moth identifier")
+    }
+
     pub(crate) fn html() -> Self {
-        Self("html".to_owned())
+        Self(HTML_BUILDER_IDENTITY.to_owned())
     }
 
     /// Unit-test builders use one synthetic owner so their fixtures cannot claim a production

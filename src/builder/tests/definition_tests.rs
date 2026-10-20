@@ -296,6 +296,20 @@ fn builder_identity_must_be_a_moth_identifier() {
 }
 
 #[test]
+fn first_party_builder_identities_are_reserved() {
+    for identity in ["html", "HTML", "Html"] {
+        let message = invalid_definition_message(
+            &format!("identity {identity:?}"),
+            BuilderDefinition::new(identity).finish(),
+        );
+        assert!(message.contains("first-party"), "{identity:?}: {message}");
+    }
+    BuilderDefinition::new("html_site")
+        .finish()
+        .expect("an identity that only starts with a reserved name is valid");
+}
+
+#[test]
 fn source_kinds_are_opt_in() {
     let plain = BuilderDefinition::new("game").finish().expect("valid");
     assert!(!plain.surface().source_file_kinds.is_supported("mtf"));

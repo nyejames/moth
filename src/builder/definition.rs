@@ -21,8 +21,8 @@ pub struct BuilderDefinition {
 impl BuilderDefinition {
     /// Starts a definition for the builder with the stable declared `identity`.
     ///
-    /// The identity owns the builder's outputs. It must have Moth identifier shape and is
-    /// checked by `finish`.
+    /// The identity owns the builder's outputs. It must have Moth identifier shape and must not
+    /// be a reserved first-party identity such as `html`. `finish` checks both.
     // The accepted SDK spelling starts a definition here and `finish` returns the immutable
     // value, so an unvalidated definition is never observable.
     #[allow(clippy::new_ret_no_self)]
@@ -81,11 +81,8 @@ impl BuilderDefinitionDraft {
 
     /// Validates the complete registration and returns the immutable definition.
     pub fn finish(self) -> Result<BuilderDefinition, Error> {
-        let identity = BuilderIdentity::new(&self.identity).ok_or_else(|| {
-            Error::invalid_definition(format!(
-                "Builder identity '{}' must be a Moth identifier.",
-                self.identity
-            ))
+        let identity = BuilderIdentity::custom(&self.identity).map_err(|reason| {
+            Error::invalid_definition(format!("Builder identity '{}' {reason}.", self.identity))
         })?;
         let mut surface = BuilderSurface::with_mandatory_core();
 
