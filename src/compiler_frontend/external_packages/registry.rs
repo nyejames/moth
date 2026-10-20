@@ -16,9 +16,8 @@ use super::ids::{
     CanonicalBindingSymbolIdentity, ExternalConstantId, ExternalFunctionId, ExternalPackageId,
     ExternalSymbolId, ExternalTypeId,
 };
-use super::{ExternalSymbolPath, ExternalSymbolPathError};
+use super::{ExternalSymbolPath, ExternalSymbolPathError, InvalidExternalSymbolComponent};
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::project_globals::PROJECT_GLOBALS_DEPENDENCY_NAME;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -141,19 +140,21 @@ impl ExternalPackageRegistry {
         origin: crate::builder_surface::PackageOrigin,
     ) -> Result<ExternalPackageId, CompilerError> {
         let path = path.into();
-        let path_without_introducer = path.strip_prefix('@').unwrap_or(&path);
-        if path_without_introducer
-            .split('/')
-            .next()
-            .is_some_and(|component| component == PROJECT_GLOBALS_DEPENDENCY_NAME)
-        {
+        let Some(path_without_introducer) = path.strip_prefix('@') else {
             return Err(CompilerError::compiler_error(format!(
-                "External package path '{}' is reserved for the @project project-globals interface",
-                path
+                "Host package '{path}' must start with '@'."
+            )));
+        };
+        if let Err(reason) = crate::builder_surface::package_metadata::validate_package_path(
+            path_without_introducer,
+            origin,
+        ) {
+            return Err(CompilerError::compiler_error(format!(
+                "Host package '{path}' {reason}."
             )));
         }
         if self.package_id_by_path.contains_key(&path) {
-            return_compiler_error!("External package '{}' is already registered.", path);
+            return_compiler_error!("Host package '{}' is already registered.", path);
         }
         let id = ExternalPackageId(self.next_package_id);
         self.next_package_id += 1;
@@ -213,6 +214,14 @@ impl ExternalPackageRegistry {
             }
         }
 
+        if let Err(reason) = validate_signature_slots(&function) {
+            return Err(CompilerError::compiler_error(format!(
+                "External function '{}' in package '{}' {reason}.",
+                path.display_text(),
+                package_path_str
+            )));
+        }
+
         function.name = path.leaf().to_owned();
 
         self.reject_duplicate_path(
@@ -220,7 +229,7 @@ impl ExternalPackageRegistry {
             package_id,
             &path,
             path.leaf(),
-            "function",
+            "host function",
         )?;
 
         if let Some(existing_identity) = self.function_reverse_identity_by_id.get(&id) {
@@ -260,7 +269,7 @@ impl ExternalPackageRegistry {
         id: ExternalFunctionId,
         function: ExternalFunctionDef,
     ) -> Result<(), CompilerError> {
-        let path = one_component_symbol_path("function", &function.name)?;
+        let path = one_component_symbol_path("host function", &function.name)?;
         self.register_function_at_path(package_id, path, id, function)
     }
 
@@ -452,7 +461,7 @@ impl ExternalPackageRegistry {
     ) -> Result<(), CompilerError> {
         if self.has_symbol_at_path(package_id, path) {
             return_compiler_error!(
-                "External {} '{}' at path '{}' in package '{}' collides with another symbol at the same namespace slot.",
+                "The {} '{}' at path '{}' in package '{}' collides with another symbol at the same namespace slot.",
                 kind,
                 symbol_name,
                 path.display_text(),
@@ -617,7 +626,7 @@ impl ExternalPackageRegistry {
         package_id: ExternalPackageId,
         spec: ExternalFunctionSpec,
     ) -> Result<ExternalFunctionId, CompilerError> {
-        let path = one_component_symbol_path("function", &spec.name)?;
+        let path = one_component_symbol_path("host function", &spec.name)?;
         self.register_external_function_at_path(package_id, path, spec)
     }
 
@@ -699,7 +708,7 @@ impl ExternalPackageRegistry {
             )?,
         };
 
-        let path = one_component_symbol_path("function", &function.name)?;
+        let path = one_component_symbol_path("host function", &function.name)?;
         let id = ExternalFunctionId::Synthetic(self.next_synthetic_id);
         self.next_synthetic_id += 1;
         self.register_function_at_path(package_id, path, id, function)?;
@@ -1095,9 +1104,44 @@ fn invalid_external_symbol_path_error(
     name: &str,
     error: ExternalSymbolPathError,
 ) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "Invalid external {kind} symbol path '{name}': {error:?}"
-    ))
+    let reason = match error {
+        ExternalSymbolPathError::EmptyPath => "must have at least one component",
+        ExternalSymbolPathError::InvalidComponent { reason, .. } => match reason {
+            InvalidExternalSymbolComponent::Empty => "must not be empty",
+            InvalidExternalSymbolComponent::ContainsPathSeparator => "must not contain '/'",
+            InvalidExternalSymbolComponent::ContainsNamespaceSeparator => "must not contain '.'",
+        },
+    };
+    CompilerError::compiler_error(format!("Invalid {kind} name '{name}': {reason}."))
+}
+
+/// Rejects signature slots that cannot carry a Moth value.
+///
+/// WHAT: every parameter and success slot names a Moth value, and every alias names an existing
+/// parameter.
+/// WHY: later projections skip slots without a `TypeId`, which would misalign ordered success
+/// slots with their aliases and skip parameter compatibility checks.
+fn validate_signature_slots(function: &ExternalFunctionDef) -> Result<(), &'static str> {
+    if function
+        .parameters
+        .iter()
+        .any(|parameter| !parameter.language_type.represents_moth_value())
+    {
+        return Err("declares a parameter without a Moth value");
+    }
+    for slot in &function.returns {
+        if !slot.value_type.represents_moth_value() {
+            return Err("declares a success slot without a Moth value");
+        }
+        if let ExternalReturnAlias::AliasArgs(indices) = &slot.alias
+            && indices
+                .iter()
+                .any(|&index| index >= function.parameters.len())
+        {
+            return Err("aliases a parameter it does not declare");
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

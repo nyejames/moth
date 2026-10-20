@@ -4,6 +4,7 @@
 //!       configuration structures shared across the compiler and build system.
 //! WHY: keeping these values in one module prevents magic literals from spreading through the
 //!      codebase and makes capacity tuning explicit.
+use crate::build_system::output::OutputRootSettings;
 use crate::compiler_frontend::build_config::{
     ConfigResolutionRecord, FoldedConfigProjectFieldDependency,
 };
@@ -16,7 +17,7 @@ use crate::compiler_frontend::module_compilation::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 /// The canonical language source file extension (without dot).
@@ -61,18 +62,11 @@ pub const MINIMUM_LIKELY_DECLARATIONS: usize = 10; // (Maybe) How many symbols t
 
 /// Typed results of one validated `html #= (...)` builder section.
 ///
-/// WHAT: each html section field in its validated form. Fields the record omits stay `None`
-/// unless their schema declares a default, which then stands.
-/// WHY: this struct is the HTML builder settings store; the routing and document-shell readers
-/// consume it directly. Directory HTML projects require the grouped `html` section; omitted
-/// fields still receive schema defaults.
+/// WHAT: each html section field in its validated form. Fields the record omits stay `None`.
+/// WHY: this struct is the HTML builder settings store. The routing and document-shell readers
+/// consume it directly. Directory HTML projects require the grouped `html` section.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HtmlSectionConfig {
-    /// Output roots owned by the builder section. The section schema's defaults (`dev` and
-    /// `release`) land here whenever a section validated, so output resolution can consume
-    /// them from the typed section.
-    pub dev_output: Option<String>,
-    pub release_output: Option<String>,
     pub origin: Option<String>,
     pub page_url_style: Option<String>,
     pub redirect_index_html: Option<bool>,
@@ -87,14 +81,6 @@ pub struct HtmlSectionConfig {
     pub html_body_style: Option<String>,
 }
 
-impl HtmlSectionConfig {
-    /// Directory output roots a directory project uses when its `html` section omits them.
-    /// The html section schema registers the same defaults, so an authored-but-omitted field
-    /// resolves identically.
-    pub const DEFAULT_DEV_OUTPUT: &'static str = "dev";
-    pub const DEFAULT_RELEASE_OUTPUT: &'static str = "release";
-}
-
 /// One additional authored `project` field retained after compiler-owned fields are applied.
 ///
 /// WHAT: the field's folded value plus the canonical type and exact authored span needed later by
@@ -106,6 +92,48 @@ pub(crate) struct ProjectMetadataField {
     pub type_identity: CanonicalTypeIdentity,
     pub value: PublicFoldedValue,
     pub span: Option<SourceSpan>,
+}
+
+/// Values authored by the active builder's configuration section, keyed by field name.
+///
+/// WHAT: holds the string and bool values a builder section validated for fields that no typed
+/// `Config` field owns. A name holds at most one value, and a `none` value removes it.
+/// WHY: builders register their section fields at run time, so the compiler has no typed field
+/// for each one. A keyed store lets each builder read its own settings by the names it registered.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BuilderSettings {
+    strings: BTreeMap<String, String>,
+    bools: BTreeMap<String, bool>,
+}
+
+impl BuilderSettings {
+    /// Return the string value stored under a field name, if the section authored one.
+    pub fn string(&self, name: &str) -> Option<&str> {
+        self.strings.get(name).map(String::as_str)
+    }
+
+    /// Return the bool value stored under a field name, if the section authored one.
+    pub fn bool(&self, name: &str) -> Option<bool> {
+        self.bools.get(name).copied()
+    }
+
+    /// Store a string value under a field name, replacing any bool value stored there.
+    pub(crate) fn set_string(&mut self, name: &str, value: String) {
+        self.bools.remove(name);
+        self.strings.insert(name.to_owned(), value);
+    }
+
+    /// Store a bool value under a field name, replacing any string value stored there.
+    pub(crate) fn set_bool(&mut self, name: &str, value: bool) {
+        self.strings.remove(name);
+        self.bools.insert(name.to_owned(), value);
+    }
+
+    /// Remove whichever value is stored under a field name.
+    pub(crate) fn clear(&mut self, name: &str) {
+        self.strings.remove(name);
+        self.bools.remove(name);
+    }
 }
 
 /// WHAT: project configuration loaded from config.moth that controls build behavior.
@@ -129,6 +157,11 @@ pub struct Config {
 
     /// Validated results of the grouped `html` builder section when one was authored.
     pub html_section: HtmlSectionConfig,
+
+    /// Output roots the active builder section authored, with `None` where it set none.
+    pub(crate) output_roots: OutputRootSettings,
+    /// Builder section values for fields no typed `Config` field owns, keyed by field name.
+    pub(crate) builder_settings: BuilderSettings,
 
     /// Additional open `project` fields retained for later `@project` publication.
     pub(crate) extra_project_fields: Vec<ProjectMetadataField>,
@@ -155,6 +188,8 @@ impl Config {
             license: None,
             setting_spans: HashMap::new(),
             html_section: HtmlSectionConfig::default(),
+            output_roots: OutputRootSettings::default(),
+            builder_settings: BuilderSettings::default(),
             extra_project_fields: Vec::new(),
             project_config_loaded: false,
             project_field_config_dependencies: Vec::new(),
@@ -252,6 +287,8 @@ impl Default for Config {
             license: None,
             setting_spans: HashMap::new(),
             html_section: HtmlSectionConfig::default(),
+            output_roots: OutputRootSettings::default(),
+            builder_settings: BuilderSettings::default(),
             extra_project_fields: Vec::new(),
             project_config_loaded: false,
             project_field_config_dependencies: Vec::new(),

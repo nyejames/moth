@@ -39,6 +39,7 @@ The example package has no output-relative resource strings.
     }
 
     struct GameBuilder {
+        // Absolute path to the installed package root. `finish` rejects a relative one.
         package_root: PathBuf,
     }
 

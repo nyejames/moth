@@ -5368,6 +5368,13 @@ contract = "language.dependencies.current_directory_provider_rejection"
 role = "primary"
 
 [[case]]
+id = "js_provider_path_hash_rejected"
+path = "js_provider_path_hash_rejected"
+tags = ["integration", "dependencies", "paths", "providers", "diagnostics"]
+contract = "build.external_js.package_path_separator_rejection"
+role = "primary"
+
+[[case]]
 id = "result_handler_without_fallback_fallthrough_rejected"
 path = "result_handler_without_fallback_fallthrough_rejected"
 tags = ["integration", "results", "diagnostics"]

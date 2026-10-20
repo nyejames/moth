@@ -19,6 +19,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 
 - [Lappet crate](crates/lappet/README.md) and [library entry](crates/lappet/src/lib.rs): dependency-free initial workspace library, with no runtime API yet.
 - [Runtime design](crates/lappet/docs/design.md), [package-manager design](crates/lappet/docs/package-manager.md) and [independent roadmap](crates/lappet/roadmap.md): accepted contracts and isolated-worktree implementation checkpoints.
+- [Host ABI adapter responsibilities](crates/lappet/docs/host-abi.md): Lappet's installation, conversion, staging-table and resource-table duties over the compiler-owned [native host ABI](docs/src/developer-docs/memory-management/native-host-abi/native-host-abi.mtf).
 - [Wasm optimisation reference](docs/src/developer-docs/wasm-optimisation/overview.mtf) and [detailed authority](docs/src/developer-docs/wasm-optimisation/wasm-optimisation.mtf): shared compiler/native-code policy. Its [page](docs/src/developer-docs/wasm-optimisation/@page.moth) composes the site.
 - [Lappet introduction](docs/src/docs/lappet/lappet.mtf) and [page](docs/src/docs/lappet/@page.moth): application and embedding overview, with implementation status explicit.
 
@@ -42,7 +43,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
     - [build_command.rs](src/projects/build_command.rs): owns build execution, output planning/writing and timing around the CLI's completed-outcome presentation.
     - [check.rs](src/projects/check.rs): frontend-only diagnostics.
     - [routing.rs](src/projects/routing.rs): path/origin rules.
-    - [settings.rs](src/projects/settings.rs): Config/defaults/known paths.
+    - [settings.rs](src/projects/settings.rs): Config/defaults/known paths and the builder section settings store.
     - [dev_server](src/projects/dev_server/): HTTP/SSE/watch rebuild loop, injected dev client and bounded runtime entry-error reports kept separate from build state. kw: serve, hot reload, runtime report.
         - [runtime_report_tests.rs](src/projects/dev_server/tests/runtime_report_tests.rs), [dev_client_tests.rs](src/projects/dev_server/tests/dev_client_tests.rs): socket-level runtime-report validation and served dev-client observable behaviour.
     - [html_project](src/projects/html_project/): HTML builder and HTML-Wasm integration. kw: shell, assets, wasm.
@@ -62,7 +63,13 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
         - [project_structure_diagnostics.rs](src/build_system/create_project_modules/project_structure_diagnostics.rs): structured layout, root and name-conflict diagnostics; project and package collision discovery lives in `source_tree_index.rs`.
         - [project_roots.rs](src/build_system/create_project_modules/project_roots.rs): project/entry roots.
         - [source_discovery_error.rs](src/build_system/create_project_modules/source_discovery_error.rs): diagnostic boundary.
-    - [output](src/build_system/output/): validated output plans, portable path policy, prepared artifact writing, write orchestration, and stale manifest cleanup.
+    - [output](src/build_system/output/): validated output plans, portable path policy, prepared artifact writing, write orchestration, stale manifest cleanup and the output-root fields every builder section registers.
+- [builder SDK](src/builder/): public `moth::builder` definitions and build driver for custom Rust builders. `BuilderDefinition` registers source packages, native host packages and source kinds through the builder surface and validates them in one `finish`.
+    - [definition.rs](src/builder/definition.rs): the public definition draft and the registered builder surface.
+    - [project.rs](src/builder/project.rs): the public `ProjectBuilder` trait and the `build_project` driver over the shared build orchestration.
+    - [compiled_project.rs](src/builder/compiled_project.rs): the compiled project handle, the owner-bound package facade handle, the build context and the artifact set.
+    - [error.rs](src/builder/error.rs): the public error kinds and the rendered compiler messages.
+- [host descriptors](src/host/mod.rs): public `moth::host` closed V1 vocabulary for manual native Rust host function descriptors, mapped onto the external-package registry specification.
 - [builder surface](src/builder_surface/): core packages, external import providers and package metadata.
     - [core_packages/](src/builder_surface/core_packages/): prelude, io, math, collections, text, random and time.
     - [external_import_providers/](src/builder_surface/external_import_providers/): provider registry and resolution table.

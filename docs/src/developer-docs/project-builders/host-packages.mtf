@@ -7,20 +7,22 @@ Neither grants special access to another module's private implementation.
 ### Provide a source package
 
 `SourcePackage::new` assigns the public package root. `from_dir` supplies its
-installed files. Registration through `BuilderDefinition::source_package`
-records Builder provenance without asking the caller to construct an internal
-registry entry.
+installed files as an absolute path, and `finish` rejects a relative one.
+Registration through `BuilderDefinition::source_package` records Builder
+provenance without asking the caller to construct an internal registry entry.
 
 [codeblock, $code("rust"):
+    let install_root = std::path::PathBuf::from("/srv/game/installed-packages");
     let package = SourcePackage::new("@ui")
-        .from_dir("installed-packages/ui")
+        .from_dir(install_root.join("ui"))
         .available_in_templates();
 ]
 
 `available_in_templates` makes the package's exported constants eligible for
 implicit template scope. It doesn't inject arbitrary Rust functions, expose
 private constants or change Moth's no-shadowing rules. Ambiguous visible names
-are errors.
+are errors. `finish` rejects the package unless the same definition also calls
+`moth_templates`.
 
 Packages compile in their own semantic boundaries with the same exact numeric
 identities and language-owned defaults. Builder source packages don't inherit
@@ -142,6 +144,8 @@ permissions from a function signature.
 
 The runtime adapter validates scalar encodings, numeric ranges, finite floats,
 Unicode and string lengths before exposing a value at the receiving boundary.
+Host float results are the exception. They reach HIR's external binary-float
+guard as raw carriers.
 Invalid values don't become successful Moth results through truncation,
 sentinel substitution or a changed type. A host contract violation is a
 boundary fault, not an undeclared Moth error return.
@@ -155,6 +159,9 @@ String results become independent Moth storage. Rust allocator ownership,
 reference counts and raw pointers don't pass through as Moth ownership. The
 adapter follows the declared ABI and cleanup contract rather than transmuting
 Rust layouts. A Rust `repr(C)` annotation alone supplies none of that contract.
+
+@../memory-management/native-host-abi (Native host ABI) defines the physical
+carriers, string spans, staged results and frames these adapters use.
 
 A recoverable Rust failure is converted deliberately to `moth::host::Error` by
 the wrapper. The attribute doesn't stringify every Rust error, catch every

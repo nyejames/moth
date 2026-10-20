@@ -11,10 +11,12 @@ available.
 - Status: CLI separation delivered. The runtime crate remains dependency-free
   and contains documentation only.
 - Current checkpoint: native binding and artefact handoff.
-- Blockers: approve that handoff and the execution checkpoints below, then consume
-  the relevant delivered compiler APIs.
-- Next action: review milestone 2 before implementing native adapters. Package
-  management remains deferred.
+- Blockers: the V1 host ABI is accepted. Approve the execution checkpoints
+  below, then consume the relevant delivered compiler APIs.
+- Next action: deliver the public custom-builder SDK and descriptor handoff
+  through the active
+  [native binding handoff plan](../../docs/roadmap/plans/lappet-native-binding-handoff-plan.md).
+  Package management remains deferred.
 
 [Runtime design](docs/design.md), [package-manager design](docs/package-manager.md)
 and [Wasm optimisation](../../docs/src/developer-docs/wasm-optimisation/overview.mtf)
@@ -94,8 +96,9 @@ These local checks do not claim hosted platform coverage, profiling execution or
 
 **Checkpoint.** Define the first concrete Rust-to-Moth ABI using the existing
 manual host descriptor path. Specify supported scalars, strings, optionals,
-errors, explicit context and opaque resources. Decide exact V1 buffer, record,
-choice, collection and multiple-result shapes before expanding the restricted
+errors, explicit context and opaque resources. Byte buffers, records,
+choices, collections, multi-slot host imports and resource results are deferred
+beyond V1 and each needs an approved shape before expanding the restricted
 profile. Resolve allocation, result ownership, cleanup on every failure path,
 call-scoped views and runtime-internal helper calls without permitting general
 re-entry. Specify explicit host-callable Moth exports and their identity.
@@ -106,11 +109,11 @@ implementation selection. Implement only approved adapters, with no guessed
 Rust layout, second type registry or general serialisation framework. Attribute
 errors to both the Moth call and the registered host binding where available.
 
-**Documentation.** Once the concrete V1 host ABI is accepted, add
-`docs/host-abi.md` for approved Rust/Moth type mappings, physical call and
-result forms, allocation, cleanup and error paths. Keep compiler memory
-semantics in their canonical authority and link each executable adapter example
-to tests. This reference must exist before implementing the approved adapters.
+**Documentation.** The accepted V1 physical boundary lives in the compiler-owned
+[native host ABI](../../docs/src/developer-docs/memory-management/native-host-abi/native-host-abi.mtf).
+[Host ABI adapter responsibilities](docs/host-abi.md) owns Lappet's adapter,
+staging, resource-table and fault duties. Link each executable adapter example
+to tests.
 
 **Evidence.** Cover exact integer ranges, finite floats, Byte versus U8, invalid
 Unicode/lengths, optional absence versus failure, ordered results and exactly-once

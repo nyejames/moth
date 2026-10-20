@@ -423,8 +423,14 @@ pub enum InvalidOutputFolderReason {
 /// their foreign tool detail opaque and interned so the compiler relays it without re-authoring it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidExternalModuleReason {
-    ReceiverMethod { moth_name: StringId },
-    ParserDiagnostic { parser_detail: StringId },
+    ReceiverMethod {
+        moth_name: StringId,
+    },
+    ParserDiagnostic {
+        parser_detail: StringId,
+    },
+    /// The module path contains `#`, which canonical package paths reserve.
+    PathContainsPackageSeparator,
 }
 
 impl InvalidExternalModuleReason {
@@ -436,6 +442,7 @@ impl InvalidExternalModuleReason {
             Self::ParserDiagnostic { parser_detail } => {
                 *parser_detail = remap.get(*parser_detail);
             }
+            Self::PathContainsPackageSeparator => {}
         }
     }
 }

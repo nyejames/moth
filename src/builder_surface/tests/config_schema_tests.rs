@@ -41,6 +41,51 @@ fn registers_root_and_fields_with_dense_ids() {
 }
 
 #[test]
+fn registers_runtime_section_and_field_names() {
+    let runtime_section_name = format!("builder_{}", 17);
+    let runtime_field_name = format!("setting_{}", 23);
+
+    let mut section_schema =
+        ConfigSchema::new("runtime section record", UnknownFieldPolicy::Reject);
+    section_schema
+        .register_field(
+            section_schema.root(),
+            ConfigSchemaField::string(runtime_field_name.clone()),
+        )
+        .expect("section schema is unfrozen");
+    section_schema
+        .validate_and_freeze()
+        .expect("section schema is valid");
+
+    let mut project_schema = ConfigSchema::new("project record", UnknownFieldPolicy::Preserve);
+    project_schema
+        .validate_and_freeze()
+        .expect("project schema is valid");
+
+    let mut schemas = ConfigSchemas::new(project_schema);
+    schemas.register_project_section(NamedConfigSectionSchema {
+        name: runtime_section_name.clone().into(),
+        schema: section_schema,
+        required: false,
+    });
+
+    let registered_section = schemas
+        .project_section(&runtime_section_name)
+        .expect("runtime section name is registered");
+    assert!(
+        registered_section
+            .schema
+            .node(registered_section.schema.root())
+            .field_ids()
+            .iter()
+            .any(|field_id| {
+                registered_section.schema.field(*field_id).name == runtime_field_name
+            }),
+        "schema must find a field by its runtime name"
+    );
+}
+
+#[test]
 fn keeps_unknown_field_policy_on_nodes() {
     let mut schema = ConfigSchema::new("closed root", UnknownFieldPolicy::Reject);
     let open = schema
@@ -304,12 +349,12 @@ fn config_schemas_reject_duplicate_project_section_names() {
         project
     });
     schemas.register_project_section(NamedConfigSectionSchema {
-        name: "html",
+        name: "html".into(),
         schema: first,
         required: true,
     });
     schemas.register_project_section(NamedConfigSectionSchema {
-        name: "html",
+        name: "html".into(),
         schema: second,
         required: false,
     });
@@ -345,12 +390,12 @@ fn config_schemas_allow_the_same_name_in_project_and_entry_namespaces() {
         project
     });
     schemas.register_project_section(NamedConfigSectionSchema {
-        name: "html",
+        name: "html".into(),
         schema: project_html,
         required: true,
     });
     schemas.register_entry_section(NamedConfigSectionSchema {
-        name: "html",
+        name: "html".into(),
         schema: entry_html,
         required: false,
     });
@@ -375,7 +420,7 @@ fn config_schemas_reject_reserved_project_section_name() {
         project
     });
     schemas.register_entry_section(NamedConfigSectionSchema {
-        name: "project",
+        name: "project".into(),
         schema: section,
         required: false,
     });

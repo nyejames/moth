@@ -12,7 +12,7 @@ use validation::ConfigApplyError;
 pub(crate) use validation::validate_directory_output_settings;
 
 use crate::build_system::create_project_modules::extract_source_code;
-use crate::build_system::output::ValidatedDirectoryOutputSettings;
+use crate::build_system::output::{OutputRootSettings, ValidatedDirectoryOutputSettings};
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
@@ -23,7 +23,7 @@ use crate::compiler_frontend::single_source_compilation::{
 use crate::compiler_frontend::source::{SourceDatabase, SourceDatabaseError, SourceKind};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::projects::settings::Config;
+use crate::projects::settings::{BuilderSettings, Config};
 
 use std::path::Path;
 
@@ -122,6 +122,8 @@ pub(crate) fn compile_project_config_file(
     config.extra_project_fields.clear();
     config.setting_spans.clear();
     config.html_section = crate::projects::settings::HtmlSectionConfig::default();
+    config.output_roots = OutputRootSettings::default();
+    config.builder_settings = BuilderSettings::default();
     let canonical_config_path = std::fs::canonicalize(config_path).map_err(|error| {
         CompilerMessages::from_error(
             CompilerError::file_error(

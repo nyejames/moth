@@ -29,8 +29,8 @@ fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
     fs::write(nested.join("@nested.moth"), "").expect("should write nested root");
 
     let mut config = Config::new(root.clone());
-    config.html_section.dev_output = Some(String::from("scratch"));
-    config.html_section.release_output = Some(String::from("generated"));
+    config.output_roots.dev_output = Some(String::from("scratch"));
+    config.output_roots.release_output = Some(String::from("generated"));
     let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
     let canonical_entry_root =
         fs::canonicalize(&entry_root).expect("entry root should canonicalize");
@@ -145,11 +145,13 @@ fn source_tree_index_ignores_package_prefix_collision_in_skipped_directory() {
         fs::canonicalize(&entry_root).expect("entry root should canonicalize");
 
     let mut source_packages = crate::builder_surface::SourcePackageRegistry::default();
-    source_packages.register_filesystem_root(
-        "target",
-        fs::canonicalize(entry_root.join("target")).unwrap(),
-        PackageOrigin::Builder,
-    );
+    source_packages
+        .register_filesystem_root(
+            "target",
+            fs::canonicalize(entry_root.join("target")).unwrap(),
+            PackageOrigin::Builder,
+        )
+        .expect("test source root should register");
 
     let mut string_table = StringTable::new();
     super::source_tree_index::SourceTreeIndex::discover(

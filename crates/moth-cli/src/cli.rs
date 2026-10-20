@@ -19,8 +19,8 @@ use moth::projects::integration_tests::{
 use moth::projects::{BoracleDump, BoracleExperiment, BoracleRuleSelection};
 use moth::projects::{
     BuildCommandLocation, BuildConfigInputDuplicate, BuildConfigInputEntry, BuildConfigInputSet,
-    BuildConfigInputValue, BuildConfigValueLocation, BuildInputName, BuildInputValueError, Flag,
-    HtmlProjectBuilder, ProjectBuilder, ProjectCommandCompletion, ProjectCommandStatus,
+    BuildConfigInputValue, BuildConfigValueLocation, BuildInputName, BuildInputValueError,
+    BuilderSelection, Flag, HtmlProjectBuilder, ProjectCommandCompletion, ProjectCommandStatus,
     print_compiler_messages, print_terse_compiler_messages,
 };
 use saying::say;
@@ -231,9 +231,9 @@ pub fn start_cli() -> process::ExitCode {
                     flags,
                     inputs,
                 } => {
-                    let project_builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+                    let builder_selection = BuilderSelection::new(HtmlProjectBuilder::new());
                     match command_input_set(&inputs) {
-                        Ok(inputs) => run_build_command(&project_builder, &path, &flags, &inputs),
+                        Ok(inputs) => run_build_command(&builder_selection, &path, &flags, &inputs),
                         Err(message) => {
                             say!(message);
                             print_help();
@@ -247,11 +247,11 @@ pub fn start_cli() -> process::ExitCode {
                     terse,
                     inputs,
                 } => {
-                    let project_builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+                    let builder_selection = BuilderSelection::new(HtmlProjectBuilder::new());
                     match command_input_set(&inputs) {
                         Ok(inputs) => {
                             let completion =
-                                run_check_command(&path, &inputs, &project_builder, |report| {
+                                run_check_command(&path, &inputs, &builder_selection, |report| {
                                     render_check_outcome(report, terse)
                                 });
                             if let Some(counts) = completion.diagnostic_counts {
@@ -289,13 +289,13 @@ pub fn start_cli() -> process::ExitCode {
                     flags,
                     inputs,
                 } => {
-                    let project_builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+                    let builder_selection = BuilderSelection::new(HtmlProjectBuilder::new());
                     match command_input_set(&inputs) {
                         Ok(inputs) => {
                             say!("\nStarting dev server...");
                             let options = options.with_inputs(inputs);
                             match dev_server::run_dev_server(
-                                project_builder,
+                                builder_selection,
                                 &path,
                                 &flags,
                                 options,
@@ -346,13 +346,13 @@ pub fn start_cli() -> process::ExitCode {
 }
 
 fn run_build_command(
-    project_builder: &ProjectBuilder,
+    builder_selection: &BuilderSelection,
     path: &str,
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
 ) -> CommandStatus {
     let completion = run_build_service(
-        project_builder,
+        builder_selection,
         path,
         flags,
         build_config_inputs,

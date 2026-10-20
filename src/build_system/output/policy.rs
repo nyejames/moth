@@ -18,41 +18,60 @@ use std::path::{Path, PathBuf};
 //  Output Ownership
 // -------------------------
 
-/// Identifies the production artefact builder that owns an output manifest.
+/// Stable declared identity of the artefact builder that owns an output manifest.
 ///
-/// WHAT: keeps manifest ownership closed over the builders that can produce project artefacts.
-/// WHY: a generic production fallback would let an unrelated builder claim an existing manifest
-/// without an explicit identity change.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BuilderKind {
-    Html,
-    #[cfg(test)]
-    Test,
-}
+/// WHAT: a validated identifier such as `html` or a custom builder's declared name.
+/// WHY: manifest ownership is keyed by builder identity, and a custom builder must be able to
+/// declare one without editing the compiler. An unrecognised or malformed manifest owner is
+/// foreign, never adopted.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BuilderIdentity(String);
 
-impl BuilderKind {
-    pub(crate) fn manifest_name(self) -> &'static str {
-        match self {
-            Self::Html => "html",
-            #[cfg(test)]
-            Self::Test => "test",
-        }
+const HTML_BUILDER_IDENTITY: &str = "html";
+
+/// Identities only first-party Moth builders may declare.
+const FIRST_PARTY_BUILDER_IDENTITIES: &[&str] = &[HTML_BUILDER_IDENTITY];
+
+impl BuilderIdentity {
+    /// Validates an identity read back from a manifest. It must have Moth identifier shape.
+    pub(crate) fn new(name: &str) -> Option<Self> {
+        moth_lexical::identifier::is_identifier(name).then(|| Self(name.to_owned()))
     }
 
-    pub(crate) fn from_manifest_name(raw_value: &str) -> Option<Self> {
-        match raw_value.trim() {
-            "html" => Some(Self::Html),
-            #[cfg(test)]
-            "test" => Some(Self::Test),
-            _ => None,
+    /// Validates the identity a custom builder declares.
+    ///
+    /// First-party identities and their ASCII case-only variants are rejected, so a custom
+    /// builder can never adopt a first-party builder's output manifests.
+    pub(crate) fn custom(name: &str) -> Result<Self, &'static str> {
+        if FIRST_PARTY_BUILDER_IDENTITIES
+            .iter()
+            .any(|reserved| reserved.eq_ignore_ascii_case(name))
+        {
+            return Err("is reserved for a first-party Moth builder");
         }
+        Self::new(name).ok_or("must be a Moth identifier")
+    }
+
+    pub(crate) fn html() -> Self {
+        Self(HTML_BUILDER_IDENTITY.to_owned())
+    }
+
+    /// Unit-test builders use one synthetic owner so their fixtures cannot claim a production
+    /// HTML manifest.
+    #[cfg(test)]
+    pub(crate) fn test() -> Self {
+        Self("test".to_owned())
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
 /// The one builder/profile pair that owns a directory output root.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutputOwner {
-    pub builder: BuilderKind,
+    pub builder: BuilderIdentity,
     pub profile: BuildProfile,
 }
 
@@ -197,10 +216,10 @@ impl OutputPlan {
         }
     }
 
-    pub(crate) fn owner(&self) -> OutputOwner {
+    pub(crate) fn owner(&self) -> &OutputOwner {
         match self {
-            Self::Directory(plan) => plan.owner,
-            Self::SingleFile(plan) => plan.owner,
+            Self::Directory(plan) => &plan.owner,
+            Self::SingleFile(plan) => &plan.owner,
         }
     }
 

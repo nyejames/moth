@@ -5,7 +5,7 @@
 //! WHY: build pipeline ownership stays in the compiler/build crate while the CLI supplies only
 //!      terminal presentation at the report boundary.
 
-use crate::build_system::build::{BuildResult, ProjectBuilder, build_project};
+use crate::build_system::build::{BuildResult, BuilderSelection, build_project};
 use crate::build_system::output::{
     OutputPlan, SingleFileOutputPlan, WriteMode, WriteOptions, write_project_outputs,
 };
@@ -71,14 +71,14 @@ enum BuildOutputFailure {
 /// timing session is finished. This preserves the established order while keeping all build
 /// orchestration and output ownership on the compiler side of the CLI boundary.
 pub fn run_build_command(
-    project_builder: &ProjectBuilder,
+    builder_selection: &BuilderSelection,
     entry_path: &str,
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
     present: impl FnOnce(BuildCommandReport),
 ) -> ProjectCommandCompletion {
     run_build_command_with_output_plan(
-        project_builder,
+        builder_selection,
         entry_path,
         flags,
         build_config_inputs,
@@ -88,7 +88,7 @@ pub fn run_build_command(
 }
 
 fn run_build_command_with_output_plan(
-    project_builder: &ProjectBuilder,
+    builder_selection: &BuilderSelection,
     entry_path: &str,
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
@@ -98,7 +98,7 @@ fn run_build_command_with_output_plan(
     command_timing_scope!(timing_session, crate::timing::TimingCommandKind::Build);
     let started = Instant::now();
     let outcome = build_command_outcome(
-        project_builder,
+        builder_selection,
         entry_path,
         flags,
         build_config_inputs,
@@ -119,13 +119,18 @@ fn run_build_command_with_output_plan(
 }
 
 fn build_command_outcome(
-    project_builder: &ProjectBuilder,
+    builder_selection: &BuilderSelection,
     entry_path: &str,
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
     output_plan_builder: impl FnOnce(&mut BuildResult) -> Result<OutputPlan, CompilerError>,
 ) -> BuildCommandOutcome {
-    match build_project(project_builder, entry_path, flags, build_config_inputs) {
+    match build_project(
+        builder_selection.backend.as_ref(),
+        entry_path,
+        flags,
+        build_config_inputs,
+    ) {
         Ok(mut build_result) => {
             write_build_outputs_with_plan(&mut build_result, output_plan_builder)
         }
@@ -208,7 +213,7 @@ fn create_build_output_plan(build_result: &mut BuildResult) -> Result<OutputPlan
     Ok(OutputPlan::SingleFile(SingleFileOutputPlan {
         output_root,
         project_root: Some(project_root),
-        owner: build_result.output_owner,
+        owner: build_result.output_owner.clone(),
         setting_span: None,
     }))
 }

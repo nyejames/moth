@@ -296,7 +296,7 @@ pub fn external_success_returns(
     success_alias: ExternalReturnAlias,
 ) -> Vec<ExternalReturnSlot> {
     let success_type = success_type.into();
-    if success_type.supports_success_return_type() {
+    if success_type.represents_moth_value() {
         vec![ExternalReturnSlot {
             value_type: success_type,
             alias: success_alias,

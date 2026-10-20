@@ -15,7 +15,7 @@ use crate::build_system::build::{
     ProjectEntry,
 };
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
-use crate::build_system::output::{BuilderKind, CleanupPolicy};
+use crate::build_system::output::{BuilderIdentity, CleanupPolicy, register_output_root_fields};
 use crate::builder_surface::config_schema::{
     ConfigSchema, ConfigSchemaField, NamedConfigSectionSchema, UnknownFieldPolicy,
 };
@@ -57,7 +57,7 @@ use crate::projects::html_project::wasm::artifacts::{
     CompiledHtmlWasmModule, compile_html_module_wasm,
 };
 use crate::projects::routing::parse_html_site_config;
-use crate::projects::settings::{Config, HtmlSectionConfig, ProjectConfigError};
+use crate::projects::settings::{Config, ProjectConfigError};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -113,8 +113,8 @@ impl HtmlProjectBuilder {
 }
 
 impl BackendBuilder for HtmlProjectBuilder {
-    fn builder_kind(&self) -> BuilderKind {
-        BuilderKind::Html
+    fn builder_identity(&self) -> BuilderIdentity {
+        BuilderIdentity::html()
     }
 
     fn build_backend(
@@ -352,11 +352,14 @@ impl BackendBuilder for HtmlProjectBuilder {
 
     fn frontend_surface(&self) -> BuilderSurface {
         let mut builder_surface = BuilderSurface::with_mandatory_core();
-        builder_surface.source_packages.register_filesystem_root(
-            HTML_SOURCE_PACKAGE_PREFIX,
-            BuilderSurface::builtin_source_package_root(HTML_SOURCE_PACKAGE_PREFIX),
-            crate::builder_surface::PackageOrigin::Builder,
-        );
+        builder_surface
+            .source_packages
+            .register_filesystem_root(
+                HTML_SOURCE_PACKAGE_PREFIX,
+                BuilderSurface::builtin_source_package_root(HTML_SOURCE_PACKAGE_PREFIX),
+                crate::builder_surface::PackageOrigin::Builder,
+            )
+            .expect("the built-in @html source package registers once");
         builder_surface.register_implicit_template_scope_source_package(HTML_SOURCE_PACKAGE_PREFIX);
 
         crate::builder_surface::core_packages::register_optional_core_packages(
@@ -390,7 +393,9 @@ impl BackendBuilder for HtmlProjectBuilder {
                 .with_test_packages_for_integration();
         }
 
-        builder_surface.finish_config_registration();
+        builder_surface
+            .validate()
+            .expect("the HTML builder surface is valid");
         builder_surface
     }
 }
@@ -401,23 +406,7 @@ impl HtmlProjectBuilder {
         Self::register_html_fields(&mut html_schema);
 
         let html_root = html_schema.root();
-        html_schema
-            .register_field(
-                html_root,
-                ConfigSchemaField::string_with_default(
-                    "dev_output",
-                    HtmlSectionConfig::DEFAULT_DEV_OUTPUT,
-                ),
-            )
-            .expect("html schema is under construction");
-        html_schema
-            .register_field(
-                html_root,
-                ConfigSchemaField::string_with_default(
-                    "release_output",
-                    HtmlSectionConfig::DEFAULT_RELEASE_OUTPUT,
-                ),
-            )
+        register_output_root_fields(&mut html_schema, html_root)
             .expect("html schema is under construction");
         html_schema
             .validate_and_freeze()
@@ -426,7 +415,7 @@ impl HtmlProjectBuilder {
         builder_surface
             .config_schemas
             .register_project_section(NamedConfigSectionSchema {
-                name: "html",
+                name: "html".into(),
                 schema: html_schema,
                 required: true,
             });

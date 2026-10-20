@@ -21,7 +21,8 @@ use crate::build_system::create_project_modules::{
     FrontendCompilationMode, compile_project_frontend_with_inputs, resolve_project_entry_root,
 };
 use crate::build_system::output::{
-    BuilderKind, CleanupPolicy, OutputOwner, ValidatedDirectoryOutputSettings, ValidatedOutputPlan,
+    BuilderIdentity, CleanupPolicy, OutputOwner, ValidatedDirectoryOutputSettings,
+    ValidatedOutputPlan,
 };
 use crate::build_system::path_validation::check_if_valid_path;
 use crate::build_system::project_config::{ProjectConfigParseServices, load_project_config};
@@ -145,8 +146,6 @@ pub struct ProjectCompilation {
     source_packages: CompletedSourcePackageRegistry,
     entries: Vec<EntryAssembly>,
     /// Optional project package-facade assembly selected from the public package surface.
-    #[allow(dead_code)]
-    // retained for future package-target backends; assembly still owns liveness
     package_assembly: Option<PackageAssembly>,
     source_function_names: Arc<std::collections::HashMap<OriginFunctionId, String>>,
     module_private_function_names:
@@ -650,7 +649,6 @@ impl ProjectCompilation {
         std::mem::take(&mut self.resource_inputs)
     }
 
-    #[allow(dead_code)] // package-target consumers are not threaded into HTML rendering in this slice
     pub(crate) fn package_assembly(&self) -> Option<&PackageAssembly> {
         self.package_assembly.as_ref()
     }
@@ -1465,13 +1463,13 @@ pub(crate) struct ProjectEntry<'a> {
 pub trait BackendBuilder {
     /// Identify the builder that owns manifests and generated output artifacts.
     #[cfg(not(test))]
-    fn builder_kind(&self) -> BuilderKind;
+    fn builder_identity(&self) -> BuilderIdentity;
 
     /// Unit-test builders use one synthetic owner so their fixtures cannot claim a production
     /// HTML manifest.
     #[cfg(test)]
-    fn builder_kind(&self) -> BuilderKind {
-        BuilderKind::Test
+    fn builder_identity(&self) -> BuilderIdentity {
+        BuilderIdentity::test()
     }
 
     /// Build the project with the given configuration
@@ -1512,11 +1510,11 @@ pub trait BackendBuilder {
 ///
 /// WHAT: stores the backend strategy object used by `build_project`.
 /// WHY: callers can swap backends while keeping one orchestration surface.
-pub struct ProjectBuilder {
+pub struct BuilderSelection {
     pub(crate) backend: Box<dyn BackendBuilder + Send>,
 }
 
-impl ProjectBuilder {
+impl BuilderSelection {
     pub fn new(backend: impl BackendBuilder + Send + 'static) -> Self {
         Self {
             backend: Box::new(backend),
@@ -1705,7 +1703,7 @@ impl BuildResult {
 /// This function intentionally does not write output files so callers can decide where artifacts
 /// should be emitted.
 pub fn build_project(
-    project_builder: &ProjectBuilder,
+    backend: &dyn BackendBuilder,
     entry_path: &str,
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
@@ -1731,7 +1729,7 @@ pub fn build_project(
         validated_directory_output_settings,
         mut project_source_files,
         build_config_inputs,
-    } = match bootstrap_project_build(project_builder, valid_path, build_config_inputs) {
+    } = match bootstrap_project_build(backend, valid_path, build_config_inputs) {
         Ok(bootstrap) => bootstrap,
         Err(messages) => {
             return Err(messages);
@@ -1779,7 +1777,7 @@ pub fn build_project(
 
     let project_result = crate::timed_stage!(
         crate::timing::TimingMetric::BuildBackendTotal,
-        project_builder.backend.build_backend(
+        backend.build_backend(
             project_compilation,
             &config,
             build_profile,
@@ -1806,7 +1804,7 @@ pub fn build_project(
     warnings.extend(project.warnings.iter().cloned());
 
     let output_owner = OutputOwner {
-        builder: project_builder.backend.builder_kind(),
+        builder: backend.builder_identity(),
         profile: build_profile,
     };
     let directory_output_plan = if config.entry_dir.is_dir() {
@@ -1829,7 +1827,7 @@ pub fn build_project(
         Some(validated_output_settings.select(
             config.entry_dir.clone(),
             resolve_project_entry_root(&config),
-            output_owner,
+            output_owner.clone(),
         ))
     } else {
         None
@@ -1860,7 +1858,7 @@ pub fn build_project(
 /// behavior does not drift between "build" and "serve" flows, and explicit inputs must ride
 /// the same shared state instead of command-local storage.
 pub(crate) fn bootstrap_project_build(
-    project_builder: &ProjectBuilder,
+    backend: &dyn BackendBuilder,
     entry_path: PathBuf,
     build_config_inputs: &BuildConfigInputSet,
 ) -> Result<BuildBootstrap, CompilerMessages> {
@@ -1879,9 +1877,9 @@ pub(crate) fn bootstrap_project_build(
 
     // Compute the builder's frontend surface once so config loading and frontend compilation
     // see the same set of allowed config keys, external packages, and source-backed packages.
-    let frontend_surface = project_builder.backend.frontend_surface();
+    let frontend_surface = backend.frontend_surface();
 
-    let frontend_style_directives = project_builder.backend.frontend_style_directives();
+    let frontend_style_directives = backend.frontend_style_directives();
     let style_directives = match StyleDirectiveRegistry::merged(&frontend_style_directives) {
         Ok(style_directives) => style_directives,
         Err(error) => {
@@ -1911,10 +1909,7 @@ pub(crate) fn bootstrap_project_build(
     };
     // WHAT: Validate backend-specific config requirements before compilation.
     // WHY: Backends should reject unsupported settings before frontend compilation does work.
-    if let Err(error) = project_builder
-        .backend
-        .validate_project_config(&config, &mut string_table)
-    {
+    if let Err(error) = backend.validate_project_config(&config, &mut string_table) {
         let mut messages = error.into_messages(string_table.clone());
         attach_owned_source_database(&mut messages, &mut project_source_files);
         return Err(messages);

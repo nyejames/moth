@@ -3,7 +3,7 @@
 // Or these tests will fail on Windows due to attempts to delete non-empty temp directories while files are still open.
 
 use super::*;
-use crate::build_system::build::{ProjectBuilder, ProjectCompilation, build_project};
+use crate::build_system::build::{ProjectCompilation, build_project};
 use crate::build_system::output::output_path_identity;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::external_packages::{
@@ -509,7 +509,7 @@ fn build_single_file_project_includes_reachable_dependency_files() {
     {
         let _cwd_guard = CurrentDirGuard::set_to(&root);
 
-        let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+        let builder = HtmlProjectBuilder::new();
         let result = build_project(&builder, "main.moth", &[], &BuildConfigInputSet::new())
             .expect("build should succeed");
 
@@ -555,7 +555,7 @@ fn build_html_project_local_js_import_emits_generated_glue() {
     )
     .expect("should write js");
 
-    let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let result = build_project(
         &builder,
         root.to_str().expect("temp dir should be UTF-8"),
@@ -618,7 +618,7 @@ fn build_html_project_reexport_fixture_emits_provider_and_exact_wrappers() {
     // Keep the original real-bug source shared with its executable integration owner.
     let root =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cases/html_js_reexport_linking/input");
-    let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let mut result = build_project(
         &builder,
         root.to_str().expect("fixture path should be UTF-8"),
@@ -692,7 +692,8 @@ impl BackendBuilder for RegisteredJsPackageBuilder {
         for (prefix, root) in packages {
             surface
                 .source_packages
-                .register_filesystem_root(prefix, root, PackageOrigin::Builder);
+                .register_filesystem_root(prefix, root, PackageOrigin::Builder)
+                .expect("test source root should register");
         }
         surface
     }
@@ -888,12 +889,12 @@ fn build_html_registered_source_package_preserves_provider_identity_and_order() 
                     .expect("should create fixture directories");
                 fs::write(path, source).expect("should write campaign source");
             }
-            let builder = ProjectBuilder::new(RegisteredJsPackageBuilder {
+            let builder = RegisteredJsPackageBuilder {
                 project_root: project_root.clone(),
                 package_root: package_root.clone(),
                 marker_root,
                 reverse_registration: reversed,
-            });
+            };
             let mut built = build_project(
                 &builder,
                 project_root.to_str().expect("fixture path should be UTF-8"),
@@ -1057,7 +1058,7 @@ fn build_html_normal_sibling_name_is_not_visible_from_child_module() {
                 .expect("should create fixture directories");
             fs::write(path, source).expect("should write sibling fixture");
         }
-        let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+        let builder = HtmlProjectBuilder::new();
         let errors = match build_project(
             &builder,
             root.to_str().expect("fixture root should be UTF-8"),
@@ -1117,7 +1118,7 @@ fn build_html_project_shared_support_provider_keeps_page_wrappers_isolated() {
     )
     .expect("should write shared provider");
 
-    let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let mut result = build_project(
         &builder,
         root.to_str().expect("temp dir should be UTF-8"),
@@ -1184,7 +1185,7 @@ fn build_html_project_shared_support_provider_keeps_page_wrappers_isolated() {
 fn build_html_project_binding_topology_emits_only_demanded_wrappers_and_whole_assets() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/cases/html_js_binding_runtime_topology/input");
-    let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let mut result = build_project(
         &builder,
         root.to_str().expect("fixture path should be UTF-8"),
@@ -1268,7 +1269,7 @@ fn build_html_project_fallible_js_with_runtime_helper_emits_runtime_import_map()
     )
     .expect("should write js");
 
-    let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let mut result = build_project(
         &builder,
         root.to_str().expect("temp dir should be UTF-8"),
@@ -1341,7 +1342,7 @@ fn build_html_project_non_fallible_js_with_runtime_helper_emits_runtime_module()
     )
     .expect("should write js");
 
-    let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let result = build_project(
         &builder,
         root.to_str().expect("temp dir should be UTF-8"),
@@ -1381,7 +1382,7 @@ fn build_html_project_fallible_js_without_runtime_import_does_not_emit_runtime_m
     )
     .expect("should write js");
 
-    let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let result = build_project(
         &builder,
         root.to_str().expect("temp dir should be UTF-8"),
@@ -1419,7 +1420,7 @@ fn build_html_project_unreachable_provider_js_import_does_not_emit_runtime_artif
     )
     .expect("should write js");
 
-    let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let result = build_project(
         &builder,
         root.to_str().expect("temp dir should be UTF-8"),
@@ -1477,7 +1478,7 @@ fn build_html_project_unreachable_html_canvas_helper_dependency_does_not_emit_ru
     )
     .expect("should write page");
 
-    let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let result = build_project(
         &builder,
         root.to_str().expect("temp dir should be UTF-8"),
@@ -1533,7 +1534,7 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
     )
     .expect("should write page");
 
-    let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let result = build_project(
         &builder,
         root.to_str().expect("temp dir should be UTF-8"),
@@ -1608,7 +1609,7 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
     )
     .expect("should write page");
 
-    let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let mut result = build_project(
         &builder,
         root.to_str().expect("temp dir should be UTF-8"),
@@ -1664,7 +1665,7 @@ fn build_project_keeps_one_shared_string_table_for_multi_module_diagnostics() {
     fs::write(src_dir.join("@page.moth"), "value = 1\n").expect("should write homepage");
     fs::write(docs_dir.join("@page.moth"), "value = 2\n").expect("should write docs page");
 
-    let builder = ProjectBuilder::new(MultiModuleDiagnosticBuilder);
+    let builder = MultiModuleDiagnosticBuilder;
     let Err(messages) = build_project(
         &builder,
         root.to_str().expect("temp dir path should be valid UTF-8"),
@@ -1717,7 +1718,7 @@ fn build_html_project_literal_const_change_reaches_next_build_without_asset() {
     )
     .expect("should write js");
 
-    let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let entry = root.to_str().expect("temp dir should be UTF-8");
 
     let first = build_project(&builder, entry, &[], &BuildConfigInputSet::new())
@@ -1782,7 +1783,7 @@ fn build_html_project_mixed_const_and_function_emits_single_glue_module() {
     )
     .expect("should write js");
 
-    let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
+    let builder = HtmlProjectBuilder::new();
     let entry = root.to_str().expect("temp dir should be UTF-8");
     let built = build_project(&builder, entry, &[], &BuildConfigInputSet::new())
         .expect("mixed const and function build should succeed");

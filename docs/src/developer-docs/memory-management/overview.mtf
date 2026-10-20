@@ -331,6 +331,18 @@ Local module compilation produces local lifetime constraints and exported summar
     ]
 
     [td:
+        [: Native Rust host imports, selected exports, result frames, staged text, resource tokens or the host manifest]
+        [:
+            - `docs/src/developer-docs/memory-management/native-host-abi/overview.mtf`
+            - `docs/src/developer-docs/memory-management/runtime-and-backend-lowering/overview.mtf`
+        ]
+        [:
+            - `docs/src/developer-docs/memory-management/native-host-abi/native-host-abi.mtf`
+            - `docs/src/developer-docs/project-builders/host-packages.mtf`
+        ]
+    ]
+
+    [td:
         [: Changing the memory model]
         [:
             - `docs/src/developer-docs/memory-management/overview.mtf`

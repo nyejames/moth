@@ -637,6 +637,9 @@ pub(crate) fn invalid_external_module_message(
         InvalidExternalModuleReason::ParserDiagnostic { parser_detail } => {
             string_table.resolve(*parser_detail).to_owned()
         }
+        InvalidExternalModuleReason::PathContainsPackageSeparator => {
+            "Its path contains `#`, which Moth package paths reserve. Rename the file.".to_owned()
+        }
     };
     format!("External JS module `{path_text}` is invalid.\n{detail}")
 }

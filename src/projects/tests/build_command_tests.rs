@@ -5,10 +5,10 @@ use super::{
     run_build_command_with_output_plan, write_build_outputs_with_plan,
 };
 use crate::build_system::BuildProfile;
-use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project, ProjectBuilder};
+use crate::build_system::build::{BuildResult, BuilderSelection, FileKind, OutputFile, Project};
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::{
-    BuilderKind, CleanupPolicy, OutputOwner, OutputPlan, SingleFileOutputPlan,
+    BuilderIdentity, CleanupPolicy, OutputOwner, OutputPlan, SingleFileOutputPlan,
 };
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 #[cfg(feature = "timers")]
@@ -20,8 +20,8 @@ use crate::projects::settings::Config;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-fn test_project_builder() -> ProjectBuilder {
-    ProjectBuilder::new(HtmlProjectBuilder::new())
+fn test_project_builder() -> BuilderSelection {
+    BuilderSelection::new(HtmlProjectBuilder::new())
 }
 
 fn write_directory_project(root: &Path, page_source: &str) {
@@ -54,7 +54,7 @@ fn build_result_with_warnings(warnings: Vec<CompilerDiagnostic>) -> BuildResult 
         source_database: None,
         warning_source_contexts: Vec::new(),
         output_owner: OutputOwner {
-            builder: BuilderKind::Html,
+            builder: BuilderIdentity::html(),
             profile: BuildProfile::Dev,
         },
         directory_output_plan: None,
@@ -65,7 +65,7 @@ fn temporary_single_file_output_plan(root: &Path, build_result: &BuildResult) ->
     OutputPlan::SingleFile(SingleFileOutputPlan {
         output_root: root.to_path_buf(),
         project_root: Some(root.to_path_buf()),
-        owner: build_result.output_owner,
+        owner: build_result.output_owner.clone(),
         setting_span: None,
     })
 }
