@@ -11,8 +11,10 @@ use super::{
     assert_snapshot_spellings, build_snapshot, choice_definition, empty_path_table,
     struct_definition, test_path,
 };
-use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayCapacityError;
 use crate::compiler_frontend::compiler_messages::diagnostic_types::type_display_snapshot::arena_index;
+use crate::compiler_frontend::compiler_messages::diagnostic_types::{
+    TypeDisplayCapacityError, TypeDisplayId,
+};
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantDefinition, ChoiceVariantPayloadDefinition,
 };
@@ -469,6 +471,143 @@ fn snapshot_generic_parameter_query_matches_live_view() {
             snapshot.is_generic_parameter(display_id),
             expected,
             "snapshot {type_id:?}"
+        );
+    }
+}
+
+#[test]
+fn appending_snapshot_offsets_records_and_child_arenas_without_deduplication() {
+    let mut strings = StringTable::new();
+    let mut paths = PathInternerBuilder::new();
+    let config_path = test_path(&mut paths, &mut strings, "Config");
+    let status_path = test_path(&mut paths, &mut strings, "Status");
+    let box_path = test_path(&mut paths, &mut strings, "Box");
+    let ready = strings.intern("Ready");
+    let failed = strings.intern("Failed");
+    let t_name = strings.intern("T");
+
+    let mut environment = TypeEnvironment::new();
+    let string_type = environment.builtins().string;
+    let i32_type = environment.intern_builtin_key(BuiltinTypeKey::FixedScalar(FixedScalar::I32));
+    let (_, config_type) =
+        environment.register_nominal_struct(struct_definition(config_path, false));
+    let (_, choice_type) = environment.register_nominal_choice(choice_definition(
+        status_path,
+        Box::new([
+            ChoiceVariantDefinition {
+                name: ready,
+                tag: 0,
+                payload: ChoiceVariantPayloadDefinition::Unit,
+                span: None,
+            },
+            ChoiceVariantDefinition {
+                name: failed,
+                tag: 1,
+                payload: ChoiceVariantPayloadDefinition::Record {
+                    fields: Box::new([]),
+                },
+                span: None,
+            },
+        ]),
+    ));
+    let (box_base, _) = environment.register_nominal_struct(struct_definition(box_path, false));
+    let box_of_i32 = environment.intern_generic_instance(box_base, Box::new([i32_type]));
+    let generic_type = environment.intern_generic_parameter(GenericParameterId(0), t_name);
+    let option_type = environment.intern_option(i32_type);
+    let collection_type = environment.intern_collection(option_type, Some(3));
+    let map_type = environment.intern_map(string_type, i32_type);
+    let function_type = environment.intern_function(FunctionTypeKey {
+        parameters: Box::new([map_type, choice_type]),
+        returns: Box::new([collection_type]),
+        error_return: Some(config_type),
+    });
+
+    let left_types = [
+        config_type,
+        choice_type,
+        collection_type,
+        map_type,
+        function_type,
+        box_of_i32,
+        generic_type,
+        option_type,
+    ];
+    let right_types = [
+        option_type,
+        generic_type,
+        box_of_i32,
+        function_type,
+        map_type,
+        collection_type,
+        choice_type,
+        config_type,
+    ];
+    let (mut left, left_ids) = build_snapshot(&environment, &left_types);
+    let (right, right_ids) = build_snapshot(&environment, &right_types);
+    let left_spellings: Vec<_> = left_ids
+        .iter()
+        .map(|&type_id| left.display(type_id, &strings, paths.paths()))
+        .collect();
+    let right_spellings: Vec<_> = right_ids
+        .iter()
+        .map(|&type_id| right.display(type_id, &strings, paths.paths()))
+        .collect();
+    let left_lengths = [
+        left.records.len(),
+        left.type_ids.len(),
+        left.variants.len(),
+        left.choices.len(),
+        left.callables.len(),
+        left.generic_instances.len(),
+        left.collections.len(),
+    ];
+    let right_lengths = [
+        right.records.len(),
+        right.type_ids.len(),
+        right.variants.len(),
+        right.choices.len(),
+        right.callables.len(),
+        right.generic_instances.len(),
+        right.collections.len(),
+    ];
+    let base = left
+        .append(right)
+        .expect("the two test snapshots fit in every arena");
+
+    assert_eq!(
+        base,
+        u32::try_from(left_lengths[0]).expect("test snapshot length fits")
+    );
+    assert_eq!(
+        [
+            left.records.len(),
+            left.type_ids.len(),
+            left.variants.len(),
+            left.choices.len(),
+            left.callables.len(),
+            left.generic_instances.len(),
+            left.collections.len(),
+        ],
+        std::array::from_fn(|index| left_lengths[index] + right_lengths[index]),
+        "all arenas append without deduplicating their rows"
+    );
+    for (&type_id, expected) in left_ids.iter().zip(left_spellings) {
+        assert_eq!(
+            left.display(type_id, &strings, paths.paths()),
+            expected,
+            "existing type ids keep their spelling"
+        );
+    }
+    for (&type_id, expected) in right_ids.iter().zip(right_spellings) {
+        let index = type_id
+            .index()
+            .checked_add(usize::try_from(base).expect("test base fits usize"))
+            .expect("test display index fits");
+        let appended_id = TypeDisplayId::from_index(index).expect("appended test display id fits");
+        assert_eq!(
+            left.display(appended_id, &strings, paths.paths()),
+            expected,
+            "appended type id {type_id:?}"
         );
     }
 }

@@ -44,6 +44,9 @@ pub(super) struct DraftCore {
     pub(super) family: &'static FamilyRow,
     pub(super) span: Option<SourceSpan>,
     pub(super) facts: [u32; FACT_WORDS],
+    /// Exact mask of fact words that hold type words, whether pending or captured.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+    pub(super) type_facts: u8,
     /// Exact mask of fact words still holding raw `TypeId`s; the family mask may be a superset.
     pub(super) pending_facts: u8,
     /// Set once a value failed to encode. The draft then stores as a capacity record and takes no more parts.
@@ -71,6 +74,7 @@ impl DiagnosticDraft {
                         family,
                         span,
                         facts,
+                        type_facts: pending_facts,
                         pending_facts,
                         faulted: false,
                         severity: SeverityOverride::Default,
@@ -98,6 +102,7 @@ impl DiagnosticDraft {
                 family: &COMPILER_CAPACITY_EXCEEDED,
                 span,
                 facts,
+                type_facts: pending_facts,
                 pending_facts,
                 faulted: true,
                 severity: SeverityOverride::Default,
@@ -201,11 +206,11 @@ impl DiagnosticDraft {
 impl DiagnosticDraft {
     /// Rewrites the pending type words of this draft through `rewrite`, which maps each raw `TypeId` to its display ID.
     ///
-    /// The mask records the concrete shape's type words, so type-free words such as a reason code stay untouched.
-    /// All-or-nothing: the new words are computed into temporaries first, and the draft changes only when every
-    /// rewrite succeeds. A failed call leaves the draft exactly as it was. Callers map the error to their own
-    /// capacity handling: the render adapter expects success, since one diagnostic's types always fit the id space.
-    /// The P4.6 producer emits TypeIds while it owns the type environment, so capture happens at this boundary.
+    /// The type-word masks keep the concrete slot shape after capture, so type-free words such as a reason code
+    /// stay untouched. All-or-nothing: the new words are computed into temporaries first, and the draft changes
+    /// only when every rewrite succeeds. A failed call leaves the draft exactly as it was. Callers map the error
+    /// to their own capacity handling: the render adapter expects success, since one diagnostic's types always fit
+    /// the id space. The P4.6 producer emits TypeIds while it owns the type environment, so capture happens here.
     pub(super) fn capture_types(
         &mut self,
         rewrite: &mut impl FnMut(TypeId) -> Result<TypeDisplayId, TypeDisplayCapacityError>,
@@ -254,11 +259,98 @@ impl DiagnosticDraft {
         }
         Ok(())
     }
+
+    /// Rebase every captured type word after its snapshot is appended to another snapshot.
+    ///
+    /// The first pass checks every present word before any write, so overflow leaves the draft unchanged.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+    pub(super) fn rebase_type_displays(
+        &mut self,
+        base: u32,
+    ) -> Result<(), TypeDisplayCapacityError> {
+        assert_eq!(
+            self.core.pending_facts, 0,
+            "type-display rebasing needs `capture_types` to run first"
+        );
+        if let Some(extra) = self.extra.as_deref() {
+            assert!(
+                extra.labels.iter().all(|label| label.pending_types == 0),
+                "type-display rebasing needs `capture_types` to run first"
+            );
+            assert!(
+                extra
+                    .substitutions
+                    .iter()
+                    .all(|entry| matches!(&entry.concrete, DraftType::Captured(_))),
+                "type-display rebasing needs `capture_types` to run first"
+            );
+        }
+
+        for (index, &word) in self.core.facts.iter().enumerate() {
+            if is_marked(self.core.type_facts, index) {
+                rebased_type_word(word, base)?;
+            }
+        }
+
+        if let Some(extra) = self.extra.as_deref() {
+            for label in &extra.labels {
+                for (slot, &word) in label.data.iter().enumerate() {
+                    if is_marked(label.type_words, slot) {
+                        rebased_type_word(word, base)?;
+                    }
+                }
+            }
+            for entry in &extra.substitutions {
+                let DraftType::Captured(word) = entry.concrete else {
+                    unreachable!("the rebase preflight rejects pending substitution types")
+                };
+                rebased_type_word(word, base)?;
+            }
+        }
+
+        for (index, word) in self.core.facts.iter_mut().enumerate() {
+            if is_marked(self.core.type_facts, index) {
+                *word = rebased_type_word(*word, base)
+                    .expect("type-display rebase preflight checked every fact");
+            }
+        }
+
+        if let Some(extra) = self.extra.as_deref_mut() {
+            for label in &mut extra.labels {
+                for (slot, word) in label.data.iter_mut().enumerate() {
+                    if is_marked(label.type_words, slot) {
+                        *word = rebased_type_word(*word, base)
+                            .expect("type-display rebase preflight checked every label");
+                    }
+                }
+            }
+            for entry in &mut extra.substitutions {
+                let DraftType::Captured(word) = entry.concrete else {
+                    unreachable!("the rebase preflight rejects pending substitution types")
+                };
+                entry.concrete = DraftType::Captured(
+                    rebased_type_word(word, base)
+                        .expect("type-display rebase preflight checked every substitution"),
+                );
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// Whether bit `bit` of a pending mask is set.
 fn is_marked(mask: u8, bit: usize) -> bool {
     mask & (1 << bit) != 0
+}
+
+/// Rebases one present display word. `NO_TYPE_WORD` is the absent-type representation.
+#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+fn rebased_type_word(word: u32, base: u32) -> Result<u32, TypeDisplayCapacityError> {
+    if word == NO_TYPE_WORD {
+        return Ok(NO_TYPE_WORD);
+    }
+    word.checked_add(base).ok_or(TypeDisplayCapacityError)
 }
 
 /// Rewrites one pending word to its display word. The absent sentinel captures as `NO_TYPE_WORD` without a rewrite.

@@ -6,14 +6,16 @@
 //! checks, not only codec checks.
 
 use super::{TEST_LABEL_FAMILY, exact_span, identity};
-use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::diagnostic_types::{
-    TypeDisplayCapacityError, TypeDisplayId,
+    TypeDisplayCapacityError, TypeDisplayId, type_display_snapshot::TypeDisplaySnapshot,
+    type_display_snapshot_builder::TypeDisplaySnapshotBuilder,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::compaction::CompactOutcome;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::extras::ExtraDataKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
-    FactReader, TypeFact, UnitFact, type_display_word,
+    FactReader, NO_TYPE_WORD, OptTypeFact, TypeFact, UnitFact, type_display_from_word,
+    type_display_word,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::unreachable_match_arm;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::unused_import;
@@ -29,16 +31,24 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::types_bo
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::{
     ForeignSiteDraft, ForeignSlot, SiteRef,
 };
-use crate::compiler_frontend::compiler_messages::diagnostics::labels::DraftType;
-use crate::compiler_frontend::compiler_messages::diagnostics::record::SeverityOverride;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::{
+    DraftType, LabelMessageCode,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::record::{
+    DiagnosticCode, SeverityOverride,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::schema::{FactDescriptor, FamilyRow};
 use crate::compiler_frontend::compiler_messages::diagnostics::store::DiagnosticStore;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::FamilyView;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticLabelMessage, DiagnosticToken, GenericSubstitutionDiagnostic, HirCapacityResource,
-    TokenTag, TypeMismatchContext,
+    DiagnosticCategory, DiagnosticDescriptor, DiagnosticLabelMessage, DiagnosticSeverity,
+    DiagnosticToken, GenericSubstitutionDiagnostic, HirCapacityResource, TokenTag,
+    TypeMismatchContext,
 };
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::symbols::string_interning::StringId;
+use crate::compiler_frontend::symbols::path_interner::{PathInternerBuilder, PathTable};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
 /// The display ID that a type at `index` in the display table captures to.
 fn display(index: usize) -> TypeDisplayId {
@@ -55,6 +65,109 @@ fn identity_rewrite(id: TypeId) -> Result<TypeDisplayId, TypeDisplayCapacityErro
     TypeDisplayId::from_index(id.0 as usize)
 }
 
+static TYPE_WORD_TEST_FAMILY: FamilyRow = FamilyRow {
+    code: DiagnosticCode::new(9002),
+    category: DiagnosticCategory::Type,
+    reserved: false,
+    descriptor: DiagnosticDescriptor::new(
+        "MOTH-TEST-9002",
+        "Type word test",
+        DiagnosticSeverity::Error,
+    ),
+    layout: &[
+        FactDescriptor::of::<TypeFact>(),
+        FactDescriptor::of::<TypeFact>(),
+    ],
+    extra: ExtraDataKind::None,
+    labels: &[LabelMessageCode::TYPED_FAILURE_PRODUCER],
+    render: None,
+};
+
+static OPTIONAL_TYPE_TEST_FAMILY: FamilyRow = FamilyRow {
+    code: DiagnosticCode::new(9003),
+    category: DiagnosticCategory::Type,
+    reserved: false,
+    descriptor: DiagnosticDescriptor::new(
+        "MOTH-TEST-9003",
+        "Optional type word test",
+        DiagnosticSeverity::Error,
+    ),
+    layout: &[FactDescriptor::of::<OptTypeFact>()],
+    extra: ExtraDataKind::None,
+    labels: &[],
+    render: None,
+};
+
+/// Builds a draft with type words in facts, a label and a substitution.
+fn draft_with_type_words(
+    first: TypeId,
+    second: TypeId,
+    label_type: TypeId,
+    substitution_type: TypeId,
+) -> DiagnosticDraft {
+    let span = exact_span(0, 1);
+    DiagnosticDraft::with_facts(&TYPE_WORD_TEST_FAMILY, Some(span), |cursor| {
+        cursor.push::<TypeFact>(&first)?;
+        cursor.push::<TypeFact>(&second)
+    })
+    .with_label(
+        Some(span),
+        Some(DiagnosticLabelMessage::TypedFailureProducer {
+            error_type_id: label_type,
+        }),
+    )
+    .with_label(
+        Some(span),
+        Some(DiagnosticLabelMessage::GenericInstantiationSubstitutions {
+            substitutions: vec![GenericSubstitutionDiagnostic {
+                parameter_name: StringId::from_index(2),
+                concrete_type_id: substitution_type,
+            }],
+        }),
+    )
+}
+
+/// Returns all captured type words from the draft's facts, label data and substitution arena.
+fn captured_type_words(draft: &DiagnosticDraft) -> Vec<u32> {
+    let mut words = Vec::new();
+    for (index, &word) in draft.core.facts.iter().enumerate() {
+        if draft.core.type_facts & (1 << index) != 0 {
+            words.push(word);
+        }
+    }
+    if let Some(extra) = draft.extra.as_deref() {
+        for label in &extra.labels {
+            for (index, &word) in label.data.iter().enumerate() {
+                if label.type_words & (1 << index) != 0 {
+                    words.push(word);
+                }
+            }
+        }
+        for substitution in &extra.substitutions {
+            let DraftType::Captured(word) = substitution.concrete else {
+                panic!("test expected every substitution type to be captured");
+            };
+            words.push(word);
+        }
+    }
+    words
+}
+
+/// Renders present type words, retaining `None` for an absent type.
+fn render_type_words(
+    snapshot: &TypeDisplaySnapshot,
+    words: &[u32],
+    strings: &StringTable,
+    paths: &PathTable,
+) -> Vec<Option<String>> {
+    words
+        .iter()
+        .map(|&word| {
+            type_display_from_word(word).map(|type_id| snapshot.display(type_id, strings, paths))
+        })
+        .collect()
+}
+
 #[test]
 fn capture_rewrites_fact_type_words_and_clears_marks() {
     let mut draft = type_mismatch(
@@ -67,6 +180,7 @@ fn capture_rewrites_fact_type_words_and_clears_marks() {
         .capture_types(&mut identity_rewrite)
         .expect("small test types always capture");
 
+    assert_eq!(draft.core.type_facts, 0b11);
     assert_eq!(draft.core.pending_facts, 0);
     let reader = FactReader::new(&draft.core.facts);
     assert_eq!(reader.read::<TypeFact>().index(), 3);
@@ -105,12 +219,57 @@ fn capture_rewrites_label_and_substitution_type_words() {
         .extra
         .as_deref()
         .expect("labels create the extra part");
+    assert_eq!(extra.labels[0].type_words, 0b01);
     assert_eq!(extra.labels[0].pending_types, 0);
     assert_eq!(extra.labels[0].data[0], display_word(3));
     assert_eq!(
         extra.substitutions[0].concrete,
         DraftType::Captured(display_word(7))
     );
+}
+
+#[test]
+fn capture_rewrites_types_added_after_prior_capture_and_is_noop_when_complete() {
+    let span = exact_span(0, 1);
+    let mut draft = draft_with_type_words(TypeId(3), TypeId(4), TypeId(5), TypeId(6));
+    draft
+        .capture_types(&mut identity_rewrite)
+        .expect("the initial test types capture");
+    draft = draft
+        .with_label(
+            Some(span),
+            Some(DiagnosticLabelMessage::TypedFailureProducer {
+                error_type_id: TypeId(8),
+            }),
+        )
+        .with_label(
+            Some(span),
+            Some(DiagnosticLabelMessage::GenericInstantiationSubstitutions {
+                substitutions: vec![GenericSubstitutionDiagnostic {
+                    parameter_name: StringId::from_index(3),
+                    concrete_type_id: TypeId(9),
+                }],
+            }),
+        );
+
+    let mut rewritten = Vec::new();
+    draft
+        .capture_types(&mut |type_id| {
+            rewritten.push(type_id.0);
+            identity_rewrite(type_id)
+        })
+        .expect("newly added types capture after the earlier types");
+    assert_eq!(rewritten, vec![8, 9]);
+    assert_eq!(captured_type_words(&draft), vec![4, 5, 6, 9, 7, 10]);
+
+    let mut rewrite_calls = 0;
+    draft
+        .capture_types(&mut |_type_id| {
+            rewrite_calls += 1;
+            Err(TypeDisplayCapacityError)
+        })
+        .expect("a draft without pending types is a no-op");
+    assert_eq!(rewrite_calls, 0);
 }
 
 #[test]
@@ -131,9 +290,209 @@ fn failed_capture_leaves_the_draft_unchanged() {
     });
 
     assert_eq!(result, Err(TypeDisplayCapacityError));
+    assert_eq!(draft.core.type_facts, before.type_facts);
     assert_eq!(draft.core.facts, before.facts);
     assert_eq!(draft.core.pending_facts, before.pending_facts);
     assert_eq!(draft.core.pending_facts, 0b11);
+}
+
+#[test]
+fn rebasing_captured_draft_keeps_every_type_spelling_after_snapshot_append() {
+    let mut environment = TypeEnvironment::new();
+    let bool_type = environment.builtins().bool;
+    let string_type = environment.builtins().string;
+    let range_type = environment.builtins().range;
+    let optional_string_type = environment.intern_option(string_type);
+    let collection_type = environment.intern_collection(bool_type, Some(3));
+
+    let mut destination_builder = TypeDisplaySnapshotBuilder::new(Some(&environment));
+    destination_builder
+        .display_id(range_type)
+        .expect("the destination snapshot fits");
+    let mut merged = destination_builder.finish();
+
+    let mut draft = draft_with_type_words(
+        bool_type,
+        optional_string_type,
+        collection_type,
+        string_type,
+    );
+    let mut source_builder = TypeDisplaySnapshotBuilder::new(Some(&environment));
+    draft
+        .capture_types(&mut |type_id| source_builder.display_id(type_id))
+        .expect("the test types fit in a display snapshot");
+    let source = source_builder.finish();
+    let words_before = captured_type_words(&draft);
+    let strings = StringTable::new();
+    let paths = PathInternerBuilder::new().freeze();
+    let spellings_before = render_type_words(&source, &words_before, &strings, &paths);
+
+    let base = merged
+        .append(source)
+        .expect("the snapshots fit after append");
+    assert_eq!(base, 1, "the destination already holds one type");
+    draft
+        .rebase_type_displays(base)
+        .expect("captured display words fit after append");
+
+    let words_after = captured_type_words(&draft);
+    let spellings_after = render_type_words(&merged, &words_after, &strings, &paths);
+    assert_eq!(spellings_after, spellings_before);
+    assert_eq!(
+        spellings_after.len(),
+        4,
+        "both facts, the label and substitution render"
+    );
+}
+
+#[test]
+fn rebasing_by_zero_is_identity_for_every_draft_type_word() {
+    let mut draft = draft_with_type_words(TypeId(3), TypeId(4), TypeId(5), TypeId(6));
+    draft
+        .capture_types(&mut identity_rewrite)
+        .expect("small test types always capture");
+    let words_before = captured_type_words(&draft);
+
+    draft
+        .rebase_type_displays(0)
+        .expect("rebasing by zero cannot overflow");
+
+    assert_eq!(captured_type_words(&draft), words_before);
+    assert_eq!(draft.core.type_facts, 0b11);
+    assert_eq!(
+        draft
+            .extra
+            .as_deref()
+            .expect("type labels create the extra part")
+            .labels[0]
+            .type_words,
+        0b01
+    );
+}
+
+#[test]
+fn rebasing_preserves_absent_type_words() {
+    let absent: Option<TypeId> = None;
+    let mut draft = DiagnosticDraft::with_facts(
+        &OPTIONAL_TYPE_TEST_FAMILY,
+        Some(exact_span(0, 1)),
+        |cursor| cursor.push::<OptTypeFact>(&absent),
+    );
+    let mut rewrite_calls = 0;
+    draft
+        .capture_types(&mut |_type_id| {
+            rewrite_calls += 1;
+            Ok(display(0))
+        })
+        .expect("an absent type does not require a display id");
+
+    assert_eq!(rewrite_calls, 0);
+    assert_eq!(draft.core.facts[0], NO_TYPE_WORD);
+    assert_eq!(draft.core.type_facts, 0b1);
+    draft
+        .rebase_type_displays(u32::MAX)
+        .expect("absent type words are not offset");
+    assert_eq!(draft.core.facts[0], NO_TYPE_WORD);
+}
+
+#[test]
+fn rebase_overflow_leaves_facts_labels_and_substitutions_unchanged() {
+    let mut draft = draft_with_type_words(TypeId(3), TypeId(4), TypeId(5), TypeId(6));
+    let maximum_index =
+        usize::try_from(u32::MAX - 1).expect("the maximum display index fits usize");
+    draft
+        .capture_types(&mut |type_id| {
+            let index = if type_id.0 == 6 { maximum_index } else { 0 };
+            TypeDisplayId::from_index(index)
+        })
+        .expect("the maximum one-based display word fits");
+
+    let facts_before = draft.core.facts;
+    let type_facts_before = draft.core.type_facts;
+    let pending_facts_before = draft.core.pending_facts;
+    let labels_before: Vec<_> = draft
+        .extra
+        .as_deref()
+        .expect("labels create the extra part")
+        .labels
+        .iter()
+        .map(|label| (label.type_words, label.pending_types, label.data))
+        .collect();
+    let substitutions_before: Vec<_> = draft
+        .extra
+        .as_deref()
+        .expect("substitutions create the extra part")
+        .substitutions
+        .iter()
+        .map(|entry| (entry.parameter, entry.concrete))
+        .collect();
+
+    assert_eq!(draft.rebase_type_displays(1), Err(TypeDisplayCapacityError));
+
+    assert_eq!(draft.core.facts, facts_before);
+    assert_eq!(draft.core.type_facts, type_facts_before);
+    assert_eq!(draft.core.pending_facts, pending_facts_before);
+    let extra = draft.extra.as_deref().expect("the extra remains present");
+    assert_eq!(
+        extra
+            .labels
+            .iter()
+            .map(|label| (label.type_words, label.pending_types, label.data))
+            .collect::<Vec<_>>(),
+        labels_before
+    );
+    assert_eq!(
+        extra
+            .substitutions
+            .iter()
+            .map(|entry| (entry.parameter, entry.concrete))
+            .collect::<Vec<_>>(),
+        substitutions_before
+    );
+}
+
+#[test]
+#[should_panic(expected = "type-display rebasing needs `capture_types` to run first")]
+fn rebasing_an_uncaptured_draft_panics() {
+    let mut draft = draft_with_type_words(TypeId(3), TypeId(4), TypeId(5), TypeId(6));
+    let _result = draft.rebase_type_displays(1);
+}
+
+#[test]
+#[should_panic(expected = "type-display rebasing needs `capture_types` to run first")]
+fn rebasing_a_draft_with_an_uncaptured_label_panics() {
+    let span = exact_span(0, 1);
+    let mut draft = DiagnosticDraft::with_facts(&TEST_LABEL_FAMILY, Some(span), |_cursor| Ok(()));
+    draft
+        .capture_types(&mut identity_rewrite)
+        .expect("a draft with no types captures");
+    let mut draft = draft.with_label(
+        Some(span),
+        Some(DiagnosticLabelMessage::TypedFailureProducer {
+            error_type_id: TypeId(5),
+        }),
+    );
+    let _result = draft.rebase_type_displays(1);
+}
+
+#[test]
+#[should_panic(expected = "type-display rebasing needs `capture_types` to run first")]
+fn rebasing_a_draft_with_an_uncaptured_substitution_panics() {
+    let span = exact_span(0, 1);
+    let mut draft = DiagnosticDraft::with_facts(&TEST_LABEL_FAMILY, Some(span), |_cursor| Ok(()));
+    draft
+        .capture_types(&mut identity_rewrite)
+        .expect("a draft with no types captures");
+    let mut draft = draft.with_label(
+        Some(span),
+        Some(DiagnosticLabelMessage::GenericInstantiationSubstitutions {
+            substitutions: vec![GenericSubstitutionDiagnostic {
+                parameter_name: StringId::from_index(2),
+                concrete_type_id: TypeId(6),
+            }],
+        }),
+    );
+    let _result = draft.rebase_type_displays(1);
 }
 
 #[test]

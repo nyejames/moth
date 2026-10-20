@@ -83,13 +83,16 @@ impl LabelMessageCode {
     }
 }
 
-/// A label as a constructor builds it. `pending_types` marks the data words that hold a raw `TypeId` until
-/// `capture_types` rewrites them.
+/// A label as a constructor builds it. `type_words` marks data words that hold a type word, while
+/// `pending_types` marks which of those words still hold a raw `TypeId`.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct DraftLabel {
     pub(super) span: Option<SourceSpan>,
     pub(super) message: LabelMessageCode,
-    /// Bit `i` set means `data[i]` holds a `TypeId` word that still needs a display ID.
+    /// Bit `i` set means `data[i]` holds a type word.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+    pub(super) type_words: u8,
+    /// Bit `i` set means `data[i]` still holds a raw `TypeId` that needs a display ID.
     pub(super) pending_types: u8,
     pub(super) data: [u32; 2],
 }
@@ -132,6 +135,7 @@ pub(super) fn encode_label(
     let plain = |code: LabelMessageCode| DraftLabel {
         span,
         message: code,
+        type_words: 0,
         pending_types: 0,
         data: [0, 0],
     };
@@ -181,6 +185,7 @@ pub(super) fn encode_label(
             plain(LabelMessageCode::IMMUTABLE_BINDING_DECLARATION)
         }
         DiagnosticLabelMessage::TypedFailureProducer { error_type_id } => DraftLabel {
+            type_words: 0b01,
             pending_types: 0b01,
             data: [pending_type_word(error_type_id)?, 0],
             ..plain(LabelMessageCode::TYPED_FAILURE_PRODUCER)
@@ -193,6 +198,7 @@ pub(super) fn encode_label(
             plain(LabelMessageCode::BUILTIN_FAILURE_ORIGIN)
         }
         DiagnosticLabelMessage::BuiltinWriteBackOrigin { target_type_id } => DraftLabel {
+            type_words: 0b01,
             pending_types: 0b01,
             data: [pending_type_word(target_type_id)?, 0],
             ..plain(LabelMessageCode::BUILTIN_WRITE_BACK_ORIGIN)

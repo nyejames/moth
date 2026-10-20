@@ -280,6 +280,128 @@ impl TypeDisplaySnapshot {
     }
 }
 
+impl TypeDisplaySnapshot {
+    /// Moves another snapshot after this one and returns its zero-based display-word offset.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+    pub(crate) fn append(
+        &mut self,
+        mut other: TypeDisplaySnapshot,
+    ) -> Result<u32, TypeDisplayCapacityError> {
+        let record_base = arena_index(self.records.len())?;
+        checked_arena_end(self.records.len(), other.records.len())?;
+        let type_ids_base = arena_index(self.type_ids.len())?;
+        checked_arena_end(self.type_ids.len(), other.type_ids.len())?;
+        let variants_base = arena_index(self.variants.len())?;
+        checked_arena_end(self.variants.len(), other.variants.len())?;
+        let choices_base = arena_index(self.choices.len())?;
+        checked_arena_end(self.choices.len(), other.choices.len())?;
+        let callables_base = arena_index(self.callables.len())?;
+        checked_arena_end(self.callables.len(), other.callables.len())?;
+        let generic_instances_base = arena_index(self.generic_instances.len())?;
+        checked_arena_end(self.generic_instances.len(), other.generic_instances.len())?;
+        let collections_base = arena_index(self.collections.len())?;
+        checked_arena_end(self.collections.len(), other.collections.len())?;
+
+        for record in &mut other.records {
+            match record.tag {
+                DiagnosticTypeTag::Choice => {
+                    record.data_0 = offset_index(record.data_0, choices_base)?;
+                }
+                DiagnosticTypeTag::Collection => {
+                    record.data_0 = offset_index(record.data_0, collections_base)?;
+                }
+                DiagnosticTypeTag::Function => {
+                    record.data_0 = offset_index(record.data_0, callables_base)?;
+                }
+                DiagnosticTypeTag::GenericInstance => {
+                    record.data_0 = offset_index(record.data_0, generic_instances_base)?;
+                }
+                DiagnosticTypeTag::OrderedMap | DiagnosticTypeTag::OptionType => {
+                    record.data_0 = offset_index(record.data_0, type_ids_base)?;
+                }
+                DiagnosticTypeTag::Unknown
+                | DiagnosticTypeTag::Bool
+                | DiagnosticTypeTag::String
+                | DiagnosticTypeTag::Char
+                | DiagnosticTypeTag::Range
+                | DiagnosticTypeTag::NoneType
+                | DiagnosticTypeTag::Number
+                | DiagnosticTypeTag::FixedScalar
+                | DiagnosticTypeTag::Struct
+                | DiagnosticTypeTag::External
+                | DiagnosticTypeTag::GenericParameter
+                | DiagnosticTypeTag::AnonymousConstRecord
+                | DiagnosticTypeTag::UnresolvedTypeId => {}
+            }
+        }
+        for type_id in &mut other.type_ids {
+            *type_id = offset_type_display_id(*type_id, record_base)?;
+        }
+        for choice in &mut other.choices {
+            choice.variants = offset_range(choice.variants, variants_base)?;
+        }
+        for callable in &mut other.callables {
+            callable.parameters = offset_range(callable.parameters, type_ids_base)?;
+            callable.returns = offset_range(callable.returns, type_ids_base)?;
+            callable.error_return = callable
+                .error_return
+                .map(|type_id| offset_type_display_id(type_id, record_base))
+                .transpose()?;
+        }
+        for generic_instance in &mut other.generic_instances {
+            generic_instance.arguments = offset_range(generic_instance.arguments, type_ids_base)?;
+        }
+        for collection in &mut other.collections {
+            collection.arguments = offset_range(collection.arguments, type_ids_base)?;
+        }
+
+        self.records.extend(other.records);
+        self.type_ids.extend(other.type_ids);
+        self.variants.extend(other.variants);
+        self.choices.extend(other.choices);
+        self.callables.extend(other.callables);
+        self.generic_instances.extend(other.generic_instances);
+        self.collections.extend(other.collections);
+        Ok(record_base)
+    }
+}
+
+/// Checks that appending `additional` items keeps this arena in the `u32` index space.
+#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+fn checked_arena_end(current: usize, additional: usize) -> Result<u32, TypeDisplayCapacityError> {
+    let current = arena_index(current)?;
+    let additional = arena_index(additional)?;
+    current
+        .checked_add(additional)
+        .ok_or(TypeDisplayCapacityError)
+}
+
+/// Offsets a child-arena index without allowing it to wrap.
+#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+fn offset_index(index: u32, base: u32) -> Result<u32, TypeDisplayCapacityError> {
+    index.checked_add(base).ok_or(TypeDisplayCapacityError)
+}
+
+/// Offsets the start of a child-arena range. Lengths stay unchanged.
+#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+fn offset_range(range: ChildRange, base: u32) -> Result<ChildRange, TypeDisplayCapacityError> {
+    Ok(ChildRange {
+        start: offset_index(range.start, base)?,
+        len: range.len,
+    })
+}
+
+/// Offsets a type-display id by the number of records already in the destination snapshot.
+#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+fn offset_type_display_id(
+    type_id: TypeDisplayId,
+    base: u32,
+) -> Result<TypeDisplayId, TypeDisplayCapacityError> {
+    let index = u32::try_from(type_id.index()).map_err(|_| TypeDisplayCapacityError)?;
+    let index = offset_index(index, base)?;
+    TypeDisplayId::from_index(usize::try_from(index).map_err(|_| TypeDisplayCapacityError)?)
+}
+
 #[cfg_attr(
     not(test),
     allow(
