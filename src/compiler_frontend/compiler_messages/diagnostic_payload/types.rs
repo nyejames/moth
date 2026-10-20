@@ -1225,7 +1225,7 @@ pub enum InvalidDeclarationReason {
     ParameterizedGenericTypeAlias,
     UnusedGenericParameter { parameter_name: StringId },
     RecursiveGenericType,
-    RecursiveRuntimeStruct { cycle: String },
+    RecursiveRuntimeStruct { cycle: Vec<StringId> },
     ExternalTypeAlias { type_name: StringId },
     InvalidGenericParameterName { parameter_name: StringId },
     DuplicateGenericParameter { parameter_name: StringId },

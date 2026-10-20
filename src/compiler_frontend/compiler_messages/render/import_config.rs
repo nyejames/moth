@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::MissingImportTargetView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::ConstRecordUsedAsValueView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidPathView;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 
@@ -680,6 +681,17 @@ pub(crate) fn const_record_used_as_value_message(
          They are used to group named fields, module dependencies, and compile-time members.\n\
          Access a field instead, for example `{name}.member`.",
     )
+}
+
+pub(crate) fn render_const_record_used_as_value(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &ConstRecordUsedAsValueView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: const_record_used_as_value_message(facts.record_name, context.string_table),
+        guidance: Vec::new(),
+    }
 }
 
 pub(crate) fn namespace_type_value_misuse_message(

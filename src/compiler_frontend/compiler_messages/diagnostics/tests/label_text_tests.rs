@@ -155,7 +155,6 @@ fn compact_and_legacy_label_text_agree_for_every_label_kind() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
     let cases = label_cases(&mut string_table, &type_environment);
-    let carrier_name = string_table.intern("shadowed");
     let path_fork = PathInternerFork::empty();
     let path_table = path_fork.snapshot_table();
     let context = DiagnosticRenderContext::new(&string_table)
@@ -192,13 +191,19 @@ fn compact_and_legacy_label_text_agree_for_every_label_kind() {
         None,
     );
 
-    // Legacy: the same kinds on a non-pilot diagnostic, whose labels keep the legacy text path.
+    // Legacy: a test-only mismatched kind/payload keeps this generic label check on the legacy path.
     let carrier_labels: Vec<DiagnosticLabel> = cases
         .iter()
         .map(|(message, _)| DiagnosticLabel::secondary(None, Some(message.clone())))
         .collect();
-    let diagnostic =
-        CompilerDiagnostic::shadowed_name(carrier_name, None, None).with_labels(carrier_labels);
+    let diagnostic = CompilerDiagnostic::new(
+        crate::compiler_frontend::compiler_messages::DiagnosticKind::Rule(
+            crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::InvalidDeclaration,
+        ),
+        None,
+        crate::compiler_frontend::compiler_messages::DiagnosticPayload::None,
+    )
+    .with_labels(carrier_labels);
     let expected_lines: Vec<String> = cases
         .iter()
         .map(|(_, text)| format!("info: - {text}"))

@@ -1,27 +1,33 @@
 //! Family rows for name and declaration diagnostics.
 //!
-//! WHAT: three existing name/declaration pilots and eight P4.4 families are full rows with mirror
-//! constructors and typed views. The other eight rows remain identity declarations.
-//! WHY: the group keeps the name and declaration families together, each with one code and category.
+//! WHAT: all nineteen name/declaration families have full compact rows
+//! with mirror constructors and typed views; no identity rows remain.
+//! WHY: the group keeps each family beside its stable code, facts, labels, and renderer.
 
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
-    OptTokenFact, StringFact, UnitFact, unit_code,
+    OptStringFact, OptTokenFact, StringFact, UnitFact, unit_code,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelMessageCode;
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
     FamilyRow, diagnostic_family,
 };
 use crate::compiler_frontend::compiler_messages::render::{
-    render_duplicate_declaration, render_identifier_naming_convention,
-    render_invalid_signature_member, render_invalid_type_annotation, render_reserved_builtin_name,
-    render_title_only, render_type_used_as_value, render_unknown_name, render_unknown_type_name,
+    render_const_record_used_as_value, render_deferred_feature, render_duplicate_declaration,
+    render_identifier_naming_convention, render_invalid_assignment_target,
+    render_invalid_declaration, render_invalid_signature_member,
+    render_invalid_struct_default_value, render_invalid_type_annotation,
+    render_missing_declaration_initializer, render_reserved_builtin_name,
+    render_reserved_name_collision, render_shadowed_name, render_title_only,
+    render_type_used_as_value, render_unknown_name, render_unknown_type_name,
     render_unknown_value_name, render_value_used_as_type,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticCategory, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
-    DiagnosticToken, InvalidSignatureMemberReason, InvalidTypeAnnotationReason, NameNamespace,
-    NamingConvention, RuleDiagnosticKind, SyntaxDiagnosticKind, TypeAnnotationContext,
+    CompilerDiagnostic, DeferredFeatureDiagnosticKind, DeferredFeatureReason, DiagnosticCategory,
+    DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, DiagnosticToken,
+    InvalidAssignmentTargetReason, InvalidDeclarationReason, InvalidSignatureMemberReason,
+    InvalidTypeAnnotationReason, NameNamespace, NamingConvention, ReservedNameOwner,
+    RuleDiagnosticKind, SyntaxDiagnosticKind, TypeAnnotationContext,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -37,6 +43,246 @@ unit_code! {
         Method = 7,
         TemplateSlot = 8,
         ConfigKey = 9,
+    }
+}
+unit_code! {
+    impl ReservedNameOwner {
+        BuiltinType = 1,
+        Keyword = 2,
+        CoreTrait = 3,
+        ImplicitStart = 4,
+        ParameterContract = 5,
+    }
+}
+unit_code! {
+    impl InvalidAssignmentTargetReason {
+        TemporaryNotAssignable = 1,
+        ImmutableBinding = 2,
+        ImmutableFieldRoot = 3,
+        UnavailableInCatchRecovery = 4,
+        CollectionGetTargetNotWritable = 5,
+        MapGetTargetNotWritable = 6,
+        ReadOnlyMapProperty = 7,
+        ExpectedAssignmentOperator = 8,
+        MutableMarkerOnAssignmentTarget = 9,
+    }
+}
+unit_code! {
+    pub(crate) enum InvalidDeclarationCode {
+        ReservedBuiltinName = 1,
+        DeclarationRequiresModuleTopLevel = 2,
+        ConstantCannotBeMutable = 3,
+        ExternalTypeLiteralConstruction = 4,
+        ParameterizedGenericTypeAlias = 5,
+        UnusedGenericParameter = 6,
+        RecursiveGenericType = 7,
+        RecursiveRuntimeStruct = 8,
+        ExternalTypeAlias = 9,
+        InvalidGenericParameterName = 10,
+        DuplicateGenericParameter = 11,
+        GenericParameterNameCollision = 12,
+        ReservedGenericParameterName = 13,
+        GenericTraitsUnsupported = 14,
+        InvalidTraitName = 15,
+        TraitConformanceMissingTrait = 16,
+        TraitConformanceSemicolon = 17,
+        TraitIncompatibilityMissingTrait = 18,
+        TraitIncompatibilitySemicolon = 19,
+        MissingInitializerExpression = 20,
+    }
+}
+
+impl InvalidDeclarationCode {
+    pub(crate) fn of(reason: &InvalidDeclarationReason) -> Self {
+        Self::split(reason).0
+    }
+
+    fn split(reason: &InvalidDeclarationReason) -> (Self, Option<StringId>) {
+        match reason {
+            InvalidDeclarationReason::ReservedBuiltinName => (Self::ReservedBuiltinName, None),
+            InvalidDeclarationReason::DeclarationRequiresModuleTopLevel => {
+                (Self::DeclarationRequiresModuleTopLevel, None)
+            }
+            InvalidDeclarationReason::ConstantCannotBeMutable => {
+                (Self::ConstantCannotBeMutable, None)
+            }
+            InvalidDeclarationReason::ExternalTypeLiteralConstruction => {
+                (Self::ExternalTypeLiteralConstruction, None)
+            }
+            InvalidDeclarationReason::ParameterizedGenericTypeAlias => {
+                (Self::ParameterizedGenericTypeAlias, None)
+            }
+            InvalidDeclarationReason::UnusedGenericParameter { parameter_name } => {
+                (Self::UnusedGenericParameter, Some(*parameter_name))
+            }
+            InvalidDeclarationReason::RecursiveGenericType => (Self::RecursiveGenericType, None),
+            InvalidDeclarationReason::RecursiveRuntimeStruct { .. } => {
+                (Self::RecursiveRuntimeStruct, None)
+            }
+            InvalidDeclarationReason::ExternalTypeAlias { type_name } => {
+                (Self::ExternalTypeAlias, Some(*type_name))
+            }
+            InvalidDeclarationReason::InvalidGenericParameterName { parameter_name } => {
+                (Self::InvalidGenericParameterName, Some(*parameter_name))
+            }
+            InvalidDeclarationReason::DuplicateGenericParameter { parameter_name } => {
+                (Self::DuplicateGenericParameter, Some(*parameter_name))
+            }
+            InvalidDeclarationReason::GenericParameterNameCollision { parameter_name } => {
+                (Self::GenericParameterNameCollision, Some(*parameter_name))
+            }
+            InvalidDeclarationReason::ReservedGenericParameterName { parameter_name } => {
+                (Self::ReservedGenericParameterName, Some(*parameter_name))
+            }
+            InvalidDeclarationReason::GenericTraitsUnsupported => {
+                (Self::GenericTraitsUnsupported, None)
+            }
+            InvalidDeclarationReason::InvalidTraitName => (Self::InvalidTraitName, None),
+            InvalidDeclarationReason::TraitConformanceMissingTrait => {
+                (Self::TraitConformanceMissingTrait, None)
+            }
+            InvalidDeclarationReason::TraitConformanceSemicolon => {
+                (Self::TraitConformanceSemicolon, None)
+            }
+            InvalidDeclarationReason::TraitIncompatibilityMissingTrait => {
+                (Self::TraitIncompatibilityMissingTrait, None)
+            }
+            InvalidDeclarationReason::TraitIncompatibilitySemicolon => {
+                (Self::TraitIncompatibilitySemicolon, None)
+            }
+            InvalidDeclarationReason::MissingInitializerExpression => {
+                (Self::MissingInitializerExpression, None)
+            }
+        }
+    }
+
+    fn to_reason(self, detail: Option<StringId>) -> Option<InvalidDeclarationReason> {
+        Some(match self {
+            Self::ReservedBuiltinName => InvalidDeclarationReason::ReservedBuiltinName,
+            Self::DeclarationRequiresModuleTopLevel => {
+                InvalidDeclarationReason::DeclarationRequiresModuleTopLevel
+            }
+            Self::ConstantCannotBeMutable => InvalidDeclarationReason::ConstantCannotBeMutable,
+            Self::ExternalTypeLiteralConstruction => {
+                InvalidDeclarationReason::ExternalTypeLiteralConstruction
+            }
+            Self::ParameterizedGenericTypeAlias => {
+                InvalidDeclarationReason::ParameterizedGenericTypeAlias
+            }
+            Self::UnusedGenericParameter => InvalidDeclarationReason::UnusedGenericParameter {
+                parameter_name: detail?,
+            },
+            Self::RecursiveGenericType => InvalidDeclarationReason::RecursiveGenericType,
+            // The cycle is carried separately in this family's `StringIds` extra.
+            Self::RecursiveRuntimeStruct => {
+                InvalidDeclarationReason::RecursiveRuntimeStruct { cycle: Vec::new() }
+            }
+            Self::ExternalTypeAlias => {
+                InvalidDeclarationReason::ExternalTypeAlias { type_name: detail? }
+            }
+            Self::InvalidGenericParameterName => {
+                InvalidDeclarationReason::InvalidGenericParameterName {
+                    parameter_name: detail?,
+                }
+            }
+            Self::DuplicateGenericParameter => {
+                InvalidDeclarationReason::DuplicateGenericParameter {
+                    parameter_name: detail?,
+                }
+            }
+            Self::GenericParameterNameCollision => {
+                InvalidDeclarationReason::GenericParameterNameCollision {
+                    parameter_name: detail?,
+                }
+            }
+            Self::ReservedGenericParameterName => {
+                InvalidDeclarationReason::ReservedGenericParameterName {
+                    parameter_name: detail?,
+                }
+            }
+            Self::GenericTraitsUnsupported => InvalidDeclarationReason::GenericTraitsUnsupported,
+            Self::InvalidTraitName => InvalidDeclarationReason::InvalidTraitName,
+            Self::TraitConformanceMissingTrait => {
+                InvalidDeclarationReason::TraitConformanceMissingTrait
+            }
+            Self::TraitConformanceSemicolon => InvalidDeclarationReason::TraitConformanceSemicolon,
+            Self::TraitIncompatibilityMissingTrait => {
+                InvalidDeclarationReason::TraitIncompatibilityMissingTrait
+            }
+            Self::TraitIncompatibilitySemicolon => {
+                InvalidDeclarationReason::TraitIncompatibilitySemicolon
+            }
+            Self::MissingInitializerExpression => {
+                InvalidDeclarationReason::MissingInitializerExpression
+            }
+        })
+    }
+}
+
+pub(crate) fn decode_invalid_declaration_reason(
+    code: InvalidDeclarationCode,
+    detail: Option<StringId>,
+) -> Option<InvalidDeclarationReason> {
+    code.to_reason(detail)
+}
+
+unit_code! {
+    pub(crate) enum DeferredFeatureCode {
+        NamedFeature = 1,
+        CaptureTaggedPattern = 2,
+        NegatedMatchPattern = 3,
+        NamedPayloadPatternAssignment = 4,
+        NestedPayloadPattern = 5,
+        ChoiceVariantDefaultValue = 6,
+        GenericReceiverMethod = 7,
+        DeclaredRegion = 8,
+        CheckedBlock = 9,
+        AsyncBlock = 10,
+        RuntimeAnonymousRecord = 11,
+    }
+}
+
+impl DeferredFeatureCode {
+    pub(crate) fn of(reason: &DeferredFeatureReason) -> Self {
+        Self::split(reason).0
+    }
+
+    fn split(reason: &DeferredFeatureReason) -> (Self, Option<StringId>) {
+        match reason {
+            DeferredFeatureReason::NamedFeature { feature } => (Self::NamedFeature, Some(*feature)),
+            DeferredFeatureReason::CaptureTaggedPattern => (Self::CaptureTaggedPattern, None),
+            DeferredFeatureReason::NegatedMatchPattern => (Self::NegatedMatchPattern, None),
+            DeferredFeatureReason::NamedPayloadPatternAssignment => {
+                (Self::NamedPayloadPatternAssignment, None)
+            }
+            DeferredFeatureReason::NestedPayloadPattern => (Self::NestedPayloadPattern, None),
+            DeferredFeatureReason::ChoiceVariantDefaultValue => {
+                (Self::ChoiceVariantDefaultValue, None)
+            }
+            DeferredFeatureReason::GenericReceiverMethod => (Self::GenericReceiverMethod, None),
+            DeferredFeatureReason::DeclaredRegion => (Self::DeclaredRegion, None),
+            DeferredFeatureReason::CheckedBlock => (Self::CheckedBlock, None),
+            DeferredFeatureReason::AsyncBlock => (Self::AsyncBlock, None),
+            DeferredFeatureReason::RuntimeAnonymousRecord => (Self::RuntimeAnonymousRecord, None),
+        }
+    }
+
+    pub(crate) fn to_reason(self, feature: Option<StringId>) -> Option<DeferredFeatureReason> {
+        Some(match self {
+            Self::NamedFeature => DeferredFeatureReason::NamedFeature { feature: feature? },
+            Self::CaptureTaggedPattern => DeferredFeatureReason::CaptureTaggedPattern,
+            Self::NegatedMatchPattern => DeferredFeatureReason::NegatedMatchPattern,
+            Self::NamedPayloadPatternAssignment => {
+                DeferredFeatureReason::NamedPayloadPatternAssignment
+            }
+            Self::NestedPayloadPattern => DeferredFeatureReason::NestedPayloadPattern,
+            Self::ChoiceVariantDefaultValue => DeferredFeatureReason::ChoiceVariantDefaultValue,
+            Self::GenericReceiverMethod => DeferredFeatureReason::GenericReceiverMethod,
+            Self::DeclaredRegion => DeferredFeatureReason::DeclaredRegion,
+            Self::CheckedBlock => DeferredFeatureReason::CheckedBlock,
+            Self::AsyncBlock => DeferredFeatureReason::AsyncBlock,
+            Self::RuntimeAnonymousRecord => DeferredFeatureReason::RuntimeAnonymousRecord,
+        })
     }
 }
 unit_code! {
@@ -193,6 +439,66 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn duplicate_de
         cursor.push::<StringFact>(&name)
     })
 }
+
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn shadowed_name(
+    name: StringId,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    DiagnosticDraft::with_facts(&SHADOWED_NAME, span, |cursor| {
+        cursor.push::<StringFact>(&name)
+    })
+}
+
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_assignment_target(
+    reason: InvalidAssignmentTargetReason,
+    target_name: Option<StringId>,
+    _target_type: Option<crate::compiler_frontend::datatypes::ids::TypeId>,
+    field_name: Option<StringId>,
+    root_binding_name: Option<StringId>,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    DiagnosticDraft::with_facts(&INVALID_ASSIGNMENT_TARGET, span, |cursor| {
+        cursor.push::<UnitFact<InvalidAssignmentTargetReason>>(&reason)?;
+        cursor.push::<OptStringFact>(&target_name)?;
+        cursor.push::<OptStringFact>(&field_name)?;
+        cursor.push::<OptStringFact>(&root_binding_name)
+    })
+}
+
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_declaration(
+    reason: InvalidDeclarationReason,
+    name: Option<StringId>,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    let (code, detail) = InvalidDeclarationCode::split(&reason);
+    let draft = DiagnosticDraft::with_facts(&INVALID_DECLARATION, span, |cursor| {
+        cursor.push::<UnitFact<InvalidDeclarationCode>>(&code)?;
+        cursor.push::<OptStringFact>(&name)?;
+        cursor.push::<OptStringFact>(&detail)
+    });
+    match reason {
+        InvalidDeclarationReason::RecursiveRuntimeStruct { cycle } => draft.with_string_ids(cycle),
+        _ => draft,
+    }
+}
+
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn deferred_feature(
+    feature: StringId,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    deferred_feature_reason(DeferredFeatureReason::NamedFeature { feature }, span)
+}
+
+pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn deferred_feature_reason(
+    reason: DeferredFeatureReason,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    let (code, feature) = DeferredFeatureCode::split(&reason);
+    DiagnosticDraft::with_facts(&DEFERRED_FEATURE, span, |cursor| {
+        cursor.push::<UnitFact<DeferredFeatureCode>>(&code)?;
+        cursor.push::<OptStringFact>(&feature)
+    })
+}
 /// The invalid-type-annotation draft preserves its context, reason code and optional found token.
 pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_type_annotation(
     context: TypeAnnotationContext,
@@ -304,6 +610,54 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidTopLevelRuntimeStatement),
             DiagnosticPayload::None,
         ) => Some(invalid_top_level_runtime_statement(span)),
+        (
+            DiagnosticKind::Rule(RuleDiagnosticKind::InvalidStructDefaultValue),
+            DiagnosticPayload::InvalidStructDefaultValue,
+        ) => Some(invalid_struct_default_value(span)),
+        (
+            DiagnosticKind::Rule(RuleDiagnosticKind::MissingDeclarationInitializer),
+            DiagnosticPayload::MissingDeclarationInitializer { name },
+        ) => Some(missing_declaration_initializer(*name, span)),
+        (
+            DiagnosticKind::Rule(RuleDiagnosticKind::ConstRecordUsedAsValue),
+            DiagnosticPayload::ConstRecordUsedAsValue { record_name },
+        ) => Some(const_record_used_as_value(*record_name, span)),
+        (
+            DiagnosticKind::Rule(RuleDiagnosticKind::ShadowedName),
+            DiagnosticPayload::ShadowedName { name },
+        ) => Some(shadowed_name(*name, span)),
+        (
+            DiagnosticKind::Rule(RuleDiagnosticKind::ReservedNameCollision),
+            DiagnosticPayload::ReservedNameCollision { name, reserved_by },
+        ) => Some(reserved_name_collision(*name, *reserved_by, span)),
+        (
+            DiagnosticKind::Rule(RuleDiagnosticKind::InvalidAssignmentTarget),
+            DiagnosticPayload::InvalidAssignmentTarget {
+                reason,
+                target_name,
+                target_type,
+                field_name,
+                root_binding_name,
+            },
+        ) => Some(invalid_assignment_target(
+            *reason,
+            *target_name,
+            *target_type,
+            *field_name,
+            *root_binding_name,
+            span,
+        )),
+        (
+            DiagnosticKind::Rule(RuleDiagnosticKind::InvalidDeclaration),
+            DiagnosticPayload::InvalidDeclaration { reason, name },
+        ) => Some(invalid_declaration(reason.clone(), *name, span)),
+        (
+            DiagnosticKind::DeferredFeature(DeferredFeatureDiagnosticKind::DeferredFeature),
+            DiagnosticPayload::DeferredFeature { reason },
+        ) => Some(match reason {
+            DeferredFeatureReason::NamedFeature { feature } => deferred_feature(*feature, span),
+            _ => deferred_feature_reason(reason.clone(), span),
+        }),
         _ => None,
     }
 }
@@ -416,18 +770,34 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    identity INVALID_STRUCT_DEFAULT_VALUE {
+    pilot INVALID_STRUCT_DEFAULT_VALUE {
         internal: 3030,
         stable: "MOTH-RULE-0030",
         category: DiagnosticCategory::Rule,
+        severity: DiagnosticSeverity::Error,
+        title: "Invalid struct default value",
+        facts: [],
+        labels: [],
+        extra: None,
+        ctor: generated invalid_struct_default_value,
+        view: InvalidStructDefaultValueView,
+        render: render_invalid_struct_default_value,
     }
 }
 
 diagnostic_family! {
-    identity MISSING_DECLARATION_INITIALIZER {
+    pilot MISSING_DECLARATION_INITIALIZER {
         internal: 3031,
         stable: "MOTH-RULE-0031",
         category: DiagnosticCategory::Rule,
+        severity: DiagnosticSeverity::Error,
+        title: "Missing declaration initializer",
+        facts: [name: StringFact],
+        labels: [],
+        extra: None,
+        ctor: generated missing_declaration_initializer,
+        view: MissingDeclarationInitializerView,
+        render: render_missing_declaration_initializer,
     }
 }
 
@@ -472,50 +842,115 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    identity SHADOWED_NAME {
+    pilot SHADOWED_NAME {
         internal: 3038,
         stable: "MOTH-RULE-0038",
         category: DiagnosticCategory::Rule,
+        severity: DiagnosticSeverity::Error,
+        title: "Shadowed name",
+        facts: [name: StringFact],
+        labels: [LabelMessageCode::PREVIOUS_DECLARATION],
+        extra: None,
+        ctor: manual,
+        view: ShadowedNameView,
+        render: render_shadowed_name,
     }
 }
 
 diagnostic_family! {
-    identity RESERVED_NAME_COLLISION {
+    pilot RESERVED_NAME_COLLISION {
         internal: 3039,
         stable: "MOTH-RULE-0039",
         category: DiagnosticCategory::Rule,
+        severity: DiagnosticSeverity::Error,
+        title: "Reserved name collision",
+        facts: [
+            name: StringFact,
+            reserved_by: UnitFact<ReservedNameOwner>,
+        ],
+        labels: [],
+        extra: None,
+        ctor: generated reserved_name_collision,
+        view: ReservedNameCollisionView,
+        render: render_reserved_name_collision,
     }
 }
 
+// For RecursiveRuntimeStruct, StringIds stores each cycle path's final component in traversal
+// order, without a repeated closing entry.
 diagnostic_family! {
-    identity INVALID_DECLARATION {
+    pilot INVALID_DECLARATION {
         internal: 3043,
         stable: "MOTH-RULE-0043",
         category: DiagnosticCategory::Rule,
+        severity: DiagnosticSeverity::Error,
+        title: "Invalid declaration",
+        facts: [
+            code: UnitFact<InvalidDeclarationCode>,
+            name: OptStringFact,
+            detail: OptStringFact,
+        ],
+        labels: [],
+        extra: StringIds,
+        ctor: manual,
+        view: InvalidDeclarationView,
+        render: render_invalid_declaration,
     }
 }
 
 diagnostic_family! {
-    identity INVALID_ASSIGNMENT_TARGET {
+    pilot INVALID_ASSIGNMENT_TARGET {
         internal: 3044,
         stable: "MOTH-RULE-0044",
         category: DiagnosticCategory::Rule,
+        severity: DiagnosticSeverity::Error,
+        title: "Invalid assignment target",
+        facts: [
+            reason: UnitFact<InvalidAssignmentTargetReason>,
+            target_name: OptStringFact,
+            field_name: OptStringFact,
+            root_binding_name: OptStringFact,
+        ],
+        labels: [LabelMessageCode::IMMUTABLE_BINDING_DECLARATION],
+        extra: None,
+        ctor: manual,
+        view: InvalidAssignmentTargetView,
+        render: render_invalid_assignment_target,
     }
 }
 
 diagnostic_family! {
-    identity CONST_RECORD_USED_AS_VALUE {
+    pilot CONST_RECORD_USED_AS_VALUE {
         internal: 3068,
         stable: "MOTH-RULE-0068",
         category: DiagnosticCategory::Rule,
+        severity: DiagnosticSeverity::Error,
+        title: "Const record used as value",
+        facts: [record_name: StringFact],
+        labels: [],
+        extra: None,
+        ctor: generated const_record_used_as_value,
+        view: ConstRecordUsedAsValueView,
+        render: render_const_record_used_as_value,
     }
 }
 
 diagnostic_family! {
-    identity DEFERRED_FEATURE {
+    pilot DEFERRED_FEATURE {
         internal: 7001,
         stable: "MOTH-DEFERRED-0001",
         category: DiagnosticCategory::DeferredFeature,
+        severity: DiagnosticSeverity::Error,
+        title: "Deferred feature",
+        facts: [
+            code: UnitFact<DeferredFeatureCode>,
+            feature: OptStringFact,
+        ],
+        labels: [],
+        extra: None,
+        ctor: manual,
+        view: DeferredFeatureView,
+        render: render_deferred_feature,
     }
 }
 

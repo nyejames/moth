@@ -9,15 +9,17 @@ use super::{
     namespace_misuse_message, token_kind_name, unknown_name_message,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
-    DuplicateDeclarationView, IdentifierNamingConventionView, InvalidSignatureMemberView,
-    ReservedBuiltinNameView, TypeUsedAsValueView, UnknownNameView, UnknownTypeNameView,
-    UnknownValueNameView, ValueUsedAsTypeView,
+    DuplicateDeclarationView, IdentifierNamingConventionView, InvalidDeclarationCode,
+    InvalidDeclarationView, InvalidSignatureMemberView, InvalidStructDefaultValueView,
+    MissingDeclarationInitializerView, ReservedBuiltinNameView, ReservedNameCollisionView,
+    ShadowedNameView, TypeUsedAsValueView, UnknownNameView, UnknownTypeNameView,
+    UnknownValueNameView, ValueUsedAsTypeView, decode_invalid_declaration_reason,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
     InvalidDeclarationReason, InvalidFunctionSignatureReason, InvalidGenericInstantiationReason,
     InvalidReceiverDeclarationReason, InvalidSignatureMemberReason, NameNamespace,
-    NamingConvention,
+    NamingConvention, ReservedNameOwner,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
@@ -119,6 +121,55 @@ pub(crate) fn render_reserved_builtin_name(
     }
 }
 
+fn shadowed_name_message(name: StringId, string_table: &dyn StringTableResolver) -> String {
+    format!("Shadowed name '{}'", string_table.resolve(name))
+}
+
+pub(crate) fn render_shadowed_name(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &ShadowedNameView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: shadowed_name_message(facts.name, context.string_table),
+        guidance: Vec::new(),
+    }
+}
+
+fn reserved_name_collision_message(
+    name: StringId,
+    reserved_by: ReservedNameOwner,
+    string_table: &dyn StringTableResolver,
+) -> String {
+    let owner = match reserved_by {
+        ReservedNameOwner::BuiltinType => "builtin type",
+        ReservedNameOwner::Keyword => "keyword",
+        ReservedNameOwner::CoreTrait => "core trait",
+        ReservedNameOwner::ImplicitStart => "compiler-owned entry point",
+        ReservedNameOwner::ParameterContract => "compiler-owned parameter contract",
+    };
+    format!(
+        "Reserved name collision: '{}' is a reserved {}",
+        string_table.resolve(name),
+        owner
+    )
+}
+
+pub(crate) fn render_reserved_name_collision(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &ReservedNameCollisionView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: reserved_name_collision_message(
+            facts.name,
+            facts.reserved_by,
+            context.string_table,
+        ),
+        guidance: Vec::new(),
+    }
+}
+
 pub(crate) fn invalid_function_signature_message(
     reason: &InvalidFunctionSignatureReason,
     string_table: &dyn StringTableResolver,
@@ -180,6 +231,7 @@ pub(crate) fn invalid_declaration_message(
     reason: InvalidDeclarationReason,
     name: Option<StringId>,
     string_table: &dyn StringTableResolver,
+    cycle_ids: Option<&[StringId]>,
 ) -> String {
     let name_text = name
         .map(|name| format!("'{}'", string_table.resolve(name)))
@@ -213,7 +265,15 @@ pub(crate) fn invalid_declaration_message(
             )
         }
         InvalidDeclarationReason::RecursiveRuntimeStruct { cycle } => {
-            format!("Recursive runtime struct definitions are not supported in v1. Cycle: {cycle}")
+            let cycle = cycle_ids.unwrap_or(cycle.as_slice());
+            let mut cycle_text = String::new();
+            for (index, component) in cycle.iter().enumerate() {
+                if index > 0 {
+                    cycle_text.push_str(" -> ");
+                }
+                cycle_text.push_str(string_table.resolve(*component));
+            }
+            format!("Recursive runtime struct definitions are not supported in v1. Cycle: {cycle_text}")
         }
         InvalidDeclarationReason::ExternalTypeAlias { type_name } => {
             let type_name_str = string_table.resolve(type_name);
@@ -261,6 +321,56 @@ pub(crate) fn invalid_declaration_message(
         InvalidDeclarationReason::MissingInitializerExpression => {
             format!("Declaration {name_text} is missing an initializer expression after '='.")
         }
+    }
+}
+
+pub(crate) fn render_invalid_declaration(
+    diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidDeclarationView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = decode_invalid_declaration_reason(facts.code, facts.detail)
+        .expect("invalid declaration code stores its required detail");
+    let cycle_ids = match facts.code {
+        InvalidDeclarationCode::RecursiveRuntimeStruct => Some(diagnostic.string_ids()),
+        _ => None,
+    };
+
+    RenderedPayload {
+        message: invalid_declaration_message(reason, facts.name, context.string_table, cycle_ids),
+        guidance: Vec::new(),
+    }
+}
+
+pub(crate) fn render_invalid_struct_default_value(
+    _diagnostic: &DiagnosticView<'_>,
+    _facts: &InvalidStructDefaultValueView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: "Invalid struct default value".to_owned(),
+        guidance: Vec::new(),
+    }
+}
+
+fn missing_declaration_initializer_message(
+    name: StringId,
+    string_table: &dyn StringTableResolver,
+) -> String {
+    format!(
+        "Declaration '{}' requires '=' followed by an initializer expression.",
+        string_table.resolve(name)
+    )
+}
+
+pub(crate) fn render_missing_declaration_initializer(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &MissingDeclarationInitializerView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: missing_declaration_initializer_message(facts.name, context.string_table),
+        guidance: Vec::new(),
     }
 }
 

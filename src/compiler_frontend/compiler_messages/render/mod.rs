@@ -40,10 +40,12 @@ pub(crate) use suggestions::*;
 pub(crate) use syntax::*;
 pub(crate) use templates::*;
 
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::DeferredFeatureView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
     InvalidTemplateDirectiveCode, InvalidTemplateDirectiveView, MalformedCssTemplateView,
     MalformedHtmlTemplateView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
     AstCapacityResource, BorrowAccessKind, CapacityResource, CssTemplateWarning,
     DeferredFeatureReason, DiagnosticOperator, DiagnosticPlace, GenericApplicationErrorReason,
@@ -769,6 +771,21 @@ pub(crate) fn deferred_feature_message(
     }
 
     deferred_feature_static_message(reason).to_owned()
+}
+
+pub(crate) fn render_deferred_feature(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &DeferredFeatureView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = facts
+        .code
+        .to_reason(facts.feature)
+        .expect("a deferred-feature code stores its required data");
+    RenderedPayload {
+        message: deferred_feature_message(&reason, context.string_table),
+        guidance: Vec::new(),
+    }
 }
 
 fn deferred_feature_static_message(reason: &DeferredFeatureReason) -> &'static str {

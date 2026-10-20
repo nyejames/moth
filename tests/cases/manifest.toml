@@ -11670,6 +11670,13 @@ contract = "language.structs.unresolved_field_type_rejected"
 role = "primary"
 
 [[case]]
+id = "struct_recursive_runtime_cycle_rejected"
+path = "struct_recursive_runtime_cycle_rejected"
+tags = ["integration", "diagnostics", "structs"]
+contract = "language.structs.recursive_runtime_cycle_rejected"
+role = "primary"
+
+[[case]]
 id = "value_if_declaration_init"
 path = "value_if_declaration_init"
 tags = ["integration", "language", "value-blocks", "if", "regression"]

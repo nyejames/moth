@@ -8,6 +8,7 @@ use super::{
     named_value_or_default,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidMultiBindView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::InvalidAssignmentTargetView;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
     InvalidAssignmentTargetReason, InvalidBuiltinCallReason, InvalidCallShapeReason,
@@ -264,6 +265,24 @@ pub(crate) fn invalid_assignment_target_message(
         InvalidAssignmentTargetReason::MutableMarkerOnAssignmentTarget => {
             "`~` is not written on assignment targets. Reassignment uses ordinary `=` and requires an already-mutable binding.".to_string()
         }
+    }
+}
+
+pub(crate) fn render_invalid_assignment_target(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidAssignmentTargetView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_assignment_target_message(
+            facts.reason,
+            facts.target_name,
+            None,
+            facts.field_name,
+            facts.root_binding_name,
+            context,
+        ),
+        guidance: Vec::new(),
     }
 }
 

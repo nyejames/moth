@@ -22,8 +22,7 @@ use super::synthetic_build_results::{
 use crate::build_system::build::{BuildResult, FileKind};
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage, InvalidAssignmentTargetReason,
-    InvalidOutputFolderReason,
+    CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidOutputFolderReason,
 };
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceSpan,
@@ -129,20 +128,15 @@ fn failure_message_contains_includes_rendered_label_text() {
     source_database
         .retain_text(source_id, "value\n".to_owned())
         .expect("label source text should be retained");
-    let label_text = string_table.intern("secondary context lives here");
     let diagnostic = CompilerDiagnostic::invalid_assignment_target(
         InvalidAssignmentTargetReason::ImmutableBinding,
         None,
         None,
         None,
         None,
-        None,
-        None,
-    )
-    .with_labels(vec![DiagnosticLabel::secondary(
         Some(test_span(source_id, 0, 1)),
-        Some(DiagnosticLabelMessage::RenderedText(label_text)),
-    )]);
+        None,
+    );
     let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
     messages.set_source_database(Arc::new(source_database));
     let expectation = FailureExpectation {
@@ -151,7 +145,7 @@ fn failure_message_contains_includes_rendered_label_text() {
         diagnostic_assertions: Vec::new(),
         diagnostic_match: DiagnosticMatchMode::Exact,
         diagnostic_match_reason: None,
-        message_contains: vec!["secondary context lives here".to_string()],
+        message_contains: vec!["immutable binding declared here".to_string()],
     };
 
     let result = validate_failure_result(messages, &expectation, Path::new("."));

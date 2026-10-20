@@ -20,7 +20,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticVi
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticCapacityResource, DiagnosticPayload, InvalidTraitConformanceReason,
     InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, ProjectContextEscapeReason,
-    PublicGenericOwnerKind, ReservedNameOwner, TypeMismatchContext,
+    PublicGenericOwnerKind, TypeMismatchContext,
 };
 
 pub(crate) struct RenderedPayload {
@@ -223,9 +223,6 @@ fn render_payload_message(
         DiagnosticPayload::InvalidConfig { key, reason } => {
             invalid_config_message(*key, reason, string_table)
         }
-        DiagnosticPayload::DeferredFeature { reason } => {
-            deferred_feature_message(reason, string_table)
-        }
         DiagnosticPayload::UnsupportedExternalFunction {
             function_name,
             package_path,
@@ -282,21 +279,11 @@ fn render_payload_message(
             available_variants,
             string_table,
         ),
-        DiagnosticPayload::InvalidStructDefaultValue => "Invalid struct default value".to_owned(),
-        DiagnosticPayload::MissingDeclarationInitializer { name } => {
-            format!(
-                "Declaration '{}' requires '=' followed by an initializer expression.",
-                string_table.resolve(*name)
-            )
-        }
         DiagnosticPayload::CircularDependency { path } => {
             format!("Circular dependency at '{}'", context.render_path(*path))
         }
         DiagnosticPayload::DependencyNamespaceUsedAsValue { record_name } => {
             dependency_namespace_used_as_value_message(*record_name, string_table)
-        }
-        DiagnosticPayload::ConstRecordUsedAsValue { record_name } => {
-            const_record_used_as_value_message(*record_name, string_table)
         }
         DiagnosticPayload::NestedDependencyTraversal { record_name } => {
             nested_dependency_traversal_message(*record_name, string_table)
@@ -388,23 +375,6 @@ fn render_payload_message(
         DiagnosticPayload::TraitNameUsedAsType { trait_name } => {
             trait_name_used_as_type_message(*trait_name, context)
         }
-        DiagnosticPayload::ShadowedName { name } => {
-            format!("Shadowed name '{}'", string_table.resolve(*name))
-        }
-        DiagnosticPayload::ReservedNameCollision { name, reserved_by } => {
-            let owner = match reserved_by {
-                ReservedNameOwner::BuiltinType => "builtin type",
-                ReservedNameOwner::Keyword => "keyword",
-                ReservedNameOwner::CoreTrait => "core trait",
-                ReservedNameOwner::ImplicitStart => "compiler-owned entry point",
-                ReservedNameOwner::ParameterContract => "compiler-owned parameter contract",
-            };
-            format!(
-                "Reserved name collision: '{}' is a reserved {}",
-                string_table.resolve(*name),
-                owner
-            )
-        }
         DiagnosticPayload::InvalidThisUsage { reason } => {
             invalid_this_usage_message(*reason, string_table)
         }
@@ -414,23 +384,6 @@ fn render_payload_message(
         DiagnosticPayload::InvalidControlFlowStatement { reason } => {
             invalid_control_flow_statement_message(*reason)
         }
-        DiagnosticPayload::InvalidDeclaration { reason, name } => {
-            invalid_declaration_message(reason.clone(), *name, string_table)
-        }
-        DiagnosticPayload::InvalidAssignmentTarget {
-            reason,
-            target_name,
-            target_type,
-            field_name,
-            root_binding_name,
-        } => invalid_assignment_target_message(
-            *reason,
-            *target_name,
-            *target_type,
-            *field_name,
-            *root_binding_name,
-            context,
-        ),
         DiagnosticPayload::InvalidValueReceiver {
             receiver,
             target_count,

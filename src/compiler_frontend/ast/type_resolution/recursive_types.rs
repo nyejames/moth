@@ -7,7 +7,7 @@ use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 pub(crate) fn validate_no_recursive_generic_type(
@@ -114,6 +114,7 @@ fn collect_runtime_struct_dependencies(
 pub(crate) fn validate_no_recursive_runtime_structs(
     struct_fields_by_path: &FxHashMap<PathId, Vec<Declaration>>,
     type_environment: &TypeEnvironment,
+    path_fork: &PathInternerFork,
 ) -> TypeResolutionResult<()> {
     // WHY: V1 runtime structs do not support recursive layout semantics yet.
     // These cycles must fail in AST construction with a targeted rule error.
@@ -121,6 +122,7 @@ pub(crate) fn validate_no_recursive_runtime_structs(
         current: &PathId,
         struct_fields_by_path: &FxHashMap<PathId, Vec<Declaration>>,
         type_environment: &TypeEnvironment,
+        path_fork: &PathInternerFork,
         visiting: &mut Vec<PathId>,
         visited: &mut FxHashSet<PathId>,
     ) -> TypeResolutionResult<()> {
@@ -131,9 +133,12 @@ pub(crate) fn validate_no_recursive_runtime_structs(
         if let Some(index) = visiting.iter().position(|path| path == current) {
             let cycle = visiting[index..]
                 .iter()
-                .map(|path| format!("{path:?}"))
-                .collect::<Vec<_>>()
-                .join(" -> ");
+                .map(|path| {
+                    path_fork
+                        .component(*path)
+                        .expect("runtime struct cycle paths must have final components")
+                })
+                .collect::<Vec<_>>();
             let cycle_span = struct_fields_by_path
                 .get(current)
                 .and_then(|fields| fields.first())
@@ -163,6 +168,7 @@ pub(crate) fn validate_no_recursive_runtime_structs(
                             &dependency,
                             struct_fields_by_path,
                             type_environment,
+                            path_fork,
                             visiting,
                             visited,
                         )?;
@@ -184,6 +190,7 @@ pub(crate) fn validate_no_recursive_runtime_structs(
             struct_path,
             struct_fields_by_path,
             type_environment,
+            path_fork,
             &mut visiting,
             &mut visited,
         )?;

@@ -6,7 +6,9 @@
 /// should have one declaration and one owning registry.
 use super::*;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidMultiBindCode;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::InvalidTypeAnnotationCode;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
+    DeferredFeatureCode, InvalidDeclarationCode, InvalidTypeAnnotationCode,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
     CssTemplateWarningCode, HtmlTemplateWarningCode, InvalidTemplateDirectiveCode,
     InvalidTemplateStructureCode,
@@ -295,6 +297,11 @@ macro_rules! define_reasoned_diagnostic_registry {
                             type_name: parameter_name,
                         } => {
                             *parameter_name = remap.get(*parameter_name);
+                        }
+                        InvalidDeclarationReason::RecursiveRuntimeStruct { cycle } => {
+                            for name in cycle {
+                                *name = remap.get(*name);
+                            }
                         }
                         _ => {}
                     }
@@ -1227,26 +1234,30 @@ define_stable_reason_keys! {
     },
 
     InvalidDeclarationReason => {
-    &InvalidDeclarationReason::ReservedBuiltinName => "invalid_declaration.reserved_builtin_name",
-    &InvalidDeclarationReason::DeclarationRequiresModuleTopLevel => "invalid_declaration.declaration_requires_module_top_level",
-    &InvalidDeclarationReason::ConstantCannotBeMutable => "invalid_declaration.constant_cannot_be_mutable",
-    &InvalidDeclarationReason::ExternalTypeLiteralConstruction => "invalid_declaration.external_type_literal_construction",
-    &InvalidDeclarationReason::ParameterizedGenericTypeAlias => "invalid_declaration.parameterized_generic_type_alias",
-    &InvalidDeclarationReason::UnusedGenericParameter { .. } => "invalid_declaration.unused_generic_parameter",
-    &InvalidDeclarationReason::RecursiveGenericType => "invalid_declaration.recursive_generic_type",
-    &InvalidDeclarationReason::RecursiveRuntimeStruct { .. } => "invalid_declaration.recursive_runtime_struct",
-    &InvalidDeclarationReason::ExternalTypeAlias { .. } => "invalid_declaration.external_type_alias",
-    &InvalidDeclarationReason::InvalidGenericParameterName { .. } => "invalid_declaration.invalid_generic_parameter_name",
-    &InvalidDeclarationReason::DuplicateGenericParameter { .. } => "invalid_declaration.duplicate_generic_parameter",
-    &InvalidDeclarationReason::GenericParameterNameCollision { .. } => "invalid_declaration.generic_parameter_name_collision",
-    &InvalidDeclarationReason::ReservedGenericParameterName { .. } => "invalid_declaration.reserved_generic_parameter_name",
-    &InvalidDeclarationReason::GenericTraitsUnsupported => "invalid_declaration.generic_traits_unsupported",
-    &InvalidDeclarationReason::InvalidTraitName => "invalid_declaration.invalid_trait_name",
-    &InvalidDeclarationReason::TraitConformanceMissingTrait => "invalid_declaration.trait_conformance_missing_trait",
-    &InvalidDeclarationReason::TraitConformanceSemicolon => "invalid_declaration.trait_conformance_semicolon",
-    &InvalidDeclarationReason::TraitIncompatibilityMissingTrait => "invalid_declaration.trait_incompatibility_missing_trait",
-    &InvalidDeclarationReason::TraitIncompatibilitySemicolon => "invalid_declaration.trait_incompatibility_semicolon",
-    &InvalidDeclarationReason::MissingInitializerExpression => "invalid_declaration.missing_initializer_expression",
+        @delegate(reason => InvalidDeclarationCode::of(reason).stable_reason_key());
+    },
+
+    InvalidDeclarationCode => {
+        &InvalidDeclarationCode::ReservedBuiltinName => "invalid_declaration.reserved_builtin_name",
+        &InvalidDeclarationCode::DeclarationRequiresModuleTopLevel => "invalid_declaration.declaration_requires_module_top_level",
+        &InvalidDeclarationCode::ConstantCannotBeMutable => "invalid_declaration.constant_cannot_be_mutable",
+        &InvalidDeclarationCode::ExternalTypeLiteralConstruction => "invalid_declaration.external_type_literal_construction",
+        &InvalidDeclarationCode::ParameterizedGenericTypeAlias => "invalid_declaration.parameterized_generic_type_alias",
+        &InvalidDeclarationCode::UnusedGenericParameter => "invalid_declaration.unused_generic_parameter",
+        &InvalidDeclarationCode::RecursiveGenericType => "invalid_declaration.recursive_generic_type",
+        &InvalidDeclarationCode::RecursiveRuntimeStruct => "invalid_declaration.recursive_runtime_struct",
+        &InvalidDeclarationCode::ExternalTypeAlias => "invalid_declaration.external_type_alias",
+        &InvalidDeclarationCode::InvalidGenericParameterName => "invalid_declaration.invalid_generic_parameter_name",
+        &InvalidDeclarationCode::DuplicateGenericParameter => "invalid_declaration.duplicate_generic_parameter",
+        &InvalidDeclarationCode::GenericParameterNameCollision => "invalid_declaration.generic_parameter_name_collision",
+        &InvalidDeclarationCode::ReservedGenericParameterName => "invalid_declaration.reserved_generic_parameter_name",
+        &InvalidDeclarationCode::GenericTraitsUnsupported => "invalid_declaration.generic_traits_unsupported",
+        &InvalidDeclarationCode::InvalidTraitName => "invalid_declaration.invalid_trait_name",
+        &InvalidDeclarationCode::TraitConformanceMissingTrait => "invalid_declaration.trait_conformance_missing_trait",
+        &InvalidDeclarationCode::TraitConformanceSemicolon => "invalid_declaration.trait_conformance_semicolon",
+        &InvalidDeclarationCode::TraitIncompatibilityMissingTrait => "invalid_declaration.trait_incompatibility_missing_trait",
+        &InvalidDeclarationCode::TraitIncompatibilitySemicolon => "invalid_declaration.trait_incompatibility_semicolon",
+        &InvalidDeclarationCode::MissingInitializerExpression => "invalid_declaration.missing_initializer_expression",
     },
 
     InvalidTraitIncompatibilityReason => {
@@ -1523,17 +1534,20 @@ define_stable_reason_keys! {
     },
 
     DeferredFeatureReason => {
-    &DeferredFeatureReason::NamedFeature { .. } => "deferred_feature.named_feature",
-    &DeferredFeatureReason::CaptureTaggedPattern => "deferred_feature.capture_tagged_pattern",
-    &DeferredFeatureReason::NegatedMatchPattern => "deferred_feature.negated_match_pattern",
-    &DeferredFeatureReason::NamedPayloadPatternAssignment => "deferred_feature.named_payload_pattern_assignment",
-    &DeferredFeatureReason::NestedPayloadPattern => "deferred_feature.nested_payload_pattern",
-    &DeferredFeatureReason::ChoiceVariantDefaultValue => "deferred_feature.choice_variant_default_value",
-    &DeferredFeatureReason::GenericReceiverMethod => "deferred_feature.generic_receiver_method",
-    &DeferredFeatureReason::DeclaredRegion => "deferred_feature.declared_region",
-    &DeferredFeatureReason::CheckedBlock => "deferred_feature.checked_block",
-    &DeferredFeatureReason::AsyncBlock => "deferred_feature.async_block",
-    &DeferredFeatureReason::RuntimeAnonymousRecord => "deferred_feature.runtime_anonymous_record",
+        @delegate(reason => DeferredFeatureCode::of(reason).stable_reason_key());
+    },
+    DeferredFeatureCode => {
+        &DeferredFeatureCode::NamedFeature => "deferred_feature.named_feature",
+        &DeferredFeatureCode::CaptureTaggedPattern => "deferred_feature.capture_tagged_pattern",
+        &DeferredFeatureCode::NegatedMatchPattern => "deferred_feature.negated_match_pattern",
+        &DeferredFeatureCode::NamedPayloadPatternAssignment => "deferred_feature.named_payload_pattern_assignment",
+        &DeferredFeatureCode::NestedPayloadPattern => "deferred_feature.nested_payload_pattern",
+        &DeferredFeatureCode::ChoiceVariantDefaultValue => "deferred_feature.choice_variant_default_value",
+        &DeferredFeatureCode::GenericReceiverMethod => "deferred_feature.generic_receiver_method",
+        &DeferredFeatureCode::DeclaredRegion => "deferred_feature.declared_region",
+        &DeferredFeatureCode::CheckedBlock => "deferred_feature.checked_block",
+        &DeferredFeatureCode::AsyncBlock => "deferred_feature.async_block",
+        &DeferredFeatureCode::RuntimeAnonymousRecord => "deferred_feature.runtime_anonymous_record",
     },
 
     InvalidPageMetadataReason => {

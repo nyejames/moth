@@ -627,6 +627,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         validate_no_recursive_runtime_structs(
             &self.resolved_struct_fields_by_path,
             &self.type_environment,
+            &*self.path_fork,
         )
         .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
 
