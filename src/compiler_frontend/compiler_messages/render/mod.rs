@@ -40,6 +40,10 @@ pub(crate) use suggestions::*;
 pub(crate) use syntax::*;
 pub(crate) use templates::*;
 
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::{
+    InvalidCollectionTypeView, InvalidMapLiteralView, InvalidMapTypeCode, InvalidMapTypeView,
+    InvalidRangeOperandView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::DeferredFeatureView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
     InvalidPageMetadataView, UnsupportedBuilderPackageView,
@@ -56,11 +60,10 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidChoiceVariantReason, InvalidCollectionTypeReason, InvalidCompileTimePathReason,
     InvalidConfigReason, InvalidDependencyClauseReason, InvalidExpressionReason,
     InvalidExternalModuleReason, InvalidGenericParameterReason, InvalidImportPathReason,
-    InvalidMapLiteralReason, InvalidMapTypeReason, InvalidMutableAccessReason,
-    InvalidOutputFolderReason, InvalidPageMetadataReason, InvalidRangeOperandReason,
-    InvalidRouteOutputReason, InvalidTemplateDirectiveReason, MalformedTemplateReason,
-    NameNamespace, NamespaceTypeValueMisuseKind, PathKind, RangeOperandKind,
-    SourceSpanCapacityResource,
+    InvalidMapLiteralReason, InvalidMutableAccessReason, InvalidOutputFolderReason,
+    InvalidPageMetadataReason, InvalidRangeOperandReason, InvalidRouteOutputReason,
+    InvalidTemplateDirectiveReason, MalformedTemplateReason, NameNamespace,
+    NamespaceTypeValueMisuseKind, PathKind, RangeOperandKind, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::compiler_messages::{DiagnosticToken, TokenDescriptorPayload};
 use crate::compiler_frontend::datatypes::display::TypeDisplayView;
@@ -240,34 +243,69 @@ pub(crate) fn invalid_collection_type_message(reason: InvalidCollectionTypeReaso
     }
 }
 
+/// WHAT: renders collection-type diagnostics from a typed reason code and its details.
+/// WHY: the compact row preserves all fields needed to rebuild the legacy message reason.
+pub(crate) fn render_invalid_collection_type(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &InvalidCollectionTypeView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = view.reason.to_reason(view.capacity, view.length);
+    RenderedPayload {
+        message: invalid_collection_type_message(reason).to_owned(),
+        guidance: Vec::new(),
+    }
+}
+
 pub(crate) fn invalid_map_type_message(
-    reason: InvalidMapTypeReason,
-    context: DiagnosticRenderContext,
+    reason: InvalidMapTypeCode,
+    key_type_name: Option<String>,
+    depth: Option<usize>,
 ) -> String {
     match reason {
-        InvalidMapTypeReason::UnsupportedKeyType { key_type } => {
-            let type_name = diagnostic_type_name(key_type, context);
+        InvalidMapTypeCode::UnsupportedKeyType => {
+            let type_name = key_type_name.expect("unsupported-key code stores its key type");
             format!(
                 "Map key type '{type_name}' is not supported. Builtin hashmap keys are limited to String, Bool, Char, I8, I16, I32, I64, U8, U16, U32, U64, and Byte. Use a package or user-defined map type for custom key behavior."
             )
         }
-        InvalidMapTypeReason::ExcessiveInlineNesting { depth } => {
+        InvalidMapTypeCode::ExcessiveInlineNesting => {
+            let depth = depth.expect("nested-map code stores its depth");
             format!(
                 "Map types nested {depth} levels deep are not allowed inline. Use a type alias instead."
             )
         }
-        InvalidMapTypeReason::EmptyMapKeyType => {
+        InvalidMapTypeCode::EmptyMapKeyType => {
             "Map type is missing the key type before the '=' separator.".to_owned()
         }
-        InvalidMapTypeReason::EmptyMapValueType => {
+        InvalidMapTypeCode::EmptyMapValueType => {
             "Map type is missing the value type after the '=' separator.".to_owned()
         }
-        InvalidMapTypeReason::MultipleMapSeparators => {
+        InvalidMapTypeCode::MultipleMapSeparators => {
             "Map type can only contain one top-level '=' separator.".to_owned()
         }
-        InvalidMapTypeReason::FixedCapacityNotAllowed => {
+        InvalidMapTypeCode::FixedCapacityNotAllowed => {
             "Fixed or capacity map syntax is outside Moth's builtin hashmap design.".to_owned()
         }
+    }
+}
+
+/// WHAT: renders map-type diagnostics from compact type displays and their reason code.
+/// WHY: the stored type display cannot be converted back to a legacy raw `TypeId`.
+pub(crate) fn render_invalid_map_type(
+    diagnostic: &DiagnosticView<'_>,
+    view: &InvalidMapTypeView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let path_table = context.path_table();
+    let key_type_name = view.key_type.map(|type_id| {
+        diagnostic
+            .types()
+            .display_for_render(type_id, context.string_table, path_table)
+    });
+    RenderedPayload {
+        message: invalid_map_type_message(view.reason, key_type_name, view.depth),
+        guidance: Vec::new(),
     }
 }
 
@@ -285,6 +323,18 @@ pub(crate) fn invalid_map_literal_message(reason: InvalidMapLiteralReason) -> St
         InvalidMapLiteralReason::MissingValueExpression => {
             "Map literal entry is missing a value expression after '='.".to_owned()
         }
+    }
+}
+/// WHAT: renders a map-literal diagnostic from its unit reason.
+/// WHY: the compact row stores the same reason consumed by the legacy message helper.
+pub(crate) fn render_invalid_map_literal(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &InvalidMapLiteralView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_map_literal_message(view.reason),
+        guidance: Vec::new(),
     }
 }
 
@@ -829,25 +879,41 @@ fn deferred_feature_static_message(reason: &DeferredFeatureReason) -> &'static s
 
 pub(crate) fn invalid_range_operand_message(
     operand: RangeOperandKind,
-    found_type: TypeId,
+    found_type_name: &str,
     reason: InvalidRangeOperandReason,
-    context: DiagnosticRenderContext<'_>,
 ) -> String {
     let operand_name = match operand {
         RangeOperandKind::Start => "start",
         RangeOperandKind::End => "end",
         RangeOperandKind::Step => "step",
     };
-    let type_name = diagnostic_type_name(found_type, context);
     match reason {
         InvalidRangeOperandReason::NotNumeric => {
             format!(
-                "Range {operand_name} must be an integer or binary-float type. Found '{type_name}'"
+                "Range {operand_name} must be an integer or binary-float type. Found '{found_type_name}'"
             )
         }
         InvalidRangeOperandReason::IncompatibleDomain => format!(
-            "Range {operand_name} type '{type_name}' has no shared numeric domain with the other range operands. Integer and binary-float operands do not mix, and integer operands need one type that holds every operand's range. Convert the operand explicitly with `cast` at a typed declaration."
+            "Range {operand_name} type '{found_type_name}' has no shared numeric domain with the other range operands. Integer and binary-float operands do not mix, and integer operands need one type that holds every operand's range. Convert the operand explicitly with `cast` at a typed declaration."
         ),
+    }
+}
+
+/// WHAT: renders a range operand diagnostic from its compact facts.
+/// WHY: the type snapshot supplies the same source-facing type name after compaction.
+pub(crate) fn render_invalid_range_operand(
+    diagnostic: &DiagnosticView<'_>,
+    view: &InvalidRangeOperandView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let found_type_name = diagnostic.types().display_for_render(
+        view.found_type,
+        context.string_table,
+        context.path_table(),
+    );
+    RenderedPayload {
+        message: invalid_range_operand_message(view.operand, &found_type_name, view.reason),
+        guidance: Vec::new(),
     }
 }
 

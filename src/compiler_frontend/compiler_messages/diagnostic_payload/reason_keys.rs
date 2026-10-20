@@ -5,7 +5,10 @@
 /// WHY: diagnostic identity must remain independent of rendered wording, while each key spelling
 /// should have one declaration and one owning registry.
 use super::*;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidMultiBindCode;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::{
+    InvalidCallShapeCode, InvalidCollectionTypeCode, InvalidMapTypeCode, InvalidMultiBindCode,
+    InvalidReturnShapeCode,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::InvalidImportPathCode;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
     DeferredFeatureCode, InvalidDeclarationCode, InvalidTypeAnnotationCode,
@@ -1051,25 +1054,31 @@ define_stable_reason_keys! {
     },
 
     InvalidCollectionTypeReason => {
-    &InvalidCollectionTypeReason::NegativeCapacity => "invalid_collection_type.negative_capacity",
-    &InvalidCollectionTypeReason::ShorthandCapacityNotAllowed => "invalid_collection_type.shorthand_capacity_not_allowed",
-    &InvalidCollectionTypeReason::ZeroCapacity => "invalid_collection_type.zero_capacity",
-    &InvalidCollectionTypeReason::CapacityNotInt => "invalid_collection_type.capacity_not_int",
-    &InvalidCollectionTypeReason::CapacityNotConstant => "invalid_collection_type.capacity_not_constant",
-    &InvalidCollectionTypeReason::CapacityOverflow => "invalid_collection_type.capacity_overflow",
-    &InvalidCollectionTypeReason::InitializerExceedsFixedCapacity { .. } => "invalid_collection_type.initializer_exceeds_fixed_capacity",
-    &InvalidCollectionTypeReason::EmptyImmutableFixedCollection => "invalid_collection_type.empty_immutable_fixed_collection",
-    &InvalidCollectionTypeReason::ShorthandEmptyLiteralAmbiguous => "invalid_collection_type.shorthand_empty_literal_ambiguous",
-    &InvalidCollectionTypeReason::ShorthandNonLiteralRhs => "invalid_collection_type.shorthand_non_literal_rhs",
+        @delegate(reason => InvalidCollectionTypeCode::of(reason).stable_reason_key());
+    },
+    InvalidCollectionTypeCode => {
+        &InvalidCollectionTypeCode::NegativeCapacity => "invalid_collection_type.negative_capacity",
+        &InvalidCollectionTypeCode::ShorthandCapacityNotAllowed => "invalid_collection_type.shorthand_capacity_not_allowed",
+        &InvalidCollectionTypeCode::ZeroCapacity => "invalid_collection_type.zero_capacity",
+        &InvalidCollectionTypeCode::CapacityNotInt => "invalid_collection_type.capacity_not_int",
+        &InvalidCollectionTypeCode::CapacityNotConstant => "invalid_collection_type.capacity_not_constant",
+        &InvalidCollectionTypeCode::CapacityOverflow => "invalid_collection_type.capacity_overflow",
+        &InvalidCollectionTypeCode::InitializerExceedsFixedCapacity => "invalid_collection_type.initializer_exceeds_fixed_capacity",
+        &InvalidCollectionTypeCode::EmptyImmutableFixedCollection => "invalid_collection_type.empty_immutable_fixed_collection",
+        &InvalidCollectionTypeCode::ShorthandEmptyLiteralAmbiguous => "invalid_collection_type.shorthand_empty_literal_ambiguous",
+        &InvalidCollectionTypeCode::ShorthandNonLiteralRhs => "invalid_collection_type.shorthand_non_literal_rhs",
     },
 
     InvalidMapTypeReason => {
-    &InvalidMapTypeReason::UnsupportedKeyType { .. } => "invalid_map_type.unsupported_key_type",
-    &InvalidMapTypeReason::ExcessiveInlineNesting { .. } => "invalid_map_type.excessive_inline_nesting",
-    &InvalidMapTypeReason::EmptyMapKeyType => "invalid_map_type.empty_map_key_type",
-    &InvalidMapTypeReason::EmptyMapValueType => "invalid_map_type.empty_map_value_type",
-    &InvalidMapTypeReason::MultipleMapSeparators => "invalid_map_type.multiple_map_separators",
-    &InvalidMapTypeReason::FixedCapacityNotAllowed => "invalid_map_type.fixed_capacity_not_allowed",
+        @delegate(reason => InvalidMapTypeCode::of(reason).stable_reason_key());
+    },
+    InvalidMapTypeCode => {
+        &InvalidMapTypeCode::UnsupportedKeyType => "invalid_map_type.unsupported_key_type",
+        &InvalidMapTypeCode::ExcessiveInlineNesting => "invalid_map_type.excessive_inline_nesting",
+        &InvalidMapTypeCode::EmptyMapKeyType => "invalid_map_type.empty_map_key_type",
+        &InvalidMapTypeCode::EmptyMapValueType => "invalid_map_type.empty_map_value_type",
+        &InvalidMapTypeCode::MultipleMapSeparators => "invalid_map_type.multiple_map_separators",
+        &InvalidMapTypeCode::FixedCapacityNotAllowed => "invalid_map_type.fixed_capacity_not_allowed",
     },
 
     InvalidMapLiteralReason => {
@@ -1538,32 +1547,38 @@ define_stable_reason_keys! {
     },
 
     InvalidCallShapeReason => {
-    &InvalidCallShapeReason::MissingArgument { .. } => "invalid_call_shape.missing_argument",
-    &InvalidCallShapeReason::ExtraPositionalArgument { .. } => "invalid_call_shape.extra_positional_argument",
-    &InvalidCallShapeReason::DuplicateArgument { .. } => "invalid_call_shape.duplicate_argument",
-    &InvalidCallShapeReason::NamedArgumentNotFound { .. } => "invalid_call_shape.named_argument_not_found",
-    &InvalidCallShapeReason::PositionalAfterNamed => "invalid_call_shape.positional_after_named",
-    &InvalidCallShapeReason::NamedArgumentsNotSupported => "invalid_call_shape.named_arguments_not_supported",
-    &InvalidCallShapeReason::MutableAccessRequired { .. } => "invalid_call_shape.mutable_access_required",
-    &InvalidCallShapeReason::MutableAccessNotAllowed { .. } => "invalid_call_shape.mutable_access_not_allowed",
-    &InvalidCallShapeReason::MutableAccessOnNonPlace { .. } => "invalid_call_shape.mutable_access_on_non_place",
-    &InvalidCallShapeReason::MutableAccessOnImmutablePlace { .. } => "invalid_call_shape.mutable_access_on_immutable_place",
-    &InvalidCallShapeReason::ImmutablePlaceMutableAccessRequired { .. } => "invalid_call_shape.immutable_place_mutable_access_required",
-    &InvalidCallShapeReason::WireArgumentOrigin => "invalid_call_shape.wire_argument_origin",
-    &InvalidCallShapeReason::WireArgumentMutableMarker => "invalid_call_shape.wire_argument_mutable_marker",
-    &InvalidCallShapeReason::RouteArgumentNotDirect => "invalid_call_shape.route_argument_not_direct",
-    &InvalidCallShapeReason::RouteForwardingContractMismatch => "invalid_call_shape.route_forwarding_contract_mismatch",
-    &InvalidCallShapeReason::RouteParameterRead => "invalid_call_shape.route_parameter_read",
-    &InvalidCallShapeReason::RouteInputFieldMismatch => "invalid_call_shape.route_input_field_mismatch",
+        @delegate(reason => InvalidCallShapeCode::of(reason).stable_reason_key());
+    },
+    InvalidCallShapeCode => {
+        &InvalidCallShapeCode::MissingArgument => "invalid_call_shape.missing_argument",
+        &InvalidCallShapeCode::ExtraPositionalArgument => "invalid_call_shape.extra_positional_argument",
+        &InvalidCallShapeCode::DuplicateArgument => "invalid_call_shape.duplicate_argument",
+        &InvalidCallShapeCode::NamedArgumentNotFound => "invalid_call_shape.named_argument_not_found",
+        &InvalidCallShapeCode::PositionalAfterNamed => "invalid_call_shape.positional_after_named",
+        &InvalidCallShapeCode::NamedArgumentsNotSupported => "invalid_call_shape.named_arguments_not_supported",
+        &InvalidCallShapeCode::WireArgumentOrigin => "invalid_call_shape.wire_argument_origin",
+        &InvalidCallShapeCode::WireArgumentMutableMarker => "invalid_call_shape.wire_argument_mutable_marker",
+        &InvalidCallShapeCode::RouteArgumentNotDirect => "invalid_call_shape.route_argument_not_direct",
+        &InvalidCallShapeCode::RouteForwardingContractMismatch => "invalid_call_shape.route_forwarding_contract_mismatch",
+        &InvalidCallShapeCode::RouteParameterRead => "invalid_call_shape.route_parameter_read",
+        &InvalidCallShapeCode::RouteInputFieldMismatch => "invalid_call_shape.route_input_field_mismatch",
+        &InvalidCallShapeCode::MutableAccessRequired => "invalid_call_shape.mutable_access_required",
+        &InvalidCallShapeCode::MutableAccessNotAllowed => "invalid_call_shape.mutable_access_not_allowed",
+        &InvalidCallShapeCode::MutableAccessOnNonPlace => "invalid_call_shape.mutable_access_on_non_place",
+        &InvalidCallShapeCode::MutableAccessOnImmutablePlace => "invalid_call_shape.mutable_access_on_immutable_place",
+        &InvalidCallShapeCode::ImmutablePlaceMutableAccessRequired => "invalid_call_shape.immutable_place_mutable_access_required",
     },
 
     InvalidReturnShapeReason => {
-    &InvalidReturnShapeReason::BareReturnWithExpectedValues { .. } => "invalid_return_shape.bare_return_with_expected_values",
-    &InvalidReturnShapeReason::ReturnValuesWithBareSignature => "invalid_return_shape.return_values_with_bare_signature",
-    &InvalidReturnShapeReason::TooManyReturnValues { .. } => "invalid_return_shape.too_many_return_values",
-    &InvalidReturnShapeReason::TooFewReturnValues { .. } => "invalid_return_shape.too_few_return_values",
-    &InvalidReturnShapeReason::MissingReturnBangValue => "invalid_return_shape.missing_return_bang_value",
-    &InvalidReturnShapeReason::FunctionMayFallThrough => "invalid_return_shape.function_may_fall_through",
+        @delegate(reason => InvalidReturnShapeCode::of(reason).stable_reason_key());
+    },
+    InvalidReturnShapeCode => {
+        &InvalidReturnShapeCode::BareReturnWithExpectedValues => "invalid_return_shape.bare_return_with_expected_values",
+        &InvalidReturnShapeCode::ReturnValuesWithBareSignature => "invalid_return_shape.return_values_with_bare_signature",
+        &InvalidReturnShapeCode::TooManyReturnValues => "invalid_return_shape.too_many_return_values",
+        &InvalidReturnShapeCode::TooFewReturnValues => "invalid_return_shape.too_few_return_values",
+        &InvalidReturnShapeCode::MissingReturnBangValue => "invalid_return_shape.missing_return_bang_value",
+        &InvalidReturnShapeCode::FunctionMayFallThrough => "invalid_return_shape.function_may_fall_through",
     },
 
     DeferredFeatureReason => {

@@ -7,6 +7,7 @@
 use super::subject::DiagnosticSubject;
 use super::*;
 use crate::builder_surface::SourceFileKind;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidValueReceiverView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
     AmbiguousImportTargetView, BareFileImportView, CrossModuleImportNotExportedView,
     DependencyAliasCaseMismatchView, DirectSpecialFileImportView, ImportNameCollisionView,
@@ -29,12 +30,45 @@ use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticVi
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticCapacityResource, DiagnosticPayload, InvalidTraitConformanceReason,
     InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, ProjectContextEscapeReason,
-    PublicGenericOwnerKind, TypeMismatchContext,
+    PublicGenericOwnerKind, TypeMismatchContext, ValueReceiverContext,
 };
 
 pub(crate) struct RenderedPayload {
     pub(crate) message: String,
     pub(crate) guidance: Vec<String>,
+}
+
+fn invalid_value_receiver_message(
+    receiver: ValueReceiverContext,
+    target_count: usize,
+    produced_count: usize,
+) -> String {
+    let receiver_name = value_receiver_context_name(receiver);
+    format!(
+        "Invalid {receiver_name} receiver: expected {target_count} success slot(s), but this expression produces {produced_count}."
+    )
+}
+
+/// WHAT: renders a value-receiver arity error and its actionable guidance.
+/// WHY: the compact facts retain the receiving context and both success-slot counts.
+pub(crate) fn render_invalid_value_receiver(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &InvalidValueReceiverView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let guidance = if view.produced_count > 1 {
+        "Use a multi-bind with one target per success slot."
+    } else {
+        "Use an expression that produces the required success values."
+    };
+    RenderedPayload {
+        message: invalid_value_receiver_message(
+            view.receiver,
+            view.target_count,
+            view.produced_count,
+        ),
+        guidance: vec![guidance.to_owned()],
+    }
 }
 
 pub(crate) fn render_payload(
@@ -43,13 +77,6 @@ pub(crate) fn render_payload(
 ) -> RenderedPayload {
     let message = render_payload_message(payload, context);
     let guidance = match payload {
-        DiagnosticPayload::InvalidValueReceiver { produced_count, .. } => {
-            if *produced_count > 1 {
-                vec!["Use a multi-bind with one target per success slot.".to_owned()]
-            } else {
-                vec!["Use an expression that produces the required success values.".to_owned()]
-            }
-        }
         DiagnosticPayload::CompileTimeEvaluationError { reason, .. } => {
             vec![compile_time_evaluation_error_suggestion(*reason).to_owned()]
         }
@@ -235,13 +262,6 @@ fn render_payload_message(
         DiagnosticPayload::InvalidParameterContract { reason } => {
             invalid_parameter_contract_message(*reason)
         }
-        DiagnosticPayload::InvalidCollectionType { reason } => {
-            invalid_collection_type_message(*reason).to_owned()
-        }
-        DiagnosticPayload::InvalidMapType { reason } => invalid_map_type_message(*reason, context),
-        DiagnosticPayload::InvalidMapLiteral { reason } => {
-            invalid_map_literal_message(*reason).to_owned()
-        }
         DiagnosticPayload::InvalidGenericParameter { reason } => {
             invalid_generic_parameter_message(reason, string_table)
         }
@@ -348,52 +368,6 @@ fn render_payload_message(
         DiagnosticPayload::InvalidControlFlowStatement { reason } => {
             invalid_control_flow_statement_message(*reason)
         }
-        DiagnosticPayload::InvalidValueReceiver {
-            receiver,
-            target_count,
-            produced_count,
-        } => {
-            let receiver_name = value_receiver_context_name(*receiver);
-            format!(
-                "Invalid {receiver_name} receiver: expected {target_count} success slot(s), but this expression produces {produced_count}."
-            )
-        }
-        DiagnosticPayload::InvalidBuiltinCall {
-            reason,
-            builtin_name,
-        } => invalid_builtin_call_message(*reason, *builtin_name, string_table),
-        DiagnosticPayload::InvalidCast {
-            reason,
-            source_type,
-            target_type,
-        } => invalid_cast_message(*reason, *source_type, *target_type, context),
-        DiagnosticPayload::InvalidReceiverCall {
-            reason,
-            receiver_type,
-            method_name,
-            receiver_kind,
-            receiver_binding_name,
-        } => invalid_receiver_call_message(
-            *reason,
-            *receiver_type,
-            *method_name,
-            *receiver_kind,
-            *receiver_binding_name,
-            string_table,
-        ),
-        DiagnosticPayload::InvalidCopyTarget { reason } => invalid_copy_target_message(*reason),
-        DiagnosticPayload::InvalidFieldAccess {
-            reason,
-            field_name,
-            receiver_type,
-            known_fields,
-        } => invalid_field_access_message(
-            *reason,
-            *field_name,
-            *receiver_type,
-            known_fields,
-            context,
-        ),
         DiagnosticPayload::InvalidMatchPattern {
             reason,
             variant_name,
@@ -418,19 +392,9 @@ fn render_payload_message(
         DiagnosticPayload::InvalidRouteOutput { reason, output } => {
             invalid_route_output_message(reason, *output, context)
         }
-        DiagnosticPayload::InvalidCallShape {
-            reason,
-            callee_name,
-        } => invalid_call_shape_message(reason.clone(), *callee_name, string_table),
-        DiagnosticPayload::InvalidReturnShape { reason } => invalid_return_shape_message(*reason),
         DiagnosticPayload::InvalidGenericInstantiation { type_name, reason } => {
             invalid_generic_instantiation_message(*type_name, reason, context)
         }
-        DiagnosticPayload::InvalidRangeOperand {
-            operand,
-            found_type,
-            reason,
-        } => invalid_range_operand_message(*operand, *found_type, *reason, context),
         DiagnosticPayload::UnsupportedBackendFeature {
             backend_name,
             reason,

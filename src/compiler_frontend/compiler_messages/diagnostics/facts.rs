@@ -434,6 +434,30 @@ impl<T: UnitCode> FactCodec for UnitFact<T> {
         T::from_code(words[0])
     }
 }
+/// An optional unit enum. Zero is absent; `unit_code!` reserves it for absence.
+pub(crate) struct OptUnitFact<T>(PhantomData<T>);
+
+impl<T: UnitCode> FactCodec for OptUnitFact<T> {
+    type Draft = Option<T>;
+    type Durable = Option<T>;
+    const WORDS: usize = 1;
+
+    fn encode(draft: &Option<T>, words: &mut [u32]) -> Result<(), FactCapacityError> {
+        words[0] = match draft {
+            Some(code) => code.code(),
+            None => 0,
+        };
+        Ok(())
+    }
+
+    fn decode(words: &[u32]) -> Option<Option<T>> {
+        if words[0] == 0 {
+            Some(None)
+        } else {
+            T::from_code(words[0]).map(Some)
+        }
+    }
+}
 
 /// Writes facts into a record's fact area in declaration order.
 pub(super) struct FactCursor {
@@ -517,7 +541,43 @@ impl<'a> FactReader<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FactCodec, OptCharFact};
+    use super::{FactCodec, OptCharFact, OptUnitFact, UnitCode};
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum TestCode {
+        One,
+        Two,
+    }
+
+    impl UnitCode for TestCode {
+        fn code(self) -> u32 {
+            match self {
+                Self::One => 1,
+                Self::Two => 2,
+            }
+        }
+
+        fn from_code(code: u32) -> Option<Self> {
+            match code {
+                1 => Some(Self::One),
+                2 => Some(Self::Two),
+                _ => None,
+            }
+        }
+    }
+
+    #[test]
+    fn opt_unit_fact_round_trips_present_and_absent_values() {
+        let present = Some(TestCode::Two);
+        let mut words = [0];
+        OptUnitFact::<TestCode>::encode(&present, &mut words)
+            .expect("a unit code fits one fact word");
+        assert_eq!(OptUnitFact::<TestCode>::decode(&words), Some(present));
+
+        let absent = None;
+        OptUnitFact::<TestCode>::encode(&absent, &mut words).expect("absence fits one fact word");
+        assert_eq!(OptUnitFact::<TestCode>::decode(&words), Some(absent));
+    }
 
     #[test]
     fn opt_char_fact_round_trips_present_and_absent_values() {
