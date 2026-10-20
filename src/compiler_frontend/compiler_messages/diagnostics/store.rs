@@ -8,7 +8,7 @@
 use super::extras::{DiagnosticExtraRecord, ExtraDataKind};
 use super::facts::FactReader;
 use super::foreign::{ForeignSiteRecord, SiteRef};
-use super::labels::{GenericSubstitutionRecord, SecondaryDiagnosticLabel};
+use super::labels::{DurableLabel, GenericSubstitutionRecord, SecondaryDiagnosticLabel};
 use super::record::{DiagnosticCode, DiagnosticRecord, SeverityOverride};
 use super::resource::DiagnosticLimits;
 use crate::compiler_frontend::compiler_messages::DiagnosticCapacityResource;
@@ -100,10 +100,6 @@ impl<'a> RecordRef<'a> {
     }
 
     /// The severity override the record stores. `Default` keeps the family descriptor's severity.
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "P4.3 render honours severity overrides")
-    )]
     pub(crate) fn severity(self) -> SeverityOverride {
         self.record.severity
     }
@@ -115,21 +111,13 @@ impl<'a> RecordRef<'a> {
 
     /// The primary site: foreign when a foreign-site row names the primary selector, otherwise local. The span stays
     /// in the record either way, so a foreign primary reads its span from the record.
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "P4.5 report freeze reads record sites")
-    )]
     pub(crate) fn primary(self) -> SiteRef<'a> {
         self.site(self.record.primary, PRIMARY_SELECTOR)
     }
 
     /// The site of secondary label `index`: foreign when a foreign-site row names the label, otherwise local. The span
     /// stays in the label either way.
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "P4.5 report freeze reads label sites")
-    )]
-    pub(crate) fn label_site(self, index: usize) -> SiteRef<'a> {
+    pub(super) fn label_site(self, index: usize) -> SiteRef<'a> {
         let span = self.labels().get(index).and_then(|label| label.span());
         self.site(span, index as u32 + 1)
     }
@@ -148,11 +136,23 @@ impl<'a> RecordRef<'a> {
     }
 
     /// The secondary labels, in the order the draft added them.
-    pub(crate) fn labels(self) -> &'a [SecondaryDiagnosticLabel] {
+    pub(super) fn labels(self) -> &'a [SecondaryDiagnosticLabel] {
         match self.extra() {
             Some(extra) => &self.store.labels[extra.labels.range()],
             None => &[],
         }
+    }
+
+    /// The secondary labels in the order the draft added them, each with its site and decoded message.
+    pub(super) fn durable_labels(self) -> impl Iterator<Item = DurableLabel<'a>> {
+        self.labels()
+            .iter()
+            .enumerate()
+            .map(move |(index, label)| DurableLabel {
+                spanned: label.span().is_some(),
+                site: self.label_site(index),
+                message: label.message(self.store),
+            })
     }
 
     /// The string list a family declares as extra data, or an empty slice.

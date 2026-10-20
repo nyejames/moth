@@ -11,9 +11,10 @@ use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, diagnostic_type_name, unsupported_operator_types_message,
 };
 use crate::compiler_frontend::compiler_messages::{
-    BuiltinFailureOriginKind, BuiltinFailureWitness, CompilerDiagnostic, DiagnosticOperator,
-    InvalidAssignmentTargetReason, InvalidFallibleHandlingReason, InvalidFieldAccessReason,
-    InvalidReceiverDeclarationReason, TypeMismatchContext,
+    BuiltinFailureOriginKind, BuiltinFailureWitness, CompilerDiagnostic, DiagnosticKind,
+    DiagnosticOperator, InvalidAssignmentTargetReason, InvalidFallibleHandlingReason,
+    InvalidFieldAccessReason, InvalidReceiverDeclarationReason, TypeDiagnosticKind,
+    TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition,
@@ -372,6 +373,31 @@ fn terse_type_mismatch_uses_type_environment_names_when_available() {
     assert_eq!(lines.len(), 1);
     assert!(lines[0].contains("expected I32, found String"));
     assert!(!lines[0].contains("TypeId("));
+}
+
+#[test]
+fn terse_type_mismatch_without_environment_prints_type_ids() {
+    let string_table = StringTable::new();
+    let diagnostic = CompilerDiagnostic::type_mismatch(
+        TypeId(999),
+        TypeId(1000),
+        TypeMismatchContext::Assignment,
+        None,
+    );
+    let lines = format_terse_diagnostics_with_context(
+        &[diagnostic],
+        DiagnosticRenderContext::new(&string_table),
+    );
+
+    let code = DiagnosticKind::Type(TypeDiagnosticKind::TypeMismatch)
+        .descriptor()
+        .code;
+    assert_eq!(
+        lines,
+        vec![format!(
+            "E|{code}|||Type mismatch in assignment: expected TypeId(999), found TypeId(1000)"
+        )]
+    );
 }
 
 #[test]

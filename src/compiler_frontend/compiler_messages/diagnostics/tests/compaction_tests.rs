@@ -84,18 +84,18 @@ fn capture_rewrites_label_and_substitution_type_words() {
     let mut draft = DiagnosticDraft::with_facts(&TEST_LABEL_FAMILY, Some(span), |_cursor| Ok(()))
         .with_label(
             Some(span),
-            DiagnosticLabelMessage::TypedFailureProducer {
+            Some(DiagnosticLabelMessage::TypedFailureProducer {
                 error_type_id: TypeId(3),
-            },
+            }),
         )
         .with_label(
             Some(span),
-            DiagnosticLabelMessage::GenericInstantiationSubstitutions {
+            Some(DiagnosticLabelMessage::GenericInstantiationSubstitutions {
                 substitutions: vec![GenericSubstitutionDiagnostic {
                     parameter_name: StringId::from_index(2),
                     concrete_type_id: TypeId(7),
                 }],
-            },
+            }),
         );
     draft
         .capture_types(&mut identity_rewrite)
@@ -155,7 +155,7 @@ fn compacting_an_undeclared_label_message_panics() {
     let mut store = DiagnosticStore::new();
     let draft = unknown_value_name(StringId::from_index(1), None).with_label(
         Some(exact_span(0, 1)),
-        DiagnosticLabelMessage::PreviousDeclaration,
+        Some(DiagnosticLabelMessage::PreviousDeclaration),
     );
     let _outcome = store.compact(draft);
 }
@@ -228,7 +228,7 @@ fn foreign_label_and_primary_share_one_identity_row() {
     let draft = duplicate_declaration(StringId::from_index(1), Some(exact_span(10, 2)))
         .with_label(
             Some(exact_span(0, 2)),
-            DiagnosticLabelMessage::PreviousDeclaration,
+            Some(DiagnosticLabelMessage::PreviousDeclaration),
         )
         .with_foreign(ForeignSiteDraft {
             slot: ForeignSlot::Label(0),
@@ -255,7 +255,7 @@ fn distinct_identities_get_distinct_context_rows() {
     let draft = duplicate_declaration(StringId::from_index(1), Some(exact_span(10, 2)))
         .with_label(
             Some(exact_span(0, 2)),
-            DiagnosticLabelMessage::PreviousDeclaration,
+            Some(DiagnosticLabelMessage::PreviousDeclaration),
         )
         .with_foreign(ForeignSiteDraft {
             slot: ForeignSlot::Label(0),

@@ -780,7 +780,7 @@ pub(crate) fn invalid_dependency_clause_message(
 }
 
 /// WHAT: renders the message for an import target that cannot be resolved.
-/// WHY: the compact renderer and the legacy payload path share this text.
+/// WHY: the path is the record's only content, so the message needs no other facts.
 pub(crate) fn missing_import_target_message(
     path: PathId,
     context: DiagnosticRenderContext<'_>,
@@ -789,7 +789,7 @@ pub(crate) fn missing_import_target_message(
 }
 
 /// WHAT: renders a missing import target from its compact facts.
-/// WHY: the record stores the same path the legacy payload carries.
+/// WHY: the record stores the path, which is everything the message needs.
 pub(crate) fn render_missing_import_target(
     _diagnostic: &DiagnosticView<'_>,
     facts: &MissingImportTargetView,

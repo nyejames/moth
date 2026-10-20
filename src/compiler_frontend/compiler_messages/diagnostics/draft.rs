@@ -139,10 +139,11 @@ impl DiagnosticDraft {
 
     /// Adds a secondary label in this draft's own identity. A label from another identity takes its span here too,
     /// then goes through `with_foreign`, which records the identity and leaves the span in place.
+    /// A label without a message is encoded as `NONE`, so it still points at its span.
     pub(super) fn with_label(
         mut self,
         span: Option<SourceSpan>,
-        message: DiagnosticLabelMessage,
+        message: Option<DiagnosticLabelMessage>,
     ) -> Self {
         if self.core.faulted {
             return self;
@@ -192,17 +193,6 @@ impl DiagnosticDraft {
         }
         self.extra.get_or_insert_with(Box::default).data = ExtraDataDraft::StringIds(ids);
         self
-    }
-
-    /// Whether every label carries a message its family declares. Compaction asserts this, so callers check it first.
-    pub(super) fn labels_match_family(&self) -> bool {
-        let declared = self.core.family.labels;
-        self.extra.as_ref().is_none_or(|extra| {
-            extra
-                .labels
-                .iter()
-                .all(|label| declared.contains(&label.message))
-        })
     }
 }
 

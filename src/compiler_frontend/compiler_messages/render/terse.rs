@@ -4,17 +4,16 @@
 //! WHY: CI, test runners, and IDEs often prefer compact output without ASCII art or colours.
 
 use crate::compiler_frontend::compiler_errors::{CompilerMessages, InfrastructureErrors};
-use crate::compiler_frontend::compiler_messages::DiagnosticKind;
 use crate::compiler_frontend::compiler_messages::render::infrastructure::{
-    ISSUE_URL, InfrastructureClass, format_error_guidance_lines, infrastructure_class,
+    INFRASTRUCTURE_FAILURE_CODE, ISSUE_URL, InfrastructureClass, format_error_guidance_lines,
+    infrastructure_class,
 };
+use crate::compiler_frontend::compiler_messages::render::subject::DiagnosticSubject;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, display_column_number, display_line_number,
     relative_display_path_from_root, terse_diagnostic_message,
 };
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticSeverity, InfrastructureDiagnosticKind,
-};
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
 use crate::compiler_frontend::utilities::basic::portable_path_text;
 use std::fmt::Write;
 
@@ -56,9 +55,6 @@ pub(crate) fn format_terse_compiler_messages(messages: &CompilerMessages) -> Vec
 
 /// Render every cause in one five-field record, with no invented source location.
 fn format_terse_infrastructure_errors(errors: &InfrastructureErrors) -> String {
-    let code = DiagnosticKind::Infrastructure(InfrastructureDiagnosticKind::InfrastructureFailure)
-        .descriptor()
-        .code;
     let display_path = errors
         .primary
         .host_path
@@ -93,7 +89,7 @@ fn format_terse_infrastructure_errors(errors: &InfrastructureErrors) -> String {
         }
     }
     format!(
-        "E|{code}|{}||{}",
+        "E|{INFRASTRUCTURE_FAILURE_CODE}|{}||{}",
         sanitize_terse_field(&display_path),
         sanitize_terse_field(&message)
     )
@@ -103,14 +99,15 @@ pub(crate) fn format_terse_diagnostic_with_context(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let descriptor = diagnostic.kind.descriptor();
-    let severity_char = match diagnostic.severity {
+    let subject = DiagnosticSubject::new(diagnostic, context);
+    let descriptor = subject.descriptor();
+    let severity_char = match subject.severity() {
         DiagnosticSeverity::Error => 'E',
         DiagnosticSeverity::Warning => 'W',
         DiagnosticSeverity::Note => 'N',
     };
 
-    let (display_path, location) = match context.primary_position(diagnostic) {
+    let (display_path, location) = match subject.primary_position(context) {
         Some(position) => {
             let display_path = relative_display_path_from_root(
                 position.path.as_path(),
@@ -124,7 +121,7 @@ pub(crate) fn format_terse_diagnostic_with_context(
         None => (String::new(), String::new()),
     };
 
-    let message = terse_diagnostic_message(diagnostic, context);
+    let message = terse_diagnostic_message(&subject, context);
 
     format!(
         "{severity_char}|{}|{}|{}|{}",

@@ -4,17 +4,16 @@
 //! WHY: terminal, terse, and dev-server renderers should differ only in output format. The
 //! payload facts themselves must become user-facing text through one dispatch path.
 
+use super::subject::DiagnosticSubject;
 use super::*;
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::CompilerCapacityExceededView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::TypeMismatchView;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::compact_for_render;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticCapacityResource, DiagnosticPayload,
-    InvalidTraitConformanceReason, InvalidTraitIncompatibilityReason,
-    InvalidTraitKeywordUsageReason, NamingConvention, ProjectContextEscapeReason,
-    PublicGenericOwnerKind, ReservedNameOwner, TypeMismatchContext,
+    DiagnosticCapacityResource, DiagnosticPayload, InvalidTraitConformanceReason,
+    InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, NamingConvention,
+    ProjectContextEscapeReason, PublicGenericOwnerKind, ReservedNameOwner, TypeMismatchContext,
 };
 
 pub(crate) struct RenderedPayload {
@@ -44,12 +43,6 @@ pub(crate) fn render_payload(
                 vec!["Use an expression that produces the required success values.".to_owned()]
             }
         }
-        DiagnosticPayload::TypeMismatch {
-            expected, found, ..
-        } => type_mismatch_guidance(
-            &diagnostic_type_name(*expected, context),
-            &diagnostic_type_name(*found, context),
-        ),
         DiagnosticPayload::CompileTimeEvaluationError { reason, .. } => {
             vec![compile_time_evaluation_error_suggestion(*reason).to_owned()]
         }
@@ -84,24 +77,8 @@ pub(crate) fn render_payload(
     RenderedPayload { message, guidance }
 }
 
-/// WHAT: renders one diagnostic, preferring the compact renderer of its family.
-/// WHY: a diagnostic whose compact record decodes renders from typed facts. Every other diagnostic keeps
-/// the legacy payload dispatch until its family migrates.
-pub(crate) fn render_diagnostic(
-    diagnostic: &CompilerDiagnostic,
-    context: DiagnosticRenderContext<'_>,
-) -> RenderedPayload {
-    if let Some(compact) = compact_for_render(diagnostic, context) {
-        let view = compact.view();
-        if let Some(render) = view.family().render {
-            return render(&view, context);
-        }
-    }
-    render_payload(&diagnostic.payload, context)
-}
-
 /// WHAT: renders a capacity diagnostic from its compact facts.
-/// WHY: the record stores the same resource the legacy payload carries, so both paths share one message.
+/// WHY: the record carries the resource, which is everything the message needs.
 pub(crate) fn render_compiler_capacity_exceeded(
     _diagnostic: &DiagnosticView<'_>,
     facts: &CompilerCapacityExceededView,
@@ -114,8 +91,8 @@ pub(crate) fn render_compiler_capacity_exceeded(
 }
 
 /// WHAT: renders a type mismatch from its compact facts.
-/// WHY: the snapshot spells each type through the same rules as the live environment, so the text
-/// matches the legacy payload path.
+/// WHY: each type is spelled through the snapshot's display rules. A type prints as a raw
+/// `TypeId` unless both the live type environment and the path table are available.
 pub(crate) fn render_type_mismatch(
     diagnostic: &DiagnosticView<'_>,
     facts: &TypeMismatchView,
@@ -158,12 +135,12 @@ fn type_mismatch_guidance(expected: &str, found: &str) -> Vec<String> {
 /// WHY: descriptor-only diagnostics use `DiagnosticPayload::None`, which renders an empty
 /// payload message. The descriptor title is always present and provides useful context.
 pub(crate) fn terse_diagnostic_message(
-    diagnostic: &CompilerDiagnostic,
+    subject: &DiagnosticSubject<'_>,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let rendered = render_diagnostic(diagnostic, context);
+    let rendered = subject.payload(context);
     if rendered.message.is_empty() {
-        diagnostic.kind.descriptor().title.to_owned()
+        subject.descriptor().title.to_owned()
     } else {
         rendered.message
     }
@@ -176,9 +153,6 @@ fn render_payload_message(
     let string_table = context.string_table;
 
     match payload {
-        DiagnosticPayload::ExpectedToken { expected, found } => {
-            expected_token_message(expected, found.as_ref(), string_table)
-        }
         DiagnosticPayload::UnexpectedToken { found } => {
             unexpected_token_message(found, string_table)
         }
@@ -192,20 +166,7 @@ fn render_payload_message(
         DiagnosticPayload::UnknownName { name, namespace } => {
             unknown_name_message(*name, *namespace, string_table)
         }
-        DiagnosticPayload::TypeMismatch {
-            expected,
-            found,
-            context: mismatch_context,
-        } => type_mismatch_message(
-            *mismatch_context,
-            &diagnostic_type_name(*expected, context),
-            &diagnostic_type_name(*found, context),
-        ),
-        DiagnosticPayload::DuplicateDeclaration { name } => {
-            duplicate_declaration_message(*name, string_table)
-        }
-        DiagnosticPayload::MissingImportTarget { .. }
-        | DiagnosticPayload::AmbiguousImportTarget { .. }
+        DiagnosticPayload::AmbiguousImportTarget { .. }
         | DiagnosticPayload::BareFileImport { .. }
         | DiagnosticPayload::DirectSpecialFileImport { .. }
         | DiagnosticPayload::ImportNameCollision { .. }
@@ -234,8 +195,7 @@ fn render_payload_message(
         | DiagnosticPayload::UseAfterPossibleMove { .. }
         | DiagnosticPayload::MoveWhileBorrowed { .. }
         | DiagnosticPayload::WholeObjectBorrowConflict { .. }
-        | DiagnosticPayload::InvalidMutableAccess { .. }
-        | DiagnosticPayload::UseOfUninitializedLocal { .. } => {
+        | DiagnosticPayload::InvalidMutableAccess { .. } => {
             borrow_payload_message(payload, context)
         }
         DiagnosticPayload::InvalidConfig { key, reason } => {
@@ -257,7 +217,6 @@ fn render_payload_message(
         DiagnosticPayload::ReservedBuiltinName { name } => {
             format!("Reserved builtin name '{}'", string_table.resolve(*name))
         }
-        DiagnosticPayload::UnreachableMatchArm => UNREACHABLE_MATCH_ARM_MESSAGE.to_owned(),
         DiagnosticPayload::IdentifierNamingConvention {
             name,
             expected_style,
@@ -292,7 +251,6 @@ fn render_payload_message(
             length,
             resource,
         } => source_span_capacity_message(*start, *length, *resource),
-        DiagnosticPayload::CompilerCapacityExceeded { resource } => capacity_message(*resource),
         DiagnosticPayload::InvalidStringEscape { reason } => invalid_string_escape_message(*reason),
         DiagnosticPayload::InvalidNumberLiteral {
             literal_text,
@@ -582,11 +540,6 @@ fn render_payload_message(
             variant_name,
             ..
         } => invalid_match_pattern_message(*reason, *variant_name, string_table),
-        DiagnosticPayload::NonExhaustiveMatch {
-            reason,
-            missing_variants,
-            ..
-        } => non_exhaustive_match_message(*reason, missing_variants, string_table),
         DiagnosticPayload::InvalidFallibleHandling { reason } => {
             invalid_fallible_handling_message(reason, context)
         }
@@ -664,6 +617,9 @@ fn render_payload_message(
             invalid_statement_position_message(*reason)
         }
         DiagnosticPayload::None => String::new(),
+        _ => unreachable!(
+            "migrated families render through the compact path; P4.6 deletes this function"
+        ),
     }
 }
 
@@ -990,9 +946,6 @@ fn import_payload_message(
 ) -> String {
     let string_table = context.string_table;
     match payload {
-        DiagnosticPayload::MissingImportTarget { path } => {
-            missing_import_target_message(*path, context)
-        }
         DiagnosticPayload::AmbiguousImportTarget { path } => format!(
             "Ambiguous dependency target '{}'. Use a more specific path.",
             context.render_path(*path)
@@ -1100,7 +1053,9 @@ fn import_payload_message(
         DiagnosticPayload::InvalidExternalModule { path, reason } => {
             invalid_external_module_message(*path, reason, context)
         }
-        _ => String::new(),
+        _ => unreachable!(
+            "migrated families render through the compact path; P4.6 deletes this function"
+        ),
     }
 }
 
@@ -1149,9 +1104,8 @@ fn borrow_payload_message(
             reason,
             conflicting_place,
         } => invalid_mutable_access_message(place, *reason, conflicting_place.as_ref(), context),
-        DiagnosticPayload::UseOfUninitializedLocal { place } => {
-            use_of_uninitialized_local_message(place, context)
-        }
-        _ => String::new(),
+        _ => unreachable!(
+            "migrated families render through the compact path; P4.6 deletes this function"
+        ),
     }
 }

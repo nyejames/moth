@@ -3,11 +3,11 @@
 //! WHAT: converts structured diagnostics into coloured terminal output.
 //! WHY: this is the primary human-facing render path for compiler errors and warnings.
 
+use crate::compiler_frontend::compiler_messages::render::subject::DiagnosticSubject;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticPrimaryPosition, DiagnosticRenderContext, ResolvedDiagnosticLabel,
     display_column_number, display_gutter_width, display_line_number, expand_tabs_for_display,
     primary_caret_padding, primary_underline_length, relative_display_path_from_root,
-    render_diagnostic, resolve_label_render_facts_from_root,
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticLabelStyle, DiagnosticSeverity,
@@ -19,11 +19,13 @@ pub(crate) fn print_diagnostic_with_context(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
 ) {
-    let descriptor = diagnostic.kind.descriptor();
-    let severity_name = severity_display_name(diagnostic.severity);
-    let visual = severity_visual(diagnostic.severity);
+    let subject = DiagnosticSubject::new(diagnostic, context);
+    let descriptor = subject.descriptor();
+    let severity = subject.severity();
+    let severity_name = severity_display_name(severity);
+    let visual = severity_visual(severity);
 
-    match diagnostic.severity {
+    match severity {
         DiagnosticSeverity::Error => {
             say!("\n", Bright Bold Red severity_name, Reset " ", Reset visual);
         }
@@ -38,7 +40,7 @@ pub(crate) fn print_diagnostic_with_context(
     say!(Reset descriptor.title);
     say!(Dark "  [", descriptor.code, "]");
 
-    let primary_position = context.primary_position(diagnostic);
+    let primary_position = subject.primary_position(context);
     if let Some(position) = primary_position.as_ref() {
         let relative_dir = relative_display_path_from_root(
             position.path.as_path(),
@@ -80,11 +82,12 @@ pub(crate) fn print_diagnostic_with_context(
         }
     }
 
-    for label_message in format_label_messages_with_context(diagnostic, context) {
+    let root = std::env::current_dir().unwrap_or_default();
+    for label_message in format_label_messages_from_subject(&subject, context, &root) {
         say!(Bright Blue "  ", label_message);
     }
 
-    for guidance in format_diagnostic_guidance(diagnostic, context) {
+    for guidance in format_guidance_from_subject(&subject, context) {
         say!(Bright Blue "  ", guidance);
     }
 }
@@ -127,7 +130,8 @@ pub(crate) fn format_terminal_source_frame_for_test(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
 ) -> Option<String> {
-    let position = context.primary_position(diagnostic)?;
+    let subject = DiagnosticSubject::new(diagnostic, context);
+    let position = subject.primary_position(context)?;
     let frame = terminal_source_frame(&position)?;
     Some(format!(
         "{}|\n{}{} | {}\n{}{}",
@@ -144,8 +148,9 @@ pub(crate) fn format_label_messages_with_context(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
 ) -> Vec<String> {
+    let subject = DiagnosticSubject::new(diagnostic, context);
     let root = std::env::current_dir().unwrap_or_default();
-    format_label_messages_with_context_from_root_impl(diagnostic, context, &root)
+    format_label_messages_from_subject(&subject, context, &root)
 }
 
 #[cfg(test)]
@@ -154,18 +159,19 @@ pub(crate) fn format_label_messages_with_context_from_root(
     context: DiagnosticRenderContext<'_>,
     root: &Path,
 ) -> Vec<String> {
-    format_label_messages_with_context_from_root_impl(diagnostic, context, root)
+    let subject = DiagnosticSubject::new(diagnostic, context);
+    format_label_messages_from_subject(&subject, context, root)
 }
 
-fn format_label_messages_with_context_from_root_impl(
-    diagnostic: &CompilerDiagnostic,
+fn format_label_messages_from_subject(
+    subject: &DiagnosticSubject<'_>,
     context: DiagnosticRenderContext<'_>,
     root: &Path,
 ) -> Vec<String> {
-    let primary_display_path = context
-        .primary_position(diagnostic)
+    let primary_display_path = subject
+        .primary_position(context)
         .map(|position| relative_display_path_from_root(position.path.as_path(), root));
-    let labels = resolve_label_render_facts_from_root(diagnostic, context, root);
+    let labels = subject.resolved_labels(context, root);
     let mut rendered_labels = Vec::with_capacity(labels.len());
 
     for ResolvedDiagnosticLabel {
@@ -211,7 +217,15 @@ pub(crate) fn format_diagnostic_guidance(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
 ) -> Vec<String> {
-    let rendered_payload = render_diagnostic(diagnostic, context);
+    let subject = DiagnosticSubject::new(diagnostic, context);
+    format_guidance_from_subject(&subject, context)
+}
+
+fn format_guidance_from_subject(
+    subject: &DiagnosticSubject<'_>,
+    context: DiagnosticRenderContext<'_>,
+) -> Vec<String> {
+    let rendered_payload = subject.payload(context);
     let mut lines = Vec::new();
 
     if !rendered_payload.message.is_empty() {

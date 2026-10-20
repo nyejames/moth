@@ -53,7 +53,7 @@ pub(crate) struct FamilyRow {
     pub(crate) descriptor: Option<DiagnosticDescriptor>,
     pub(crate) layout: &'static [FactDescriptor],
     pub(crate) extra: ExtraDataKind,
-    /// Label codes that drafts of this family may declare.
+    /// Family-specific label codes that drafts of this family may declare. The universal codes apply to every family.
     pub(crate) labels: &'static [LabelMessageCode],
     /// Renders the family's records from their typed view. Only pilot rows carry a renderer; identity rows have no
     /// records to render.
@@ -104,6 +104,11 @@ impl FamilyRow {
     /// The severity that the family's descriptor gives its records. Only pilot rows carry a descriptor.
     pub(crate) const fn default_severity(&self) -> DiagnosticSeverity {
         self.pilot_descriptor().default_severity
+    }
+
+    /// Whether drafts of this family may carry a label with `code`: one of its declared roles or a universal role.
+    pub(crate) fn permits_label(&self, code: LabelMessageCode) -> bool {
+        code.is_universal() || self.labels.contains(&code)
     }
 
     #[cfg_attr(

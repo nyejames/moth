@@ -1,8 +1,9 @@
 use super::{
-    DiagnosticPayload, DiagnosticToken, InvalidFunctionSignatureReason,
+    CompilerDiagnostic, DiagnosticPayload, DiagnosticToken, InvalidFunctionSignatureReason,
     InvalidGenericParameterReason, InvalidTypeAnnotationReason, TokenDescriptorPayload,
     TypeAnnotationContext,
 };
+use crate::compiler_frontend::compiler_messages::render::terminal::format_diagnostic_guidance;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, render_payload,
 };
@@ -65,6 +66,13 @@ fn render_payload_message(payload: &DiagnosticPayload, string_table: &StringTabl
     render_payload(payload, DiagnosticRenderContext::new(string_table)).message
 }
 
+fn render_diagnostic_message(
+    diagnostic: &CompilerDiagnostic,
+    string_table: &StringTable,
+) -> String {
+    format_diagnostic_guidance(diagnostic, DiagnosticRenderContext::new(string_table)).join("\n")
+}
+
 #[test]
 fn diagnostic_token_has_the_locked_eight_byte_layout() {
     assert_eq!(std::mem::size_of::<DiagnosticToken>(), 8);
@@ -100,10 +108,6 @@ fn every_token_payload_render_survives_store_drop() {
                 .expect("fixture token index should resolve");
             let projected = DiagnosticToken::from_token_ref(token_ref);
             let payloads = [
-                DiagnosticPayload::ExpectedToken {
-                    expected: DiagnosticToken::from_static_tag(TokenTag::ARROW),
-                    found: Some(projected),
-                },
                 DiagnosticPayload::UnexpectedToken { found: projected },
                 DiagnosticPayload::InvalidTypeAnnotation {
                     context: TypeAnnotationContext::DeclarationTarget,
@@ -168,12 +172,12 @@ fn projected_unexpected_and_expected_rendering_survives_store_drop() {
                 None,
             );
 
-            projected_rendered.push(render_payload_message(
-                &projected_unexpected.payload,
+            projected_rendered.push(render_diagnostic_message(
+                &projected_unexpected,
                 &string_table,
             ));
-            projected_rendered.push(render_payload_message(
-                &projected_expected.payload,
+            projected_rendered.push(render_diagnostic_message(
+                &projected_expected,
                 &string_table,
             ));
             projected_diagnostics.push(projected_unexpected);
@@ -186,7 +190,7 @@ fn projected_unexpected_and_expected_rendering_survives_store_drop() {
     drop(source_tokens);
     let after_drop = projected_diagnostics
         .iter()
-        .map(|diagnostic| render_payload_message(&diagnostic.payload, &string_table))
+        .map(|diagnostic| render_diagnostic_message(diagnostic, &string_table))
         .collect::<Vec<_>>();
     assert_eq!(projected_rendered, after_drop);
 }

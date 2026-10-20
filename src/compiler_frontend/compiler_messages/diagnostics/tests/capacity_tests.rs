@@ -51,7 +51,7 @@ fn foreign_capacity_draft() -> DiagnosticDraft {
 /// A draft on the test family with one label, so compacting it needs a label row and an extra part.
 fn labelled_test_draft(message: DiagnosticLabelMessage) -> DiagnosticDraft {
     DiagnosticDraft::with_facts(&TEST_LABEL_FAMILY, None, |_cursor| Ok(()))
-        .with_label(Some(exact_span(0, 2)), message)
+        .with_label(Some(exact_span(0, 2)), Some(message))
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn label_ceiling_rejects_with_labels() {
     let mut store = limited(|limits| limits.labels = 0);
     let draft = duplicate_declaration(StringId::from_index(1), Some(exact_span(10, 2))).with_label(
         Some(exact_span(0, 2)),
-        DiagnosticLabelMessage::PreviousDeclaration,
+        Some(DiagnosticLabelMessage::PreviousDeclaration),
     );
 
     assert_eq!(
@@ -73,7 +73,7 @@ fn extra_ceiling_rejects_with_extras() {
     let mut store = limited(|limits| limits.extras = 0);
     let draft = duplicate_declaration(StringId::from_index(1), Some(exact_span(10, 2))).with_label(
         Some(exact_span(0, 2)),
-        DiagnosticLabelMessage::PreviousDeclaration,
+        Some(DiagnosticLabelMessage::PreviousDeclaration),
     );
 
     assert_eq!(

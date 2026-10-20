@@ -7,11 +7,14 @@
 
 use super::*;
 use crate::compiler_frontend::build_config::BuildConfigValueOrigin;
+use crate::compiler_frontend::compiler_messages::diagnostic_types::type_display_snapshot::TypeDisplaySnapshot;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage, DiagnosticLabelStyle,
 };
-use crate::compiler_frontend::source::FrozenIdentityContext;
 use crate::compiler_frontend::source::line_index::{LineIndex, LinePosition};
+use crate::compiler_frontend::source::{FrozenIdentityContext, FrozenIdentityHandle};
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
 #[cfg(test)]
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -207,20 +210,7 @@ impl<'a> DiagnosticRenderContext<'a> {
         diagnostic: &'a CompilerDiagnostic,
     ) -> Option<DiagnosticPrimaryPosition<'a>> {
         let span = diagnostic.primary_span?;
-        if let Some(frozen_identity_handle) = diagnostic.primary_frozen_identity_handle.as_ref() {
-            if let Some(frozen_identity) = frozen_identity_handle.get() {
-                return self.resolve_span_in_frozen(frozen_identity, span);
-            }
-
-            // A legacy handle without a stable domain may use the message's transitional source
-            // row. A donor-domain handle never authorizes requester-database fallback.
-            if self.frozen_identity.is_none() && frozen_identity_handle.domain().is_none() {
-                return self.resolve_span_in_database(span);
-            }
-            return None;
-        }
-
-        self.resolve_span(span)
+        self.position_of(span, diagnostic.primary_frozen_identity_handle.as_ref())
     }
 
     /// Resolve one secondary label span through its explicit owner when present.
@@ -236,20 +226,50 @@ impl<'a> DiagnosticRenderContext<'a> {
         'a: 'label,
     {
         let span = label.span?;
-        if let Some(frozen_identity_handle) = label.frozen_identity_handle.as_ref() {
-            if let Some(frozen_identity) = frozen_identity_handle.get() {
-                return self.resolve_span_in_frozen(frozen_identity, span);
-            }
+        self.position_of(span, label.frozen_identity_handle.as_ref())
+    }
 
-            // A legacy handle without a stable domain may use the message's transitional source
-            // row. A donor-domain handle never authorizes requester-database fallback.
-            if self.frozen_identity.is_none() && frozen_identity_handle.domain().is_none() {
-                return self.resolve_span_in_database(span);
-            }
-            return None;
+    /// Resolve a compact site: a foreign site through its own identity, a local site through this context, and an
+    /// absent site to no position.
+    pub(crate) fn site_position<'site>(
+        self,
+        site: SiteRef<'site>,
+    ) -> Option<DiagnosticPrimaryPosition<'site>>
+    where
+        'a: 'site,
+    {
+        match site {
+            SiteRef::Absent => None,
+            SiteRef::Local(span) => self.position_of(span, None),
+            SiteRef::Foreign { span, context } => self.position_of(span, Some(context)),
+        }
+    }
+
+    /// Resolve one span through the identity that owns it. A span with no handle uses this context. A handle resolves
+    /// through its installed context; an uninstalled handle falls back to the requester database only when neither
+    /// side is a donor domain, and otherwise has no position.
+    fn position_of<'site>(
+        self,
+        span: SourceSpan,
+        frozen_identity_handle: Option<&'site FrozenIdentityHandle>,
+    ) -> Option<DiagnosticPrimaryPosition<'site>>
+    where
+        'a: 'site,
+    {
+        let Some(frozen_identity_handle) = frozen_identity_handle else {
+            return self.resolve_span(span);
+        };
+
+        if let Some(frozen_identity) = frozen_identity_handle.get() {
+            return self.resolve_span_in_frozen(frozen_identity, span);
         }
 
-        self.resolve_span(span)
+        // A legacy handle without a stable domain may use the message's transitional source
+        // row. A donor-domain handle never authorizes requester-database fallback.
+        if self.frozen_identity.is_none() && frozen_identity_handle.domain().is_none() {
+            return self.resolve_span_in_database(span);
+        }
+        None
     }
 
     fn resolve_span(self, span: SourceSpan) -> Option<DiagnosticPrimaryPosition<'a>> {
@@ -330,49 +350,61 @@ pub(crate) fn resolve_label_render_facts_from_root(
     context: DiagnosticRenderContext<'_>,
     root: &Path,
 ) -> Vec<ResolvedDiagnosticLabel> {
-    let mut labels = Vec::new();
-
-    for label in &diagnostic.labels {
-        let message = label
-            .message
-            .as_ref()
-            .map(|message| diagnostic_label_message_text(message, context));
-        let Some(position) = context.label_position(label) else {
-            // A spanless label carries only its message, and a message that renders empty leaves
-            // nothing to show. A label whose source span cannot be resolved has no usable global
-            // fact, so it keeps the existing omission policy.
-            if label.span.is_none()
-                && let Some(message) = message
-                && !message.is_empty()
-            {
-                labels.push(ResolvedDiagnosticLabel {
-                    style: label.style,
-                    path: None,
-                    line: None,
-                    column: None,
-                    message,
-                });
-            }
-            continue;
-        };
-
-        labels.push(ResolvedDiagnosticLabel {
-            style: label.style,
-            path: Some(relative_display_path_from_root(
-                position.path.as_path(),
+    diagnostic
+        .labels
+        .iter()
+        .filter_map(|label| {
+            resolved_label_fact(
+                label.style,
+                label.span.is_some(),
+                context.label_position(label),
+                label
+                    .message
+                    .as_ref()
+                    .map(|message| diagnostic_label_message_text(message, context)),
                 root,
-            )),
-            line: Some(display_line_number(
-                i32::try_from(position.start.line).unwrap_or(i32::MAX),
-            )),
-            column: Some(display_column_number(
-                i32::try_from(position.start.column).unwrap_or(i32::MAX),
-            )),
-            message: message.unwrap_or_default(),
-        });
-    }
+            )
+        })
+        .collect()
+}
 
-    labels
+/// Build one resolved label from its style, its position and its message.
+///
+/// A positioned label keeps its location even when its message is empty. A label without a position keeps only a
+/// non-empty message, and only when it has no source span to explain. Any other label has no usable fact and is
+/// omitted.
+pub(super) fn resolved_label_fact(
+    style: DiagnosticLabelStyle,
+    spanned: bool,
+    position: Option<DiagnosticPrimaryPosition<'_>>,
+    message: Option<String>,
+    root: &Path,
+) -> Option<ResolvedDiagnosticLabel> {
+    let Some(position) = position else {
+        let message = message.filter(|message| !message.is_empty())?;
+        return (!spanned).then_some(ResolvedDiagnosticLabel {
+            style,
+            path: None,
+            line: None,
+            column: None,
+            message,
+        });
+    };
+
+    Some(ResolvedDiagnosticLabel {
+        style,
+        path: Some(relative_display_path_from_root(
+            position.path.as_path(),
+            root,
+        )),
+        line: Some(display_line_number(
+            i32::try_from(position.start.line).unwrap_or(i32::MAX),
+        )),
+        column: Some(display_column_number(
+            i32::try_from(position.start.column).unwrap_or(i32::MAX),
+        )),
+        message: message.unwrap_or_default(),
+    })
 }
 
 fn diagnostic_label_message_text(
@@ -442,6 +474,83 @@ fn diagnostic_label_message_text(
             format!("write-back into `{target}` here after the compound update")
         }
     }
+}
+
+/// The message of one compact label. Every arm reads the same text as [`diagnostic_label_message_text`] for the
+/// matching legacy message. `None` is the message-less label, which marks a location without prose.
+pub(crate) fn compact_label_message_text(
+    message: DurableLabelMessage<'_>,
+    types: &TypeDisplaySnapshot,
+    context: DiagnosticRenderContext<'_>,
+) -> Option<String> {
+    let string_table = context.string_table;
+    let type_text = |type_id| types.display_for_render(type_id, string_table, context.path_table());
+
+    let text = match message {
+        DurableLabelMessage::None => return None,
+        DurableLabelMessage::PreviousDeclaration => "previous declaration here".to_owned(),
+        DurableLabelMessage::ConflictingAccess => "earlier conflicting access here".to_owned(),
+        DurableLabelMessage::ValueMovedHere => "value moved here".to_owned(),
+        DurableLabelMessage::ConfigInputOrigin { input_name, origin } => {
+            let origin_text = match origin {
+                BuildConfigValueOrigin::ExplicitInput => "an explicit input",
+                BuildConfigValueOrigin::BuilderGlobal => "a builder-provided global",
+                BuildConfigValueOrigin::FixedProjectField => "a fixed project field",
+                BuildConfigValueOrigin::DeclarationDefault => "its declaration default",
+            };
+            format!(
+                "configuration input `{}` resolved from {origin_text}",
+                string_table.resolve(input_name)
+            )
+        }
+        DurableLabelMessage::RenderedText(message_text) => {
+            string_table.resolve(message_text).to_owned()
+        }
+        DurableLabelMessage::GenericInstantiationBodySite => {
+            "generic body operation failed here".to_owned()
+        }
+        DurableLabelMessage::GenericInstantiationDeclarationSite => {
+            "generic function declared here".to_owned()
+        }
+        DurableLabelMessage::GenericInstantiationSubstitutions(substitutions) => {
+            let substitution_text = substitutions
+                .iter()
+                .map(|substitution| {
+                    let parameter_name = string_table.resolve(substitution.parameter);
+                    format!("{parameter_name} = {}", type_text(substitution.concrete))
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            format!("generic substitution: {substitution_text}")
+        }
+        DurableLabelMessage::GenericInferencePreviousEvidence => {
+            "previous generic inference evidence here".to_owned()
+        }
+        DurableLabelMessage::ImmutableBindingDeclaration => {
+            "immutable binding declared here".to_owned()
+        }
+        DurableLabelMessage::TypedFailureProducer { error_type } => {
+            format!("`{}!` failure produced here", type_text(error_type))
+        }
+        DurableLabelMessage::ImplicitFailureProducer => {
+            "implicit built-in failure may escape here".to_owned()
+        }
+        DurableLabelMessage::BuiltinFailureCall => {
+            "implicit built-in failure propagates through this call".to_owned()
+        }
+        DurableLabelMessage::BuiltinFailureOrigin => {
+            "original failing numeric or range operation here".to_owned()
+        }
+        DurableLabelMessage::BuiltinWriteBackOrigin { target_type } => {
+            format!(
+                "write-back into `{}` here after the compound update",
+                type_text(target_type)
+            )
+        }
+    };
+
+    Some(text)
 }
 
 /// Return a validated retained line, allowing only the exact EOF position of an empty snapshot to

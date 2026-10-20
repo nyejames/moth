@@ -1255,7 +1255,7 @@ pub struct SecondaryDiagnosticLabel {
 `message_and_data` uses:
 
 ```text
-bits 24..31  LabelMessageCode; never 0
+bits 24..31  LabelMessageCode; 0 is NONE, used only for a label with no message
 bits  0..23  24-bit immediate value or one-based LabelDataId; zero for codes without data
 ```
 
@@ -1268,6 +1268,9 @@ label data reference.
 
 More than `2^24 - 1` label-data entries in one compilation is a typed diagnostic-capacity failure for
 user input, not integer wrapping.
+
+A label with a span and no message is stored as code 0 (`NONE`) with zero data. It keeps its span, so
+its location still renders.
 
 ### Mixed-domain ownership
 
@@ -1400,6 +1403,11 @@ The schema generates or validates:
 
 Direct construction of `DiagnosticRecord`, raw fact indexing and direct renderer matches on storage
 bits are prohibited outside the diagnostic storage/schema modules.
+
+Compaction treats a secondary label whose role the family row does not declare as a compiler bug and
+panics, naming the family and the role. Four roles are universal and need no declaration: `NONE` for a
+message-less label, and the three generic-instantiation roles, which the generic-function machinery
+appends to any diagnostic.
 
 A procedural generator remains deferred unless the declarative schema becomes demonstrably
 unmanageable. “More convenient” is not sufficient evidence.

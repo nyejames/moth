@@ -74,17 +74,17 @@ fn assert_captured(draft: &DiagnosticDraft) {
     );
 }
 
-/// Panics when a label's message is not one the family declares. The schema lists the permitted roles, so an
-/// undeclared role is a producer bug and never reaches the store.
+/// Panics when a label's message is not one the family permits. A family permits its declared roles and the universal
+/// roles, so an undeclared role is a producer bug and never reaches the store.
 fn assert_label_roles(draft: &DiagnosticDraft) {
     let Some(extra) = draft.extra.as_deref() else {
         return;
     };
     for label in &extra.labels {
         assert!(
-            draft.core.family.labels.contains(&label.message),
-            "label {:?} is not declared by family {}",
-            label.message,
+            draft.core.family.permits_label(label.message),
+            "label role {} is not declared by family {}",
+            label.message.name(),
             draft.core.family.stable_code
         );
     }

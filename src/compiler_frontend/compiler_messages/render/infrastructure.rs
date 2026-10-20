@@ -10,6 +10,11 @@ use crate::compiler_frontend::compiler_errors::{
 
 pub(crate) const ISSUE_URL: &str = "https://github.com/nyejames/moth/issues";
 
+/// The code and title of the infrastructure failure record. The descriptor table carries the same
+/// pair, and a test keeps the two equal, so every renderer reads one spelling.
+pub(crate) const INFRASTRUCTURE_FAILURE_CODE: &str = "MOTH-INFRA-0001";
+pub(crate) const INFRASTRUCTURE_FAILURE_TITLE: &str = "Infrastructure failure";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum InfrastructureClass {
     CompilerBug,

@@ -337,9 +337,9 @@ fn empty_retained_file_eof_position_preserves_path_coordinates_and_excerpt() {
 #[test]
 fn spanless_message_label_renders_without_a_source_position() {
     let mut string_table = StringTable::new();
-    let label_text = string_table.intern("message-only label");
-    let diagnostic = CompilerDiagnostic::unreachable_match_arm(None).with_labels(vec![
-        DiagnosticLabel::secondary(None, Some(DiagnosticLabelMessage::RenderedText(label_text))),
+    let name = string_table.intern("value");
+    let diagnostic = CompilerDiagnostic::duplicate_declaration(name, None, None).with_labels(vec![
+        DiagnosticLabel::secondary(None, Some(DiagnosticLabelMessage::PreviousDeclaration)),
         DiagnosticLabel::secondary(
             Some(SourceSpan::new(
                 SourceId::from_index(99),
@@ -356,8 +356,44 @@ fn spanless_message_label_renders_without_a_source_position() {
 
     assert_eq!(
         rendered,
-        vec!["info: - message-only label"],
+        vec!["info: - previous declaration here"],
         "spanless labels render their message while unresolved spans remain omitted"
+    );
+}
+
+#[test]
+fn message_less_label_on_a_pilot_renders_only_its_location() {
+    let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
+    let mut string_table = StringTable::new();
+    let name = string_table.intern("value");
+    let (source_database, source_id) = retained_source_database(
+        temporary_directory.path(),
+        "main.moth",
+        "alpha\nbeta\n",
+        &mut string_table,
+    );
+    let identity = Arc::new(FrozenIdentityContext::from_parts(
+        string_table,
+        source_database,
+    ));
+    let diagnostic =
+        CompilerDiagnostic::duplicate_declaration(name, None, Some(inline_span(source_id, 6, 4)))
+            .with_labels(vec![DiagnosticLabel::secondary(
+                Some(inline_span(source_id, 0, 5)),
+                None,
+            )]);
+    let context = DiagnosticRenderContext::new(identity.strings()).with_frozen_identity(&identity);
+
+    let rendered = format_label_messages_with_context_from_root(
+        &diagnostic,
+        context,
+        temporary_directory.path(),
+    );
+
+    assert_eq!(
+        rendered,
+        vec!["info: 1:1"],
+        "a message-less label renders only its location"
     );
 }
 
@@ -1033,7 +1069,7 @@ fn html_escapes_related_label_messages_without_terminal_presentation_text() {
     let name = string_table.intern("value");
     let label_text = string_table.intern("<label> &");
     let diagnostic =
-        CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 0, 5)))
+        CompilerDiagnostic::import_name_collision(name, None, Some(inline_span(source_id, 0, 5)))
             .with_labels(vec![DiagnosticLabel::secondary(
                 None,
                 Some(DiagnosticLabelMessage::RenderedText(label_text)),

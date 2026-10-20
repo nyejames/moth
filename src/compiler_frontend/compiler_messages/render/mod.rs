@@ -17,12 +17,13 @@ pub(crate) use tests::infrastructure_tests::assert_compiler_bug_views;
 
 mod borrow;
 mod calls;
-mod context;
+pub(super) mod context;
 mod control_flow;
 mod declarations;
 mod import_config;
 mod paths;
 mod payload;
+mod subject;
 mod suggestions;
 mod syntax;
 mod templates;

@@ -225,7 +225,7 @@ fn secondary_label_rejects_a_data_index_beyond_24_bits() {
 
 fn encode(message: DiagnosticLabelMessage) -> (DraftLabel, Vec<DraftSubstitution>) {
     let mut substitutions = Vec::new();
-    let label = encode_label(Some(exact_span(1, 2)), message, &mut substitutions)
+    let label = encode_label(Some(exact_span(1, 2)), Some(message), &mut substitutions)
         .expect("a small label always encodes");
     (label, substitutions)
 }
@@ -234,6 +234,18 @@ fn encode(message: DiagnosticLabelMessage) -> (DraftLabel, Vec<DraftSubstitution
 fn plain_labels_carry_their_code_and_span_only() {
     let (label, substitutions) = encode(DiagnosticLabelMessage::ValueMovedHere);
     assert_eq!(label.message, LabelMessageCode::VALUE_MOVED_HERE);
+    assert!(label.span.is_some());
+    assert_eq!(label.pending_types, 0);
+    assert_eq!(label.data, [0, 0]);
+    assert!(substitutions.is_empty());
+}
+
+#[test]
+fn message_less_labels_encode_to_none_and_keep_their_span() {
+    let mut substitutions = Vec::new();
+    let label = encode_label(Some(exact_span(1, 2)), None, &mut substitutions)
+        .expect("a message-less label always encodes");
+    assert_eq!(label.message, LabelMessageCode::NONE);
     assert!(label.span.is_some());
     assert_eq!(label.pending_types, 0);
     assert_eq!(label.data, [0, 0]);
@@ -369,8 +381,8 @@ fn generic_substitution_labels_append_pending_entries() {
             },
         ],
     };
-    let label =
-        encode_label(None, message, &mut substitutions).expect("two substitutions always encode");
+    let label = encode_label(None, Some(message), &mut substitutions)
+        .expect("two substitutions always encode");
     assert_eq!(label.data, [1, 2]);
     assert_eq!(label.pending_types, 0);
     assert_eq!(substitutions.len(), 3);
@@ -384,7 +396,9 @@ fn label_encoding_rejects_a_name_beyond_the_fact_range() {
     let mut substitutions = Vec::new();
     let result = encode_label(
         None,
-        DiagnosticLabelMessage::RenderedText(StringId::from_index(u32::MAX)),
+        Some(DiagnosticLabelMessage::RenderedText(StringId::from_index(
+            u32::MAX,
+        ))),
         &mut substitutions,
     );
     assert!(result.is_err());

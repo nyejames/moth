@@ -37,10 +37,6 @@ const _: () = assert!(
 );
 
 /// A span as a reader sees it: local to the diagnostic, foreign to it, or absent.
-#[cfg_attr(
-    not(test),
-    allow(dead_code, reason = "P4.5 report freeze reads record sites")
-)]
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum SiteRef<'a> {
     Absent,

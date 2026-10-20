@@ -5,13 +5,14 @@
 
 use crate::compiler_frontend::compiler_errors::{CompilerMessages, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::render::infrastructure::{
-    ISSUE_URL, InfrastructureClass, format_error_guidance_lines, infrastructure_class,
-    infrastructure_heading,
+    INFRASTRUCTURE_FAILURE_CODE, INFRASTRUCTURE_FAILURE_TITLE, ISSUE_URL, InfrastructureClass,
+    format_error_guidance_lines, infrastructure_class, infrastructure_heading,
 };
+use crate::compiler_frontend::compiler_messages::render::subject::DiagnosticSubject;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, ResolvedDiagnosticLabel, display_column_number, display_gutter_width,
     display_line_number, expand_tabs_for_display, primary_caret_padding, primary_underline_length,
-    relative_display_path_from_root, render_diagnostic, resolve_label_render_facts_from_root,
+    relative_display_path_from_root,
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticLabelStyle, DiagnosticSeverity,
@@ -33,11 +34,11 @@ fn severity_display(severity: DiagnosticSeverity) -> (&'static str, &'static str
 }
 
 fn render_source_frame(
-    diagnostic: &CompilerDiagnostic,
+    subject: &DiagnosticSubject<'_>,
     project_root: &std::path::Path,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let Some(primary_position) = context.primary_position(diagnostic) else {
+    let Some(primary_position) = subject.primary_position(context) else {
         return String::new();
     };
 
@@ -172,7 +173,7 @@ fn render_infrastructure_card(errors: &InfrastructureErrors) -> String {
         body.push_str("</section>");
     }
     format!(
-        r#"<article class="diagnostic" data-diagnostic-code="MOTH-INFRA-0001"><div class="diagnostic-head"><span class="{badge_class}">{severity_visual} {severity_label}</span><span class="kind">Infrastructure failure</span></div>{body}</article>"#
+        r#"<article class="diagnostic" data-diagnostic-code="{INFRASTRUCTURE_FAILURE_CODE}"><div class="diagnostic-head"><span class="{badge_class}">{severity_visual} {severity_label}</span><span class="kind">{INFRASTRUCTURE_FAILURE_TITLE}</span></div>{body}</article>"#
     )
 }
 fn render_diagnostic_card(
@@ -180,8 +181,9 @@ fn render_diagnostic_card(
     project_root: &std::path::Path,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let descriptor = diagnostic.kind.descriptor();
-    let (severity_label, severity_visual, badge_class) = severity_display(diagnostic.severity);
+    let subject = DiagnosticSubject::new(diagnostic, context);
+    let descriptor = subject.descriptor();
+    let (severity_label, severity_visual, badge_class) = severity_display(subject.severity());
 
     // The code is available as a data attribute for debugging but not shown
     // visibly in the browser card. Terse/terminal output still shows codes.
@@ -190,9 +192,9 @@ fn render_diagnostic_card(
         escape_html(descriptor.code)
     );
 
-    let source_frame = render_source_frame(diagnostic, project_root, context);
+    let source_frame = render_source_frame(&subject, project_root, context);
 
-    let rendered_payload = render_diagnostic(diagnostic, context);
+    let rendered_payload = subject.payload(context);
 
     let mut body = String::new();
 
@@ -212,8 +214,8 @@ fn render_diagnostic_card(
 
     body.push_str(&source_frame);
 
-    let primary_display_path = context
-        .primary_position(diagnostic)
+    let primary_display_path = subject
+        .primary_position(context)
         .map(|position| relative_display_path_from_root(position.path.as_path(), project_root));
     for ResolvedDiagnosticLabel {
         style,
@@ -221,7 +223,7 @@ fn render_diagnostic_card(
         line,
         column,
         message,
-    } in resolve_label_render_facts_from_root(diagnostic, context, project_root)
+    } in subject.resolved_labels(context, project_root)
     {
         let style_name = match style {
             DiagnosticLabelStyle::Secondary => "info",

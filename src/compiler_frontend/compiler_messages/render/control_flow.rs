@@ -18,7 +18,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 
-/// The fixed message for an unreachable match arm, shared by the compact and legacy renderers.
+/// The fixed message for an unreachable match arm.
 pub(crate) const UNREACHABLE_MATCH_ARM_MESSAGE: &str = "Unreachable match arm";
 
 pub(crate) fn invalid_control_flow_statement_message(

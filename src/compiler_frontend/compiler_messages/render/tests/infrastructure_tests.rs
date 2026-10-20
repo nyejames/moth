@@ -6,10 +6,14 @@ use crate::compiler_frontend::compiler_errors::{
 };
 use crate::compiler_frontend::compiler_messages::display_messages::format_infrastructure_errors;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
+use crate::compiler_frontend::compiler_messages::render::infrastructure::{
+    INFRASTRUCTURE_FAILURE_CODE, INFRASTRUCTURE_FAILURE_TITLE,
+};
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_compiler_messages;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, InvalidConfigReason,
-    InvalidImportPathReason, NameNamespace, RuleDiagnosticKind, TypeMismatchContext,
+    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
+    InfrastructureDiagnosticKind, InvalidConfigReason, InvalidImportPathReason, NameNamespace,
+    RuleDiagnosticKind, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
@@ -358,4 +362,13 @@ fn normal_import_config_and_type_diagnostics_keep_codes_without_infrastructure_b
             < html.find("warning_name").expect("warning"),
         "{html}"
     );
+}
+
+#[test]
+fn infrastructure_constants_match_the_failure_descriptor() {
+    let descriptor =
+        DiagnosticKind::Infrastructure(InfrastructureDiagnosticKind::InfrastructureFailure)
+            .descriptor();
+    assert_eq!(INFRASTRUCTURE_FAILURE_CODE, descriptor.code);
+    assert_eq!(INFRASTRUCTURE_FAILURE_TITLE, descriptor.title);
 }

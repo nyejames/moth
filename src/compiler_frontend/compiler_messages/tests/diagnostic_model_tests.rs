@@ -1757,14 +1757,12 @@ fn colliding_owner_messages(
         generic_parameters: None,
         const_record: false,
     });
-    let unknown_name =
-        CompilerDiagnostic::unknown_value_name(name_id, primary_span).with_labels(vec![
-            DiagnosticLabel::secondary_with_frozen_identity(
-                Some(foreign_span),
-                Some(DiagnosticLabelMessage::PreviousDeclaration),
-                foreign_handle,
-            ),
-        ]);
+    let duplicate_name = CompilerDiagnostic::duplicate_declaration(name_id, None, primary_span)
+        .with_labels(vec![DiagnosticLabel::secondary_with_frozen_identity(
+            Some(foreign_span),
+            Some(DiagnosticLabelMessage::PreviousDeclaration),
+            foreign_handle,
+        )]);
     let type_mismatch = CompilerDiagnostic::type_mismatch(
         expected_type,
         builtin_type_ids::fixed_scalar(FixedScalar::I32),
@@ -1773,7 +1771,7 @@ fn colliding_owner_messages(
     );
 
     let mut messages =
-        CompilerMessages::from_diagnostics(vec![unknown_name, type_mismatch], string_table)
+        CompilerMessages::from_diagnostics(vec![duplicate_name, type_mismatch], string_table)
             .with_type_context_for_all_diagnostics(type_environment);
     messages.set_source_database(Arc::new(source_database));
     messages
@@ -4388,7 +4386,7 @@ fn remapping_diagnostic_strings_leaves_source_spans_unchanged() {
     let primary = exact_span(primary_source, 4, 6, &mut builder);
     let related = exact_span(related_source, 18, 5, &mut builder);
 
-    let diagnostic = CompilerDiagnostic::duplicate_declaration(name, Some(related), Some(primary))
+    let diagnostic = CompilerDiagnostic::import_name_collision(name, Some(related), Some(primary))
         .with_labels(vec![DiagnosticLabel::secondary(
             Some(related),
             Some(DiagnosticLabelMessage::RenderedText(label_text)),
@@ -4405,12 +4403,12 @@ fn remapping_diagnostic_strings_leaves_source_spans_unchanged() {
     assert_eq!(diagnostic.primary_span, Some(primary));
     assert_eq!(diagnostic.labels[0].span, Some(related));
     match &diagnostic.payload {
-        DiagnosticPayload::DuplicateDeclaration {
+        DiagnosticPayload::ImportNameCollision {
             name: remapped_name,
         } => {
             assert_eq!(merged_table.resolve(*remapped_name), "Button");
         }
-        payload => panic!("unexpected duplicate payload: {payload:?}"),
+        payload => panic!("unexpected import payload: {payload:?}"),
     }
     match diagnostic.labels[0].message {
         Some(DiagnosticLabelMessage::RenderedText(remapped_text)) => {

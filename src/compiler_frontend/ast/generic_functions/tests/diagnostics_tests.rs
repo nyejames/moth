@@ -242,15 +242,18 @@ fn with_generic_instantiation_context_avoids_duplicate_body_secondary_label() {
 
 #[test]
 fn generic_reanchoring_does_not_deduplicate_distinct_domainless_label_owners() {
+    let mut string_table = StringTable::new();
     let body_span = make_span(1, 10, 1);
     let call_span = make_span(2, 20, 1);
     let body_owner = FrozenIdentityHandle::new();
     let existing_owner = FrozenIdentityHandle::new();
-    let mut diagnostic = CompilerDiagnostic::type_mismatch(
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        builtin_type_ids::STRING,
-        TypeMismatchContext::FunctionArgument,
+    let mut diagnostic = CompilerDiagnostic::new(
+        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
         Some(body_span),
+        DiagnosticPayload::UnknownName {
+            name: string_table.intern("x"),
+            namespace: crate::compiler_frontend::compiler_messages::NameNamespace::Value,
+        },
     )
     .with_labels(vec![DiagnosticLabel::secondary_with_frozen_identity(
         Some(body_span),
@@ -293,14 +296,17 @@ fn generic_reanchoring_does_not_deduplicate_distinct_domainless_label_owners() {
 
 #[test]
 fn generic_reanchoring_deduplicates_same_domainless_label_owner() {
+    let mut string_table = StringTable::new();
     let body_span = make_span(1, 10, 1);
     let call_span = make_span(2, 20, 1);
     let body_owner = FrozenIdentityHandle::new();
-    let mut diagnostic = CompilerDiagnostic::type_mismatch(
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        builtin_type_ids::STRING,
-        TypeMismatchContext::FunctionArgument,
+    let mut diagnostic = CompilerDiagnostic::new(
+        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
         Some(body_span),
+        DiagnosticPayload::UnknownName {
+            name: string_table.intern("x"),
+            namespace: crate::compiler_frontend::compiler_messages::NameNamespace::Value,
+        },
     )
     .with_labels(vec![DiagnosticLabel::secondary_with_frozen_identity(
         Some(body_span),
@@ -567,6 +573,7 @@ fn donor_owned_label_uses_installed_donor_context() {
 
 #[test]
 fn generic_reanchoring_preserves_mixed_domain_label_owners() {
+    let mut string_table = StringTable::new();
     let body_span = make_span(1, 10, 1);
     let call_span = make_span(2, 20, 1);
     let declaration_span = make_span(1, 30, 1);
@@ -580,11 +587,13 @@ fn generic_reanchoring_preserves_mixed_domain_label_owners() {
     ));
     let call_site_owner =
         FrozenIdentityHandle::for_domain(StablePackageIdentity::project_local("requester"));
-    let mut diagnostic = CompilerDiagnostic::type_mismatch(
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        builtin_type_ids::STRING,
-        TypeMismatchContext::FunctionArgument,
+    let mut diagnostic = CompilerDiagnostic::new(
+        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
         Some(body_span),
+        DiagnosticPayload::UnknownName {
+            name: string_table.intern("x"),
+            namespace: crate::compiler_frontend::compiler_messages::NameNamespace::Value,
+        },
     )
     .with_labels(vec![DiagnosticLabel::secondary_with_frozen_identity(
         Some(body_span),

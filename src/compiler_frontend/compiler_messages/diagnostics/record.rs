@@ -55,10 +55,6 @@ impl SeverityOverride {
     }
 
     /// The severity a record reports: the stored override, or the family default when no override is stored.
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "P4.3 render honours severity overrides")
-    )]
     pub(super) fn resolve(self, default: DiagnosticSeverity) -> DiagnosticSeverity {
         match self {
             Self::Default => default,

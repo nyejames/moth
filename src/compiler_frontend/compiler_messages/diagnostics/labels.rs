@@ -7,18 +7,23 @@
 //! fixed-size words, and substitution entries live in the draft's extra part until compaction moves them into
 //! the store.
 
-use super::facts::{FactCapacityError, string_word};
+use super::facts::{FactCapacityError, string_word, type_display_from_word};
+use super::foreign::SiteRef;
+use super::store::DiagnosticStore;
 use crate::compiler_frontend::build_config::BuildConfigValueOrigin;
 use crate::compiler_frontend::compiler_messages::DiagnosticLabelMessage;
+use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayId;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::string_interning::StringId;
 
-/// The message of a compact label. Each variant of the legacy `DiagnosticLabelMessage` has one code. Codes are
-/// internal to one compiler build and carry no meaning outside it.
+/// The message of a compact label. Each variant of the legacy `DiagnosticLabelMessage` has one code, and a label
+/// without a message has `NONE`. Codes are internal to one compiler build and carry no meaning outside it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct LabelMessageCode(u8);
 
 impl LabelMessageCode {
+    pub(crate) const NONE: Self = Self(0);
     pub(crate) const PREVIOUS_DECLARATION: Self = Self(1);
     pub(crate) const CONFLICTING_ACCESS: Self = Self(2);
     pub(crate) const VALUE_MOVED_HERE: Self = Self(3);
@@ -39,6 +44,43 @@ impl LabelMessageCode {
     /// producers and write-back origins carry data; the rest never read the row.
     pub(super) const fn carries_data(self) -> bool {
         matches!(self.0, 4 | 5 | 8 | 11 | 15)
+    }
+
+    /// Whether every family accepts the label, whatever its row declares. The generic instantiation labels are
+    /// appended to any diagnostic, and a message-less label carries no role of its own.
+    pub(crate) fn is_universal(self) -> bool {
+        matches!(
+            self,
+            Self::NONE
+                | Self::GENERIC_INSTANTIATION_BODY_SITE
+                | Self::GENERIC_INSTANTIATION_DECLARATION_SITE
+                | Self::GENERIC_INSTANTIATION_SUBSTITUTIONS
+        )
+    }
+
+    /// The constant's name, as a diagnostic about a missing label role names it.
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::NONE => "NONE",
+            Self::PREVIOUS_DECLARATION => "PREVIOUS_DECLARATION",
+            Self::CONFLICTING_ACCESS => "CONFLICTING_ACCESS",
+            Self::VALUE_MOVED_HERE => "VALUE_MOVED_HERE",
+            Self::CONFIG_INPUT_ORIGIN => "CONFIG_INPUT_ORIGIN",
+            Self::RENDERED_TEXT => "RENDERED_TEXT",
+            Self::GENERIC_INSTANTIATION_BODY_SITE => "GENERIC_INSTANTIATION_BODY_SITE",
+            Self::GENERIC_INSTANTIATION_DECLARATION_SITE => {
+                "GENERIC_INSTANTIATION_DECLARATION_SITE"
+            }
+            Self::GENERIC_INSTANTIATION_SUBSTITUTIONS => "GENERIC_INSTANTIATION_SUBSTITUTIONS",
+            Self::GENERIC_INFERENCE_PREVIOUS_EVIDENCE => "GENERIC_INFERENCE_PREVIOUS_EVIDENCE",
+            Self::IMMUTABLE_BINDING_DECLARATION => "IMMUTABLE_BINDING_DECLARATION",
+            Self::TYPED_FAILURE_PRODUCER => "TYPED_FAILURE_PRODUCER",
+            Self::IMPLICIT_FAILURE_PRODUCER => "IMPLICIT_FAILURE_PRODUCER",
+            Self::BUILTIN_FAILURE_CALL => "BUILTIN_FAILURE_CALL",
+            Self::BUILTIN_FAILURE_ORIGIN => "BUILTIN_FAILURE_ORIGIN",
+            Self::BUILTIN_WRITE_BACK_ORIGIN => "BUILTIN_WRITE_BACK_ORIGIN",
+            _ => unreachable!("label codes are the constants above"),
+        }
     }
 }
 
@@ -68,9 +110,8 @@ pub(crate) enum DraftType {
 }
 
 /// A generic substitution as the store keeps it. `type_word` is a type display word.
-#[allow(dead_code, reason = "P4.3 render reads generic substitutions")]
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct GenericSubstitutionRecord {
+pub(super) struct GenericSubstitutionRecord {
     pub(super) parameter: u32,
     pub(super) type_word: u32,
 }
@@ -80,12 +121,13 @@ const _: () = assert!(
     "generic substitutions are locked at 8 bytes"
 );
 
-/// Encodes one legacy label. Substitution entries are appended to `substitutions`, the draft's arena.
+/// Encodes one legacy label. A label without a message encodes as `NONE` and keeps its span. Substitution entries
+/// are appended to `substitutions`, the draft's arena.
 ///
 /// The match is exhaustive on purpose: a new `DiagnosticLabelMessage` variant must choose its code here.
 pub(super) fn encode_label(
     span: Option<SourceSpan>,
-    message: DiagnosticLabelMessage,
+    message: Option<DiagnosticLabelMessage>,
     substitutions: &mut Vec<DraftSubstitution>,
 ) -> Result<DraftLabel, FactCapacityError> {
     let plain = |code: LabelMessageCode| DraftLabel {
@@ -93,6 +135,9 @@ pub(super) fn encode_label(
         message: code,
         pending_types: 0,
         data: [0, 0],
+    };
+    let Some(message) = message else {
+        return Ok(plain(LabelMessageCode::NONE));
     };
     Ok(match message {
         DiagnosticLabelMessage::PreviousDeclaration => {
@@ -166,6 +211,17 @@ fn origin_code(origin: BuildConfigValueOrigin) -> u32 {
     }
 }
 
+/// The origin that `origin_code` wrote for a stored word. A word `origin_code` never writes has no origin.
+fn origin_from_code(word: u32) -> Option<BuildConfigValueOrigin> {
+    match word {
+        1 => Some(BuildConfigValueOrigin::ExplicitInput),
+        2 => Some(BuildConfigValueOrigin::BuilderGlobal),
+        3 => Some(BuildConfigValueOrigin::FixedProjectField),
+        4 => Some(BuildConfigValueOrigin::DeclarationDefault),
+        _ => None,
+    }
+}
+
 /// A draft-local index or count as a word. Counts beyond `u32::MAX` cannot be stored.
 fn word_index(value: usize) -> Result<u32, FactCapacityError> {
     u32::try_from(value).map_err(|_| FactCapacityError)
@@ -176,7 +232,7 @@ fn word_index(value: usize) -> Result<u32, FactCapacityError> {
 /// Bits 24-31 hold the message code. Bits 0-23 hold the `label_data` row index, which is meaningful only when
 /// the code carries data.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct SecondaryDiagnosticLabel {
+pub(super) struct SecondaryDiagnosticLabel {
     pub(super) span: Option<SourceSpan>,
     pub(super) packed: u32,
 }
@@ -203,27 +259,151 @@ impl SecondaryDiagnosticLabel {
     }
 
     /// The span this label points at. `None` when the span belongs to a foreign site.
-    pub(crate) fn span(self) -> Option<SourceSpan> {
+    pub(super) fn span(self) -> Option<SourceSpan> {
         self.span
     }
 
     /// The message code of the label.
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "P4.3 render reads secondary labels")
-    )]
-    pub(crate) fn message_code(self) -> LabelMessageCode {
+    pub(super) fn message_code(self) -> LabelMessageCode {
         LabelMessageCode((self.packed >> CODE_SHIFT) as u8)
     }
 
     /// The `label_data` row of a code that carries data, or `None` for the others.
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "P4.3 render reads secondary labels")
-    )]
-    pub(crate) fn data_index(self) -> Option<usize> {
+    pub(super) fn data_index(self) -> Option<usize> {
         self.message_code()
             .carries_data()
             .then_some((self.packed & DATA_INDEX_MASK) as usize)
     }
+
+    /// The message of this label as a renderer reads it: the code's data, decoded from its `label_data` row or from
+    /// the substitution arena for the substitution code.
+    pub(super) fn message<'a>(self, store: &'a DiagnosticStore) -> DurableLabelMessage<'a> {
+        let row = || {
+            let index = self
+                .data_index()
+                .expect("label codes that carry data have a label_data row");
+            store.label_data[index]
+        };
+        let type_word = |word: u32| {
+            type_display_from_word(word).expect("captured label type words are display ids")
+        };
+
+        match self.message_code() {
+            LabelMessageCode::NONE => DurableLabelMessage::None,
+            LabelMessageCode::PREVIOUS_DECLARATION => DurableLabelMessage::PreviousDeclaration,
+            LabelMessageCode::CONFLICTING_ACCESS => DurableLabelMessage::ConflictingAccess,
+            LabelMessageCode::VALUE_MOVED_HERE => DurableLabelMessage::ValueMovedHere,
+            LabelMessageCode::CONFIG_INPUT_ORIGIN => {
+                let [input_name, origin] = row();
+                DurableLabelMessage::ConfigInputOrigin {
+                    input_name: StringId::from_index(input_name),
+                    origin: origin_from_code(origin)
+                        .expect("config origin rows hold a valid origin"),
+                }
+            }
+            LabelMessageCode::RENDERED_TEXT => {
+                let [text, _] = row();
+                DurableLabelMessage::RenderedText(StringId::from_index(text))
+            }
+            LabelMessageCode::GENERIC_INSTANTIATION_BODY_SITE => {
+                DurableLabelMessage::GenericInstantiationBodySite
+            }
+            LabelMessageCode::GENERIC_INSTANTIATION_DECLARATION_SITE => {
+                DurableLabelMessage::GenericInstantiationDeclarationSite
+            }
+            LabelMessageCode::GENERIC_INSTANTIATION_SUBSTITUTIONS => {
+                let [start, len] = row();
+                let start = start as usize;
+                DurableLabelMessage::GenericInstantiationSubstitutions(GenericSubstitutions {
+                    records: &store.substitutions[start..start + len as usize],
+                })
+            }
+            LabelMessageCode::GENERIC_INFERENCE_PREVIOUS_EVIDENCE => {
+                DurableLabelMessage::GenericInferencePreviousEvidence
+            }
+            LabelMessageCode::IMMUTABLE_BINDING_DECLARATION => {
+                DurableLabelMessage::ImmutableBindingDeclaration
+            }
+            LabelMessageCode::TYPED_FAILURE_PRODUCER => {
+                let [error_type, _] = row();
+                DurableLabelMessage::TypedFailureProducer {
+                    error_type: type_word(error_type),
+                }
+            }
+            LabelMessageCode::IMPLICIT_FAILURE_PRODUCER => {
+                DurableLabelMessage::ImplicitFailureProducer
+            }
+            LabelMessageCode::BUILTIN_FAILURE_CALL => DurableLabelMessage::BuiltinFailureCall,
+            LabelMessageCode::BUILTIN_FAILURE_ORIGIN => DurableLabelMessage::BuiltinFailureOrigin,
+            LabelMessageCode::BUILTIN_WRITE_BACK_ORIGIN => {
+                let [target_type, _] = row();
+                DurableLabelMessage::BuiltinWriteBackOrigin {
+                    target_type: type_word(target_type),
+                }
+            }
+            _ => unreachable!("label codes are the constants in LabelMessageCode"),
+        }
+    }
+}
+
+/// A label's message as a renderer reads it: the code's data, decoded into typed values.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum DurableLabelMessage<'a> {
+    None,
+    PreviousDeclaration,
+    ConflictingAccess,
+    ValueMovedHere,
+    ConfigInputOrigin {
+        input_name: StringId,
+        origin: BuildConfigValueOrigin,
+    },
+    RenderedText(StringId),
+    GenericInstantiationBodySite,
+    GenericInstantiationDeclarationSite,
+    GenericInstantiationSubstitutions(GenericSubstitutions<'a>),
+    GenericInferencePreviousEvidence,
+    ImmutableBindingDeclaration,
+    TypedFailureProducer {
+        error_type: TypeDisplayId,
+    },
+    ImplicitFailureProducer,
+    BuiltinFailureCall,
+    BuiltinFailureOrigin,
+    BuiltinWriteBackOrigin {
+        target_type: TypeDisplayId,
+    },
+}
+
+/// The generic substitutions of one label, borrowed from the store's substitution arena.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct GenericSubstitutions<'a> {
+    records: &'a [GenericSubstitutionRecord],
+}
+
+impl<'a> GenericSubstitutions<'a> {
+    /// The substitutions in the order the label names them, with each concrete type decoded.
+    pub(crate) fn iter(self) -> impl Iterator<Item = GenericSubstitution> + 'a {
+        self.records.iter().map(|record| GenericSubstitution {
+            parameter: StringId::from_index(record.parameter),
+            concrete: type_display_from_word(record.type_word)
+                .expect("captured substitution type words are display ids"),
+        })
+    }
+}
+
+/// One generic substitution: the parameter's name and the concrete type it received.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct GenericSubstitution {
+    pub(crate) parameter: StringId,
+    pub(crate) concrete: TypeDisplayId,
+}
+
+/// A secondary label as a renderer reads it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct DurableLabel<'a> {
+    /// Whether the label stores a source span. A label without one marks no location.
+    pub(crate) spanned: bool,
+    /// Where the label points: foreign when a foreign-site row names it, otherwise local.
+    pub(crate) site: SiteRef<'a>,
+    pub(crate) message: DurableLabelMessage<'a>,
 }
