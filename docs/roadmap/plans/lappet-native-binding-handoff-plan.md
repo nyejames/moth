@@ -7,11 +7,12 @@ the milestone and update `crates/lappet/roadmap.md` in the same commit.
 
 ## Status
 
-- Status: active. Phases 0, 1 and 2A are delivered.
-- Current slice: Phase 2B, the immutable compiled project and build context.
+- Status: active. Phases 0, 1, 2A and 2B.0 are delivered.
+- Current slice: Phase 2B.1, the `ProjectBuilder` trait and build driver.
 - Blockers: none for Phase 2. Executable native Wasm lowering is blocked on the
   compiler prerequisites listed in the native host ABI. Phase 2 does not need it.
-- Next action: write the failing external-crate `ProjectBuilder` test below.
+- Next action: write the failing external-crate `ProjectBuilder` tests for
+  Phase 2B.1.
 
 ## Goal
 
@@ -94,7 +95,22 @@ The user approved these. Do not reopen them without new evidence.
 - **Outputs:** builders register their own configuration section with
   output-root fields. That needs dynamic section and field names, because
   `NamedConfigSectionSchema.name` and `ConfigSchemaField.name` are
-  `&'static str` today.
+  `&'static str` today. Every builder section gains `dev_output` and
+  `release_output` with the HTML defaults, and HTML moves onto the same generic
+  path. A builder without a section uses the defaults.
+- **Phase 2B SDK shape:** `ProjectBuilder` has `definition` and `build`.
+  `build_project(&dyn ProjectBuilder, BuildRequest)` returns `BuiltProject`,
+  which exposes `warnings`. `BuildRequest::new` takes the project root.
+  `CompiledProject::require_package` returns `ProjectPackage<'_>`, an
+  owner-bound handle and the future `compile_wasm` input.
+  `CompiledProject::settings` returns typed `string` and `bool` reads of the
+  builder's section. `BuildContext` and `BuildArtifacts::new` start empty.
+- **SDK errors:** the kinds are `InvalidDefinition`, `Compilation`, `Build`,
+  `Infrastructure` and `CompilerBug`. `Error::build` creates builder failures
+  and `Error::messages` returns rendered terse compiler lines. A structured
+  diagnostic view comes later. A missing facade is a `Build` error.
+- **Definition rules:** `finish` rejects relative `from_dir` paths and
+  `available_in_templates` without `moth_templates`.
 
 ## Delivered so far
 
@@ -106,6 +122,9 @@ The user approved these. Do not reopen them without new evidence.
   component source roots, case-only duplicates, source and host path overlap
   and the V1 signature profile. Tests live in `src/builder/tests/` and
   `tests/builder_sdk.rs`.
+- **Phase 2B.0:** `finish` rejections use builder-facing terms and name the
+  offending package, path or function. `BuilderDefinition` has a compact
+  `Debug`. The definition rules above are enforced and documented.
 
 ## Code map
 
@@ -210,15 +229,8 @@ Phase 2 is complete only when a real external crate runs the whole workflow.
 
 ## Open follow-ups and questions
 
-- SDK error messages still carry compiler wording such as "External package
-  path" and a Debug-formatted reason. Rewrite them for builder authors.
-- The derived `Debug` on `BuilderDefinition` prints the whole surface.
 - The source and host overlap check does not cover JS packages registered
   during compilation.
-- Ask the user: should `SourcePackage::from_dir` reject relative paths, which
-  currently resolve against the process working directory?
-- Ask the user: should `available_in_templates` without `moth_templates` be
-  rejected? It is accepted silently today.
 - Documentation follow-ups to report rather than edit: the host manifest is not
   yet described in `docs/build-system-design.md` or
   `docs/compiler-design-overview.md`, the reserved first-party identities are

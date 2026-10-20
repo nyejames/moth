@@ -82,7 +82,7 @@ pub(crate) fn validate_package_path(
         .split('/')
         .any(|component| component.is_empty() || component.contains('#'))
     {
-        return Err("must be '@' followed by nonempty '/'-separated components without '#'");
+        return Err("must have nonempty '/'-separated components without '#'");
     }
     let root = path_without_introducer
         .split('/')

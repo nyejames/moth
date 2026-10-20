@@ -117,9 +117,7 @@ impl HostFunction {
     /// Maps the descriptor onto the registry's function specification.
     pub(crate) fn to_spec(&self) -> Result<ExternalFunctionSpec, &'static str> {
         if self.returns.len() > 1 {
-            return Err(
-                "declares several success values, but V1 host functions return at most one",
-            );
+            return Err("declares several success values, but host functions return at most one");
         }
         let parameters = self
             .parameters

@@ -7,20 +7,22 @@ Neither grants special access to another module's private implementation.
 ### Provide a source package
 
 `SourcePackage::new` assigns the public package root. `from_dir` supplies its
-installed files. Registration through `BuilderDefinition::source_package`
-records Builder provenance without asking the caller to construct an internal
-registry entry.
+installed files as an absolute path, and `finish` rejects a relative one.
+Registration through `BuilderDefinition::source_package` records Builder
+provenance without asking the caller to construct an internal registry entry.
 
 [codeblock, $code("rust"):
+    let install_root = std::path::PathBuf::from("/srv/game/installed-packages");
     let package = SourcePackage::new("@ui")
-        .from_dir("installed-packages/ui")
+        .from_dir(install_root.join("ui"))
         .available_in_templates();
 ]
 
 `available_in_templates` makes the package's exported constants eligible for
 implicit template scope. It doesn't inject arbitrary Rust functions, expose
 private constants or change Moth's no-shadowing rules. Ambiguous visible names
-are errors.
+are errors. `finish` rejects the package unless the same definition also calls
+`moth_templates`.
 
 Packages compile in their own semantic boundaries with the same exact numeric
 identities and language-owned defaults. Builder source packages don't inherit

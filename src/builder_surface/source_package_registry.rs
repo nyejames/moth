@@ -45,12 +45,12 @@ impl SourcePackageRegistry {
         let prefix = package_prefix.into();
         if let Err(reason) = validate_package_path(&prefix, origin) {
             return Err(CompilerError::compiler_error(format!(
-                "Source package path '@{prefix}' {reason}."
+                "Source package '@{prefix}' {reason}."
             )));
         }
         if prefix.contains('/') {
             return Err(CompilerError::compiler_error(format!(
-                "Source package path '@{prefix}' must have exactly one component."
+                "Source package '@{prefix}' must have exactly one component."
             )));
         }
         if self

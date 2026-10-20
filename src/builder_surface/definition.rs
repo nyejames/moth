@@ -90,7 +90,7 @@ impl BuilderSurface {
             for &binding_path in &binding_paths {
                 if paths_overlap(source_path, binding_path) {
                     return Err(CompilerError::compiler_error(format!(
-                        "Source package '@{source_path}' overlaps binding package '@{binding_path}'."
+                        "Source package '@{source_path}' overlaps host package '@{binding_path}'."
                     )));
                 }
             }

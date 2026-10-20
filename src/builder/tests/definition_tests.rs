@@ -35,6 +35,7 @@ fn finish_registers_source_and_host_packages_with_builder_provenance() {
                 .from_dir(ui_dir.path())
                 .available_in_templates(),
         )
+        .moth_templates()
         .host_package(
             HostPackage::new("@platform").function(
                 HostFunction::new("parse_count")
@@ -156,25 +157,32 @@ fn finish_rejects_host_signatures_outside_the_v1_profile() {
     let cases = [
         (
             "nested optional",
+            "nested",
             HostFunction::new("nested")
                 .returns(HostType::optional(HostType::optional(HostType::I32))),
         ),
         (
             "two success values",
+            "pair",
             HostFunction::new("pair")
                 .returns(HostType::I32)
                 .returns(HostType::I32),
         ),
+        (
+            "function name with a path separator",
+            "read/file",
+            HostFunction::new("read/file"),
+        ),
     ];
 
-    for (case, function) in cases {
+    for (case, offender, function) in cases {
         let message = invalid_definition_message(
             case,
             BuilderDefinition::new("game")
                 .host_package(HostPackage::new("@platform").function(function))
                 .finish(),
         );
-        assert!(message.contains("@platform"), "{case}: {message}");
+        assert!(message.contains(offender), "{case}: {message}");
     }
 }
 
@@ -185,24 +193,28 @@ fn finish_rejects_duplicate_and_overlapping_registrations() {
     let cases = [
         (
             "duplicate source package",
+            "@ui",
             BuilderDefinition::new("game")
                 .source_package(source("@ui"))
                 .source_package(source("@ui")),
         ),
         (
             "case-only duplicate source package",
+            "@UI",
             BuilderDefinition::new("game")
                 .source_package(source("@ui"))
                 .source_package(source("@UI")),
         ),
         (
             "duplicate host package",
+            "@platform",
             BuilderDefinition::new("game")
                 .host_package(HostPackage::new("@platform"))
                 .host_package(HostPackage::new("@platform")),
         ),
         (
             "conflicting host signatures",
+            "read",
             BuilderDefinition::new("game").host_package(
                 HostPackage::new("@platform")
                     .function(HostFunction::new("read").returns(HostType::String))
@@ -211,26 +223,30 @@ fn finish_rejects_duplicate_and_overlapping_registrations() {
         ),
         (
             "source and host at one path",
+            "@ui",
             BuilderDefinition::new("game")
                 .source_package(source("@ui"))
                 .host_package(HostPackage::new("@ui")),
         ),
         (
             "host package nested in a source package",
+            "@ui/native",
             BuilderDefinition::new("game")
                 .source_package(source("@ui"))
                 .host_package(HostPackage::new("@ui/native")),
         ),
         (
             "source and host differing only by case",
+            "@UI",
             BuilderDefinition::new("game")
                 .source_package(source("@UI"))
                 .host_package(HostPackage::new("@ui")),
         ),
     ];
 
-    for (case, draft) in cases {
-        invalid_definition_message(case, draft.finish());
+    for (case, offender, draft) in cases {
+        let message = invalid_definition_message(case, draft.finish());
+        assert!(message.contains(offender), "{case}: {message}");
     }
 
     BuilderDefinition::new("game")
@@ -244,26 +260,29 @@ fn finish_rejects_duplicate_and_overlapping_registrations() {
 fn finish_rejects_reserved_and_malformed_package_paths() {
     let dir = package_dir();
     for path in ["@project", "@Project", "@core", "@CORE/game", "ui", "@ui#x"] {
-        invalid_definition_message(
+        let message = invalid_definition_message(
             &format!("source package {path}"),
             BuilderDefinition::new("game")
                 .source_package(SourcePackage::new(path).from_dir(dir.path()))
                 .finish(),
         );
-        invalid_definition_message(
+        assert!(message.contains(path), "{message}");
+        let message = invalid_definition_message(
             &format!("host package {path}"),
             BuilderDefinition::new("game")
                 .host_package(HostPackage::new(path))
                 .finish(),
         );
+        assert!(message.contains(path), "{message}");
     }
 
-    invalid_definition_message(
+    let message = invalid_definition_message(
         "nested source package path",
         BuilderDefinition::new("game")
             .source_package(SourcePackage::new("@game/ui").from_dir(dir.path()))
             .finish(),
     );
+    assert!(message.contains("@game/ui"), "{message}");
 }
 
 #[test]
@@ -283,6 +302,71 @@ fn finish_rejects_source_packages_without_an_installed_directory() {
             .source_package(SourcePackage::new("@ui").from_dir(&missing))
             .finish(),
     );
+    for (case, root) in [
+        ("relative existing directory", "."),
+        ("relative missing directory", "installed-packages/ui"),
+    ] {
+        let message = invalid_definition_message(
+            case,
+            BuilderDefinition::new("game")
+                .source_package(SourcePackage::new("@ui").from_dir(root))
+                .finish(),
+        );
+        assert!(message.contains("@ui"), "{case}: {message}");
+        assert!(message.contains(root), "{case}: {message}");
+    }
+}
+
+#[test]
+fn available_in_templates_requires_moth_templates() {
+    let ui_dir = package_dir();
+    let ui_source = || {
+        SourcePackage::new("@ui")
+            .from_dir(ui_dir.path())
+            .available_in_templates()
+    };
+
+    for (case, draft) in [
+        (
+            "no source kinds",
+            BuilderDefinition::new("game").source_package(ui_source()),
+        ),
+        (
+            "markdown only",
+            BuilderDefinition::new("game")
+                .markdown()
+                .source_package(ui_source()),
+        ),
+    ] {
+        let message = invalid_definition_message(case, draft.finish());
+        assert!(message.contains("@ui"), "{case}: {message}");
+    }
+
+    for (case, draft) in [
+        (
+            "moth_templates after the package",
+            BuilderDefinition::new("game")
+                .source_package(ui_source())
+                .moth_templates(),
+        ),
+        (
+            "moth_templates before the package",
+            BuilderDefinition::new("game")
+                .moth_templates()
+                .source_package(ui_source()),
+        ),
+    ] {
+        let definition = draft
+            .finish()
+            .unwrap_or_else(|error| panic!("{case}: {error}"));
+        assert!(
+            definition
+                .surface()
+                .implicit_template_scope_source_packages
+                .contains("ui"),
+            "{case}"
+        );
+    }
 }
 
 #[test]

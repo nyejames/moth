@@ -9,10 +9,11 @@ use super::Error;
 use crate::build_system::output::BuilderIdentity;
 use crate::builder_surface::{BuilderSurface, PackageOrigin, SourceFileKind};
 use crate::host::HostFunction;
+use std::fmt;
 use std::path::PathBuf;
 
 /// An immutable, validated builder definition.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct BuilderDefinition {
     identity: BuilderIdentity,
     surface: BuilderSurface,
@@ -42,6 +43,32 @@ impl BuilderDefinition {
     #[cfg_attr(not(test), allow(dead_code))] // consumed by the build driver in the next slice
     pub(crate) fn surface(&self) -> &BuilderSurface {
         &self.surface
+    }
+}
+
+/// Prints the identity and registered package paths. The full surface is a compiler registry,
+/// too large to print usefully in assertion failures or logs.
+impl fmt::Debug for BuilderDefinition {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let source_packages = self
+            .surface
+            .source_packages
+            .iter()
+            .map(|root| format!("@{}", root.package_prefix))
+            .collect::<Vec<_>>();
+        let mut host_packages = self
+            .surface
+            .binding_packages
+            .package_paths()
+            .collect::<Vec<_>>();
+        // The registry iterates a hash map, so sort for a stable summary.
+        host_packages.sort_unstable();
+        formatter
+            .debug_struct("BuilderDefinition")
+            .field("identity", &self.identity())
+            .field("source_packages", &source_packages)
+            .field("host_packages", &host_packages)
+            .finish()
     }
 }
 
@@ -94,6 +121,13 @@ impl BuilderDefinitionDraft {
                     package.path
                 ))
             })?;
+            if !root.is_absolute() {
+                return Err(Error::invalid_definition(format!(
+                    "Source package '{}' directory '{}' must be an absolute path.",
+                    package.path,
+                    root.display()
+                )));
+            }
             if !root.is_dir() {
                 return Err(Error::invalid_definition(format!(
                     "Source package '{}' directory '{}' does not exist.",
@@ -106,6 +140,13 @@ impl BuilderDefinitionDraft {
                 .register_filesystem_root(prefix, root.clone(), PackageOrigin::Builder)
                 .map_err(|error| Error::invalid_definition(error.msg))?;
             if package.available_in_templates {
+                if !self.source_kinds.contains(&SourceFileKind::MothTemplate) {
+                    return Err(Error::invalid_definition(format!(
+                        "Source package '{}' is available in templates, so the definition must \
+                         call `moth_templates`.",
+                        package.path
+                    )));
+                }
                 surface.register_implicit_template_scope_source_package(prefix);
             }
         }
@@ -118,7 +159,7 @@ impl BuilderDefinitionDraft {
             for function in &package.functions {
                 let spec = function.to_spec().map_err(|reason| {
                     Error::invalid_definition(format!(
-                        "Host function '{}' in package '{}' {reason}.",
+                        "Host function '{}' in host package '{}' {reason}.",
                         function.name(),
                         package.path
                     ))
@@ -145,7 +186,7 @@ impl BuilderDefinitionDraft {
 /// registry stores the bare prefix.
 fn package_path_without_introducer(path: &str) -> Result<&str, Error> {
     path.strip_prefix('@').ok_or_else(|| {
-        Error::invalid_definition(format!("Package path '{path}' must start with '@'."))
+        Error::invalid_definition(format!("Source package '{path}' must start with '@'."))
     })
 }
 

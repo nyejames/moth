@@ -16,7 +16,7 @@ use super::ids::{
     CanonicalBindingSymbolIdentity, ExternalConstantId, ExternalFunctionId, ExternalPackageId,
     ExternalSymbolId, ExternalTypeId,
 };
-use super::{ExternalSymbolPath, ExternalSymbolPathError};
+use super::{ExternalSymbolPath, ExternalSymbolPathError, InvalidExternalSymbolComponent};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -142,7 +142,7 @@ impl ExternalPackageRegistry {
         let path = path.into();
         let Some(path_without_introducer) = path.strip_prefix('@') else {
             return Err(CompilerError::compiler_error(format!(
-                "External package path '{path}' must start with '@'."
+                "Host package '{path}' must start with '@'."
             )));
         };
         if let Err(reason) = crate::builder_surface::package_metadata::validate_package_path(
@@ -150,11 +150,11 @@ impl ExternalPackageRegistry {
             origin,
         ) {
             return Err(CompilerError::compiler_error(format!(
-                "External package path '{path}' {reason}."
+                "Host package '{path}' {reason}."
             )));
         }
         if self.package_id_by_path.contains_key(&path) {
-            return_compiler_error!("External package '{}' is already registered.", path);
+            return_compiler_error!("Host package '{}' is already registered.", path);
         }
         let id = ExternalPackageId(self.next_package_id);
         self.next_package_id += 1;
@@ -229,7 +229,7 @@ impl ExternalPackageRegistry {
             package_id,
             &path,
             path.leaf(),
-            "function",
+            "host function",
         )?;
 
         if let Some(existing_identity) = self.function_reverse_identity_by_id.get(&id) {
@@ -269,7 +269,7 @@ impl ExternalPackageRegistry {
         id: ExternalFunctionId,
         function: ExternalFunctionDef,
     ) -> Result<(), CompilerError> {
-        let path = one_component_symbol_path("function", &function.name)?;
+        let path = one_component_symbol_path("host function", &function.name)?;
         self.register_function_at_path(package_id, path, id, function)
     }
 
@@ -461,7 +461,7 @@ impl ExternalPackageRegistry {
     ) -> Result<(), CompilerError> {
         if self.has_symbol_at_path(package_id, path) {
             return_compiler_error!(
-                "External {} '{}' at path '{}' in package '{}' collides with another symbol at the same namespace slot.",
+                "The {} '{}' at path '{}' in package '{}' collides with another symbol at the same namespace slot.",
                 kind,
                 symbol_name,
                 path.display_text(),
@@ -626,7 +626,7 @@ impl ExternalPackageRegistry {
         package_id: ExternalPackageId,
         spec: ExternalFunctionSpec,
     ) -> Result<ExternalFunctionId, CompilerError> {
-        let path = one_component_symbol_path("function", &spec.name)?;
+        let path = one_component_symbol_path("host function", &spec.name)?;
         self.register_external_function_at_path(package_id, path, spec)
     }
 
@@ -708,7 +708,7 @@ impl ExternalPackageRegistry {
             )?,
         };
 
-        let path = one_component_symbol_path("function", &function.name)?;
+        let path = one_component_symbol_path("host function", &function.name)?;
         let id = ExternalFunctionId::Synthetic(self.next_synthetic_id);
         self.next_synthetic_id += 1;
         self.register_function_at_path(package_id, path, id, function)?;
@@ -1104,9 +1104,15 @@ fn invalid_external_symbol_path_error(
     name: &str,
     error: ExternalSymbolPathError,
 ) -> CompilerError {
-    CompilerError::compiler_error(format!(
-        "Invalid external {kind} symbol path '{name}': {error:?}"
-    ))
+    let reason = match error {
+        ExternalSymbolPathError::EmptyPath => "must have at least one component",
+        ExternalSymbolPathError::InvalidComponent { reason, .. } => match reason {
+            InvalidExternalSymbolComponent::Empty => "must not be empty",
+            InvalidExternalSymbolComponent::ContainsPathSeparator => "must not contain '/'",
+            InvalidExternalSymbolComponent::ContainsNamespaceSeparator => "must not contain '.'",
+        },
+    };
+    CompilerError::compiler_error(format!("Invalid {kind} name '{name}': {reason}."))
 }
 
 /// Rejects signature slots that cannot carry a Moth value.
