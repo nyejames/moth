@@ -20,8 +20,8 @@ architectural reviews or changes that cross ownership boundaries.
 - **Host bindings, ABI and exported calls:** read the Lappet Rust bindings
   section, `docs/src/developer-docs/project-builders/host-packages.mtf` and
   `docs/src/developer-docs/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf`.
-  Read `docs/src/developer-docs/memory-management/native-host-abi/native-host-abi.mtf`
-  for the physical boundary. Once approved, `crates/lappet/docs/host-abi.md`
+  Once approved, `docs/src/developer-docs/memory-management/native-host-abi/native-host-abi.mtf`
+  owns the physical boundary and `crates/lappet/docs/host-abi.md`
   owns Lappet's adapter, staging, resource-table and fault handling. Neither
   overrides compiler memory semantics.
 - **Native Core implementations:** read the relevant canonical Core package

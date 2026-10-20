@@ -32,7 +32,7 @@ Before guest start, Lappet checks that:
 - the module's actual imports and exports match the manifest's physical names
   and Wasm signatures
 - the ABI version, memory and helper set match the profile Lappet implements
-- every required context type and resource type is available to this instance
+- every required context type and resource type is registered with this runtime
 
 Any mismatch rejects the instance before guest code runs. Lappet never installs
 an unrequested import, a default stub or a trapping placeholder. An implementation
@@ -49,7 +49,7 @@ check is a boundary fault and the Rust function isn't called.
 | `bool`, `char` | Check `0`/`1` and Unicode scalar validity |
 | `i8`..`i64`, `u8`..`u64` | Check the exact range of the declared type, then convert |
 | `moth::host::Byte` | Check `0` through `255`. Never accept a `U8` descriptor for `Byte` or the reverse |
-| `f32`, `f64` | Pass import results through raw. The compiler's external float guard decides their delivery |
+| `f32`, `f64` | Check finiteness of import arguments and export arguments and results. Pass import results through raw, because the compiler's external float guard decides their delivery |
 | `&str` | Check span bounds, length and UTF-8, then borrow or copy for this call only |
 | `String` result | Check the length limit, stage the bytes and write an `AbiStagedText` |
 | `Option<T>` | Check the tag and absent-payload zeroing. Keep absence distinct from failure |
@@ -83,11 +83,12 @@ protocol itself is defined by the native host ABI.
 ## Resource table
 
 Each instance owns a table of its opaque host resources. Rust code creates and
-closes resources through the host resource API, which is milestone 3 design.
+closes resources through the host resource API, which is later runtime design.
 
-- Tokens come from one generator per host runtime, so they are unique across
-  that runtime's live instances and never reused. Exhausting the generator is a
-  host fault.
+- Tokens come from one process-wide generator, so they are nonzero, unique
+  across every runtime and instance in the process and never reused. A token
+  from another runtime is therefore never live in this table. Exhausting the
+  generator is a host fault.
 - Every use checks the instance's table, the registered canonical resource type
   and the entry's lifecycle before a Rust reference exists. Stale, closed,
   wrong-type and other-instance tokens are boundary faults.
@@ -108,8 +109,8 @@ another request through a shared table.
 A host function may mark at most one parameter as host context. Context isn't a
 Moth parameter and has no Wasm carrier or descriptor slot. The embedder supplies
 context for each guest entry call, so one instance can serve successive requests
-with different context. Lappet checks its Rust type before the host call and
-rejects a missing or mismatched context without calling the function. A mutable
+with different context. Lappet checks its Rust type before the host call. A
+missing or mismatched context is a host fault and the function isn't called. A mutable
 context receives exclusive access for the call.
 
 ## Faults
@@ -127,21 +128,24 @@ aborts the process instead, and Lappet gives no Moth-level guarantee.
 
 A fault ends the guest call and the faulting instance is quarantined. Lappet
 then calls no guest helper, clears the staging table and discards values
-already copied from the call. The milestone 3 runtime policy decides whether a
-quarantined instance may be reused. Until it does, a faulted instance is
-dropped. Host IO already performed is never rolled back.
+already copied from the call. The runtime checkpoint in milestone 3 decides
+fault disposition. The V1 helper set has no reset helper, so until a later ABI
+version adds one, a faulted instance is dropped. Host IO already performed is never rolled back.
 
 ## Calling Moth exports
 
 Lappet calls only exports listed in the manifest, and only when no guest call is
 active on that instance. Each call follows the native host ABI's call-scope
 protocol and its fault rules. The Rust-facing call API, including several
-ordered success slots, is milestone 3 design.
+ordered success slots, is later runtime design.
 
-## Tests deferred to milestone 3
+Lappet also implements the reserved `assertion_failed` helper once the
+compiler freezes its signature. It reports a guest trap.
 
-These need emitted Wasm or a Wasmtime store and stay blocked until the compiler
-prerequisites on the ABI page exist.
+## Deferred tests
+
+These need emitted Wasm and a Wasmtime store. They stay blocked until the
+compiler prerequisites on the ABI page exist and milestone 5's gate opens.
 
 1. `U8` and `Byte` descriptors with identical carriers reject each other's
    implementations and out-of-range values.

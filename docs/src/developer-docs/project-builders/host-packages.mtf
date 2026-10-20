@@ -142,6 +142,8 @@ permissions from a function signature.
 
 The runtime adapter validates scalar encodings, numeric ranges, finite floats,
 Unicode and string lengths before exposing a value at the receiving boundary.
+Host float results are the exception. They reach HIR's external binary-float
+guard as raw carriers.
 Invalid values don't become successful Moth results through truncation,
 sentinel substitution or a changed type. A host contract violation is a
 boundary fault, not an undeclared Moth error return.
