@@ -21,7 +21,7 @@ use crate::compiler_frontend::compiler_messages::render::{
 };
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticLabel, DiagnosticLabelMessage, DiagnosticLabelStyle, DiagnosticPayload,
-    TypeMismatchContext,
+    GenericSubstitutionDiagnostic, TypeMismatchContext,
 };
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityContext, FrozenIdentityHandle, LocalSpan, SourceDatabase,
@@ -1067,13 +1067,25 @@ fn html_escapes_related_label_messages_without_terminal_presentation_text() {
         &mut string_table,
     );
     let name = string_table.intern("value");
-    let label_text = string_table.intern("<label> &");
+    let substitution_name = string_table.intern("<label> &");
+    let previous_declaration = inline_span(source_id, 0, 5);
     let diagnostic =
-        CompilerDiagnostic::import_name_collision(name, None, Some(inline_span(source_id, 0, 5)))
-            .with_labels(vec![DiagnosticLabel::secondary(
-                None,
-                Some(DiagnosticLabelMessage::RenderedText(label_text)),
-            )]);
+        CompilerDiagnostic::import_name_collision(name, None, Some(previous_declaration))
+            .with_labels(vec![
+                DiagnosticLabel::secondary(
+                    Some(previous_declaration),
+                    Some(DiagnosticLabelMessage::PreviousDeclaration),
+                ),
+                DiagnosticLabel::secondary(
+                    None,
+                    Some(DiagnosticLabelMessage::GenericInstantiationSubstitutions {
+                        substitutions: vec![GenericSubstitutionDiagnostic {
+                            parameter_name: substitution_name,
+                            concrete_type_id: crate::compiler_frontend::datatypes::ids::TypeId(1),
+                        }],
+                    }),
+                ),
+            ]);
     let context = DiagnosticRenderContext::new(&string_table)
         .with_optional_source_database(Some(&source_database));
 
@@ -1084,12 +1096,12 @@ fn html_escapes_related_label_messages_without_terminal_presentation_text() {
     );
 
     assert!(
-        html.contains(r#"class="diagnostic-label">info: - &lt;label&gt; &amp;</p>"#),
-        "label message text must be escaped independently in HTML: {html}",
+        html.contains("generic substitution: &lt;label&gt; &amp; = TypeId(1)"),
+        "related label message must be escaped independently in HTML: {html}",
     );
     assert!(
-        !html.contains(r#"class="diagnostic-label">info: - <label> &</p>"#),
-        "raw label message markup must never be emitted: {html}",
+        !html.contains("generic substitution: <label> & = TypeId(1)"),
+        "raw related label markup must never be emitted: {html}",
     );
 }
 /// A compilation-root span names no physical source, so renderers omit a source frame even when

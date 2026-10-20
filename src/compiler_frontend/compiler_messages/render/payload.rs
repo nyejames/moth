@@ -7,6 +7,12 @@
 use super::subject::DiagnosticSubject;
 use super::*;
 use crate::builder_surface::SourceFileKind;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
+    AmbiguousImportTargetView, BareFileImportView, CrossModuleImportNotExportedView,
+    DependencyAliasCaseMismatchView, DirectSpecialFileImportView, ImportNameCollisionView,
+    MissingModuleRootPublicSurfaceView, MissingPackageSymbolView, NotExportedByPublicSurfaceView,
+    NotExportedBySourceFileView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::CircularDependencyView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::LegacyDependencyClauseView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::ProjectContextEscapeView;
@@ -191,17 +197,7 @@ fn render_payload_message(
         DiagnosticPayload::UnknownName { name, namespace } => {
             unknown_name_message(*name, *namespace, string_table)
         }
-        DiagnosticPayload::AmbiguousImportTarget { .. }
-        | DiagnosticPayload::BareFileImport { .. }
-        | DiagnosticPayload::DirectSpecialFileImport { .. }
-        | DiagnosticPayload::ImportNameCollision { .. }
-        | DiagnosticPayload::NotExportedBySourceFile { .. }
-        | DiagnosticPayload::NotExportedByPublicSurface { .. }
-        | DiagnosticPayload::MissingModuleRootPublicSurface { .. }
-        | DiagnosticPayload::MissingPackageSymbol { .. }
-        | DiagnosticPayload::CrossModuleImportNotExported { .. }
-        | DiagnosticPayload::InvalidImportPath { .. }
-        | DiagnosticPayload::DirectSymbolPathImport { .. }
+        DiagnosticPayload::DirectSymbolPathImport { .. }
         | DiagnosticPayload::InvalidNamespaceDefaultName { .. }
         | DiagnosticPayload::DuplicateImportSurfaceMember { .. }
         | DiagnosticPayload::ExplicitMothExtension { .. }
@@ -232,11 +228,6 @@ fn render_payload_message(
             *package_path,
             *backend_name,
             string_table,
-        ),
-        DiagnosticPayload::DependencyAliasCaseMismatch { alias, symbol } => format!(
-            "Dependency alias '{}' case mismatch with symbol '{}'",
-            string_table.resolve(*alias),
-            string_table.resolve(*symbol)
         ),
         DiagnosticPayload::InvalidGenericApplication { reason } => {
             invalid_generic_application_message(*reason).to_owned()
@@ -903,76 +894,7 @@ fn import_payload_message(
     payload: &DiagnosticPayload,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let string_table = context.string_table;
     match payload {
-        DiagnosticPayload::AmbiguousImportTarget { path } => format!(
-            "Ambiguous dependency target '{}'. Use a more specific path.",
-            context.render_path(*path)
-        ),
-        DiagnosticPayload::BareFileImport { path } => format!(
-            "Bare file dependency clauses are not supported; select an exported symbol from the file '{}'.",
-            context.render_path(*path)
-        ),
-        DiagnosticPayload::DirectSpecialFileImport { path } => {
-            let special_file = special_file_name_from_path(*path, context);
-            let path_text = context.render_path(*path);
-            // Guide the author toward the support package directory dependency rather than the root filename.
-            let suggestion = support_root_import_suggestion(*path, context);
-            format!(
-                "Cannot depend directly on '{special_file}' via '{path_text}'. Support roots are referenced through their package directory, not by filename.{suggestion}"
-            )
-        }
-        DiagnosticPayload::ImportNameCollision { name } => {
-            format!(
-                "Dependency binding name collision: '{}' is already visible in this file.",
-                string_table.resolve(*name)
-            )
-        }
-        DiagnosticPayload::NotExportedBySourceFile { symbol_path } => {
-            format!(
-                "Cannot bind '{}' because it is not exported.",
-                context.render_path(*symbol_path)
-            )
-        }
-        DiagnosticPayload::NotExportedByPublicSurface {
-            requested_path,
-            public_surface_name,
-            public_surface_type,
-        } => {
-            let path_text = context.render_path(*requested_path);
-            let public_surface_name = string_table.resolve(*public_surface_name);
-            match public_surface_type {
-                crate::compiler_frontend::compiler_messages::ImportPublicSurfaceType::SourcePackage => {
-                    format!(
-                        "Cannot bind '{path_text}' from source-backed package '@{public_surface_name}' because it is not exported by the package public surface."
-                    )
-                }
-                crate::compiler_frontend::compiler_messages::ImportPublicSurfaceType::ModuleRoot => {
-                    format!(
-                        "Cannot bind '{path_text}' from module '{public_surface_name}' because it is not exported by the module's public surface."
-                    )
-                }
-            }
-        }
-        DiagnosticPayload::MissingModuleRootPublicSurface { symbol_path } => format!(
-            "Cannot bind '{}' because the target module has no public export surface. Depend on a concrete file from inside the same module, or add a module root file with an `export:` block to define the module's public dependency surface.",
-            context.render_path(*symbol_path)
-        ),
-        DiagnosticPayload::MissingPackageSymbol {
-            symbol,
-            package_path,
-        } => format!(
-            "Cannot bind '{}' from package '{}': symbol not found.",
-            string_table.resolve(*symbol),
-            string_table.resolve(*package_path)
-        ),
-        DiagnosticPayload::CrossModuleImportNotExported { symbol_path } => format!(
-            "Cannot bind '{}' because it is not exported by the target module's public surface.",
-            context.render_path(*symbol_path)
-        ),
-        DiagnosticPayload::InvalidImportPath { path, reason } => {
-            invalid_import_path_message(*path, *reason, context)
-        }
         DiagnosticPayload::DirectSymbolPathImport { path } => {
             direct_symbol_path_import_message(*path, context)
         }
@@ -1015,6 +937,238 @@ fn import_payload_message(
         _ => unreachable!(
             "migrated families render through the compact path; P4.6 deletes this function"
         ),
+    }
+}
+
+fn missing_package_symbol_message(
+    symbol: StringId,
+    package_path: StringId,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    format!(
+        "Cannot bind '{}' from package '{}': symbol not found.",
+        context.string_table.resolve(symbol),
+        context.string_table.resolve(package_path)
+    )
+}
+
+/// Renders a missing package symbol from its compact string facts.
+pub(crate) fn render_missing_package_symbol(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &MissingPackageSymbolView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: missing_package_symbol_message(view.symbol, view.package_path, context),
+        guidance: Vec::new(),
+    }
+}
+
+fn cross_module_import_not_exported_message(
+    symbol_path: PathId,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    format!(
+        "Cannot bind '{}' because it is not exported by the target module's public surface.",
+        context.render_path(symbol_path)
+    )
+}
+
+/// Renders a cross-module export failure from its compact path fact.
+pub(crate) fn render_cross_module_import_not_exported(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &CrossModuleImportNotExportedView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: cross_module_import_not_exported_message(view.symbol_path, context),
+        guidance: Vec::new(),
+    }
+}
+
+fn not_exported_by_source_file_message(
+    symbol_path: PathId,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    format!(
+        "Cannot bind '{}' because it is not exported.",
+        context.render_path(symbol_path)
+    )
+}
+
+/// Renders an unexported source-file symbol from its compact path fact.
+pub(crate) fn render_not_exported_by_source_file(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &NotExportedBySourceFileView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: not_exported_by_source_file_message(view.symbol_path, context),
+        guidance: Vec::new(),
+    }
+}
+
+fn not_exported_by_public_surface_message(
+    requested_path: PathId,
+    public_surface_name: StringId,
+    public_surface_type: crate::compiler_frontend::compiler_messages::ImportPublicSurfaceType,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    let path_text = context.render_path(requested_path);
+    let public_surface_name = context.string_table.resolve(public_surface_name);
+    match public_surface_type {
+        crate::compiler_frontend::compiler_messages::ImportPublicSurfaceType::SourcePackage => {
+            format!(
+                "Cannot bind '{path_text}' from source-backed package '@{public_surface_name}' because it is not exported by the package public surface."
+            )
+        }
+        crate::compiler_frontend::compiler_messages::ImportPublicSurfaceType::ModuleRoot => {
+            format!(
+                "Cannot bind '{path_text}' from module '{public_surface_name}' because it is not exported by the module's public surface."
+            )
+        }
+    }
+}
+
+/// Renders a public-surface export failure from its path, name and typed surface facts.
+pub(crate) fn render_not_exported_by_public_surface(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &NotExportedByPublicSurfaceView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: not_exported_by_public_surface_message(
+            view.requested_path,
+            view.public_surface_name,
+            view.public_surface_type,
+            context,
+        ),
+        guidance: Vec::new(),
+    }
+}
+
+fn missing_module_root_public_surface_message(
+    symbol_path: PathId,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    format!(
+        "Cannot bind '{}' because the target module has no public export surface. Depend on a concrete file from inside the same module, or add a module root file with an `export:` block to define the module's public dependency surface.",
+        context.render_path(symbol_path)
+    )
+}
+
+/// Renders the missing module-root surface message from its compact path fact.
+pub(crate) fn render_missing_module_root_public_surface(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &MissingModuleRootPublicSurfaceView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: missing_module_root_public_surface_message(view.symbol_path, context),
+        guidance: Vec::new(),
+    }
+}
+
+fn dependency_alias_case_mismatch_message(
+    alias: StringId,
+    symbol: StringId,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    format!(
+        "Dependency alias '{}' case mismatch with symbol '{}'",
+        context.string_table.resolve(alias),
+        context.string_table.resolve(symbol)
+    )
+}
+
+/// Renders the dependency alias's case mismatch from its compact name facts.
+pub(crate) fn render_dependency_alias_case_mismatch(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &DependencyAliasCaseMismatchView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: dependency_alias_case_mismatch_message(view.alias, view.symbol, context),
+        guidance: Vec::new(),
+    }
+}
+
+fn import_name_collision_message(name: StringId, context: DiagnosticRenderContext<'_>) -> String {
+    format!(
+        "Dependency binding name collision: '{}' is already visible in this file.",
+        context.string_table.resolve(name)
+    )
+}
+
+/// Renders a colliding import binding from its compact name fact.
+pub(crate) fn render_import_name_collision(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &ImportNameCollisionView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: import_name_collision_message(view.name, context),
+        guidance: Vec::new(),
+    }
+}
+fn ambiguous_import_target_message(path: PathId, context: DiagnosticRenderContext<'_>) -> String {
+    format!(
+        "Ambiguous dependency target '{}'. Use a more specific path.",
+        context.render_path(path)
+    )
+}
+
+/// Renders an ambiguous dependency target from its compact path fact.
+pub(crate) fn render_ambiguous_import_target(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &AmbiguousImportTargetView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: ambiguous_import_target_message(view.path, context),
+        guidance: Vec::new(),
+    }
+}
+
+fn direct_special_file_import_message(
+    path: PathId,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    let special_file = special_file_name_from_path(path, context);
+    let path_text = context.render_path(path);
+    let suggestion = support_root_import_suggestion(path, context);
+    format!(
+        "Cannot depend directly on '{special_file}' via '{path_text}'. Support roots are referenced through their package directory, not by filename.{suggestion}"
+    )
+}
+
+/// Renders a direct special-file dependency from its compact path fact.
+pub(crate) fn render_direct_special_file_import(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &DirectSpecialFileImportView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: direct_special_file_import_message(view.path, context),
+        guidance: Vec::new(),
+    }
+}
+fn bare_file_import_message(path: PathId, context: DiagnosticRenderContext<'_>) -> String {
+    format!(
+        "Bare file dependency clauses are not supported; select an exported symbol from the file '{}'.",
+        context.render_path(path)
+    )
+}
+
+/// Renders the legacy bare-file import message from the compact path fact.
+pub(crate) fn render_bare_file_import(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &BareFileImportView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: bare_file_import_message(view.path, context),
+        guidance: Vec::new(),
     }
 }
 

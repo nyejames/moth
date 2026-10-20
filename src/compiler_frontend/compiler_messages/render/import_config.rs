@@ -5,7 +5,9 @@
 //! expression/type/rule diagnostic rendering.
 
 use super::*;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::MissingImportTargetView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
+    InvalidImportPathView, MissingImportTargetView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::ConstRecordUsedAsValueView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidCompileTimePathView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidDependencyClauseView;
@@ -435,6 +437,22 @@ pub(crate) fn invalid_import_path_message(
             context.string_table.resolve(provided),
             context.string_table.resolve(expected),
         ),
+    }
+}
+
+/// Renders an invalid dependency path from compact reason and path facts.
+pub(crate) fn render_invalid_import_path(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &InvalidImportPathView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let reason = view
+        .reason
+        .to_reason(view.provided, view.expected)
+        .expect("case-mismatch import paths retain both spellings");
+    RenderedPayload {
+        message: invalid_import_path_message(view.path, reason, context),
+        guidance: Vec::new(),
     }
 }
 

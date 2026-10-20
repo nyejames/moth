@@ -6,6 +6,7 @@
 /// should have one declaration and one owning registry.
 use super::*;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidMultiBindCode;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::InvalidImportPathCode;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
     DeferredFeatureCode, InvalidDeclarationCode, InvalidTypeAnnotationCode,
 };
@@ -1001,12 +1002,15 @@ define_stable_reason_keys! {
     },
 
     InvalidImportPathReason => {
-        &InvalidImportPathReason::PublicRoot => "invalid_import_path.public_root",
-        &InvalidImportPathReason::CurrentDirectorySegment => "invalid_import_path.current_directory_segment",
-        &InvalidImportPathReason::ParentDirectorySegment => "invalid_import_path.parent_directory_segment",
-    &InvalidImportPathReason::EscapesProjectRoot => "invalid_import_path.escapes_project_root",
-    &InvalidImportPathReason::EscapesSourcePackageRoot => "invalid_import_path.escapes_source_package_root",
-    &InvalidImportPathReason::CaseMismatch { .. } => "invalid_import_path.case_mismatch",
+        @delegate(reason => InvalidImportPathCode::of(reason).stable_reason_key());
+    },
+    InvalidImportPathCode => {
+        &InvalidImportPathCode::PublicRoot => "invalid_import_path.public_root",
+        &InvalidImportPathCode::CurrentDirectorySegment => "invalid_import_path.current_directory_segment",
+        &InvalidImportPathCode::ParentDirectorySegment => "invalid_import_path.parent_directory_segment",
+        &InvalidImportPathCode::EscapesProjectRoot => "invalid_import_path.escapes_project_root",
+        &InvalidImportPathCode::EscapesSourcePackageRoot => "invalid_import_path.escapes_source_package_root",
+        &InvalidImportPathCode::CaseMismatch => "invalid_import_path.case_mismatch",
     },
     InvalidExternalModuleReason => {
         &InvalidExternalModuleReason::ReceiverMethod { .. } => "invalid_external_module.receiver_method",
