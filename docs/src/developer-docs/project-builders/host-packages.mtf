@@ -156,6 +156,9 @@ reference counts and raw pointers don't pass through as Moth ownership. The
 adapter follows the declared ABI and cleanup contract rather than transmuting
 Rust layouts. A Rust `repr(C)` annotation alone supplies none of that contract.
 
+@../memory-management/native-host-abi (Native host ABI) defines the physical
+carriers, string spans, staged results and frames these adapters use.
+
 A recoverable Rust failure is converted deliberately to `moth::host::Error` by
 the wrapper. The attribute doesn't stringify every Rust error, catch every
 panic or expose sensitive internal details automatically. Assertions, traps,

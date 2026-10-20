@@ -19,6 +19,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 
 - [Lappet crate](crates/lappet/README.md) and [library entry](crates/lappet/src/lib.rs): dependency-free initial workspace library, with no runtime API yet.
 - [Runtime design](crates/lappet/docs/design.md), [package-manager design](crates/lappet/docs/package-manager.md) and [independent roadmap](crates/lappet/roadmap.md): accepted contracts and isolated-worktree implementation checkpoints.
+- [Host ABI adapter responsibilities](crates/lappet/docs/host-abi.md): Lappet's installation, conversion, staging-table and resource-table duties over the compiler-owned [native host ABI](docs/src/developer-docs/memory-management/native-host-abi/native-host-abi.mtf).
 - [Wasm optimisation reference](docs/src/developer-docs/wasm-optimisation/overview.mtf) and [detailed authority](docs/src/developer-docs/wasm-optimisation/wasm-optimisation.mtf): shared compiler/native-code policy. Its [page](docs/src/developer-docs/wasm-optimisation/@page.moth) composes the site.
 - [Lappet introduction](docs/src/docs/lappet/lappet.mtf) and [page](docs/src/docs/lappet/@page.moth): application and embedding overview, with implementation status explicit.
 
