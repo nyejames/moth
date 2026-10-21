@@ -26,14 +26,6 @@ pub fn run_boracle(
     dump: BoracleDump,
     rule_selection: BoracleRuleSelection,
 ) -> Result<String, BoundaryFailure> {
-    run_boracle_with_messages(path, dump, rule_selection).map_err(into_boundary_failure)
-}
-
-fn run_boracle_with_messages(
-    path: &str,
-    dump: BoracleDump,
-    rule_selection: BoracleRuleSelection,
-) -> Result<String, CompilerMessages> {
     let (input, string_table) = compile_boracle_input(path)?;
     run_hir_module(
         &input,
@@ -42,23 +34,24 @@ fn run_boracle_with_messages(
             rule_selection,
         },
     )
-    .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))
+    .map_err(|error| into_boundary_failure(CompilerMessages::from_error_ref(error, &string_table)))
 }
 
 /// Solve the same compiler-owned source payload as [`run_boracle`] without flattening the typed
 /// function reports into a developer dump.
 #[cfg(test)]
-fn solve_boracle(path: &str) -> Result<BoracleModuleReport, CompilerMessages> {
+fn solve_boracle(path: &str) -> Result<BoracleModuleReport, BoundaryFailure> {
     let (input, string_table) = compile_boracle_input(path)?;
-    solve_hir_module(&input).map_err(|error| CompilerMessages::from_error_ref(error, &string_table))
+    solve_hir_module(&input).map_err(|error| {
+        into_boundary_failure(CompilerMessages::from_error_ref(error, &string_table))
+    })
 }
 
-fn compile_boracle_input(
-    path: &str,
-) -> Result<(BoracleModuleInput, StringTable), CompilerMessages> {
+fn compile_boracle_input(path: &str) -> Result<(BoracleModuleInput, StringTable), BoundaryFailure> {
     let normalized_path = if path.trim().is_empty() { "." } else { path };
-    let valid_path = check_if_valid_path(normalized_path)
-        .map_err(|error| CompilerMessages::from_error(error, StringTable::new()))?;
+    let valid_path = check_if_valid_path(normalized_path).map_err(|error| {
+        into_boundary_failure(CompilerMessages::from_error(error, StringTable::new()))
+    })?;
 
     let project_builder = ProjectBuilder::new(HtmlProjectBuilder::new());
     let BuildBootstrap {
@@ -67,13 +60,17 @@ fn compile_boracle_input(
         mut string_table,
         mut frontend_surface,
         ..
-    } = bootstrap_project_build(&project_builder, valid_path, &BuildConfigInputSet::new())?;
+    } = bootstrap_project_build(&project_builder, valid_path, &BuildConfigInputSet::new())
+        .map_err(into_boundary_failure)?;
 
     if config.entry_dir.is_dir() {
         let error = CompilerError::compiler_error(
             "Boracle source mode currently accepts one .moth file, not a directory project",
         );
-        return Err(CompilerMessages::from_error_ref(error, &string_table));
+        return Err(into_boundary_failure(CompilerMessages::from_error_ref(
+            error,
+            &string_table,
+        )));
     }
 
     let input = compile_single_file_boracle(

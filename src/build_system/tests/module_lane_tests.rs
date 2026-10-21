@@ -19,7 +19,6 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::module_diagnostics::ModuleDiagnostics;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, NameNamespace,
@@ -922,8 +921,7 @@ fn generated_sidecar_warnings_survive_render_and_success_only_compilation() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let frontend = frontend_with_sidecar_warnings(&mut string_table);
-    let messages =
-        into_boundary_failure(frontend.into_render_messages(&mut string_table, None, None));
+    let messages = frontend.into_boundary_failure(&mut string_table, None, None);
     let rendered_codes = messages
         .reports
         .iter_severity(DiagnosticSeverity::Warning)

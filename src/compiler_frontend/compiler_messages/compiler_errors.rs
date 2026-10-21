@@ -474,6 +474,7 @@ impl CompilerMessages {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn has_infrastructure_error(&self) -> bool {
         self.infrastructure_errors.is_some()
     }
@@ -558,8 +559,9 @@ impl CompilerMessages {
     /// Record that this vessel's identity rows are final, so the boundary converter installs them.
     ///
     /// WHAT: sets the install mode to `Frozen`. The mode travels with the vessel through merges.
-    /// WHY: production boundaries freeze once, after the final merge. The converter reads the
-    /// mode from the vessel instead of taking a caller-supplied argument.
+    /// WHY: production boundaries freeze once through the run accumulator; this setter now only
+    /// builds frozen legacy fixtures for the parity oracle and render tests.
+    #[cfg(test)]
     pub(crate) fn mark_frozen(&mut self) {
         self.install_mode = InstallMode::Frozen;
     }
@@ -792,8 +794,10 @@ impl CompilerMessages {
     /// WHAT: moves diagnostics and all source, type and path render-context ranges from `messages`
     ///       into this set, offsets the appended ranges by the current diagnostic count, and
     ///       remaps premerge facts into this set's table.
-    /// WHY: final aggregation consumes module-local message owners without cloning their
-    ///      contexts. A frozen incoming vessel freezes this one; the mode travels with the vessel.
+    /// WHY: this is the retired production merge. It survives only as the parity oracle that S4a's
+    ///      accumulator tests compare against; every production tail now appends to the run
+    ///      accumulator and freezes once.
+    #[cfg(test)]
     pub(crate) fn append_messages_preserving_context(&mut self, messages: CompilerMessages) {
         let CompilerMessages {
             mut diagnostics,

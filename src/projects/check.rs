@@ -7,8 +7,7 @@
 
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{
-    BuildBootstrap, ProjectAssemblyError, ProjectBuilder, bootstrap_project_build,
-    validate_frontend_facade_boundaries,
+    BuildBootstrap, ProjectBuilder, bootstrap_project_build, validate_frontend_facade_boundaries,
 };
 use crate::build_system::create_project_modules::{
     FrontendCompilationMode, compile_project_frontend_with_inputs,
@@ -22,7 +21,6 @@ use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::in
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::finish_command_timing;
 use crate::projects::{ProjectCommandCompletion, ProjectCommandStatus, ProjectDiagnosticCounts};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 struct CheckOutcome {
@@ -37,22 +35,6 @@ pub struct CheckCommandReport {
     pub error_count: usize,
     pub warning_count: usize,
     pub messages: BoundaryFailure,
-}
-
-fn attach_source_database_if_missing(
-    messages: &mut CompilerMessages,
-    source_database: Option<&Arc<crate::compiler_frontend::source::SourceDatabase>>,
-) {
-    let Some(source_database) = source_database else {
-        return;
-    };
-    if messages
-        .diagnostics()
-        .enumerate()
-        .any(|(index, _)| messages.source_database_for_diagnostic(index).is_none())
-    {
-        messages.set_source_database(Arc::clone(source_database));
-    }
 }
 
 /// Execute one frontend-only check before presenting its result to the caller.
@@ -136,10 +118,7 @@ fn execute_check(
     build_config_inputs: &BuildConfigInputSet,
     project_builder: &ProjectBuilder,
 ) -> CheckOutcome {
-    let messages = match execute_check_messages(path, build_config_inputs, project_builder) {
-        Ok(messages) | Err(messages) => messages,
-    };
-    let messages = into_boundary_failure(messages);
+    let messages = execute_check_messages(path, build_config_inputs, project_builder);
     let status = if messages.has_errors() {
         ProjectCommandStatus::Failure
     } else {
@@ -152,16 +131,21 @@ fn execute_check_messages(
     path: &str,
     build_config_inputs: &BuildConfigInputSet,
     project_builder: &ProjectBuilder,
-) -> Result<CompilerMessages, CompilerMessages> {
+) -> BoundaryFailure {
     let normalized_path = normalize_entry_path(path);
 
     let valid_path = match check_if_valid_path(normalized_path) {
         Ok(path) => path,
         Err(error) => {
-            return Err(CompilerMessages::from_error(error, StringTable::new()));
+            return into_boundary_failure(CompilerMessages::from_error(error, StringTable::new()));
         }
     };
 
+    let bootstrap = match bootstrap_project_build(project_builder, valid_path, build_config_inputs)
+    {
+        Ok(bootstrap) => bootstrap,
+        Err(messages) => return into_boundary_failure(messages),
+    };
     let BuildBootstrap {
         mut config,
         style_directives,
@@ -170,7 +154,7 @@ fn execute_check_messages(
         validated_directory_output_settings,
         mut project_source_files,
         build_config_inputs,
-    } = bootstrap_project_build(project_builder, valid_path, build_config_inputs)?;
+    } = bootstrap;
 
     match compile_project_frontend_with_inputs(
         &mut config,
@@ -184,19 +168,14 @@ fn execute_check_messages(
         FrontendCompilationMode::Check,
     ) {
         Ok(frontend) => {
-            let facade_messages = validate_frontend_facade_boundaries(&frontend)
-                .err()
-                .map(ProjectAssemblyError::into_owned_messages);
-            Ok(frontend.into_render_messages(
+            let facade_failure = validate_frontend_facade_boundaries(&frontend).err();
+            frontend.into_boundary_failure(
                 &mut string_table,
                 project_source_files.take(),
-                facade_messages,
-            ))
+                facade_failure,
+            )
         }
-        Err(mut messages) => {
-            attach_source_database_if_missing(&mut messages, project_source_files.as_ref());
-            Err(messages)
-        }
+        Err(failure) => failure,
     }
 }
 

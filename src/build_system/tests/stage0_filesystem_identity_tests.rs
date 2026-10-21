@@ -9,7 +9,7 @@
 //!      module rather than living in the oversized Stage 0 orchestration test file.
 
 use super::*;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerMessages};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[cfg(test)]
@@ -18,7 +18,7 @@ fn compile_single_file_for_filesystem_test(
     builder_surface: &mut crate::builder_surface::BuilderSurface,
     extension: &std::ffi::OsStr,
     string_table: &mut StringTable,
-) -> Result<crate::build_system::create_project_modules::ProjectFrontendCompilation, CompilerMessages>
+) -> Result<crate::build_system::create_project_modules::ProjectFrontendCompilation, BoundaryFailure>
 {
     let mut project_source_files = None;
     super::compilation::compile_single_file_frontend_with_inputs(
@@ -238,22 +238,21 @@ mod non_utf8_single_file_identity {
     use crate::compiler_frontend::compiler_errors::ErrorType;
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
-    fn assert_file_infrastructure_error(messages: &CompilerMessages) {
-        let error = messages
-            .primary_infrastructure_error()
+    fn assert_file_infrastructure_error(failure: &BoundaryFailure) {
+        let errors = failure
+            .infrastructure_errors()
             .expect("expected an infrastructure file error");
         assert_eq!(
-            error.error_type,
+            errors.primary.error_type,
             ErrorType::File,
             "non-UTF-8 single-file input should be a File infrastructure error"
         );
         assert!(
-            error.msg.contains("UTF-8"),
+            errors.primary.msg.contains("UTF-8"),
             "error message should mention UTF-8: {}",
-            error.msg,
+            errors.primary.msg,
         );
     }
-
     #[test]
     fn single_file_rejects_non_utf8_extension() {
         let temp = tempfile::tempdir().expect("should create temp dir");
@@ -318,19 +317,19 @@ mod non_utf8_windows_single_file_identity {
     use crate::compiler_frontend::compiler_errors::ErrorType;
     use std::ffi::OsString;
     use std::os::windows::ffi::OsStringExt;
-    fn assert_file_infrastructure_error(messages: &CompilerMessages) {
-        let error = messages
-            .primary_infrastructure_error()
+    fn assert_file_infrastructure_error(failure: &BoundaryFailure) {
+        let errors = failure
+            .infrastructure_errors()
             .expect("expected an infrastructure file error");
         assert_eq!(
-            error.error_type,
+            errors.primary.error_type,
             ErrorType::File,
             "unpaired-wide single-file input should be a File infrastructure error"
         );
         assert!(
-            error.msg.contains("UTF-8"),
+            errors.primary.msg.contains("UTF-8"),
             "error message should mention UTF-8: {}",
-            error.msg,
+            errors.primary.msg,
         );
     }
 

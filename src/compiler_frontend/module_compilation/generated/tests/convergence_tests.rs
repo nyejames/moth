@@ -10,7 +10,6 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, diagnostic_type_name,
 };
@@ -2139,8 +2138,7 @@ fn completed_service_diagnoses_retained_generic_assertion_and_custom_catch_sites
         for (source, assertion) in [(assertion_source, true), (catch_source, false)] {
             let (frontend, mut strings) = compile_owned_service_fixture(source, single_file, &[]);
             assert!(frontend.has_diagnosed_or_blocked());
-            let messages = frontend.into_render_messages(&mut strings, None, None);
-            let failure = into_boundary_failure(messages);
+            let failure = frontend.into_boundary_failure(&mut strings, None, None);
             assert_eq!(failure.error_count(), 1);
             let (report, view) = failure
                 .reports

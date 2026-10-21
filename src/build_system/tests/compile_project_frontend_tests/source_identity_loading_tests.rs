@@ -43,8 +43,7 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
     )
     .expect("diagnosed modules are retained in the typed frontend outcome");
     let project_source = frontend.project_source_database.take();
-    let messages = frontend.into_render_messages(&mut string_table, project_source, None);
-    let failure = into_boundary_failure(messages);
+    let failure = frontend.into_boundary_failure(&mut string_table, project_source, None);
 
     assert_eq!(
         failure.error_count(),
@@ -167,8 +166,9 @@ fn selected_preload_read_failure_stays_in_the_existing_file_error_lane() {
         Err(error) => error,
     };
     let error_value = error
-        .primary_infrastructure_error()
+        .infrastructure_errors()
         .expect("selected preload failure should remain an infrastructure file error");
+    let error_value = &error_value.primary;
     assert_eq!(&error_value.error_type, &ErrorType::File);
     assert!(
         error_value
@@ -280,8 +280,7 @@ fn project_facade_rejects_own_project_globals_dependency_before_semantic_use() {
     )
     .expect("a facade dependency diagnostic should remain a retained frontend outcome");
     let project_source = frontend.project_source_database.take();
-    let messages = frontend.into_render_messages(&mut string_table, project_source, None);
-    let failure = into_boundary_failure(messages);
+    let failure = frontend.into_boundary_failure(&mut string_table, project_source, None);
     let matching = failure
         .reports
         .iter()
@@ -343,10 +342,9 @@ fn failed_directory_preparation_keeps_unfinished_module_metadata_out_of_completi
         &mut BuilderSurface::with_mandatory_core(),
         &mut string_table,
     );
-    let Err(messages) = result else {
+    let Err(failure) = result else {
         panic!("malformed Stage 0 input should fail preparation");
     };
-    let failure = into_boundary_failure(messages);
     assert_has_diagnostic_code(&failure, "MOTH-SYNTAX-0019");
     assert_eq!(
         failure.error_count(),
@@ -860,10 +858,9 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
         &mut BuilderSurface::with_mandatory_core(),
         &mut string_table,
     );
-    let Err(messages_a) = result_a else {
+    let Err(failure_a) = result_a else {
         panic!("first fixture should fail before the concurrent compile starts");
     };
-    let failure_a = into_boundary_failure(messages_a);
     assert_has_diagnostic_code(&failure_a, "MOTH-SYNTAX-0019");
     assert_eq!(
         failure_a.error_count(),
@@ -893,9 +890,10 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
 
                 // The concurrent fixture must fail for the infrastructure file-error reason, not
                 // carry a user diagnostic: the invalid-UTF-8 source is unreadable, not invalid.
-                let error_value = thread_error
-                    .primary_infrastructure_error()
+                let infrastructure = thread_error
+                    .infrastructure_errors()
                     .expect("concurrent failure should remain an infrastructure file error");
+                let error_value = &infrastructure.primary;
                 assert_eq!(&error_value.error_type, &ErrorType::File);
                 assert!(
                     error_value
@@ -994,37 +992,7 @@ fn dormant_dependency_root_grouped_delimiters_report_eof_in_child_source() {
         )
         .expect("a diagnosed dependency module stays a retained frontend outcome");
         let project_source = frontend.project_source_database.take();
-        let messages = frontend.into_render_messages(&mut string_table, project_source, None);
-        let (expected_delimiter_id, span) = {
-            let diagnostic = messages
-                .diagnostics()
-                .find(|diagnostic| {
-                    matches!(
-                        &diagnostic.payload,
-                        DiagnosticPayload::UnexpectedEndOfFile { .. }
-                    )
-                })
-                .expect("the dormant group must report one typed unexpected-EOF diagnostic");
-            assert_eq!(
-                diagnostic.kind.code(),
-                "MOTH-SYNTAX-0017",
-                "{case}: {diagnostic:?}"
-            );
-            assert_eq!(diagnostic.severity, DiagnosticSeverity::Error, "{case}");
-            let DiagnosticPayload::UnexpectedEndOfFile {
-                expected_delimiter: Some(expected_delimiter_id),
-            } = &diagnostic.payload
-            else {
-                panic!("{case}: expected a typed EOF payload naming the missing delimiter");
-            };
-            (
-                *expected_delimiter_id,
-                diagnostic
-                    .primary_span
-                    .expect("the EOF diagnostic must retain its authored span"),
-            )
-        };
-        let failure = into_boundary_failure(messages);
+        let failure = frontend.into_boundary_failure(&mut string_table, project_source, None);
 
         assert!(
             !failure.has_infrastructure_error(),
@@ -1042,13 +1010,26 @@ fn dormant_dependency_root_grouped_delimiters_report_eof_in_child_source() {
             .find(|(_, view)| view.descriptor().code == "MOTH-SYNTAX-0017")
             .expect("the dormant group must retain its unexpected-EOF view");
         assert_eq!(view.severity(), DiagnosticSeverity::Error, "{case}");
+        let rendered =
+            terse::format_terse_diagnostic_view(view, DiagnosticRenderContext::for_report(report));
+        assert!(
+            rendered.contains(&format!("expected '{expected_delimiter}'")),
+            "{case}: the retained EOF view must render the exact missing-delimiter fact: {rendered}"
+        );
+        let span = match view.primary_site() {
+            crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(
+                span,
+            )
+            | crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+                span,
+                ..
+            } => span,
+            crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent => {
+                panic!("{case}: unexpected EOF must retain its authored source span")
+            }
+        };
         let context = DiagnosticRenderContext::for_report(report);
         let identity = report.context();
-        assert_eq!(
-            identity.strings().resolve(expected_delimiter_id),
-            expected_delimiter,
-            "{case}: the dormant group must name its own missing delimiter"
-        );
 
         let dependency_path = fs::canonicalize(dir.join("src/components/@components.moth"))
             .expect("dependency source path should canonicalize");

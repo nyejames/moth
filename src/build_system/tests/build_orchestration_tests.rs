@@ -136,7 +136,6 @@ fn build_project_returns_result_without_writing_files() {
         "clean build should not retain a source database"
     );
 }
-
 #[test]
 fn build_project_preserves_builder_warnings_in_build_result() {
     let _temp = tempfile::tempdir().expect("should create temp dir");

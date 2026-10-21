@@ -988,7 +988,6 @@ fn check_only_success_batches_render_local_paths_through_production_construction
     use crate::build_system::create_project_modules::module_artifact_store::ModuleArtifactStore;
     use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
     use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
-    use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
     use crate::compiler_frontend::compiler_messages::render::terse;
 
     let (compiled, _spelling) = check_only_success_result_with_warnings();
@@ -1021,8 +1020,7 @@ fn check_only_success_batches_render_local_paths_through_production_construction
     // only a correct per-batch remap can still resolve the path components.
     let mut string_table = StringTable::new();
     string_table.intern("sidecar");
-    let messages =
-        into_boundary_failure(frontend.into_render_messages(&mut string_table, None, None));
+    let messages = frontend.into_boundary_failure(&mut string_table, None, None);
     let rendered = terse::format_terse_boundary_messages(&messages);
     assert_eq!(
         rendered.len(),
@@ -1038,19 +1036,20 @@ fn check_only_success_batches_render_local_paths_through_production_construction
 }
 
 #[test]
-fn render_tail_retains_trailing_causes_warning_and_source_owners() {
+fn canonical_tail_preserves_facade_failure_and_warning_sources() {
+    use crate::build_system::build::ProjectAssemblyError;
     use crate::build_system::create_project_modules::compiled_boundary::{
         CompiledGraphBoundary, CompletedSourcePackageRegistry, ProjectFrontendCompilation,
+        TransientPremergeBatch,
     };
     use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
+    use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
     use crate::compiler_frontend::compiler_errors::{
-        CompilerErrorMetadataKey, CompilerMessages, ErrorType,
+        CompilerError, CompilerErrorMetadataKey, ErrorType,
     };
-    #[cfg(not(feature = "data_layout_memory_probe"))]
-    use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
     use crate::compiler_frontend::compiler_messages::{
         CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, NameNamespace,
-        RuleDiagnosticKind,
+        PremergeDiagnosticBatch, RuleDiagnosticKind,
     };
     use crate::compiler_frontend::source::{
         ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceSpan,
@@ -1083,9 +1082,6 @@ fn render_tail_retains_trailing_causes_warning_and_source_owners() {
         CompilerErrorMetadataKey::CompilationStage,
         "original stage".to_owned(),
     );
-    let secondary =
-        CompilerError::file_error(Path::new("trailing-input.moth"), "original file cause");
-    let expected = [primary.clone(), secondary.clone()];
     let warning = CompilerDiagnostic::with_severity(
         DiagnosticKind::Rule(RuleDiagnosticKind::UnknownValueName),
         DiagnosticSeverity::Warning,
@@ -1096,9 +1092,7 @@ fn render_tail_retains_trailing_causes_warning_and_source_owners() {
         },
     );
     let expected_warning_code = warning.kind.code();
-    let mut trailing = CompilerMessages::from_diagnostics(vec![warning.clone()], strings.clone());
-    trailing.set_infrastructure_error(primary);
-    trailing.set_infrastructure_error(secondary);
+    let batch = PremergeDiagnosticBatch::from_diagnostics(vec![warning], strings.clone());
     let project = CompiledGraphBoundary {
         structure: ProjectModuleGraph::from_normal_roots(Vec::new()),
         modules: ModuleArtifactStore::new(0),
@@ -1110,21 +1104,21 @@ fn render_tail_retains_trailing_causes_warning_and_source_owners() {
         project,
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),
-        Vec::new(),
+        vec![TransientPremergeBatch::project(batch)],
     )
     .expect("empty frontend should validate");
     #[cfg(feature = "data_layout_memory_probe")]
-    let (messages, retention) = frontend.into_render_messages_and_metrics(
+    let (messages, retention) = frontend.into_boundary_failure_and_metrics(
         &mut strings,
         Some(Arc::new(source)),
-        Some(trailing),
+        Some(ProjectAssemblyError::Infrastructure(primary.clone())),
     );
     #[cfg(not(feature = "data_layout_memory_probe"))]
-    let messages = into_boundary_failure(frontend.into_render_messages(
+    let messages = frontend.into_boundary_failure(
         &mut strings,
         Some(Arc::new(source)),
-        Some(trailing),
-    ));
+        Some(ProjectAssemblyError::Infrastructure(primary.clone())),
+    );
     #[cfg(feature = "data_layout_memory_probe")]
     {
         assert_eq!(
@@ -1146,32 +1140,24 @@ fn render_tail_retains_trailing_causes_warning_and_source_owners() {
         .reports
         .iter()
         .next()
-        .expect("the trailing warning should remain");
+        .expect("the canonical warning should remain");
     assert_eq!(warning_view.descriptor().code, expected_warning_code);
     assert_eq!(warning_view.severity(), DiagnosticSeverity::Warning);
     let errors = messages
         .infrastructure_errors()
-        .expect("original failures must remain");
+        .expect("the facade failure must remain");
     let actual = errors.iter().collect::<Vec<_>>();
-    assert_eq!(
-        actual.len(),
-        2,
-        "render-tail aggregation must append, not replace, original causes"
-    );
-    for (actual, expected) in actual.iter().zip(expected) {
-        assert_eq!(actual.msg, expected.msg);
-        assert_eq!(actual.error_type, expected.error_type);
-        assert_eq!(actual.host_path, expected.host_path);
-        assert_eq!(actual.source_span, expected.source_span);
-        assert_eq!(actual.metadata, expected.metadata);
-    }
-    let cause_identities = (0..2).map(|index| {
-        errors
-            .frozen_identity_for_cause(index)
-            .expect("exact frozen cause owner")
-    });
+    assert_eq!(actual.len(), 1);
+    assert_eq!(actual[0].msg, primary.msg);
+    assert_eq!(actual[0].error_type, primary.error_type);
+    assert_eq!(actual[0].host_path, primary.host_path);
+    assert_eq!(actual[0].source_span, primary.source_span);
+    assert_eq!(actual[0].metadata, primary.metadata);
+    let cause_identity = errors
+        .frozen_identity_for_cause(0)
+        .expect("the facade cause must retain its project owner");
     let warning_identity = warning_report.context();
-    for identity in cause_identities.chain(std::iter::once(warning_identity)) {
+    for identity in [cause_identity, warning_identity] {
         assert!(
             identity.get(source_id).is_some(),
             "the original physical source must retain its identity slot"
@@ -1189,133 +1175,131 @@ fn render_tail_retains_trailing_causes_warning_and_source_owners() {
         );
     }
 }
+
 #[cfg(feature = "data_layout_memory_probe")]
 #[test]
-fn render_tail_retention_counts_donor_only_identity_domains() {
-    use crate::build_system::create_project_modules::compiled_boundary::{
-        CompiledGraphBoundary, CompletedSourcePackageRegistry, ProjectFrontendCompilation,
+fn canonical_tail_retains_donor_only_package_identity() {
+    use crate::build_system::BuildProfile;
+    use crate::build_system::create_project_modules::{
+        FrontendCompilationMode, compile_project_frontend_with_inputs,
     };
-    use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
-    use crate::compiler_frontend::compiler_errors::{CompilerMessages, RenderSourceContext};
-    use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-    use crate::compiler_frontend::source::{
-        ExtendedSpanBuilder, FrozenIdentityHandle, LocalSpan, SourceDatabase, SourceSpan,
-    };
+    use crate::builder_surface::{BuilderSurface, PackageOrigin};
+    use crate::compiler_frontend::build_config::BuildConfigInputSet;
+    use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+    use std::fs;
 
-    let requester_root = tempfile::tempdir().expect("requester source root should exist");
-    let requester_path = requester_root.path().join("requester.moth");
-    std::fs::write(&requester_path, "requester").expect("requester source should be written");
-    let donor_root = tempfile::tempdir().expect("donor source root should exist");
-    let donor_path = donor_root.path().join("donor.moth");
-    std::fs::write(&donor_path, "donor").expect("donor source should be written");
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let project_directory = tempfile::tempdir().expect("the requester project should exist");
+    let donor_directory = tempfile::tempdir().expect("the donor package should exist");
+    let source_root = project_directory.path().join("src");
+    fs::create_dir_all(&source_root).expect("the requester source root should exist");
+    let requester_path = source_root.join("@page.moth");
+    let donor_path = donor_directory.path().join("@mod.moth");
+    const REQUESTER: &str = "@pkg outer\nvalue I32 = outer(1)\n";
+    const DONOR: &str = "inner type U |text String, result U| -> U:\n    return result\n;\n\
+        export:\n    outer type T |value T| -> I32:\n        return inner(value, 1)\n    ;\n;\n";
+    fs::write(&requester_path, REQUESTER).expect("the requester should be written");
+    fs::write(&donor_path, DONOR).expect("the donor should be written");
+    fs::write(
+        project_directory.path().join("config.moth"),
+        "project #= (name = \"snapshots\", entry_root = \"src\")\nhtml #= ()\n",
+    )
+    .expect("the project config should be written");
 
+    let mut config = Config::new(project_directory.path().to_path_buf());
     let mut strings = StringTable::new();
-    let mut requester_source = SourceDatabase::build(
-        std::iter::once(requester_path.as_path()),
-        requester_root.path(),
-        None,
-        &mut strings,
-    )
-    .expect("requester source identity should build");
-    let requester_id = requester_source
-        .get_by_canonical_path(&requester_path)
-        .expect("requester source should be registered")
-        .id;
-    requester_source
-        .retain_text(requester_id, "requester".to_owned())
-        .expect("requester snapshot should be retained");
-    let requester = Arc::new(requester_source);
-    let requester_metrics = requester.retention_metrics();
-    let requester_path_rows = requester.paths().len();
-    let requester_path_bytes = requester.paths().storage_bytes();
-
-    let mut donor_source = SourceDatabase::build(
-        std::iter::once(donor_path.as_path()),
-        donor_root.path(),
-        None,
-        &mut strings,
-    )
-    .expect("donor source identity should build");
-    let donor_id = donor_source
-        .get_by_canonical_path(&donor_path)
-        .expect("donor source should be registered")
-        .id;
-    donor_source
-        .retain_text(donor_id, "donor".to_owned())
-        .expect("donor snapshot should be retained");
-    let donor = Arc::new(donor_source);
-    let donor_metrics = donor.retention_metrics();
-    let donor_path_rows = donor.paths().len();
-    let donor_path_bytes = donor.paths().storage_bytes();
-
-    let name = strings.intern("donor-only-diagnostic");
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let span = SourceSpan::new(
-        donor_id,
-        LocalSpan::exact(0, 5, &mut span_builder).expect("donor span should be compact"),
+    let mut surface = BuilderSurface::with_mandatory_core();
+    surface.source_packages.register_filesystem_root(
+        "pkg",
+        donor_directory.path().to_path_buf(),
+        PackageOrigin::Builder,
     );
-    let mut diagnostic = CompilerDiagnostic::unknown_value_name(name, Some(span));
-    let donor_identity = StablePackageIdentity::project_local("donor-only");
-    diagnostic.primary_frozen_identity_handle =
-        Some(FrozenIdentityHandle::for_domain(donor_identity.clone()));
-    let mut trailing = CompilerMessages::from_diagnostics(vec![diagnostic], strings.clone());
-    trailing.install_source_contexts(
-        [
-            RenderSourceContext {
-                diagnostic_range: 0..1,
-                source_database: Arc::clone(&requester),
-                domain: None,
-            },
-            RenderSourceContext {
-                diagnostic_range: 0..0,
-                source_database: Arc::clone(&donor),
-                domain: Some(donor_identity),
-            },
-        ],
-        0,
-    );
-    drop(donor);
+    let mut project_source_files = None;
+    let frontend = compile_project_frontend_with_inputs(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut surface,
+        &mut strings,
+        &mut project_source_files,
+        &BuildConfigInputSet::new(),
+        FrontendCompilationMode::Canonical,
+    )
+    .expect("the requester diagnosis should retain the frontend transaction");
 
-    let project = CompiledGraphBoundary {
-        structure: ProjectModuleGraph::from_normal_roots(Vec::new()),
-        modules: ModuleArtifactStore::new(0),
-        generated: BoundaryGeneratedFunctionStore::default(),
-        diagnosed: Vec::new(),
-        blocked: Vec::new(),
+    assert!(
+        !frontend.project.diagnosed.is_empty(),
+        "the requester should be diagnosed by the concrete donor call"
+    );
+    assert_eq!(frontend.source_packages.len(), 1);
+    let donor_package_id = frontend
+        .source_packages
+        .by_prefix("pkg")
+        .expect("the requester should resolve the donor package");
+    let donor_package = frontend
+        .source_packages
+        .package(donor_package_id)
+        .expect("the donor package should be retained");
+    assert!(
+        donor_package.boundary.diagnosed.is_empty() && donor_package.boundary.blocked.is_empty(),
+        "the donor package should have no diagnostic records"
+    );
+    donor_package
+        .root_interface()
+        .expect("the donor package should have a successful facade");
+
+    let (
+        expected_source_snapshot_bytes,
+        expected_extended_span_rows,
+        expected_source_identity_slots,
+        expected_path_rows,
+        expected_path_storage_bytes,
+    ) = {
+        let requester = project_source_files
+            .as_ref()
+            .expect("the requester source identity should be retained");
+        let donor = frontend
+            .source_packages
+            .source_database(donor_package_id)
+            .expect("the donor source identity should be retained");
+        let requester_metrics = requester.retention_metrics();
+        let donor_metrics = donor.retention_metrics();
+        (
+            requester_metrics.source_snapshot_bytes + donor_metrics.source_snapshot_bytes,
+            requester_metrics.extended_span_rows + donor_metrics.extended_span_rows,
+            requester_metrics.source_identity_slots + donor_metrics.source_identity_slots,
+            requester.paths().len() + donor.paths().len(),
+            requester.paths().storage_bytes() + donor.paths().storage_bytes(),
+        )
     };
-    let frontend = ProjectFrontendCompilation::new(
-        project,
-        CompletedSourcePackageRegistry::new(),
-        ResourceInputRegistry::new(),
-        Vec::new(),
-    )
-    .expect("empty frontend should validate");
+
     let (failure, retention) =
-        frontend.into_render_messages_and_metrics(&mut strings, Some(requester), Some(trailing));
+        frontend.into_boundary_failure_and_metrics(&mut strings, project_source_files.take(), None);
 
     assert_eq!(failure.reports.iter().count(), 1);
     assert_eq!(retention.diagnostic_records, 1);
     assert_eq!(
         retention.source_snapshot_bytes,
-        requester_metrics.source_snapshot_bytes + donor_metrics.source_snapshot_bytes
+        expected_source_snapshot_bytes
     );
-    assert_eq!(
-        retention.extended_span_rows,
-        requester_metrics.extended_span_rows + donor_metrics.extended_span_rows
-    );
+    assert_eq!(retention.extended_span_rows, expected_extended_span_rows);
     assert_eq!(
         retention.source_identity_slots,
-        requester_metrics.source_identity_slots + donor_metrics.source_identity_slots
+        expected_source_identity_slots
     );
     assert_eq!(retention.retained_identity_contexts, 2);
     assert_eq!(retention.path_table_count, 2);
-    assert_eq!(
-        retention.path_table_node_rows,
-        requester_path_rows + donor_path_rows
+    // Conversion merges each distinct explicit module path table into its owner's builder, so the
+    // frozen tables retain every pre-freeze source node and any merged module path nodes on top.
+    assert!(
+        retention.path_table_node_rows >= expected_path_rows,
+        "frozen path tables must retain every pre-freeze source node: {} < {expected_path_rows}",
+        retention.path_table_node_rows
     );
-    assert_eq!(
-        retention.path_table_storage_bytes,
-        requester_path_bytes + donor_path_bytes
+    assert!(
+        retention.path_table_storage_bytes >= expected_path_storage_bytes,
+        "frozen path tables must retain every pre-freeze source byte"
     );
 }
 

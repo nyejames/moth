@@ -965,8 +965,8 @@ pub(super) fn check_only_success_batch(
     if warnings.is_empty() {
         return Ok(None);
     }
-    // Retain the module-local table; the final render tail merges it exactly once via
-    // `append_messages_preserving_context`.
+    // Retain the module-local table; the canonical boundary tail merges it once through its
+    // run-scoped `BoundaryAccumulator`.
     let mut batch = PremergeDiagnosticBatch::from_diagnostics(warnings, module_string_table);
     if let Err(error) = batch.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table())) {
         return Err(PremergeFailure::from(error));
@@ -1118,9 +1118,9 @@ pub(super) fn compile_module_waves_in_premerge_lane(
                 }
                 DirectoryModuleTaskOutcome::Diagnosed(diagnostics) => {
                     provider_store.mark_diagnosed(outcome.module_id)?;
-                    // Retain the local table without a premerge remap; the final tail owns
-                    // the single merge via `append_messages_preserving_context`.
-                    // then classify back without round-tripping through the final vessel.
+                    // Retain the local table without a premerge remap; the canonical boundary tail
+                    // merges it once through its run-scoped `BoundaryAccumulator`, then classify
+                    // back without round-tripping through the final vessel.
                     let batch = diagnostics.into_batch()?;
                     let diagnostics = ModuleDiagnostics::from_batch(batch)?;
                     diagnosed.push(DiagnosedModule {

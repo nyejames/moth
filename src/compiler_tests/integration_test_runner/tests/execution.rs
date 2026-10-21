@@ -24,10 +24,7 @@ use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
-use crate::compiler_frontend::compiler_messages::compiler_errors::{
-    BoundaryFailure, CompilerMessages,
-};
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, dev_server::render_boundary_messages_html, terse,
 };
@@ -46,10 +43,6 @@ use crate::projects::settings::Config;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
-
-fn boundary_failure(messages: CompilerMessages) -> BoundaryFailure {
-    into_boundary_failure(messages)
-}
 
 #[test]
 fn panic_execution_results_are_always_failures() {
@@ -124,8 +117,7 @@ impl EntryFixture {
         .expect("entry frontend should complete without infrastructure failure");
         if frontend.has_diagnosed_or_blocked() {
             let source_database = frontend.project_source_database.take();
-            let messages = frontend.into_render_messages(&mut string_table, source_database, None);
-            let failure = boundary_failure(messages);
+            let failure = frontend.into_boundary_failure(&mut string_table, source_database, None);
             let rendered = terse::format_terse_boundary_messages(&failure);
             let structured = failure
                 .reports
@@ -165,8 +157,7 @@ impl EntryFixture {
         .expect("HTML entry frontend should complete without infrastructure failure");
         if frontend.has_diagnosed_or_blocked() {
             let source_database = frontend.project_source_database.take();
-            let messages = frontend.into_render_messages(&mut string_table, source_database, None);
-            let failure = boundary_failure(messages);
+            let failure = frontend.into_boundary_failure(&mut string_table, source_database, None);
             let rendered = terse::format_terse_boundary_messages(&failure);
             let structured = failure
                 .reports

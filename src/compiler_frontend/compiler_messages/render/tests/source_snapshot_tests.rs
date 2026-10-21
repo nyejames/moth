@@ -107,7 +107,7 @@ fn materialised_diagnostic_renders_owned_requester_and_donor_snapshots_after_ser
 
     // Return only the report. The complete module transaction, provider preparation, caller
     // configuration and mutable source owners end before any source or type is rendered.
-    let messages = {
+    let failure = {
         let mut config = Config::new(project_directory.path().to_path_buf());
         let mut strings = StringTable::new();
         let mut surface = BuilderSurface::with_mandatory_core();
@@ -130,13 +130,12 @@ fn materialised_diagnostic_renders_owned_requester_and_donor_snapshots_after_ser
         )
         .expect("the generated source diagnosis should return its complete transaction");
         assert!(frontend.has_diagnosed_or_blocked());
-        frontend.into_render_messages(&mut strings, source_files.take(), None)
+        frontend.into_boundary_failure(&mut strings, source_files.take(), None)
     };
     fs::write(&requester_path, "requester disk replacement\n")
         .expect("the requester should be replaced");
     fs::write(&donor_path, "donor disk replacement\n").expect("the donor should be replaced");
 
-    let failure = into_boundary_failure(messages);
     let mut reports = failure.reports.iter();
     let (report, view) = reports
         .next()

@@ -20,12 +20,11 @@ use crate::compiler_frontend::build_config::{
     BuildInputName, PrimitiveBuildValue,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_boundary_messages_html;
 use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticLabelMessage, DiagnosticPayload, DiagnosticSeverity, InvalidConfigReason,
+    DiagnosticLabelMessage, DiagnosticPayload, DiagnosticSeverity,
 };
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
@@ -45,7 +44,6 @@ use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_tests::test_diagnostics::assert_exact_infrastructure_error;
 use crate::projects::settings::{Config, ProjectConfigError};
 use std::fs;
 use std::path::{Path, PathBuf};

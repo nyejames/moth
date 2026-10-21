@@ -108,9 +108,13 @@ ACTIVE_PLAN:
 - Execution order: Phase 4 runs as the steps in `PHASE_4_EXECUTION_ORDER` below. The slice
   checklists remain the acceptance contract. Only their order and grouping changed, under the
   architecture document's repository-discovered corrections rule.
-- NEXT_SUBSTEP: P4.5 slice S4 of `PHASE_4_5_SEQUENCE`, the canonical merge, at sub-slice S4b; S4a
-  is accepted in "Phase 4 P4.5 S4a: run-scoped boundary accumulator" and S4c in "Phase 4 P4.5
-  S4c: build warnings freeze once". S1 is accepted in
+- NEXT_SUBSTEP: P4.5 slice S4 of `PHASE_4_5_SEQUENCE`, the canonical merge, at sub-slice S4d (the
+  residual census and the medians); S4a is accepted in "Phase 4 P4.5 S4a: run-scoped boundary
+  accumulator", S4c in "Phase 4 P4.5 S4c: build warnings freeze once" and S4b in "Phase 4 P4.5
+  S4b: canonical tail freezes once". S4b also fixed `MOTH-RULE-0040` naming the wrong function
+  after a string-table merge (the legacy payload remap skipped the reason's function name); three
+  cases now pin the message. `transient_batches` and `BoundaryPremergeFailure` retire in S5,
+  where batches become prepared drafts. S1 is accepted in
   the checkpoints "Phase 4 P4.5 S1a: frozen diagnostic report types" through "Phase 4 P4.5 S1c:
   draft string and path ID remaps", S2 in "Phase 4 P4.5 S2: diagnostic freeze side", and S3 (the
   boundary cut) in "Phase 4 P4.5 S3.1: legacy-to-boundary converter", "Phase 4 P4.5 S3.2:

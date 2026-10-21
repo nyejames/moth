@@ -271,8 +271,14 @@ macro_rules! define_reasoned_diagnostic_registry {
             Rule::InvalidThisUsage => {
                 payload: InvalidThisUsage;
                 fields: { reason: InvalidThisUsageReason }
-                bindings: {}
-                remap: {}
+                bindings: { reason }
+                remap: {
+                    if let InvalidThisUsageReason::DuplicateThis { function_name }
+                    | InvalidThisUsageReason::NotFirstParameter { function_name } = reason
+                    {
+                        *function_name = remap.get(*function_name);
+                    }
+                }
                 descriptor: { "MOTH-RULE-0040", "Invalid this usage", Error }
             },
             Rule::InvalidReceiverDeclaration => {

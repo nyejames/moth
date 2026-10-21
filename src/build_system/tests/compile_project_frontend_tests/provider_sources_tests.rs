@@ -1140,17 +1140,12 @@ fn provider_backed_opaque_type_from_different_package_is_rejected() {
     )
     .expect("diagnosed modules are retained in the typed frontend outcome");
     let project_source = frontend.project_source_database.take();
-    let messages = frontend.into_render_messages(&mut string_table, project_source, None);
-    let type_mismatch_code = messages
-        .error_diagnostics()
-        .find(|diagnostic| matches!(&diagnostic.payload, DiagnosticPayload::TypeMismatch { .. }))
-        .map(|diagnostic| diagnostic.kind.code());
-    let failure = into_boundary_failure(messages);
+    let failure = frontend.into_boundary_failure(&mut string_table, project_source, None);
     assert!(
         failure
             .reports
             .iter_severity(DiagnosticSeverity::Error)
-            .any(|(_, view)| Some(view.descriptor().code) == type_mismatch_code),
+            .any(|(_, view)| view.descriptor().code == "MOTH-TYPE-0001"),
         "expected type mismatch diagnostic for cross-package opaque type, got {failure:?}"
     );
 }
@@ -1200,20 +1195,18 @@ fn directory_project_rejects_missing_entry_root() {
         &mut string_table,
     );
 
-    let Err(messages) = result else {
+    let Err(failure) = result else {
         panic!("expected Err for missing entry root");
     };
     assert!(
-        messages.error_diagnostics().any(|diagnostic| {
-            matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidConfig {
-                    reason: InvalidConfigReason::ConfiguredEntryRootMissing { .. },
-                    ..
-                }
-            )
-        }),
-        "expected ConfiguredEntryRootMissing for a nonexistent entry root, got {messages:?}"
+        failure
+            .reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| {
+                view.descriptor().code == "MOTH-CONFIG-0001"
+                    && view.reason_key() == Some("invalid_config.configured_entry_root_missing")
+            }),
+        "expected ConfiguredEntryRootMissing for a nonexistent entry root, got {failure:?}"
     );
 }
 
@@ -1639,7 +1632,7 @@ fn html_js_provider_receiver_method_in_project_local_js_rejected() {
     let mut string_table = StringTable::new();
     let mut frontend_surface = builder_surface_with_html_js_provider();
 
-    let messages = match compile_project_frontend(
+    let failure = match compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
@@ -1648,9 +1641,8 @@ fn html_js_provider_receiver_method_in_project_local_js_rejected() {
         &mut string_table,
     ) {
         Ok(_) => panic!("project-local JS receiver-style signature should be rejected"),
-        Err(messages) => messages,
+        Err(failure) => failure,
     };
-    let failure = into_boundary_failure(messages);
 
     assert!(
         failure.has_errors(),

@@ -2,3 +2,4 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0040"]
+message_contains = ["Function 'bad' uses 'this' as a receiver parameter, but it is not the first parameter."]

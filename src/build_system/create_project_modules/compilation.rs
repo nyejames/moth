@@ -16,7 +16,8 @@ use crate::compiler_frontend::build_config::{
     BuildConfigContractFact, BuildConfigInputSet, BuildConfigResolutionError,
     ResolvedBuildConfigMap,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure, SourceSpanCapacityResource,
 };
@@ -303,8 +304,8 @@ struct SourcePackageCheckOnlyInventory {
 
 /// Typed boundary-orchestration failure retaining its source owner.
 ///
-/// WHAT: pairs the premerge lane with the finished package database when the failure is
-///       package-scoped, so the single public tail can attach the correct snapshot once.
+/// WHAT: pairs a premerge failure with a finished package database until the terminal wrapper can
+///       build the adapter input with the correct owner.
 /// WHY: package failures must render against their own snapshot while project failures render
 ///      against the project database finalized by the outer tail; carrying the owner here keeps
 ///      every intermediate site typed until that deliberate final conversion.
@@ -356,9 +357,30 @@ impl From<SourceDatabaseError> for BoundaryPremergeFailure {
         }
     }
 }
+/// Consume a terminal premerge failure with its package owner or project fallback.
+///
+/// The owner is moved into the one legacy-adapter run; callers never receive a vessel to attach a
+/// source database to or convert a second time.
+pub(super) fn premerge_failure_to_boundary(
+    failure: PremergeFailure,
+    string_table: &StringTable,
+    package_source: Option<Box<SourceDatabase>>,
+    project_source: Option<Arc<SourceDatabase>>,
+) -> BoundaryFailure {
+    let mut messages = match package_source {
+        Some(source) => failure.into_messages_with_source(string_table, Arc::new(*source)),
+        None => failure.into_messages(string_table),
+    };
+    if messages.source_database_for_diagnostic(0).is_none()
+        && let Some(source) = project_source
+    {
+        messages.set_source_database(source);
+    }
+    into_boundary_failure(messages)
+}
 
-// NOTE: no `From<CompilerMessages>` here by design. Stage 0 stays in the typed premerge lane;
-// the public tail owns the single final vessel conversion.
+// Intermediate orchestration stays typed until the terminal wrapper has finalized the relevant
+// source owner. That wrapper builds the adapter input and returns the one frozen BoundaryFailure.
 
 /// Finish a package source owner beside a typed failure.
 ///
@@ -1061,7 +1083,7 @@ pub(super) fn compile_source_package_inventories(
 
 /// Discover all entry modules in a directory project and compile each one.
 ///
-/// WHAT: owns the single final conversion from the premerge lane into the boundary vessel.
+/// WHAT: owns the single final conversion from the premerge lane into a frozen `BoundaryFailure`.
 /// WHY: every intermediate directory site stays typed until here, so source attachment and
 ///      string-table finalization happen exactly once at this outer tail.
 #[allow(
@@ -1078,7 +1100,7 @@ pub(crate) fn compile_directory_frontend(
     project_source_files: &mut Option<Arc<SourceDatabase>>,
     build_config_inputs: &BuildConfigInputSet,
     mode: FrontendCompilationMode,
-) -> Result<ProjectFrontendCompilation, CompilerMessages> {
+) -> Result<ProjectFrontendCompilation, BoundaryFailure> {
     match compile_directory_frontend_in_premerge_lane(
         config,
         build_profile,
@@ -1091,19 +1113,12 @@ pub(crate) fn compile_directory_frontend(
         mode,
     ) {
         Ok(compilation) => Ok(compilation),
-        Err(directory_failure) => {
-            if let Some(package_source) = directory_failure.package_source {
-                return Err((*directory_failure.failure)
-                    .into_messages_with_source(string_table, Arc::new(*package_source)));
-            }
-            let mut messages = (*directory_failure.failure).into_messages(string_table);
-            if messages.source_database_for_diagnostic(0).is_none()
-                && let Some(project_source) = project_source_files.as_ref()
-            {
-                messages.set_source_database(Arc::clone(project_source));
-            }
-            Err(messages)
-        }
+        Err(directory_failure) => Err(premerge_failure_to_boundary(
+            *directory_failure.failure,
+            string_table,
+            directory_failure.package_source,
+            project_source_files.take(),
+        )),
     }
 }
 
@@ -1112,8 +1127,8 @@ pub(crate) fn compile_directory_frontend(
 /// WHAT: runs package/project discovery, source loading, deferred check-only preparation,
 ///       provider publication and graph validation with typed failures, retaining a finished
 ///       package snapshot beside package-scoped failures.
-/// WHY: the public wrapper above owns the single final vessel conversion; this lane never
-///      constructs it early and never clones a diagnostic table solely to transport a failure.
+/// WHY: the terminal wrapper above owns the single final boundary conversion; this lane never
+///      constructs a vessel early and never clones a diagnostic table solely to transport a failure.
 #[allow(
     clippy::too_many_arguments,
     reason = "premerge directory orchestration keeps configuration, profile, output settings, directives, mutable builder/string/source owners, build-config inputs and mode separate"

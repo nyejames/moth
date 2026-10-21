@@ -1698,35 +1698,14 @@ pub fn build_project(
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
 ) -> Result<BuildResult, BoundaryFailure> {
-    match build_project_with_messages(project_builder, entry_path, flags, build_config_inputs) {
-        Ok(result) => Ok(result),
-        Err(BuildOrchestrationFailure::Legacy(messages)) => Err(into_boundary_failure(messages)),
-        Err(BuildOrchestrationFailure::Boundary(failure)) => Err(failure),
-    }
-}
-
-enum BuildOrchestrationFailure {
-    Legacy(CompilerMessages),
-    Boundary(BoundaryFailure),
-}
-
-impl From<CompilerMessages> for BuildOrchestrationFailure {
-    fn from(messages: CompilerMessages) -> Self {
-        Self::Legacy(messages)
-    }
-}
-
-fn build_project_with_messages(
-    project_builder: &ProjectBuilder,
-    entry_path: &str,
-    flags: &[Flag],
-    build_config_inputs: &BuildConfigInputSet,
-) -> Result<BuildResult, BuildOrchestrationFailure> {
     let build_profile = BuildProfile::from_flags(flags);
     let valid_path = match check_if_valid_path(entry_path) {
         Ok(path) => path,
         Err(error) => {
-            return Err(CompilerMessages::from_error(error, StringTable::new()).into());
+            return Err(into_boundary_failure(CompilerMessages::from_error(
+                error,
+                StringTable::new(),
+            )));
         }
     };
 
@@ -1745,12 +1724,10 @@ fn build_project_with_messages(
         build_config_inputs,
     } = match bootstrap_project_build(project_builder, valid_path, build_config_inputs) {
         Ok(bootstrap) => bootstrap,
-        Err(messages) => {
-            return Err(messages.into());
-        }
+        Err(messages) => return Err(into_boundary_failure(messages)),
     };
 
-    let frontend_compilation = match compile_project_frontend_with_inputs(
+    let frontend_compilation = compile_project_frontend_with_inputs(
         &mut config,
         build_profile,
         validated_directory_output_settings.as_ref(),
@@ -1760,27 +1737,23 @@ fn build_project_with_messages(
         &mut project_source_files,
         &build_config_inputs,
         FrontendCompilationMode::Canonical,
-    ) {
-        Ok(frontend_compilation) => frontend_compilation,
-        Err(mut messages) => {
-            attach_source_database(&mut messages, project_source_files.as_ref());
-            return Err(messages.into());
-        }
-    };
+    )?;
     if frontend_compilation.has_diagnosed_or_blocked() {
-        let messages = frontend_compilation.into_render_messages(
+        let failure = frontend_compilation.into_boundary_failure(
             &mut string_table,
             project_source_files.take(),
             None,
         );
-        return Err(messages.into());
+        return Err(failure);
     }
     let mut project_compilation = match ProjectCompilation::from_frontend(frontend_compilation) {
         Ok(project_compilation) => project_compilation,
         Err(error) => {
             let mut messages = error.into_messages(&mut string_table);
-            attach_source_database(&mut messages, project_source_files.as_ref());
-            return Err(messages.into());
+            if let Some(source_database) = project_source_files.take() {
+                messages.set_source_database(source_database);
+            }
+            return Err(into_boundary_failure(messages));
         }
     };
     let mut warning_accumulator = collect_success_warnings(&mut project_compilation, string_table);
@@ -1807,7 +1780,7 @@ fn build_project_with_messages(
                 warning_accumulator,
                 project_source_files.take(),
             );
-            return Err(BuildOrchestrationFailure::Boundary(failure));
+            return Err(failure);
         }
     };
 
@@ -1822,15 +1795,14 @@ fn build_project_with_messages(
             let error = CompilerError::compiler_error(
                 "Directory output settings were not available after bootstrap validation.",
             );
-            let failure = finalize_backend_failure_messages(
+            return Err(finalize_backend_failure_messages(
                 CompilerMessages::from_error(
                     error,
                     crate::compiler_frontend::symbols::string_interning::StringTable::new(),
                 ),
                 warning_accumulator,
                 project_source_files.take(),
-            );
-            return Err(BuildOrchestrationFailure::Boundary(failure));
+            ));
         };
 
         Some(validated_output_settings.select(

@@ -110,14 +110,13 @@ fn single_file_rejects_wrong_extension() {
     let Err(messages) = result else {
         panic!("expected Err for wrong extension");
     };
-    let diagnostic = messages
-        .error_diagnostics()
+    let (report, view) = messages
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
         .next()
         .expect("expected at least one error");
-    let error_text = terse::format_terse_diagnostic_with_context(
-        diagnostic,
-        messages.diagnostic_render_context(0),
-    );
+    let error_text =
+        terse::format_terse_diagnostic_view(view, DiagnosticRenderContext::for_report(report));
     assert!(
         error_text.contains(".moth"),
         "expected error to mention .moth, got: {error_text}"
@@ -149,7 +148,20 @@ fn single_file_rejects_missing_file() {
     let Err(messages) = result else {
         panic!("missing entry file should produce an error, not success");
     };
-    assert_exact_infrastructure_error(&messages, &ErrorType::File);
+    assert_eq!(messages.error_count(), 1);
+    assert!(
+        messages
+            .reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .next()
+            .is_none(),
+        "missing entry file should not produce a user diagnostic"
+    );
+    let infrastructure = messages
+        .infrastructure_errors()
+        .expect("missing entry file should produce an infrastructure error");
+    assert_eq!(infrastructure.primary.error_type, ErrorType::File);
+    assert!(infrastructure.additional.is_empty());
 }
 
 #[test]
@@ -179,14 +191,18 @@ fn single_file_rejects_optional_core_package_not_exposed_by_builder() {
     let Err(messages) = result else {
         panic!("optional core package should require builder opt-in");
     };
-    let diagnostic = messages
-        .error_diagnostics()
+    let (report, view) = messages
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
         .next()
         .expect("expected one diagnostic");
-    let DiagnosticPayload::UnsupportedBuilderPackage { package_path } = diagnostic.payload else {
-        panic!("unexpected diagnostic payload: {:?}", diagnostic.payload);
-    };
-    assert_eq!(messages.string_table.resolve(package_path), "@core/text");
+    assert_eq!(view.descriptor().code, "MOTH-RULE-0060");
+    let rendered =
+        terse::format_terse_diagnostic_view(view, DiagnosticRenderContext::for_report(report));
+    assert!(
+        rendered.contains("Core package '@core/text' is not supported by this builder."),
+        "unsupported builder package should render the exact selected package-path fact: {rendered}"
+    );
 }
 
 #[test]
@@ -422,15 +438,13 @@ fn single_file_rejects_source_package_moth_folder_collision() {
     };
 
     assert!(
-        messages.error_diagnostics().any(|diagnostic| {
-            matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidConfig {
-                    reason: InvalidConfigReason::SourceFileFolderCollision { .. },
-                    ..
-                }
-            )
-        }),
+        messages
+            .reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| {
+                view.descriptor().code == "MOTH-CONFIG-0001"
+                    && view.reason_key() == Some("invalid_config.source_file_folder_collision")
+            }),
         "expected SourceFileFolderCollision diagnostic, got {messages:?}"
     );
 }

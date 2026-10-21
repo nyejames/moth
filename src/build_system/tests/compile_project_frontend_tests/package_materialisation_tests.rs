@@ -5,8 +5,8 @@ use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::InvalidFallibleHandlingReason;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureSource,
@@ -68,7 +68,7 @@ fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_s
             PackageOrigin::Builder,
         );
 
-        let messages = match compile_project_frontend(
+        let failure = match compile_project_frontend(
             &mut config,
             BuildProfile::Dev,
             None,
@@ -76,10 +76,9 @@ fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_s
             &mut frontend_surface,
             &mut string_table,
         ) {
-            Err(messages) => messages,
+            Err(failure) => failure,
             Ok(_) => panic!("{entry_mode}: invalid package default unexpectedly compiled"),
         };
-        let failure = into_boundary_failure(messages);
         assert!(
             !failure.has_infrastructure_error(),
             "{entry_mode}: {failure:?}"
@@ -175,67 +174,44 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
         &build_config_inputs,
         FrontendCompilationMode::Canonical,
     );
-    let Err(mut messages) = result else {
+    let Err(failure) = result else {
         panic!("source-package config contract must not consume the project input");
     };
-    messages.set_source_database(
-        project_source_files
-            .take()
-            .expect("directory frontend should retain the project source database"),
-    );
-    let observed_identities = messages
-        .error_diagnostics()
-        .map(|diagnostic| diagnostic.identity())
-        .collect::<Vec<_>>();
 
-    let matching = messages
-        .diagnostics()
-        .enumerate()
-        .filter(|(_, diagnostic)| {
-            diagnostic.severity
-                == crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error
-                && matches!(
-                    &diagnostic.payload,
-                    DiagnosticPayload::InvalidConfig {
-                        reason: InvalidConfigReason::MissingConfigInput,
-                        ..
-                    }
-                )
+    let matching = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .filter(|(_, view)| {
+            view.descriptor().code == "MOTH-CONFIG-0001"
+                && view.reason_key() == Some("invalid_config.missing_config_input")
         })
         .collect::<Vec<_>>();
     assert_eq!(
         matching.len(),
         1,
-        "the isolated source package should report exactly one missing-input diagnostic; observed {observed_identities:?}"
+        "the isolated source package should report exactly one missing-input diagnostic: {failure:?}"
     );
-    let (_, diagnostic) = matching[0];
-    let DiagnosticPayload::InvalidConfig {
-        key: Some(key),
-        reason: InvalidConfigReason::MissingConfigInput,
-    } = &diagnostic.payload
-    else {
-        unreachable!("the diagnostic was filtered to the missing-input payload");
+    let (report, view) = matching[0];
+    assert!(
+        view.string_ids()
+            .iter()
+            .any(|key| report.context().strings().resolve(*key) == "enabled"),
+        "the missing-input diagnostic should name the enabled contract"
+    );
+    let span = match view.primary_site() {
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(span)
+        | crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+            span,
+            ..
+        } => span,
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent => {
+            panic!("source-package config diagnostic should retain its authored span")
+        }
     };
-    assert_eq!(messages.string_table.resolve(*key), "enabled");
-    let span = diagnostic
-        .primary_span
-        .expect("source-package config diagnostic should retain its authored span");
     assert_ne!(
         span.source(),
         crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
         "source-package diagnostics must not use the synthetic compilation-root span",
-    );
-    let code = diagnostic.kind.code();
-    drop(matching);
-    let failure = into_boundary_failure(messages);
-    let (report, view) = failure
-        .reports
-        .iter()
-        .find(|(_, view)| view.descriptor().code == code)
-        .expect("missing-input diagnostic should remain in the boundary");
-    assert_eq!(
-        view.reason_key(),
-        Some("invalid_config.missing_config_input")
     );
     let position = DiagnosticRenderContext::for_report(report)
         .site_position(view.primary_site())
@@ -304,11 +280,7 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
     )
     .expect("diagnosed source packages are retained in the typed frontend outcome");
     let project_source = frontend.project_source_database.take();
-    let messages = into_boundary_failure(frontend.into_render_messages(
-        &mut string_table,
-        project_source,
-        None,
-    ));
+    let messages = frontend.into_boundary_failure(&mut string_table, project_source, None);
 
     assert!(
         messages.error_count() >= 2,
@@ -435,11 +407,7 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
         );
 
         let project_source = frontend.project_source_database.take();
-        let messages = into_boundary_failure(frontend.into_render_messages(
-            &mut string_table,
-            project_source,
-            None,
-        ));
+        let messages = frontend.into_boundary_failure(&mut string_table, project_source, None);
         assert_eq!(
             messages.error_count(),
             1,
@@ -468,11 +436,10 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
             &mut frontend_surface,
             &mut string_table,
         );
-        let messages = match result {
-            Err(messages) => messages,
+        let failure = match result {
+            Err(failure) => failure,
             Ok(_) => panic!("Boracle consumer of a diagnosed package unexpectedly compiled"),
         };
-        let failure = into_boundary_failure(messages);
         assert!(!failure.has_infrastructure_error(), "{failure:?}");
         assert_eq!(
             failure.error_count(),
@@ -925,8 +892,8 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
     }
 }
 
-/// Compiles one single-page project and returns the frontend, or the diagnostics it produced.
-fn compile_single_page_project(page: &str) -> Result<ProjectFrontendCompilation, CompilerMessages> {
+/// Compiles one single-page project and returns the frontend, or its boundary failure.
+fn compile_single_page_project(page: &str) -> Result<ProjectFrontendCompilation, BoundaryFailure> {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("src")).expect("should create source root");
@@ -1366,8 +1333,7 @@ fn generated_materialisation_preserves_exact_request_span_in_recursive_diagnosti
     )
     .expect("diagnosed recursive materialisation should remain a retained frontend outcome");
     let project_source = frontend.project_source_database.take();
-    let messages = frontend.into_render_messages(&mut string_table, project_source, None);
-    let failure = into_boundary_failure(messages);
+    let failure = frontend.into_boundary_failure(&mut string_table, project_source, None);
     let (report, view) = failure
         .reports
         .iter_severity(DiagnosticSeverity::Error)
@@ -1488,19 +1454,12 @@ html #= ()\n",
         "project and package databases should begin with colliding SourceId values"
     );
 
-    let messages =
-        frontend.into_render_messages(&mut string_table, project_source_files.take(), None);
-    let type_mismatch_code = messages
-        .diagnostics()
-        .find(|diagnostic| matches!(&diagnostic.payload, DiagnosticPayload::TypeMismatch { .. }))
-        .expect("imported generic materialisation should retain one type mismatch diagnostic")
-        .kind
-        .code();
-    let failure = into_boundary_failure(messages);
+    let failure =
+        frontend.into_boundary_failure(&mut string_table, project_source_files.take(), None);
     let (report, view) = failure
         .reports
         .iter()
-        .find(|(_, view)| view.descriptor().code == type_mismatch_code)
+        .find(|(_, view)| view.descriptor().code == "MOTH-TYPE-0001")
         .expect("type mismatch should remain in the boundary report");
 
     let context = DiagnosticRenderContext::for_report(report);
@@ -1712,9 +1671,8 @@ export:
 
     let project_path = fs::canonicalize(project_path).expect("project path should canonicalize");
     let package_path = fs::canonicalize(package_path).expect("package path should canonicalize");
-    let messages =
-        frontend.into_render_messages(&mut string_table, project_source_files.take(), None);
-    let failure = into_boundary_failure(messages);
+    let failure =
+        frontend.into_boundary_failure(&mut string_table, project_source_files.take(), None);
     let (report, view) = failure
         .reports
         .iter()
@@ -2877,10 +2835,8 @@ fn exported_private_chain_witness_rendering_is_stable_across_repeated_compilatio
             frontend.project.generated.sidecars().next().is_none(),
             "the escaping export must not materialise"
         );
-        let project_source = frontend.project_source_database.clone();
         let mut string_table = StringTable::new();
-        let messages = frontend.into_render_messages(&mut string_table, project_source, None);
-        let failure = into_boundary_failure(messages);
+        let failure = frontend.into_boundary_failure(&mut string_table, None, None);
         terse::format_terse_boundary_messages(&failure)
     }
     let first = terse_error_lines(temp_dir.path());
@@ -2970,7 +2926,7 @@ fn source_package_warning_retained_by_frontend_outcome() {
         package,
         PackageOrigin::Builder,
     );
-    let mut frontend = compile_project_frontend(
+    let frontend = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
@@ -2995,9 +2951,7 @@ fn source_package_warning_retained_by_frontend_outcome() {
         "source-package warning should be retained: {warning_codes:?}"
     );
 
-    let project_source = frontend.project_source_database.take();
-    let messages = frontend.into_render_messages(&mut string_table, project_source, None);
-    let failure = into_boundary_failure(messages);
+    let failure = frontend.into_boundary_failure(&mut string_table, None, None);
     assert!(
         failure.warning_count() >= 1,
         "render boundary should retain the source-package warning"
@@ -3152,9 +3106,8 @@ fn source_package_diagnostic_uses_package_snapshot_for_colliding_logical_path() 
         FrontendCompilationMode::Canonical,
     )
     .expect("the package diagnostic should remain a retained frontend outcome");
-    let messages =
-        frontend.into_render_messages(&mut string_table, project_source_files.take(), None);
-    let failure = into_boundary_failure(messages);
+    let failure =
+        frontend.into_boundary_failure(&mut string_table, project_source_files.take(), None);
     let rendered = render_boundary_messages_html(&failure, &project_root);
 
     assert!(

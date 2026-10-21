@@ -16,7 +16,11 @@ use crate::compiler_frontend::module_compilation::compile_module_for_boracle;
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+#[cfg(feature = "boracle")]
+use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
+#[cfg(feature = "boracle")]
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure, SourceSpanCapacityResource,
 };
@@ -65,7 +69,8 @@ use super::super::source_package_discovery::build_source_package_boundary_indexe
 use super::super::source_tree_index::SourceTreeIndex;
 use super::{
     BoundaryPremergeFailure, append_finish_failure, canonical, compile_source_package_inventories,
-    discover_source_package_inventories, prepare_source_package_check_only_jobs,
+    discover_source_package_inventories, premerge_failure_to_boundary,
+    prepare_source_package_check_only_jobs,
 };
 
 #[allow(
@@ -82,7 +87,7 @@ pub(crate) fn compile_single_file_frontend_with_inputs(
     project_source_files: &mut Option<Arc<SourceDatabase>>,
     build_config_inputs: &BuildConfigInputSet,
     mode: FrontendCompilationMode,
-) -> Result<ProjectFrontendCompilation, CompilerMessages> {
+) -> Result<ProjectFrontendCompilation, BoundaryFailure> {
     let result = match compile_single_file_frontend_with_target(
         config,
         build_profile,
@@ -97,29 +102,26 @@ pub(crate) fn compile_single_file_frontend_with_inputs(
     ) {
         Ok(result) => result,
         Err(failure) => {
-            if let Some(package_source) = failure.package_source {
-                return Err((*failure.failure)
-                    .into_messages_with_source(string_table, Arc::new(*package_source)));
-            }
-            let mut messages = (*failure.failure).into_messages(string_table);
-            if messages.source_database_for_diagnostic(0).is_none()
-                && let Some(source_database) = project_source_files.as_ref()
-            {
-                messages.set_source_database(Arc::clone(source_database));
-            }
-            return Err(messages);
+            return Err(premerge_failure_to_boundary(
+                *failure.failure,
+                string_table,
+                failure.package_source,
+                project_source_files.take(),
+            ));
         }
     };
 
     match result {
         SingleFileFrontendResult::Project(compilation) => Ok(*compilation),
         #[cfg(feature = "boracle")]
-        SingleFileFrontendResult::Boracle(_) => Err(CompilerMessages::from_error_ref(
-            CompilerError::compiler_error(
-                "normal single-file compilation unexpectedly returned a Boracle payload",
-            ),
-            string_table,
-        )),
+        SingleFileFrontendResult::Boracle(_) => {
+            Err(into_boundary_failure(CompilerMessages::from_error_ref(
+                CompilerError::compiler_error(
+                    "normal single-file compilation unexpectedly returned a Boracle payload",
+                ),
+                string_table,
+            )))
+        }
     }
 }
 #[cfg(feature = "boracle")]
@@ -130,7 +132,7 @@ pub(crate) fn compile_single_file_boracle_frontend(
     builder_surface: &mut BuilderSurface,
     extension: &OsStr,
     string_table: &mut StringTable,
-) -> Result<BoracleModuleInput, CompilerMessages> {
+) -> Result<BoracleModuleInput, BoundaryFailure> {
     let mut project_source_files = None;
     let result = match compile_single_file_frontend_with_target(
         config,
@@ -146,17 +148,12 @@ pub(crate) fn compile_single_file_boracle_frontend(
     ) {
         Ok(result) => result,
         Err(failure) => {
-            if let Some(package_source) = failure.package_source {
-                return Err((*failure.failure)
-                    .into_messages_with_source(string_table, Arc::new(*package_source)));
-            }
-            let mut messages = (*failure.failure).into_messages(string_table);
-            if messages.source_database_for_diagnostic(0).is_none()
-                && let Some(source_database) = project_source_files.as_ref()
-            {
-                messages.set_source_database(Arc::clone(source_database));
-            }
-            return Err(messages);
+            return Err(premerge_failure_to_boundary(
+                *failure.failure,
+                string_table,
+                failure.package_source,
+                project_source_files.take(),
+            ));
         }
     };
 
@@ -164,18 +161,16 @@ pub(crate) fn compile_single_file_boracle_frontend(
         SingleFileFrontendResult::Boracle(input) => Ok(*input),
         SingleFileFrontendResult::Project(compilation) => {
             if !compilation.has_diagnosed_or_blocked() {
-                return Err(CompilerMessages::from_error_ref(
+                return Err(into_boundary_failure(CompilerMessages::from_error_ref(
                     CompilerError::compiler_error(
                         "Boracle source compilation unexpectedly returned a clean project payload",
                     ),
                     string_table,
-                ));
+                )));
             }
             // The canonical scheduler retains failed package reports and blocks their consumer.
             // Render only after the synthetic source owner has finalised its span tables.
-            let messages =
-                compilation.into_render_messages(string_table, project_source_files, None);
-            Err(messages)
+            Err(compilation.into_boundary_failure(string_table, project_source_files.take(), None))
         }
     }
 }

@@ -497,27 +497,27 @@ fn run_frontend_benchmark_with_owner_internal(
     ) {
         Ok(frontend) => {
             #[cfg(feature = "data_layout_memory_probe")]
-            let (messages, retention) = frontend.into_render_messages_and_metrics(
+            let (messages, retention) = frontend.into_boundary_failure_and_metrics(
                 &mut string_table,
                 project_source_files.take(),
                 None,
             );
             #[cfg(not(feature = "data_layout_memory_probe"))]
-            let messages = into_boundary_failure(frontend.into_render_messages(
+            let messages = frontend.into_boundary_failure(
                 &mut string_table,
                 project_source_files.take(),
                 None,
-            ));
+            );
             #[cfg(feature = "data_layout_memory_probe")]
             let retention = FrontendBenchmarkRetention::from(retention);
             #[cfg(not(feature = "data_layout_memory_probe"))]
             let retention = FrontendBenchmarkRetention::default();
             (messages, retention, false)
         }
-        Err(messages) => {
+        Err(failure) => {
             drop(project_source_files.take());
             let retention = snapshot_ledger_retention();
-            (into_boundary_failure(messages), retention, true)
+            (failure, retention, true)
         }
     };
 

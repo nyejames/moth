@@ -91,7 +91,8 @@ use crate::build_system::output::ValidatedDirectoryOutputSettings;
 
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerMessages};
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::instrumentation::{log_frontend_counters, reset_frontend_counters};
 #[cfg(feature = "boracle")]
 use crate::compiler_frontend::module_compilation::BoracleModuleInput;
@@ -137,7 +138,7 @@ pub fn compile_project_frontend(
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     string_table: &mut StringTable,
-) -> Result<ProjectFrontendCompilation, CompilerMessages> {
+) -> Result<ProjectFrontendCompilation, BoundaryFailure> {
     let mut project_source_files = None;
     let result = compile_project_frontend_with_inputs(
         config,
@@ -173,7 +174,7 @@ pub(crate) fn compile_project_frontend_with_inputs(
     project_source_files: &mut Option<Arc<SourceDatabase>>,
     build_config_inputs: &BuildConfigInputSet,
     mode: FrontendCompilationMode,
-) -> Result<ProjectFrontendCompilation, CompilerMessages> {
+) -> Result<ProjectFrontendCompilation, BoundaryFailure> {
     // Frontend counters are command-scoped and gated by `benchmark_counters`.
     // The counter storage is atomic so directory module compilation can update
     // it safely from Rayon workers.
@@ -222,7 +223,10 @@ pub(crate) fn compile_project_frontend_with_inputs(
                     "Found a file without an extension set. Moth files use .{LANGUAGE_SOURCE_EXTENSION}"
                 ),
             );
-            Err(CompilerMessages::from_error_ref(err, string_table))
+            Err(into_boundary_failure(CompilerMessages::from_error_ref(
+                err,
+                string_table,
+            )))
         }
     });
 
@@ -243,13 +247,16 @@ pub(crate) fn compile_single_file_boracle(
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     string_table: &mut StringTable,
-) -> Result<BoracleModuleInput, CompilerMessages> {
+) -> Result<BoracleModuleInput, BoundaryFailure> {
     let Some(extension) = config.entry_dir.extension() else {
         let error = crate::compiler_frontend::compiler_errors::CompilerError::file_error(
             &config.entry_dir,
             format!("Boracle source mode requires a .{LANGUAGE_SOURCE_EXTENSION} file entry"),
         );
-        return Err(CompilerMessages::from_error_ref(error, string_table));
+        return Err(into_boundary_failure(CompilerMessages::from_error_ref(
+            error,
+            string_table,
+        )));
     };
 
     compilation::compile_single_file_boracle_frontend(
