@@ -108,13 +108,17 @@ ACTIVE_PLAN:
 - Execution order: Phase 4 runs as the steps in `PHASE_4_EXECUTION_ORDER` below. The slice
   checklists remain the acceptance contract. Only their order and grouping changed, under the
   architecture document's repository-discovered corrections rule.
-- NEXT_SUBSTEP: P4.5 slice S4 of `PHASE_4_5_SEQUENCE`, the canonical merge, at sub-slice S4d (the
-  residual census and the medians); S4a is accepted in "Phase 4 P4.5 S4a: run-scoped boundary
-  accumulator", S4c in "Phase 4 P4.5 S4c: build warnings freeze once" and S4b in "Phase 4 P4.5
-  S4b: canonical tail freezes once". S4b also fixed `MOTH-RULE-0040` naming the wrong function
-  after a string-table merge (the legacy payload remap skipped the reason's function name); three
-  cases now pin the message. `transient_batches` and `BoundaryPremergeFailure` retire in S5,
-  where batches become prepared drafts. S1 is accepted in
+- NEXT_SUBSTEP: P4.5 slice S5 of `PHASE_4_5_SEQUENCE`, prepared carriers, at sub-slice S5a. S4
+  (the canonical merge) is accepted in "Phase 4 P4.5 S4a: run-scoped boundary accumulator",
+  "Phase 4 P4.5 S4c: build warnings freeze once", "Phase 4 P4.5 S4b: canonical tail freezes once"
+  and "Phase 4 P4.5 S4d: canonical merge census and medians". S4d found no production vessel
+  merge left: `append_messages_preserving_context` and `mark_frozen` are test-only parity
+  oracles, and `into_render_messages` has no caller. Back-to-back dev medians, ten iterations:
+  `data_layout_diagnosed_frontend` 54.05 ms at S4 against 53.96 ms at S3.3, and
+  `data_layout_warning_heavy_frontend` 14.94 ms against 14.02 ms, both inside run noise. The
+  gap against the Phase 4 reactivation baseline (44.77 ms and 11.93 ms at `719d08efe`) predates
+  S4 and stays a P4.7 close item. `transient_batches` and `BoundaryPremergeFailure` retire in
+  S5. S1 is accepted in
   the checkpoints "Phase 4 P4.5 S1a: frozen diagnostic report types" through "Phase 4 P4.5 S1c:
   draft string and path ID remaps", S2 in "Phase 4 P4.5 S2: diagnostic freeze side", and S3 (the
   boundary cut) in "Phase 4 P4.5 S3.1: legacy-to-boundary converter", "Phase 4 P4.5 S3.2:
