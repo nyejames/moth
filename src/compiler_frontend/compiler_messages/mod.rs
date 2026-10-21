@@ -27,6 +27,7 @@ pub(crate) mod diagnostic_types;
 pub(crate) mod diagnostics;
 pub(crate) mod display_messages;
 pub(crate) mod module_diagnostics;
+pub(crate) mod prepared_batch;
 pub(crate) mod render;
 pub(crate) mod trait_keyword_diagnostics;
 

@@ -22,5 +22,22 @@ mod schema;
 mod store;
 pub(crate) mod view;
 
+use super::diagnostic_types::type_display_snapshot::TypeDisplaySnapshot;
+use draft::DiagnosticDraft;
+
+/// One family draft and its captured type snapshot while a boundary run is accumulated.
+pub(super) struct PreparedDiagnostic {
+    draft: DiagnosticDraft,
+    types: TypeDisplaySnapshot,
+    /// The first source row that covers the diagnostic.
+    owner: Option<usize>,
+    /// The first explicit path row that covers the diagnostic.
+    pub(super) explicit_path: Option<usize>,
+    /// The first identity-less source row that covers the diagnostic.
+    identityless_owner: Option<usize>,
+    /// The path-table merge whose remap the draft and snapshot follow.
+    merge: Option<usize>,
+}
+
 #[cfg(test)]
 mod tests;

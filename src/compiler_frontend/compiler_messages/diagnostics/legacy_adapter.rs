@@ -7,6 +7,8 @@
 //! WHY: the boundary replaces the legacy vessel without changing rendered output. `compact_for_render` is a test-only
 //! per-diagnostic store shim.
 
+use super::super::prepared_batch::{PreparedBatchIdentity, PreparedDiagnosticBatch};
+use super::PreparedDiagnostic;
 #[cfg(test)]
 use super::compaction::CompactOutcome;
 use super::draft::DiagnosticDraft;
@@ -30,6 +32,7 @@ use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext
 use crate::compiler_frontend::compiler_messages::{
     CapacityResource, CompilerDiagnostic, DiagnosticCapacityResource, SourceSpanCapacityResource,
 };
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase};
 use crate::compiler_frontend::symbols::path_interner::{
@@ -127,20 +130,6 @@ fn finish(mut draft: DiagnosticDraft, diagnostic: &CompilerDiagnostic) -> Diagno
     draft
 }
 
-/// The draft and rows of one legacy diagnostic, read before its vessel is consumed.
-struct PreparedDiagnostic {
-    draft: DiagnosticDraft,
-    types: TypeDisplaySnapshot,
-    /// The first source row that covers the diagnostic. `None` leaves the diagnostic unowned.
-    owner: Option<usize>,
-    /// The first path row that covers the diagnostic. Its table replaces the owner's table for this diagnostic.
-    explicit_path: Option<usize>,
-    /// The first identity-less source row that covers the diagnostic, selected only in Frozen mode.
-    identityless_owner: Option<usize>,
-    /// The merge whose remap the diagnostic's path ids follow.
-    merge: Option<usize>,
-}
-
 /// A source row that the converter keeps: its identity, and the slot of its database.
 struct KeptSourceRow {
     domain: Option<StablePackageIdentity>,
@@ -163,7 +152,7 @@ pub(crate) struct BoundaryAccumulator {
 }
 
 struct BoundaryAccumulatorState {
-    string_table: Box<StringTable>,
+    string_table: StringTable,
     prepared: Vec<PreparedDiagnostic>,
     source_rows: Vec<RenderSourceContext>,
     path_rows: Vec<RenderPathContext>,
@@ -206,7 +195,7 @@ impl BoundaryAccumulator {
 
         let Some(mut state) = self.state.take() else {
             self.state = Some(BoundaryAccumulatorState {
-                string_table,
+                string_table: *string_table,
                 prepared,
                 source_rows: render_source_contexts,
                 path_rows,
@@ -253,6 +242,77 @@ impl BoundaryAccumulator {
                 Some(existing) => existing.append(*incoming),
                 None => state.infrastructure_errors = Some(incoming),
             }
+        }
+        self.state = Some(state);
+    }
+
+    /// Append a Pass-A-prepared premerge batch without constructing a legacy vessel.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5b carrier cut"))]
+    pub(crate) fn append_prepared(
+        &mut self,
+        batch: PreparedDiagnosticBatch,
+        source: Option<(Arc<SourceDatabase>, Option<StablePackageIdentity>)>,
+    ) {
+        let PreparedDiagnosticBatch {
+            mut prepared,
+            identity,
+        } = batch;
+        let PreparedBatchIdentity {
+            string_table,
+            mut path_rows,
+            required_handles,
+        } = *identity;
+
+        let Some(mut state) = self.state.take() else {
+            let mut source_rows = Vec::new();
+            if let Some((source_database, domain)) = source {
+                source_rows.push(RenderSourceContext {
+                    diagnostic_range: 0..prepared.len(),
+                    source_database,
+                    domain,
+                });
+            }
+            self.state = Some(BoundaryAccumulatorState {
+                string_table,
+                prepared,
+                source_rows,
+                path_rows,
+                required_handles,
+                infrastructure_errors: None,
+            });
+            return;
+        };
+
+        let diagnostic_shift = state.prepared.len();
+        let path_shift = state.path_rows.len();
+        let remap = state.string_table.merge_from(&string_table);
+        if !remap.is_identity() {
+            for diagnostic in &mut prepared {
+                diagnostic.draft.remap_string_ids(&remap);
+                diagnostic.types.remap_string_ids(&remap);
+            }
+            for row in &mut path_rows {
+                Arc::make_mut(&mut row.path_table).remap_string_ids(&remap);
+            }
+        }
+
+        for row in &mut path_rows {
+            row.diagnostic_range.start += diagnostic_shift;
+            row.diagnostic_range.end += diagnostic_shift;
+        }
+        for diagnostic in &mut prepared {
+            diagnostic.explicit_path = diagnostic.explicit_path.map(|row| row + path_shift);
+        }
+        let diagnostic_end = diagnostic_shift + prepared.len();
+        state.prepared.extend(prepared);
+        state.path_rows.extend(path_rows);
+        state.required_handles.extend(required_handles);
+        if let Some((source_database, domain)) = source {
+            state.source_rows.push(RenderSourceContext {
+                diagnostic_range: diagnostic_shift..diagnostic_end,
+                source_database,
+                domain,
+            });
         }
         self.state = Some(state);
     }
@@ -344,7 +404,7 @@ impl BoundaryAccumulator {
     /// Resolves the run-wide install policy, merges retained owners, and freezes once.
     pub(crate) fn finish(self, install: InstallMode) -> BoundaryFailure {
         let state = self.state.unwrap_or_else(|| BoundaryAccumulatorState {
-            string_table: Box::new(StringTable::new()),
+            string_table: StringTable::new(),
             prepared: Vec::new(),
             source_rows: Vec::new(),
             path_rows: Vec::new(),
@@ -596,14 +656,13 @@ impl BoundaryAccumulator {
     }
 }
 
-/// Pass A for one diagnostic: build its family draft and capture type words against its own vessel context.
+/// Pass A for one diagnostic in a legacy vessel.
 fn prepare(
     messages: &CompilerMessages,
     index: usize,
     required_handles: &mut Vec<FrozenIdentityHandle>,
 ) -> PreparedDiagnostic {
     let diagnostic = &messages.diagnostics[index];
-
     let owner = messages
         .render_source_contexts
         .iter()
@@ -616,7 +675,22 @@ fn prepare(
         rows.iter()
             .position(|row| row.diagnostic_range.contains(&index))
     });
+    let environment = messages
+        .type_environment_for_diagnostic(index)
+        .filter(|_| messages.path_table_for_diagnostic(index).is_some());
+    let mut prepared = prepare_diagnostic(diagnostic, environment, required_handles);
+    prepared.owner = owner;
+    prepared.identityless_owner = identityless_owner;
+    prepared.explicit_path = explicit_path;
+    prepared
+}
 
+/// Shared Pass A family adapter, finish step, handle capture, and type-display capture.
+pub(in crate::compiler_frontend::compiler_messages) fn prepare_diagnostic(
+    diagnostic: &CompilerDiagnostic,
+    environment: Option<&TypeEnvironment>,
+    required_handles: &mut Vec<FrozenIdentityHandle>,
+) -> PreparedDiagnostic {
     let handles = diagnostic.primary_frozen_identity_handle.iter().chain(
         diagnostic
             .labels
@@ -625,9 +699,6 @@ fn prepare(
     );
     required_handles.extend(handles.cloned());
 
-    let environment = messages
-        .type_environment_for_diagnostic(index)
-        .filter(|_| messages.path_table_for_diagnostic(index).is_some());
     let mut builder = TypeDisplaySnapshotBuilder::new(environment);
     let family = families::from_legacy(diagnostic).unwrap_or_else(|| {
         panic!(
@@ -650,9 +721,9 @@ fn prepare(
     PreparedDiagnostic {
         draft,
         types,
-        owner,
-        explicit_path,
-        identityless_owner,
+        owner: None,
+        explicit_path: None,
+        identityless_owner: None,
         merge: None,
     }
 }

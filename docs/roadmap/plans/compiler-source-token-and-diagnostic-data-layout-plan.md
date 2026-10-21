@@ -108,7 +108,8 @@ ACTIVE_PLAN:
 - Execution order: Phase 4 runs as the steps in `PHASE_4_EXECUTION_ORDER` below. The slice
   checklists remain the acceptance contract. Only their order and grouping changed, under the
   architecture document's repository-discovered corrections rule.
-- NEXT_SUBSTEP: P4.5 slice S5 of `PHASE_4_5_SEQUENCE`, prepared carriers, at sub-slice S5a. S4
+- NEXT_SUBSTEP: P4.5 slice S5 of `PHASE_4_5_SEQUENCE`, prepared carriers, at sub-slice S5b; S5a
+  is accepted in "Phase 4 P4.5 S5a: prepared batch vessel-free append". S4
   (the canonical merge) is accepted in "Phase 4 P4.5 S4a: run-scoped boundary accumulator",
   "Phase 4 P4.5 S4c: build warnings freeze once", "Phase 4 P4.5 S4b: canonical tail freezes once"
   and "Phase 4 P4.5 S4d: canonical merge census and medians". S4d found no production vessel
