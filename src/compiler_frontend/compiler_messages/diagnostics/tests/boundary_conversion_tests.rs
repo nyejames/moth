@@ -16,7 +16,7 @@ use crate::compiler_frontend::compiler_messages::compiler_errors::{
 use crate::compiler_frontend::compiler_messages::diagnostic_types::type_display_snapshot_builder::ForcedTypeDisplayExhaustionGuard;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::{
-    compact_render_for_test, into_boundary_failure,
+    BoundaryAccumulator, compact_render_for_test, into_boundary_failure,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::render::{
@@ -244,6 +244,74 @@ fn assert_legacy_parity(mut messages: CompilerMessages, install: InstallMode) ->
 fn into_frozen_boundary_failure(mut messages: CompilerMessages) -> BoundaryFailure {
     messages.mark_frozen();
     into_boundary_failure(messages)
+}
+
+/// Compares one accumulator run with the canonical merge-then-convert path.
+fn assert_accumulator_matches_merge(
+    make_vessels: impl Fn() -> (CompilerMessages, CompilerMessages),
+    install: InstallMode,
+    expected_record_counts: (u32, u32, u32),
+    expected_error_count: usize,
+    expected_infrastructure_causes: usize,
+) -> (BoundaryFailure, BoundaryFailure) {
+    let (first, second) = make_vessels();
+    let mut merged = first;
+    merged.append_messages_preserving_context(second);
+    if install == InstallMode::Frozen {
+        merged.mark_frozen();
+    }
+    let merged_failure = into_boundary_failure(merged);
+
+    let (first, second) = make_vessels();
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append(first);
+    accumulator.append(second);
+    let accumulated_failure = accumulator.finish(install);
+
+    let merged_render = frozen_render(&merged_failure);
+    let accumulated_render = frozen_render(&accumulated_failure);
+    assert_render_parity(&merged_render, &accumulated_render);
+
+    let counts = |failure: &BoundaryFailure| {
+        let counts = failure.reports.counts();
+        (counts.errors, counts.warnings, counts.notes)
+    };
+    assert_eq!(counts(&merged_failure), expected_record_counts);
+    assert_eq!(counts(&accumulated_failure), expected_record_counts);
+    assert_eq!(merged_failure.error_count(), expected_error_count);
+    assert_eq!(accumulated_failure.error_count(), expected_error_count);
+    assert_eq!(
+        merged_failure.warning_count(),
+        expected_record_counts.1 as usize
+    );
+    assert_eq!(
+        accumulated_failure.warning_count(),
+        expected_record_counts.1 as usize
+    );
+    let infrastructure_causes = |failure: &BoundaryFailure| {
+        failure
+            .infrastructure_errors()
+            .map_or(0, |errors| 1 + errors.additional.len())
+    };
+    assert_eq!(
+        infrastructure_causes(&merged_failure),
+        expected_infrastructure_causes
+    );
+    assert_eq!(
+        infrastructure_causes(&accumulated_failure),
+        expected_infrastructure_causes
+    );
+
+    let metadata = |failure: &BoundaryFailure| {
+        failure
+            .reports
+            .iter()
+            .map(|(_, view)| (view.descriptor().code, view.reason_key(), view.severity()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(metadata(&merged_failure), metadata(&accumulated_failure));
+
+    (merged_failure, accumulated_failure)
 }
 
 /// Writes `text` to `src/<relative_name>` under `directory` and builds a database that retains it.
@@ -1123,4 +1191,371 @@ fn uninstalled_donor_label_renders_position_less_on_both_sides() {
         rendered.position.is_none(),
         "an uninstalled donor label should render position-less"
     );
+}
+
+/// Distinct vessel string tables with colliding ids are remapped before the run freezes.
+#[test]
+fn accumulator_parity_remaps_colliding_vessel_strings() {
+    let make_vessels = || {
+        let mut first_strings = StringTable::new();
+        let alpha = first_strings.intern("alpha");
+        let mut second_strings = StringTable::new();
+        let bravo = second_strings.intern("bravo");
+        assert_eq!(alpha, bravo, "fixture string ids should collide");
+
+        let first = CompilerMessages::from_diagnostics(
+            vec![CompilerDiagnostic::duplicate_declaration(alpha, None, None)],
+            first_strings,
+        );
+        let second = CompilerMessages::from_diagnostics(
+            vec![CompilerDiagnostic::duplicate_declaration(bravo, None, None)],
+            second_strings,
+        );
+        (first, second)
+    };
+
+    let (_, accumulated) =
+        assert_accumulator_matches_merge(make_vessels, InstallMode::Unfrozen, (2, 0, 0), 2, 0);
+    let rendered = frozen_render(&accumulated);
+    assert!(rendered[0].message.contains("alpha"));
+    assert!(rendered[1].message.contains("bravo"));
+}
+
+/// Shared database rows reuse one identity domain or share its frozen owner across identities.
+#[test]
+fn accumulator_parity_shares_a_database_across_identity_domains() {
+    let dir = tempfile::tempdir().expect("should create temp dir");
+    let identity_a = StablePackageIdentity::project_local("pkg-a");
+
+    for (identity_b, one_domain) in [
+        (identity_a.clone(), true),
+        (StablePackageIdentity::project_local("pkg-b"), false),
+    ] {
+        let make_vessels = || {
+            let mut strings = StringTable::new();
+            let (database, source) =
+                retained_database(dir.path(), "shared.moth", "missing", &mut strings);
+            let name = strings.intern("missing");
+            let database = Arc::new(database);
+            let make_messages = |domain: StablePackageIdentity| {
+                let mut messages = CompilerMessages::from_diagnostics(
+                    vec![CompilerDiagnostic::unknown_value_name(
+                        name,
+                        Some(inline_span(source, 0, 7)),
+                    )],
+                    strings.clone(),
+                );
+                messages.install_source_contexts(
+                    [RenderSourceContext {
+                        diagnostic_range: 0..1,
+                        source_database: Arc::clone(&database),
+                        domain: Some(domain),
+                    }],
+                    0,
+                );
+                messages
+            };
+            (
+                make_messages(identity_a.clone()),
+                make_messages(identity_b.clone()),
+            )
+        };
+
+        let (merged, accumulated) =
+            assert_accumulator_matches_merge(make_vessels, InstallMode::Frozen, (2, 0, 0), 2, 0);
+        assert_eq!(
+            merged.reports.report(0).len(),
+            if one_domain { 2 } else { 1 }
+        );
+        assert_eq!(
+            accumulated.reports.report(0).len(),
+            if one_domain { 2 } else { 1 }
+        );
+        if !one_domain {
+            assert_eq!(merged.reports.report(1).len(), 1);
+            assert_eq!(accumulated.reports.report(1).len(), 1);
+            assert!(std::ptr::eq(
+                merged.reports.report(0).context(),
+                merged.reports.report(1).context(),
+            ));
+            assert!(std::ptr::eq(
+                accumulated.reports.report(0).context(),
+                accumulated.reports.report(1).context(),
+            ));
+        }
+    }
+}
+
+/// One explicit table shared by both vessels contributes once to its owner's path builder.
+#[test]
+fn accumulator_parity_deduplicates_a_shared_explicit_path_table() {
+    let dir = tempfile::tempdir().expect("should create temp dir");
+    let make_vessels = || {
+        let mut strings = StringTable::new();
+        let mut paths = PathInternerBuilder::new();
+        let package_path = paths
+            .try_intern_portable_path("pkg/mod.moth", &mut strings)
+            .expect("package path should intern");
+        let main_path = paths
+            .try_intern_portable_path("main.moth", &mut strings)
+            .expect("main path should intern");
+        let explicit = Arc::new(paths.freeze());
+        let (database, source) = retained_database(dir.path(), "main.moth", "main", &mut strings);
+        let database = Arc::new(database);
+        let make_messages = |path| {
+            let mut messages = CompilerMessages::from_diagnostics(
+                vec![CompilerDiagnostic::missing_import_target(
+                    path,
+                    Some(inline_span(source, 0, 4)),
+                )],
+                strings.clone(),
+            );
+            messages.install_source_contexts(
+                [RenderSourceContext {
+                    diagnostic_range: 0..1,
+                    source_database: Arc::clone(&database),
+                    domain: None,
+                }],
+                0,
+            );
+            messages
+                .attach_path_table_if_missing(Arc::clone(&explicit))
+                .expect("explicit path table should attach");
+            messages
+        };
+        (make_messages(main_path), make_messages(package_path))
+    };
+
+    let (_, accumulated) =
+        assert_accumulator_matches_merge(make_vessels, InstallMode::Frozen, (2, 0, 0), 2, 0);
+    let rendered = frozen_render(&accumulated);
+    assert!(rendered[0].message.contains("main.moth"));
+    assert!(rendered[1].message.contains("pkg/mod.moth"));
+    assert_eq!(primary(&rendered[0]).line, "main");
+    assert_eq!(primary(&rendered[1]).line, "main");
+}
+
+/// Each vessel's type snapshot and explicit path table survive independent string and path remaps.
+#[test]
+fn accumulator_parity_captures_each_vessel_type_display() {
+    let dir = tempfile::tempdir().expect("should create temp dir");
+    let identity = StablePackageIdentity::project_local("type-owners");
+    let make_vessels = || {
+        let mut base_strings = StringTable::new();
+        let (database, _) = retained_database(dir.path(), "main.moth", "main", &mut base_strings);
+        let database = Arc::new(database);
+
+        let mut alpha_strings = base_strings.clone();
+        let alpha_name = alpha_strings.intern("TAlpha");
+        let mut alpha_paths = PathInternerBuilder::new();
+        let alpha_import_path = alpha_paths
+            .try_intern_portable_path("pkg/alpha-only.moth", &mut alpha_strings)
+            .expect("Alpha import path should intern");
+        let alpha_explicit = Arc::new(alpha_paths.freeze());
+
+        let mut beta_strings = base_strings;
+        let beta_name = beta_strings.intern("TBeta");
+        assert_eq!(alpha_name, beta_name, "type-name ids should collide");
+        let mut beta_paths = PathInternerBuilder::new();
+        let beta_import_path = beta_paths
+            .try_intern_portable_path("pkg/beta-only.moth", &mut beta_strings)
+            .expect("Beta import path should intern");
+        let beta_explicit = Arc::new(beta_paths.freeze());
+
+        for explicit in [&alpha_explicit, &beta_explicit] {
+            assert!(
+                !database
+                    .clone_path_builder()
+                    .merge_snapshot(explicit)
+                    .expect("explicit paths should merge into the owner")
+                    .is_identity(),
+                "each explicit path table should require a path-id remap"
+            );
+        }
+        assert!(
+            !Arc::ptr_eq(&alpha_explicit, &beta_explicit),
+            "each vessel should own a distinct explicit table"
+        );
+
+        let make_messages = |strings, name, import_path, explicit| {
+            let mut environment = TypeEnvironment::new();
+            let generic_type = environment.register_synthetic_generic_parameter(name);
+            let boolean = environment.builtins().bool;
+            let mut messages = CompilerMessages::from_diagnostics(
+                vec![
+                    CompilerDiagnostic::type_mismatch(
+                        generic_type,
+                        boolean,
+                        TypeMismatchContext::Assignment,
+                        None,
+                    ),
+                    CompilerDiagnostic::missing_import_target(import_path, None),
+                ],
+                strings,
+            )
+            .with_type_context_for_all_diagnostics(environment);
+            messages.install_source_contexts(
+                [RenderSourceContext {
+                    diagnostic_range: 0..2,
+                    source_database: Arc::clone(&database),
+                    domain: Some(identity.clone()),
+                }],
+                0,
+            );
+            messages
+                .attach_path_table_if_missing(explicit)
+                .expect("explicit paths should cover both diagnostics");
+            messages
+        };
+
+        (
+            make_messages(alpha_strings, alpha_name, alpha_import_path, alpha_explicit),
+            make_messages(beta_strings, beta_name, beta_import_path, beta_explicit),
+        )
+    };
+
+    let (merged, accumulated) =
+        assert_accumulator_matches_merge(make_vessels, InstallMode::Frozen, (4, 0, 0), 4, 0);
+    for failure in [&merged, &accumulated] {
+        let rendered = frozen_render(failure);
+        assert_eq!(rendered.len(), 4);
+        assert!(rendered[0].message.contains("TAlpha"));
+        assert!(rendered[1].message.contains("pkg/alpha-only.moth"));
+        assert!(rendered[2].message.contains("TBeta"));
+        assert!(rendered[3].message.contains("pkg/beta-only.moth"));
+    }
+}
+
+/// Infrastructure causes from both vessels retain their own frozen source owners and order.
+#[test]
+fn accumulator_parity_preserves_infrastructure_causes_and_owners() {
+    let dir = tempfile::tempdir().expect("should create temp dir");
+    let make_vessels = || {
+        let mut strings = StringTable::new();
+        let (first_database, first_source) =
+            retained_database(dir.path(), "first.moth", "first", &mut strings);
+        let (second_database, second_source) =
+            retained_database(dir.path(), "second.moth", "second", &mut strings);
+        let mut first = CompilerMessages::from_diagnostics(Vec::new(), strings.clone());
+        first.set_infrastructure_error(CompilerError::compiler_error("first cause"));
+        first.set_source_database(Arc::new(first_database));
+        let mut second = CompilerMessages::from_diagnostics(Vec::new(), strings);
+        second.set_infrastructure_error(CompilerError::compiler_error("second cause"));
+        second.set_source_database(Arc::new(second_database));
+        (first, second, first_source, second_source)
+    };
+    let (first, second, first_source, second_source) = make_vessels();
+    let mut merged = first;
+    merged.append_messages_preserving_context(second);
+    merged.mark_frozen();
+    let merged_failure = into_boundary_failure(merged);
+
+    let (first, second, accumulated_first_source, accumulated_second_source) = make_vessels();
+    assert_eq!(first_source, accumulated_first_source);
+    assert_eq!(second_source, accumulated_second_source);
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append(first);
+    accumulator.append(second);
+    let accumulated_failure = accumulator.finish(InstallMode::Frozen);
+
+    assert_render_parity(
+        &frozen_render(&merged_failure),
+        &frozen_render(&accumulated_failure),
+    );
+    for failure in [&merged_failure, &accumulated_failure] {
+        assert_eq!(failure.reports.counts().errors, 0);
+        assert_eq!(failure.reports.counts().warnings, 0);
+        assert_eq!(failure.reports.counts().notes, 0);
+        assert_eq!(failure.error_count(), 1);
+        assert_eq!(failure.warning_count(), 0);
+        let infrastructure = failure
+            .infrastructure_errors()
+            .expect("the infrastructure lane should survive conversion");
+        assert_eq!(1 + infrastructure.additional.len(), 2);
+        for (cause, source, expected_path) in [
+            (0, first_source, "first.moth"),
+            (1, second_source, "second.moth"),
+        ] {
+            let context = infrastructure
+                .frozen_identity_for_cause(cause)
+                .expect("each cause should keep its source owner");
+            let path = context
+                .source_logical_path(source)
+                .expect("cause source should keep its logical path");
+            let rendered_path = context.render_path(path, &mut Vec::new());
+            assert!(rendered_path.ends_with(expected_path));
+        }
+    }
+}
+
+/// A frozen identity handle can obtain its donor row from a later vessel in the same run.
+#[test]
+fn accumulator_parity_installs_a_donor_from_another_vessel() {
+    let dir = tempfile::tempdir().expect("should create temp dir");
+    let identity = StablePackageIdentity::project_local("donor-package");
+    let make_vessels = || {
+        let mut strings = StringTable::new();
+        let (database, source) = retained_database(dir.path(), "donor.moth", "donor", &mut strings);
+        let name = strings.intern("missing");
+        let handle = FrozenIdentityHandle::for_domain(identity.clone());
+        let mut diagnostic =
+            CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source, 0, 5)));
+        diagnostic.primary_frozen_identity_handle = Some(handle.clone());
+        let first = CompilerMessages::from_diagnostics(vec![diagnostic], strings.clone());
+
+        let mut second = CompilerMessages::from_diagnostics(Vec::new(), strings);
+        second.install_source_contexts(
+            [RenderSourceContext {
+                diagnostic_range: 0..0,
+                source_database: Arc::new(database),
+                domain: Some(identity.clone()),
+            }],
+            0,
+        );
+        (first, second, handle)
+    };
+
+    let (first, second, merged_handle) = make_vessels();
+    let mut merged = first;
+    merged.append_messages_preserving_context(second);
+    merged.mark_frozen();
+    let merged_failure = into_boundary_failure(merged);
+    assert!(merged_handle.get().is_some());
+
+    let (first, second, accumulated_handle) = make_vessels();
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append(first);
+    accumulator.append(second);
+    let accumulated_failure = accumulator.finish(InstallMode::Frozen);
+    let installed = accumulated_handle
+        .get()
+        .expect("the donor row from the second vessel should install the handle");
+
+    let merged_render = frozen_render(&merged_failure);
+    let accumulated_render = frozen_render(&accumulated_failure);
+    assert_render_parity(&merged_render, &accumulated_render);
+    assert_eq!(
+        (
+            accumulated_failure.reports.counts().errors,
+            accumulated_failure.reports.counts().warnings,
+            accumulated_failure.reports.counts().notes,
+        ),
+        (1, 0, 0)
+    );
+    assert_eq!(accumulated_failure.error_count(), 1);
+    assert_eq!(accumulated_failure.warning_count(), 0);
+    assert!(std::ptr::eq(
+        installed,
+        accumulated_failure.reports.report(0).context()
+    ));
+    assert!(primary(&accumulated_render[0]).path.ends_with("donor.moth"));
+    assert_eq!(primary(&accumulated_render[0]).line, "donor");
+    let metadata = |failure: &BoundaryFailure| {
+        failure
+            .reports
+            .iter()
+            .map(|(_, view)| (view.descriptor().code, view.reason_key(), view.severity()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(metadata(&merged_failure), metadata(&accumulated_failure));
 }

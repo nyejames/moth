@@ -399,7 +399,6 @@ fn offset_type_display_id(
 
 impl TypeDisplaySnapshot {
     /// Rewrites every string id after the string table that issued them merged into another table.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S4 canonical merge"))]
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         if remap.is_identity() {
             return;

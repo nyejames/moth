@@ -19,7 +19,7 @@ use super::store::{DiagnosticId, DiagnosticStore};
 #[cfg(test)]
 use super::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::compiler_errors::{
-    BoundaryFailure, CompilerMessages,
+    BoundaryFailure, CompilerMessages, InfrastructureErrors, RenderPathContext, RenderSourceContext,
 };
 use crate::compiler_frontend::compiler_messages::diagnostic_types::{
     type_display_snapshot::TypeDisplaySnapshot,
@@ -31,10 +31,11 @@ use crate::compiler_frontend::compiler_messages::{
     CapacityResource, CompilerDiagnostic, DiagnosticCapacityResource, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
-use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase};
 use crate::compiler_frontend::symbols::path_interner::{
     PathIdRemap, PathInternError, PathInternerBuilder,
 };
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -134,8 +135,8 @@ struct PreparedDiagnostic {
     owner: Option<usize>,
     /// The first path row that covers the diagnostic. Its table replaces the owner's table for this diagnostic.
     explicit_path: Option<usize>,
-    /// The source row whose domain resolves the diagnostic's identity-less foreign sites.
-    none_row: Option<usize>,
+    /// The first identity-less source row that covers the diagnostic, selected only in Frozen mode.
+    identityless_owner: Option<usize>,
     /// The merge whose remap the diagnostic's path ids follow.
     merge: Option<usize>,
 }
@@ -154,240 +155,354 @@ struct PathMerge {
     outcome: Result<PathIdRemap, PathInternError>,
 }
 
-/// Converts a legacy vessel into the frozen boundary failure.
+/// Accumulates legacy vessels before one canonical freeze.
 ///
-/// WHAT: each legacy diagnostic becomes one compact draft in one report set. Its path ids follow the path table it was
-/// rendered against, merged into the owning database's builder. Its type words are captured against its own snapshot.
-/// Each database and identity pair becomes one identity domain.
-/// The vessel's `install_mode` selects the freeze. `Frozen` installs each identity-named handle's donor context;
-/// `Unfrozen` leaves those handles uninstalled, as legacy non-frozen rendering did.
-/// WHY: the boundary replaces the legacy vessel without changing rendered output.
+/// Empty construction has no allocations; the first append adopts its string table as the root.
+pub(crate) struct BoundaryAccumulator {
+    state: Option<BoundaryAccumulatorState>,
+}
+
+struct BoundaryAccumulatorState {
+    string_table: Box<StringTable>,
+    prepared: Vec<PreparedDiagnostic>,
+    source_rows: Vec<RenderSourceContext>,
+    path_rows: Vec<RenderPathContext>,
+    required_handles: Vec<FrozenIdentityHandle>,
+    infrastructure_errors: Option<Box<InfrastructureErrors>>,
+}
+
+/// Converts one legacy vessel through the run-scoped accumulator.
+///
+/// The vessel's mode remains authoritative for this transitional one-vessel boundary.
 pub(crate) fn into_boundary_failure(messages: CompilerMessages) -> BoundaryFailure {
     let install = messages.install_mode;
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append(messages);
+    accumulator.finish(install)
+}
 
-    // Pass A reads the vessel. Each draft is captured against the legacy context of its own diagnostic.
-    let mut required = Vec::new();
-    let mut prepared: Vec<PreparedDiagnostic> = (0..messages.diagnostics.len())
-        .map(|index| prepare(&messages, index, install, &mut required))
-        .collect();
-
-    // Pass B takes ownership. A source row is kept when it covers a diagnostic, or when a frozen handle must install
-    // its identity. Each database is owned once, however many rows name it.
-    let CompilerMessages {
-        mut infrastructure_errors,
-        string_table,
-        render_source_contexts,
-        render_path_contexts,
-        ..
-    } = messages;
-
-    let mut databases: Vec<Arc<SourceDatabase>> = Vec::new();
-    let mut kept: Vec<Option<KeptSourceRow>> = Vec::with_capacity(render_source_contexts.len());
-    for row in render_source_contexts {
-        let needed = !row.diagnostic_range.is_empty()
-            || (install == InstallMode::Frozen
-                && row
-                    .domain
-                    .as_ref()
-                    .is_some_and(|domain| required.contains(domain)));
-        if needed {
-            let slot = intern_database(&mut databases, row.source_database);
-            kept.push(Some(KeptSourceRow {
-                domain: row.domain,
-                slot,
-            }));
-        } else {
-            kept.push(None);
-        }
+impl BoundaryAccumulator {
+    /// Creates an empty accumulator without allocating.
+    pub(crate) fn new() -> Self {
+        Self { state: None }
     }
 
-    // Infrastructure cause rows name databases too. Their databases join the same list.
-    let mut cause_rows: Vec<(Range<usize>, usize)> = Vec::new();
-    if let Some(infrastructure) = infrastructure_errors.as_deref_mut() {
-        for (range, database) in infrastructure.take_source_rows() {
-            let slot = intern_database(&mut databases, database);
-            cause_rows.push((range, slot));
-        }
-    }
-
-    // Every owner has been released, so each database must be uniquely owned here.
-    let mut owned: Vec<Option<SourceDatabase>> = databases
-        .into_iter()
-        .map(|database| {
-            Some(Arc::try_unwrap(database).unwrap_or_else(|_| {
-                panic!("source database was unexpectedly shared at the frozen render handoff")
-            }))
-        })
-        .collect();
-
-    // Each owned diagnostic with an explicit path table merges that table into its owner's builder, once per table.
-    let path_rows = render_path_contexts.map(Vec::from).unwrap_or_default();
-    let mut merges: Vec<PathMerge> = Vec::new();
-    for diagnostic in &mut prepared {
-        let (Some(owner), Some(explicit)) = (diagnostic.owner, diagnostic.explicit_path) else {
-            continue;
-        };
-        let slot = kept[owner]
-            .as_ref()
-            .expect("a covering source row is always kept")
-            .slot;
-        let table = &path_rows[explicit].path_table;
-        let known = merges.iter().position(|merge| {
-            merge.slot == slot && Arc::ptr_eq(&path_rows[merge.first_path].path_table, table)
-        });
-        let merge = match known {
-            Some(merge) => merge,
-            None => {
-                let outcome = owned[slot]
-                    .as_mut()
-                    .expect("a database is merged before it registers")
-                    .path_builder_mut()
-                    .merge_snapshot(table);
-                merges.push(PathMerge {
-                    slot,
-                    first_path: explicit,
-                    outcome,
-                });
-                merges.len() - 1
-            }
-        };
-        diagnostic.merge = Some(merge);
-    }
-
-    // Domains: one per database and identity pair. A database already registered under another identity shares its
-    // first domain's context.
-    let mut pending = PendingDiagnostics::default();
-    let mut row_domain: Vec<Option<u32>> = vec![None; kept.len()];
-    let mut database_domain: Vec<Option<u32>> = vec![None; owned.len()];
-    let mut registered: Vec<(usize, Option<StablePackageIdentity>, u32)> = Vec::new();
-    for (index, row) in kept.iter().enumerate() {
-        let Some(row) = row else {
-            continue;
-        };
-        let known = registered
-            .iter()
-            .find(|(slot, identity, _)| *slot == row.slot && *identity == row.domain)
-            .map(|&(_, _, domain)| domain);
-        let domain = match known {
-            Some(domain) => domain,
-            None => {
-                let domain = match database_domain[row.slot] {
-                    Some(first) => {
-                        pending.add_domain(row.domain.clone(), DomainSource::Shares(first))
-                    }
-                    None => {
-                        let database = owned[row.slot].take().expect("a database registers once");
-                        let domain =
-                            pending.add_domain(row.domain.clone(), DomainSource::Sources(database));
-                        database_domain[row.slot] = Some(domain);
-                        domain
-                    }
-                };
-                registered.push((row.slot, row.domain.clone(), domain));
-                domain
-            }
-        };
-        row_domain[index] = Some(domain);
-    }
-
-    let mut cause_domains: Vec<(Range<usize>, u32)> = Vec::with_capacity(cause_rows.len());
-    for (range, slot) in cause_rows {
-        let domain = match database_domain[slot] {
-            Some(domain) => domain,
-            None => {
-                let database = owned[slot].take().expect("a database registers once");
-                let domain = pending.add_domain(None, DomainSource::Sources(database));
-                database_domain[slot] = Some(domain);
-                domain
-            }
-        };
-        cause_domains.push((range, domain));
-    }
-
-    // Unowned diagnostics share one domain per explicit path table. Without one, they share an empty table.
-    let mut shared_root: Option<u32> = None;
-    let mut unowned_tables: Vec<(usize, u32)> = Vec::new();
-    for diagnostic in prepared {
-        let PreparedDiagnostic {
-            mut draft,
-            mut types,
-            owner,
-            explicit_path,
-            none_row,
-            merge,
-        } = diagnostic;
-
-        let domain = match (owner, explicit_path) {
-            (Some(row), _) => row_domain[row].expect("a covering source row is always registered"),
-            (None, Some(explicit)) => {
-                let table = &path_rows[explicit].path_table;
-                let known = unowned_tables
-                    .iter()
-                    .find(|(first, _)| Arc::ptr_eq(&path_rows[*first].path_table, table))
-                    .map(|&(_, domain)| domain);
-                match known {
-                    Some(domain) => domain,
-                    None => {
-                        let domain =
-                            pending.add_domain(None, DomainSource::Unowned(Arc::clone(table)));
-                        unowned_tables.push((explicit, domain));
-                        domain
-                    }
-                }
-            }
-            (None, None) => *shared_root.get_or_insert_with(|| {
-                let empty = Arc::new(PathInternerBuilder::new().freeze());
-                pending.add_domain(None, DomainSource::Unowned(empty))
-            }),
-        };
-        let none_domain = none_row.and_then(|row| row_domain[row]);
-
-        if let Some(index) = merge {
-            match &merges[index].outcome {
-                Ok(remap) => {
-                    if !remap.is_identity() {
-                        draft.remap_path_ids(remap);
-                        types.remap_path_ids(remap);
-                    }
-                }
-                Err(PathInternError::TableFull) => {
-                    draft = table_capacity_draft();
-                    types = TypeDisplaySnapshot::default();
-                }
-                Err(error) => panic!("a path snapshot merge failed with {error:?}"),
-            }
-        }
-        push_rebased(&mut pending, domain, none_domain, draft, types);
-    }
-
-    // A vessel that never merged into the build root still holds its module fork; legacy rendering read through it.
-    let reports = pending.freeze(
-        string_table.freeze_flattening(),
-        DiagnosticLimits::production(),
-        install,
-    );
-
-    if let Some(infrastructure) = infrastructure_errors.as_deref_mut() {
-        let rows = cause_domains
-            .into_iter()
-            .map(|(range, domain)| (range, reports.report(domain).shared_context()))
+    /// Captures one vessel against its own legacy contexts, then joins its rows to this run.
+    pub(crate) fn append(&mut self, messages: CompilerMessages) {
+        let mut required_handles = Vec::new();
+        let mut prepared: Vec<PreparedDiagnostic> = (0..messages.diagnostics.len())
+            .map(|index| prepare(&messages, index, &mut required_handles))
             .collect();
-        infrastructure.set_frozen_source_rows(rows);
+        let CompilerMessages {
+            infrastructure_errors,
+            string_table,
+            render_source_contexts,
+            render_path_contexts,
+            ..
+        } = messages;
+        let mut path_rows = render_path_contexts
+            .map(|rows| rows.into_vec())
+            .unwrap_or_default();
+
+        let Some(mut state) = self.state.take() else {
+            self.state = Some(BoundaryAccumulatorState {
+                string_table,
+                prepared,
+                source_rows: render_source_contexts,
+                path_rows,
+                required_handles,
+                infrastructure_errors,
+            });
+            return;
+        };
+
+        let diagnostic_shift = state.prepared.len();
+        let source_shift = state.source_rows.len();
+        let path_shift = state.path_rows.len();
+        let remap = state.string_table.merge_from(string_table.as_ref());
+        if !remap.is_identity() {
+            for diagnostic in &mut prepared {
+                diagnostic.draft.remap_string_ids(&remap);
+                diagnostic.types.remap_string_ids(&remap);
+            }
+            for row in &mut path_rows {
+                Arc::make_mut(&mut row.path_table).remap_string_ids(&remap);
+            }
+        }
+
+        for diagnostic in &mut prepared {
+            diagnostic.owner = diagnostic.owner.map(|row| row + source_shift);
+            diagnostic.identityless_owner =
+                diagnostic.identityless_owner.map(|row| row + source_shift);
+            diagnostic.explicit_path = diagnostic.explicit_path.map(|row| row + path_shift);
+        }
+        state.prepared.extend(prepared);
+        for mut row in render_source_contexts {
+            row.diagnostic_range.start += diagnostic_shift;
+            row.diagnostic_range.end += diagnostic_shift;
+            state.source_rows.push(row);
+        }
+        for mut row in path_rows {
+            row.diagnostic_range.start += diagnostic_shift;
+            row.diagnostic_range.end += diagnostic_shift;
+            state.path_rows.push(row);
+        }
+        state.required_handles.extend(required_handles);
+        if let Some(incoming) = infrastructure_errors {
+            match state.infrastructure_errors.as_mut() {
+                Some(existing) => existing.append(*incoming),
+                None => state.infrastructure_errors = Some(incoming),
+            }
+        }
+        self.state = Some(state);
     }
 
-    BoundaryFailure {
-        reports,
-        infrastructure: infrastructure_errors,
+    /// Resolves the run-wide install policy, merges retained owners, and freezes once.
+    pub(crate) fn finish(self, install: InstallMode) -> BoundaryFailure {
+        let state = self.state.unwrap_or_else(|| BoundaryAccumulatorState {
+            string_table: Box::new(StringTable::new()),
+            prepared: Vec::new(),
+            source_rows: Vec::new(),
+            path_rows: Vec::new(),
+            required_handles: Vec::new(),
+            infrastructure_errors: None,
+        });
+        let BoundaryAccumulatorState {
+            string_table,
+            mut prepared,
+            source_rows,
+            path_rows,
+            required_handles,
+            mut infrastructure_errors,
+        } = state;
+
+        // Only a frozen run installs identity-named handles and retains their donor rows.
+        let mut required = Vec::new();
+        if install == InstallMode::Frozen {
+            for handle in required_handles
+                .iter()
+                .filter(|handle| handle.get().is_none())
+            {
+                if let Some(identity) = handle.domain()
+                    && !required.contains(identity)
+                {
+                    required.push(identity.clone());
+                }
+            }
+        }
+
+        // A source row is kept when it covers a diagnostic, or when a frozen handle needs its identity.
+        let mut databases: Vec<Arc<SourceDatabase>> = Vec::new();
+        let mut kept: Vec<Option<KeptSourceRow>> = Vec::with_capacity(source_rows.len());
+        for row in source_rows {
+            let needed = !row.diagnostic_range.is_empty()
+                || (install == InstallMode::Frozen
+                    && row
+                        .domain
+                        .as_ref()
+                        .is_some_and(|domain| required.contains(domain)));
+            if needed {
+                let slot = intern_database(&mut databases, row.source_database);
+                kept.push(Some(KeptSourceRow {
+                    domain: row.domain,
+                    slot,
+                }));
+            } else {
+                kept.push(None);
+            }
+        }
+
+        // Infrastructure cause rows name databases too. Their databases join the same list.
+        let mut cause_rows: Vec<(Range<usize>, usize)> = Vec::new();
+        if let Some(infrastructure) = infrastructure_errors.as_deref_mut() {
+            for (range, database) in infrastructure.take_source_rows() {
+                let slot = intern_database(&mut databases, database);
+                cause_rows.push((range, slot));
+            }
+        }
+
+        // Every owner has been released, so each database must be uniquely owned here.
+        let mut owned: Vec<Option<SourceDatabase>> = databases
+            .into_iter()
+            .map(|database| {
+                Some(Arc::try_unwrap(database).unwrap_or_else(|_| {
+                    panic!("source database was unexpectedly shared at the frozen render handoff")
+                }))
+            })
+            .collect();
+
+        // Each owned diagnostic with an explicit path table merges that table into its owner's builder, once per table.
+        let mut merges: Vec<PathMerge> = Vec::new();
+        for diagnostic in &mut prepared {
+            let (Some(owner), Some(explicit)) = (diagnostic.owner, diagnostic.explicit_path) else {
+                continue;
+            };
+            let slot = kept[owner]
+                .as_ref()
+                .expect("a covering source row is always kept")
+                .slot;
+            let table = &path_rows[explicit].path_table;
+            let known = merges.iter().position(|merge| {
+                merge.slot == slot && Arc::ptr_eq(&path_rows[merge.first_path].path_table, table)
+            });
+            let merge = match known {
+                Some(merge) => merge,
+                None => {
+                    let outcome = owned[slot]
+                        .as_mut()
+                        .expect("a database is merged before it registers")
+                        .path_builder_mut()
+                        .merge_snapshot(table);
+                    merges.push(PathMerge {
+                        slot,
+                        first_path: explicit,
+                        outcome,
+                    });
+                    merges.len() - 1
+                }
+            };
+            diagnostic.merge = Some(merge);
+        }
+
+        // Domains: one per database and identity pair. A database already registered under another identity shares its
+        // first domain's context.
+        let mut pending = PendingDiagnostics::default();
+        let mut row_domain: Vec<Option<u32>> = vec![None; kept.len()];
+        let mut database_domain: Vec<Option<u32>> = vec![None; owned.len()];
+        let mut registered: Vec<(usize, Option<StablePackageIdentity>, u32)> = Vec::new();
+        for (index, row) in kept.iter().enumerate() {
+            let Some(row) = row else {
+                continue;
+            };
+            let known = registered
+                .iter()
+                .find(|(slot, identity, _)| *slot == row.slot && *identity == row.domain)
+                .map(|&(_, _, domain)| domain);
+            let domain = match known {
+                Some(domain) => domain,
+                None => {
+                    let domain = match database_domain[row.slot] {
+                        Some(first) => {
+                            pending.add_domain(row.domain.clone(), DomainSource::Shares(first))
+                        }
+                        None => {
+                            let database =
+                                owned[row.slot].take().expect("a database registers once");
+                            let domain = pending
+                                .add_domain(row.domain.clone(), DomainSource::Sources(database));
+                            database_domain[row.slot] = Some(domain);
+                            domain
+                        }
+                    };
+                    registered.push((row.slot, row.domain.clone(), domain));
+                    domain
+                }
+            };
+            row_domain[index] = Some(domain);
+        }
+
+        let mut cause_domains: Vec<(Range<usize>, u32)> = Vec::with_capacity(cause_rows.len());
+        for (range, slot) in cause_rows {
+            let domain = match database_domain[slot] {
+                Some(domain) => domain,
+                None => {
+                    let database = owned[slot].take().expect("a database registers once");
+                    let domain = pending.add_domain(None, DomainSource::Sources(database));
+                    database_domain[slot] = Some(domain);
+                    domain
+                }
+            };
+            cause_domains.push((range, domain));
+        }
+
+        // Unowned diagnostics share one domain per explicit path table. Without one, they share an empty table.
+        let mut shared_root: Option<u32> = None;
+        let mut unowned_tables: Vec<(usize, u32)> = Vec::new();
+        for diagnostic in prepared {
+            let PreparedDiagnostic {
+                mut draft,
+                mut types,
+                owner,
+                explicit_path,
+                identityless_owner,
+                merge,
+            } = diagnostic;
+
+            let domain = match (owner, explicit_path) {
+                (Some(row), _) => {
+                    row_domain[row].expect("a covering source row is always registered")
+                }
+                (None, Some(explicit)) => {
+                    let table = &path_rows[explicit].path_table;
+                    let known = unowned_tables
+                        .iter()
+                        .find(|(first, _)| Arc::ptr_eq(&path_rows[*first].path_table, table))
+                        .map(|&(_, domain)| domain);
+                    match known {
+                        Some(domain) => domain,
+                        None => {
+                            let domain =
+                                pending.add_domain(None, DomainSource::Unowned(Arc::clone(table)));
+                            unowned_tables.push((explicit, domain));
+                            domain
+                        }
+                    }
+                }
+                (None, None) => *shared_root.get_or_insert_with(|| {
+                    let empty = Arc::new(PathInternerBuilder::new().freeze());
+                    pending.add_domain(None, DomainSource::Unowned(empty))
+                }),
+            };
+            let none_row = match install {
+                InstallMode::Frozen => identityless_owner,
+                InstallMode::Unfrozen => owner,
+            };
+            let none_domain = none_row.and_then(|row| row_domain[row]);
+
+            if let Some(index) = merge {
+                match &merges[index].outcome {
+                    Ok(remap) => {
+                        if !remap.is_identity() {
+                            draft.remap_path_ids(remap);
+                            types.remap_path_ids(remap);
+                        }
+                    }
+                    Err(PathInternError::TableFull) => {
+                        draft = table_capacity_draft();
+                        types = TypeDisplaySnapshot::default();
+                    }
+                    Err(error) => panic!("a path snapshot merge failed with {error:?}"),
+                }
+            }
+            push_rebased(&mut pending, domain, none_domain, draft, types);
+        }
+
+        let reports = pending.freeze(
+            string_table.freeze_flattening(),
+            DiagnosticLimits::production(),
+            install,
+        );
+
+        if let Some(infrastructure) = infrastructure_errors.as_deref_mut() {
+            let rows = cause_domains
+                .into_iter()
+                .map(|(range, domain)| (range, reports.report(domain).shared_context()))
+                .collect();
+            infrastructure.set_frozen_source_rows(rows);
+        }
+
+        BoundaryFailure {
+            reports,
+            infrastructure: infrastructure_errors,
+        }
     }
 }
 
-/// Pass A for one diagnostic: its draft with the type words it names, and the rows that cover it. It only borrows the
-/// vessel, so Pass B can take ownership afterwards.
+/// Pass A for one diagnostic: build its family draft and capture type words against its own vessel context.
 fn prepare(
     messages: &CompilerMessages,
     index: usize,
-    install: InstallMode,
-    required: &mut Vec<StablePackageIdentity>,
+    required_handles: &mut Vec<FrozenIdentityHandle>,
 ) -> PreparedDiagnostic {
     let diagnostic = &messages.diagnostics[index];
 
@@ -395,34 +510,22 @@ fn prepare(
         .render_source_contexts
         .iter()
         .position(|row| row.diagnostic_range.contains(&index));
+    let identityless_owner = messages
+        .render_source_contexts
+        .iter()
+        .position(|row| row.domain.is_none() && row.diagnostic_range.contains(&index));
     let explicit_path = messages.render_path_contexts.as_deref().and_then(|rows| {
         rows.iter()
             .position(|row| row.diagnostic_range.contains(&index))
     });
-    let none_row = match install {
-        InstallMode::Frozen => messages
-            .render_source_contexts
-            .iter()
-            .position(|row| row.domain.is_none() && row.diagnostic_range.contains(&index)),
-        InstallMode::Unfrozen => owner,
-    };
 
-    if install == InstallMode::Frozen {
-        let handles = diagnostic.primary_frozen_identity_handle.iter().chain(
-            diagnostic
-                .labels
-                .iter()
-                .filter_map(|label| label.frozen_identity_handle.as_ref()),
-        );
-        for handle in handles.filter(|handle| handle.get().is_none()) {
-            if let Some(identity) = handle
-                .domain()
-                .filter(|identity| !required.contains(identity))
-            {
-                required.push(identity.clone());
-            }
-        }
-    }
+    let handles = diagnostic.primary_frozen_identity_handle.iter().chain(
+        diagnostic
+            .labels
+            .iter()
+            .filter_map(|label| label.frozen_identity_handle.as_ref()),
+    );
+    required_handles.extend(handles.cloned());
 
     let environment = messages
         .type_environment_for_diagnostic(index)
@@ -451,7 +554,7 @@ fn prepare(
         types,
         owner,
         explicit_path,
-        none_row,
+        identityless_owner,
         merge: None,
     }
 }

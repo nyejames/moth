@@ -367,7 +367,6 @@ fn captured_word(
 impl DiagnosticDraft {
     /// Rewrites every string ID in this draft through `remap`, which must come from the table the draft was
     /// built against. An identity remap changes nothing.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S4 canonical merge"))]
     pub(super) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         if remap.is_identity() {
             return;

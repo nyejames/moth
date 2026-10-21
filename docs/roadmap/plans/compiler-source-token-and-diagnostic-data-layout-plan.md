@@ -108,14 +108,14 @@ ACTIVE_PLAN:
 - Execution order: Phase 4 runs as the steps in `PHASE_4_EXECUTION_ORDER` below. The slice
   checklists remain the acceptance contract. Only their order and grouping changed, under the
   architecture document's repository-discovered corrections rule.
-- NEXT_SUBSTEP: P4.5 slice S4 of `PHASE_4_5_SEQUENCE`, the canonical merge, at sub-slice S4a. S1
-  is accepted in the checkpoints "Phase 4 P4.5 S1a: frozen diagnostic report types" through "Phase
-  4 P4.5 S1c: draft string and path ID remaps", S2 in "Phase 4 P4.5 S2: diagnostic freeze side",
-  and S3 (the boundary cut) in "Phase 4 P4.5 S3.1: legacy-to-boundary converter", "Phase 4 P4.5
-  S3.2: renderers read frozen reports" and "Phase 4 P4.5 S3.3: exits return frozen reports" (S3.3a–
-  S3.3c and S3.4 landed together). The CP0 pre-flight re-verified the sequence against the
-  post-P4.4 tree; after S1 the boundary cut moved ahead of owning-site capture (see the sequence
-  note).
+- NEXT_SUBSTEP: P4.5 slice S4 of `PHASE_4_5_SEQUENCE`, the canonical merge, at sub-slices S4b and
+  S4c; S4a is accepted in "Phase 4 P4.5 S4a: run-scoped boundary accumulator". S1 is accepted in
+  the checkpoints "Phase 4 P4.5 S1a: frozen diagnostic report types" through "Phase 4 P4.5 S1c:
+  draft string and path ID remaps", S2 in "Phase 4 P4.5 S2: diagnostic freeze side", and S3 (the
+  boundary cut) in "Phase 4 P4.5 S3.1: legacy-to-boundary converter", "Phase 4 P4.5 S3.2:
+  renderers read frozen reports" and "Phase 4 P4.5 S3.3: exits return frozen reports" (S3.3a–S3.3c
+  and S3.4 landed together). The CP0 pre-flight re-verified the sequence against the post-P4.4
+  tree; after S1 the boundary cut moved ahead of owning-site capture (see the sequence note).
   P4.4 (the schema side of 4G1–4G8) is accepted in the checkpoints "Phase 4 P4.4 prep" through
   "Phase 4 P4.4 close: every family on a full row": every family has a full row, a mirror
   constructor, a typed view, a legacy-adapter arm and a view renderer, while producers still build
