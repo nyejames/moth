@@ -43,28 +43,21 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
     )
     .expect("diagnosed modules are retained in the typed frontend outcome");
     let project_source = frontend.project_source_database.take();
-    let messages =
-        frontend.into_render_messages_with_frozen_identity(&mut string_table, project_source, None);
+    let messages = frontend.into_render_messages(&mut string_table, project_source, None);
+    let failure = into_boundary_failure(messages);
 
     assert_eq!(
-        messages.error_count(),
+        failure.error_count(),
         2,
         "the provider and independent branch should each diagnose once; blocked consumers should emit no cascades"
     );
-    let diagnosed_paths = messages
-        .diagnostics()
-        .enumerate()
-        .filter(|(_, diagnostic)| {
-            diagnostic.severity
-                == crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error
-        })
-        .filter_map(|(diagnostic_index, diagnostic)| {
-            Some(
-                messages
-                    .diagnostic_render_context(diagnostic_index)
-                    .primary_position(diagnostic)?
-                    .path,
-            )
+    let diagnosed_paths = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .filter_map(|(report, view)| {
+            DiagnosticRenderContext::for_report(report)
+                .site_position(view.primary_site())
+                .map(|position| position.path)
         })
         .collect::<Vec<_>>();
     assert!(
@@ -287,20 +280,17 @@ fn project_facade_rejects_own_project_globals_dependency_before_semantic_use() {
     )
     .expect("a facade dependency diagnostic should remain a retained frontend outcome");
     let project_source = frontend.project_source_database.take();
-    let messages =
-        frontend.into_render_messages_with_frozen_identity(&mut string_table, project_source, None);
-
-    let matching = messages
-        .diagnostics()
-        .enumerate()
-        .filter(|(_, diagnostic)| {
-            matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidDependencyClause {
-                    reason: InvalidDependencyClauseReason::ProjectGlobalsFacadeDependencyNotAllowed,
-                    ..
-                }
-            )
+    let messages = frontend.into_render_messages(&mut string_table, project_source, None);
+    let failure = into_boundary_failure(messages);
+    let matching = failure
+        .reports
+        .iter()
+        .filter(|(_, view)| {
+            view.descriptor().code == "MOTH-SYNTAX-0019"
+                && view.reason_key()
+                    == Some(
+                        "invalid_dependency_clause.project_globals_facade_dependency_not_allowed",
+                    )
         })
         .collect::<Vec<_>>();
     assert_eq!(
@@ -308,11 +298,9 @@ fn project_facade_rejects_own_project_globals_dependency_before_semantic_use() {
         1,
         "the facade's own @project declaration should produce one structured diagnostic"
     );
-    let (diagnostic_index, diagnostic) = matching[0];
-    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0019");
-    let position = messages
-        .diagnostic_render_context(diagnostic_index)
-        .primary_position(diagnostic)
+    let (report, view) = matching[0];
+    let position = DiagnosticRenderContext::for_report(report)
+        .site_position(view.primary_site())
         .expect("facade diagnostic should retain its authored source position");
     assert!(
         position.path.ends_with("+package.moth"),
@@ -358,9 +346,10 @@ fn failed_directory_preparation_keeps_unfinished_module_metadata_out_of_completi
     let Err(messages) = result else {
         panic!("malformed Stage 0 input should fail preparation");
     };
-    assert_has_diagnostic_code(&messages, "MOTH-SYNTAX-0019");
+    let failure = into_boundary_failure(messages);
+    assert_has_diagnostic_code(&failure, "MOTH-SYNTAX-0019");
     assert_eq!(
-        messages.error_count(),
+        failure.error_count(),
         1,
         "malformed Stage 0 input should produce exactly the syntax diagnostic"
     );
@@ -874,12 +863,13 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
     let Err(messages_a) = result_a else {
         panic!("first fixture should fail before the concurrent compile starts");
     };
-    assert_has_diagnostic_code(&messages_a, "MOTH-SYNTAX-0019");
+    let failure_a = into_boundary_failure(messages_a);
+    assert_has_diagnostic_code(&failure_a, "MOTH-SYNTAX-0019");
     assert_eq!(
-        messages_a.error_count(),
+        failure_a.error_count(),
         1,
         "first fixture should fail with exactly the syntax diagnostic before the concurrent compile starts: {:#?}",
-        messages_a
+        failure_a
     );
 
     std::thread::scope(|scope| {
@@ -1004,61 +994,65 @@ fn dormant_dependency_root_grouped_delimiters_report_eof_in_child_source() {
         )
         .expect("a diagnosed dependency module stays a retained frontend outcome");
         let project_source = frontend.project_source_database.take();
-        let messages = frontend.into_render_messages_with_frozen_identity(
-            &mut string_table,
-            project_source,
-            None,
-        );
+        let messages = frontend.into_render_messages(&mut string_table, project_source, None);
+        let (expected_delimiter_id, span) = {
+            let diagnostic = messages
+                .diagnostics()
+                .find(|diagnostic| {
+                    matches!(
+                        &diagnostic.payload,
+                        DiagnosticPayload::UnexpectedEndOfFile { .. }
+                    )
+                })
+                .expect("the dormant group must report one typed unexpected-EOF diagnostic");
+            assert_eq!(
+                diagnostic.kind.code(),
+                "MOTH-SYNTAX-0017",
+                "{case}: {diagnostic:?}"
+            );
+            assert_eq!(diagnostic.severity, DiagnosticSeverity::Error, "{case}");
+            let DiagnosticPayload::UnexpectedEndOfFile {
+                expected_delimiter: Some(expected_delimiter_id),
+            } = &diagnostic.payload
+            else {
+                panic!("{case}: expected a typed EOF payload naming the missing delimiter");
+            };
+            (
+                *expected_delimiter_id,
+                diagnostic
+                    .primary_span
+                    .expect("the EOF diagnostic must retain its authored span"),
+            )
+        };
+        let failure = into_boundary_failure(messages);
 
         assert!(
-            !messages.has_infrastructure_error(),
-            "{case}: malformed dependency source must stay in the diagnostic lane: {messages:?}"
+            !failure.has_infrastructure_error(),
+            "{case}: malformed dependency source must stay in the diagnostic lane: {failure:?}"
         );
         assert_eq!(
-            messages.error_count(),
+            failure.error_count(),
             1,
             "{case}: the dependency root should diagnose once and the blocked page must not \
-             cascade: {messages:?}"
+             cascade: {failure:?}"
         );
-        let (diagnostic_index, diagnostic) = messages
-            .diagnostics()
-            .enumerate()
-            .find(|(_, diagnostic)| {
-                matches!(
-                    &diagnostic.payload,
-                    DiagnosticPayload::UnexpectedEndOfFile { .. }
-                )
-            })
-            .expect("the dormant group must report one typed unexpected-EOF diagnostic");
+        let (report, view) = failure
+            .reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .find(|(_, view)| view.descriptor().code == "MOTH-SYNTAX-0017")
+            .expect("the dormant group must retain its unexpected-EOF view");
+        assert_eq!(view.severity(), DiagnosticSeverity::Error, "{case}");
+        let context = DiagnosticRenderContext::for_report(report);
+        let identity = report.context();
         assert_eq!(
-            diagnostic.kind,
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedEndOfFile),
-            "{case}: {diagnostic:?}"
-        );
-        assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0017", "{case}");
-        assert_eq!(diagnostic.severity, DiagnosticSeverity::Error, "{case}");
-        // Payload strings belong to the diagnostic's frozen identity, not the merged table.
-        let frozen_identity = messages
-            .frozen_identity_context_for_diagnostic(diagnostic_index)
-            .expect("project diagnostics must retain their frozen source identity");
-        let DiagnosticPayload::UnexpectedEndOfFile {
-            expected_delimiter: Some(expected_delimiter_id),
-        } = &diagnostic.payload
-        else {
-            panic!("{case}: expected a typed EOF payload naming the missing delimiter");
-        };
-        assert_eq!(
-            frozen_identity.strings().resolve(*expected_delimiter_id),
+            identity.strings().resolve(expected_delimiter_id),
             expected_delimiter,
             "{case}: the dormant group must name its own missing delimiter"
         );
 
-        let span = diagnostic
-            .primary_span
-            .expect("the EOF diagnostic must retain its authored span");
         let dependency_path = fs::canonicalize(dir.join("src/components/@components.moth"))
             .expect("dependency source path should canonicalize");
-        let source_slot = frozen_identity
+        let source_slot = identity
             .get(span.source())
             .expect("the EOF span must resolve through the dependency's own source identity");
         assert_eq!(
@@ -1066,7 +1060,11 @@ fn dormant_dependency_root_grouped_delimiters_report_eof_in_child_source() {
             Some(dependency_path.as_path()),
             "{case}: the missing delimiter must belong to the dependency source"
         );
-        let range = span.byte_range(frozen_identity);
+        let position = context
+            .site_position(view.primary_site())
+            .expect("the EOF site should resolve through its dependency report");
+        assert_eq!(position.host_path, Some(dependency_path.as_path()));
+        let range = span.byte_range(identity);
         assert_eq!(
             (range.start(), range.end()),
             (

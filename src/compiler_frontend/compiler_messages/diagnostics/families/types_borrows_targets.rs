@@ -439,6 +439,7 @@ diagnostic_family! {
         labels: [],
         extra: StringIds,
         ctor: manual,
+        reason_key: reason,
         view: IncompatibleChoiceComparisonView,
         render: render_incompatible_choice_comparison,
     }
@@ -458,6 +459,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: generated invalid_route_output,
+        reason_key: reason,
         view: InvalidRouteOutputView,
         render: render_invalid_route_output,
     }
@@ -497,6 +499,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: generated unsupported_backend_feature,
+        reason_key: reason,
         view: UnsupportedBackendFeatureView,
         render: render_unsupported_backend_feature,
     }
@@ -633,6 +636,7 @@ diagnostic_family! {
         labels: [LabelMessageCode::CONFLICTING_ACCESS],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: InvalidMutableAccessView,
         render: render_invalid_mutable_access,
     }

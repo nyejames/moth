@@ -12,8 +12,9 @@ use crate::command_timing_scope;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerErrorMetadataKey, CompilerMessages, ErrorType,
+    BoundaryFailure, CompilerError, CompilerErrorMetadataKey, CompilerMessages, ErrorType,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::display_messages::print_compiler_messages;
 use crate::projects::dev_server::error_page::{
     format_compiler_messages, render_compiler_error_page, render_runtime_error_page,
@@ -67,7 +68,7 @@ struct BuildOutcome {
 }
 
 enum BuildFailure {
-    CompilerMessages(CompilerMessages),
+    Diagnostics(BoundaryFailure),
 }
 
 /// Adapter for build execution used by the dev loop.
@@ -208,8 +209,8 @@ pub fn run_single_build_cycle(
         // Failed publication may leave partially emitted assets, never a successful page generation.
         // Keep assets reachable, but replace page HTML with diagnostics for this failed attempt.
         build_state.last_error_html = Some(match failed_build {
-            Some(BuildFailure::CompilerMessages(messages)) => render_compiler_error_page(
-                &messages,
+            Some(BuildFailure::Diagnostics(failure)) => render_compiler_error_page(
+                &failure,
                 &project_root,
                 &build_state.html_site_config.origin,
                 build_state.last_build_version,
@@ -391,14 +392,15 @@ fn build_once(
     let mut build_result = match build_result_outcome {
         Ok(build_result) => build_result,
         Err(messages) => {
+            let failure = into_boundary_failure(messages);
             return BuildOutcome {
                 build_succeeded: false,
                 build_duration,
                 entry_page_rel: None,
                 html_site_config: None,
-                diagnostics_summary: format_compiler_messages(&messages),
+                diagnostics_summary: format_compiler_messages(&failure),
                 success_messages: None,
-                failed_build: Some(BuildFailure::CompilerMessages(messages)),
+                failed_build: Some(BuildFailure::Diagnostics(failure)),
                 watch_scope: None,
                 output_dir: None,
             };
@@ -436,17 +438,16 @@ fn build_once(
                 if let Some(warnings) = build_result.take_warning_messages_before_freeze() {
                     messages.append_messages_preserving_context(warnings);
                 }
-                if let Err(error) = messages.freeze_source_contexts() {
-                    messages.set_infrastructure_error(error);
-                }
+                messages.mark_frozen();
+                let failure = into_boundary_failure(messages);
                 return BuildOutcome {
                     build_succeeded: false,
                     build_duration,
                     entry_page_rel: None,
                     html_site_config: None,
-                    diagnostics_summary: format_compiler_messages(&messages),
+                    diagnostics_summary: format_compiler_messages(&failure),
                     success_messages: None,
-                    failed_build: Some(BuildFailure::CompilerMessages(messages)),
+                    failed_build: Some(BuildFailure::Diagnostics(failure)),
                     watch_scope: Some(watch_scope),
                     output_dir: Some(output_dir),
                 };
@@ -469,14 +470,15 @@ fn build_once(
 
         let success_messages = match build_result.take_warning_messages() {
             Some(messages) if messages.has_errors() => {
+                let failure = into_boundary_failure(messages);
                 return BuildOutcome {
                     build_succeeded: false,
                     build_duration,
                     entry_page_rel: None,
                     html_site_config: None,
-                    diagnostics_summary: format_compiler_messages(&messages),
+                    diagnostics_summary: format_compiler_messages(&failure),
                     success_messages: None,
-                    failed_build: Some(BuildFailure::CompilerMessages(messages)),
+                    failed_build: Some(BuildFailure::Diagnostics(failure)),
                     watch_scope: Some(watch_scope),
                     output_dir: Some(output_dir),
                 };
@@ -508,10 +510,9 @@ fn build_once(
             warnings.append_messages_preserving_context(messages);
             messages = warnings;
         }
-        if let Err(error) = messages.freeze_source_contexts() {
-            messages.set_infrastructure_error(error);
-        }
-        let diagnostics_summary = format_compiler_messages(&messages);
+        messages.mark_frozen();
+        let failure = into_boundary_failure(messages);
+        let diagnostics_summary = format_compiler_messages(&failure);
         BuildOutcome {
             build_succeeded: false,
             build_duration,
@@ -519,7 +520,7 @@ fn build_once(
             html_site_config: None,
             diagnostics_summary,
             success_messages: None,
-            failed_build: Some(BuildFailure::CompilerMessages(messages)),
+            failed_build: Some(BuildFailure::Diagnostics(failure)),
             watch_scope: Some(watch_scope),
             output_dir: Some(output_dir),
         }

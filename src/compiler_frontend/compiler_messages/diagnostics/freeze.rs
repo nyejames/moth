@@ -22,10 +22,9 @@ use crate::compiler_frontend::source::{
     FrozenIdentityContext, FrozenSourceDatabase, SourceDatabase,
 };
 use crate::compiler_frontend::symbols::path_interner::PathTable;
-use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
+use crate::compiler_frontend::symbols::string_interning::FrozenStringTable;
 
 /// Where one identity domain's spans resolve.
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 pub(super) enum DomainSource {
     /// The domain's loaded sources, frozen with the batch's shared string table.
     Sources(SourceDatabase),
@@ -38,13 +37,11 @@ pub(super) enum DomainSource {
 
 impl DomainSource {
     /// Whether the domain's spans resolve through a source database rather than a bare path trie.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     fn owns_database(&self) -> bool {
         !matches!(self, Self::Unowned(_))
     }
 
     /// Builds the domain's context. `earlier` holds the contexts of every lower domain index, in index order.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     fn into_context(
         self,
         strings: &Arc<FrozenStringTable>,
@@ -65,7 +62,6 @@ impl DomainSource {
 }
 
 /// One identity domain's accumulated state. Its index is the `u32` that `add_domain` returned.
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 struct DomainAccumulator {
     identity: Option<StablePackageIdentity>,
     source: DomainSource,
@@ -74,7 +70,6 @@ struct DomainAccumulator {
 
 /// One draft, the index of the domain that owns its spans, and the index of the domain whose context resolves its
 /// identity-less foreign sites.
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 struct PendingDraft {
     domain: u32,
     none_domain: Option<u32>,
@@ -83,7 +78,6 @@ struct PendingDraft {
 
 /// The drafts of one boundary call, in push order, with the identity domains they name.
 #[derive(Default)]
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 pub(super) struct PendingDiagnostics {
     domains: Vec<DomainAccumulator>,
     drafts: Vec<PendingDraft>,
@@ -97,7 +91,6 @@ const _: () = assert!(std::mem::size_of::<PendingDiagnostics>() <= 48);
 /// and an owned draft whose named identity matches no domain is a D12 invariant. `Unfrozen` reproduces legacy
 /// non-frozen rendering: identity-named handles stay uninstalled and render without a position.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 pub(crate) enum InstallMode {
     Frozen,
     Unfrozen,
@@ -107,7 +100,6 @@ impl PendingDiagnostics {
     /// Registers an identity domain and returns the index that its drafts name.
     ///
     /// `Shares(j)` must name a lower index than the new domain's own index. Any other `j` is a D12 invariant.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(super) fn add_domain(
         &mut self,
         identity: Option<StablePackageIdentity>,
@@ -131,7 +123,6 @@ impl PendingDiagnostics {
 
     /// Queues `draft` in push order. Its spans belong to the domain that `domain` names. Its identity-less foreign
     /// sites resolve through the domain that `none_domain` names, when one is given.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(super) fn push(&mut self, domain: u32, none_domain: Option<u32>, draft: DiagnosticDraft) {
         let count = self.domains.len();
         assert!(
@@ -146,7 +137,6 @@ impl PendingDiagnostics {
     }
 
     /// Appends one domain's type-display snapshot and returns the record index that it starts at.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(super) fn append_types(
         &mut self,
         domain: u32,
@@ -159,20 +149,19 @@ impl PendingDiagnostics {
             .append(types)
     }
 
-    /// Freezes the batch into one report set.
+    /// Freezes the batch into one report set over the batch's frozen string table.
     ///
     /// Donor handles install first, so a refused draft still resolves its foreign sites. Each domain's drafts compact
     /// into that domain's store. Each stretch of one domain's records becomes one run, in push order. A stretch that
     /// continues the last run in the same domain extends that run.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(super) fn freeze(
         self,
-        strings: StringTable,
+        strings: FrozenStringTable,
         limits: DiagnosticLimits,
         install: InstallMode,
     ) -> DiagnosticReportSet {
         let Self { domains, drafts } = self;
-        let shared = Arc::new(strings.freeze());
+        let shared = Arc::new(strings);
 
         let mut identities = Vec::with_capacity(domains.len());
         let mut contexts: Vec<Arc<FrozenIdentityContext>> = Vec::with_capacity(domains.len());
@@ -238,7 +227,6 @@ impl PendingDiagnostics {
 }
 
 /// Installs the donor handle of every foreign site that the batch's drafts carry.
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 fn install_donor_handles(
     drafts: &[PendingDraft],
     identities: &[Option<StablePackageIdentity>],
@@ -263,7 +251,6 @@ fn install_donor_handles(
 /// bug when the draft's own domain owns a database: a primary or label site must reach the frozen render boundary with
 /// its donor identity. Otherwise the handle stays uninstalled and renders without a position. `Unfrozen` mode installs
 /// no identity-named handle.
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 fn install_site(
     site: &ForeignSiteDraft,
     pending: &PendingDraft,
@@ -307,7 +294,6 @@ fn install_site(
         .expect("frozen identity handle was assigned concurrently");
 }
 
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 fn to_u32(index: usize) -> u32 {
     u32::try_from(index).expect("diagnostic run indices fit in u32")
 }

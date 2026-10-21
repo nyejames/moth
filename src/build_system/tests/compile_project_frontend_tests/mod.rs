@@ -20,12 +20,12 @@ use crate::compiler_frontend::build_config::{
     BuildInputName, PrimitiveBuildValue,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
-use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
+use crate::compiler_frontend::compiler_messages::render::dev_server::render_boundary_messages_html;
 use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticLabelMessage, DiagnosticPayload, DiagnosticSeverity,
-    InvalidConfigReason, InvalidDependencyClauseReason, InvalidGenericInstantiationReason,
-    SyntaxDiagnosticKind,
+    DiagnosticLabelMessage, DiagnosticPayload, DiagnosticSeverity, InvalidConfigReason,
 };
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
@@ -80,11 +80,14 @@ fn module_has_timing(
         .iter()
         .any(|aggregate| aggregate.metric == metric && aggregate.samples > 0)
 }
-fn assert_has_diagnostic_code(messages: &CompilerMessages, expected_code: &str) {
+fn assert_has_diagnostic_code(
+    messages: &crate::compiler_frontend::compiler_errors::BoundaryFailure,
+    expected_code: &str,
+) {
     let actual_codes = messages
-        .diagnostics
+        .reports
         .iter()
-        .map(|diagnostic| diagnostic.kind.code())
+        .map(|(_, view)| view.descriptor().code)
         .collect::<Vec<_>>();
 
     assert!(

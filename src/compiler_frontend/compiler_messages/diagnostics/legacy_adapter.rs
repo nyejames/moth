@@ -1,23 +1,22 @@
-//! Compacts a diagnostic when its kind and payload match a family adapter arm.
+//! Converts legacy diagnostics into the compact family drafts of the frozen boundary.
 //!
-//! WHAT: the adapter maps a matching diagnostic onto its family draft, severity, labels and foreign sites, and its
-//! types are captured as display ids. The draft is stored and read back through a typed view. When the adapter
-//! declines a diagnostic, the caller keeps the legacy payload path until P4.6. No label is declined: a label without
-//! a message is kept as `NONE`, and compaction checks that the family declares each label's role. A draft that faults
-//! while it is filled, or that the store refuses, is stored as its capacity record, which renders as a compiler limit.
-//! WHY: matching diagnostics render from compact records; declined diagnostics keep their legacy output until P4.6.
-//! Each call builds a store for its one diagnostic; a shared store replaces it once the boundary owns one.
-//!
-//! `into_boundary_failure` converts a whole legacy vessel into one frozen report set. It merges each diagnostic's
-//! path table into its owner's builder, captures its types against that table, and freezes the batch once.
+//! WHAT: `into_boundary_failure` converts a whole legacy vessel into one frozen report set. Each diagnostic maps onto
+//! its family draft, severity, labels and foreign sites, and its types are captured as display ids. Its path ids
+//! follow the path table it was rendered against, merged into the owning database's builder. A draft that overflows a
+//! capacity is stored as its capacity record, which renders as a compiler limit.
+//! WHY: the boundary replaces the legacy vessel without changing rendered output. `compact_for_render` is a test-only
+//! per-diagnostic store shim.
 
+#[cfg(test)]
 use super::compaction::CompactOutcome;
 use super::draft::DiagnosticDraft;
 use super::families;
 use super::foreign::{ForeignSiteDraft, ForeignSlot};
 use super::freeze::{DomainSource, InstallMode, PendingDiagnostics};
 use super::resource::DiagnosticLimits;
+#[cfg(test)]
 use super::store::{DiagnosticId, DiagnosticStore};
+#[cfg(test)]
 use super::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::compiler_errors::{
     BoundaryFailure, CompilerMessages,
@@ -26,6 +25,7 @@ use crate::compiler_frontend::compiler_messages::diagnostic_types::{
     type_display_snapshot::TypeDisplaySnapshot,
     type_display_snapshot_builder::TypeDisplaySnapshotBuilder,
 };
+#[cfg(test)]
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
     CapacityResource, CompilerDiagnostic, DiagnosticCapacityResource, SourceSpanCapacityResource,
@@ -39,12 +39,14 @@ use std::ops::Range;
 use std::sync::Arc;
 
 /// One compacted diagnostic, with the store and the type snapshot that its record reads from.
+#[cfg(test)]
 pub(crate) struct CompactRender {
     store: DiagnosticStore,
     id: DiagnosticId,
     types: TypeDisplaySnapshot,
 }
 
+#[cfg(test)]
 impl CompactRender {
     /// The typed view of the stored record.
     pub(crate) fn view(&self) -> DiagnosticView<'_> {
@@ -52,9 +54,10 @@ impl CompactRender {
     }
 }
 
-/// Compacts `diagnostic` when its kind and payload match a family adapter arm.
+/// Compacts `diagnostic` when its kind and payload match a family adapter arm, for render tests.
 ///
-/// Returns `None` when the adapter declines the diagnostic. The caller then keeps the legacy payload path.
+/// Returns `None` when the adapter declines the diagnostic.
+#[cfg(test)]
 pub(crate) fn compact_for_render(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
@@ -79,6 +82,20 @@ pub(crate) fn compact_for_render(
         CompactOutcome::Rejected(_) => DiagnosticId::from_index(0),
     };
     Some(CompactRender { store, id, types })
+}
+
+/// Compacts `diagnostic` for a render test. A diagnostic without a compact family cannot reach a render entry, so
+/// this panics where the boundary converter does.
+#[cfg(test)]
+pub(crate) fn compact_render_for_test(
+    diagnostic: &CompilerDiagnostic,
+    context: DiagnosticRenderContext<'_>,
+) -> CompactRender {
+    compact_for_render(diagnostic, context).unwrap_or_else(|| {
+        panic!(
+            "legacy diagnostic has no compact family; the boundary converter cannot represent it"
+        )
+    })
 }
 
 /// Adds the legacy severity, labels and foreign sites to a family draft.
@@ -110,7 +127,6 @@ fn finish(mut draft: DiagnosticDraft, diagnostic: &CompilerDiagnostic) -> Diagno
 }
 
 /// The draft and rows of one legacy diagnostic, read before its vessel is consumed.
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 struct PreparedDiagnostic {
     draft: DiagnosticDraft,
     types: TypeDisplaySnapshot,
@@ -125,14 +141,12 @@ struct PreparedDiagnostic {
 }
 
 /// A source row that the converter keeps: its identity, and the slot of its database.
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 struct KeptSourceRow {
     domain: Option<StablePackageIdentity>,
     slot: usize,
 }
 
 /// One `merge_snapshot` call into a database's builder. Diagnostics that name the same table share it.
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 struct PathMerge {
     slot: usize,
     /// The first path row that named the table. Later rows with the same allocation reuse this merge.
@@ -145,16 +159,11 @@ struct PathMerge {
 /// WHAT: each legacy diagnostic becomes one compact draft in one report set. Its path ids follow the path table it was
 /// rendered against, merged into the owning database's builder. Its type words are captured against its own snapshot.
 /// Each database and identity pair becomes one identity domain.
+/// The vessel's `install_mode` selects the freeze. `Frozen` installs each identity-named handle's donor context;
+/// `Unfrozen` leaves those handles uninstalled, as legacy non-frozen rendering did.
 /// WHY: the boundary replaces the legacy vessel without changing rendered output.
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
-pub(crate) fn into_boundary_failure(
-    messages: CompilerMessages,
-    install: InstallMode,
-) -> BoundaryFailure {
-    assert!(
-        messages.render_frozen_contexts.is_empty(),
-        "pre-frozen render contexts reached the boundary converter"
-    );
+pub(crate) fn into_boundary_failure(messages: CompilerMessages) -> BoundaryFailure {
+    let install = messages.install_mode;
 
     // Pass A reads the vessel. Each draft is captured against the legacy context of its own diagnostic.
     let mut required = Vec::new();
@@ -351,7 +360,12 @@ pub(crate) fn into_boundary_failure(
         push_rebased(&mut pending, domain, none_domain, draft, types);
     }
 
-    let reports = pending.freeze(*string_table, DiagnosticLimits::production(), install);
+    // A vessel that never merged into the build root still holds its module fork; legacy rendering read through it.
+    let reports = pending.freeze(
+        string_table.freeze_flattening(),
+        DiagnosticLimits::production(),
+        install,
+    );
 
     if let Some(infrastructure) = infrastructure_errors.as_deref_mut() {
         let rows = cause_domains
@@ -369,7 +383,6 @@ pub(crate) fn into_boundary_failure(
 
 /// Pass A for one diagnostic: its draft with the type words it names, and the rows that cover it. It only borrows the
 /// vessel, so Pass B can take ownership afterwards.
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 fn prepare(
     messages: &CompilerMessages,
     index: usize,
@@ -411,10 +424,9 @@ fn prepare(
         }
     }
 
-    let context = messages.diagnostic_render_context(index);
-    let environment = context
-        .type_environment
-        .filter(|_| context.path_table().is_some());
+    let environment = messages
+        .type_environment_for_diagnostic(index)
+        .filter(|_| messages.path_table_for_diagnostic(index).is_some());
     let mut builder = TypeDisplaySnapshotBuilder::new(environment);
     let family = families::from_legacy(diagnostic).unwrap_or_else(|| {
         panic!(
@@ -445,7 +457,6 @@ fn prepare(
 }
 
 /// Returns the slot of `database`, adding it when no earlier row named the same allocation.
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 fn intern_database(
     databases: &mut Vec<Arc<SourceDatabase>>,
     database: Arc<SourceDatabase>,
@@ -464,7 +475,6 @@ fn intern_database(
 
 /// Appends a diagnostic's type words to its domain, then rebases its draft onto them. A capacity failure at either
 /// step replaces the draft with its type-display capacity record, which names no type words.
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 fn push_rebased(
     pending: &mut PendingDiagnostics,
     domain: u32,
@@ -488,7 +498,6 @@ fn push_rebased(
 }
 
 /// The record that replaces a diagnostic whose owner's path table cannot absorb the table that it names.
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 fn table_capacity_draft() -> DiagnosticDraft {
     let diagnostic =
         CompilerDiagnostic::source_table_capacity(SourceSpanCapacityResource::LogicalPath);

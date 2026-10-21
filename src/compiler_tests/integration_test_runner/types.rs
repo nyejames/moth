@@ -4,7 +4,8 @@
 
 use crate::build_system::build::BuildResult;
 use crate::compiler_frontend::Flag;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::compiler_errors::BoundaryFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -326,7 +327,7 @@ pub(crate) struct CaseExecutionResult {
     pub passed: bool,
     pub panic_message: Option<String>,
     pub build_result: Option<BuildResult>,
-    pub messages: Option<CompilerMessages>,
+    pub messages: Option<BoundaryFailure>,
     pub failure_reason: Option<String>,
     pub failure_kind: Option<FailureKind>,
 }
@@ -335,7 +336,7 @@ impl CaseExecutionResult {
     /// Move a successful build's warnings into the final diagnostic report owner.
     ///
     /// Build assertions consume the `BuildResult` first, but terminal integration reporting must
-    /// render the frozen `CompilerMessages` owner so generated donor spans cannot fall back to the
+    /// render the frozen boundary report so generated donor spans cannot fall back to the
     /// requester database. A freeze failure is a harness failure, not an absent warning report.
     pub(crate) fn finalize_build_result_report(&mut self) {
         if self.messages.is_some() {
@@ -346,11 +347,13 @@ impl CaseExecutionResult {
             return;
         };
 
-        self.messages = build_result.take_warning_messages();
+        self.messages = build_result
+            .take_warning_messages()
+            .map(into_boundary_failure);
         if self
             .messages
             .as_ref()
-            .is_some_and(CompilerMessages::has_infrastructure_error)
+            .is_some_and(BoundaryFailure::has_infrastructure_error)
         {
             self.passed = false;
             self.failure_kind = Some(FailureKind::HarnessFailed);

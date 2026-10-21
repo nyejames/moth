@@ -53,6 +53,7 @@ impl DiagnosticId {
 
 impl DiagnosticStore {
     /// An empty store with production ceilings.
+    #[cfg(test)]
     pub(super) fn new() -> Self {
         Self::with_limits(DiagnosticLimits::production())
     }

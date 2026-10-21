@@ -7,19 +7,24 @@
 
 use super::*;
 use crate::compiler_frontend::build_config::BuildConfigValueOrigin;
+use crate::compiler_frontend::compiler_messages::DiagnosticLabelStyle;
 use crate::compiler_frontend::compiler_messages::diagnostic_types::type_display_snapshot::TypeDisplaySnapshot;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
     UnexpectedTokenShape, UnexpectedTokenView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReport;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
+#[cfg(test)]
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage, DiagnosticLabelStyle,
+    CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage,
 };
+#[cfg(test)]
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::source::line_index::{LineIndex, LinePosition};
 use crate::compiler_frontend::source::{FrozenIdentityContext, FrozenIdentityHandle};
-use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 #[cfg(test)]
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathTable};
@@ -31,8 +36,8 @@ use unicode_width::UnicodeWidthStr;
 ///
 /// A label with a source span carries a root-relative path and one-based display coordinates;
 /// its message is empty when the label marks a location without prose. A spanless message carries
-/// no location. Labels with an unresolved source span are omitted by
-/// [`resolve_label_render_facts_from_root`].
+/// no location. A label whose source span cannot be resolved, or that has neither a location nor
+/// a message, is omitted.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ResolvedDiagnosticLabel {
     pub(crate) style: DiagnosticLabelStyle,
@@ -97,12 +102,13 @@ impl<'a> DiagnosticPathContext<'a> {
 /// WHAT: carries shared lookup tables by reference while diagnostics keep only stable IDs.
 /// WHY: type diagnostics should store semantic `TypeId`s, not rendered strings or owned
 /// `TypeEnvironment` snapshots. The render boundary decides how those IDs become names.
-/// Frozen identity rows are authoritative for retained source spans; the attached `SourceDatabase`
+/// Frozen identity rows are authoritative for retained source spans. A test-only `SourceDatabase`
 /// is consulted only when no frozen identity context is attached.
 #[derive(Clone, Copy)]
 pub(crate) struct DiagnosticRenderContext<'a> {
     pub(crate) string_table: &'a dyn StringTableResolver,
     pub(crate) type_environment: Option<&'a TypeEnvironment>,
+    #[cfg(test)]
     pub(crate) source_database: Option<&'a SourceDatabase>,
     pub(crate) frozen_identity: Option<&'a FrozenIdentityContext>,
     pub(crate) path_context: Option<DiagnosticPathContext<'a>>,
@@ -113,10 +119,16 @@ impl<'a> DiagnosticRenderContext<'a> {
         Self {
             string_table,
             type_environment: None,
+            #[cfg(test)]
             source_database: None,
             frozen_identity: None,
             path_context: None,
         }
+    }
+
+    /// The render context for one frozen report: its strings and its frozen identity rows.
+    pub(crate) fn for_report(report: &'a DiagnosticReport) -> Self {
+        Self::new(report.context().strings()).with_frozen_identity(report.context())
     }
 
     pub(crate) fn with_frozen_identity(
@@ -129,16 +141,7 @@ impl<'a> DiagnosticRenderContext<'a> {
         self
     }
 
-    pub(crate) fn with_optional_frozen_identity(
-        self,
-        frozen_identity: Option<&'a FrozenIdentityContext>,
-    ) -> Self {
-        match frozen_identity {
-            Some(frozen_identity) => self.with_frozen_identity(frozen_identity),
-            None => self,
-        }
-    }
-
+    #[cfg(test)]
     pub(crate) fn with_optional_type_environment(
         mut self,
         type_environment: Option<&'a TypeEnvironment>,
@@ -147,6 +150,7 @@ impl<'a> DiagnosticRenderContext<'a> {
         self
     }
 
+    #[cfg(test)]
     pub(crate) fn with_optional_source_database(
         mut self,
         source_database: Option<&'a SourceDatabase>,
@@ -155,6 +159,13 @@ impl<'a> DiagnosticRenderContext<'a> {
         if self.path_context.is_none() {
             self.path_context =
                 source_database.map(|database| DiagnosticPathContext::Table(database.paths()));
+        }
+        self
+    }
+    #[cfg(test)]
+    pub(crate) fn with_optional_path_table(mut self, path_table: Option<&'a PathTable>) -> Self {
+        if let Some(path_table) = path_table {
+            self.path_context = Some(DiagnosticPathContext::Table(path_table));
         }
         self
     }
@@ -168,13 +179,6 @@ impl<'a> DiagnosticRenderContext<'a> {
     #[cfg(test)]
     pub(crate) fn with_path_table(mut self, path_table: &'a PathTable) -> Self {
         self.path_context = Some(DiagnosticPathContext::Table(path_table));
-        self
-    }
-
-    pub(crate) fn with_optional_path_table(mut self, path_table: Option<&'a PathTable>) -> Self {
-        if let Some(path_table) = path_table {
-            self.path_context = Some(DiagnosticPathContext::Table(path_table));
-        }
         self
     }
 
@@ -209,6 +213,7 @@ impl<'a> DiagnosticRenderContext<'a> {
     /// table and the retained source snapshot, so line/column conversion and source text always
     /// come from one identity context. Compilation-root spans and diagnostics without an
     /// attached owner intentionally have no physical source position.
+    #[cfg(test)]
     pub(crate) fn primary_position(
         self,
         diagnostic: &'a CompilerDiagnostic,
@@ -222,6 +227,7 @@ impl<'a> DiagnosticRenderContext<'a> {
     /// Ordinary labels remain compact and use the diagnostic context. A donor-owned label is
     /// different: its source IDs belong to the handle's frozen context, so an uninstalled handle
     /// returns no position rather than silently falling back to the requester context.
+    #[cfg(test)]
     pub(crate) fn label_position<'label>(
         self,
         label: &'label DiagnosticLabel,
@@ -270,6 +276,7 @@ impl<'a> DiagnosticRenderContext<'a> {
 
         // A legacy handle without a stable domain may use the message's transitional source
         // row. A donor-domain handle never authorizes requester-database fallback.
+        #[cfg(test)]
         if self.frozen_identity.is_none() && frozen_identity_handle.domain().is_none() {
             return self.resolve_span_in_database(span);
         }
@@ -281,11 +288,13 @@ impl<'a> DiagnosticRenderContext<'a> {
             return None;
         }
 
-        if let Some(frozen) = self.frozen_identity {
-            return self.resolve_span_in_frozen(frozen, span);
+        match self.frozen_identity {
+            Some(frozen) => self.resolve_span_in_frozen(frozen, span),
+            #[cfg(test)]
+            None => self.resolve_span_in_database(span),
+            #[cfg(not(test))]
+            None => None,
         }
-
-        self.resolve_span_in_database(span)
     }
 
     fn resolve_span_in_frozen<'identity>(
@@ -314,6 +323,7 @@ impl<'a> DiagnosticRenderContext<'a> {
         })
     }
 
+    #[cfg(test)]
     fn resolve_span_in_database(self, span: SourceSpan) -> Option<DiagnosticPrimaryPosition<'a>> {
         let source_database = self.source_database?;
         let source = span.source();
@@ -349,6 +359,7 @@ impl<'a> DiagnosticRenderContext<'a> {
 /// coordinates. A label with a resolvable source span keeps its location even when it carries no
 /// message, which then stays empty. A spanless message is retained with no location; a label whose
 /// source span cannot be resolved, or that has neither a location nor a message, is omitted.
+#[cfg(test)]
 pub(crate) fn resolve_label_render_facts_from_root(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
@@ -411,6 +422,7 @@ pub(super) fn resolved_label_fact(
     })
 }
 
+#[cfg(test)]
 fn diagnostic_label_message_text(
     message: &DiagnosticLabelMessage,
     context: DiagnosticRenderContext<'_>,
@@ -480,8 +492,8 @@ fn diagnostic_label_message_text(
     }
 }
 
-/// The message of one compact label. Every arm reads the same text as [`diagnostic_label_message_text`] for the
-/// matching legacy message. `None` is the message-less label, which marks a location without prose.
+/// The message of one compact label. `None` is the message-less label, which marks a location
+/// without prose.
 pub(crate) fn compact_label_message_text(
     message: DurableLabelMessage<'_>,
     types: &TypeDisplaySnapshot,

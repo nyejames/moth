@@ -7,6 +7,7 @@
 use super::{BackendId, CaseExecutionResult, ExpectedOutcome, FailureKind, TestCaseSpec};
 use crate::build_system::build::{ProjectBuilder, build_project};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -47,7 +48,7 @@ pub(crate) fn execute_test_case(case: &TestCaseSpec) -> CaseExecutionResult {
                     passed: false,
                     panic_message: None,
                     build_result: None,
-                    messages: Some(messages),
+                    messages: Some(into_boundary_failure(messages)),
                     failure_reason: Some(
                         "Expected a successful build, but compilation failed.".to_string(),
                     ),
@@ -67,7 +68,7 @@ pub(crate) fn execute_test_case(case: &TestCaseSpec) -> CaseExecutionResult {
                     failure_kind: Some(FailureKind::ExpectationViolation),
                 },
                 Err(messages) => super::assertions::validate_failure_result(
-                    messages,
+                    into_boundary_failure(messages),
                     expectation,
                     &case.fixture_root,
                 ),

@@ -111,7 +111,7 @@ fn assert_runs(set: &DiagnosticReportSet, expected: &[(u32, u32, u32)]) {
 #[test]
 fn freeze_empty_batch_yields_an_empty_set() {
     let set = PendingDiagnostics::default().freeze(
-        StringTable::new(),
+        StringTable::new().freeze(),
         DiagnosticLimits::production(),
         InstallMode::Frozen,
     );
@@ -138,7 +138,7 @@ fn freeze_keeps_one_domain_records_in_one_run() {
     batch.push(domain, None, unreachable_match_arm(Some(exact_span(4, 1))));
 
     let set = batch.freeze(
-        StringTable::new(),
+        StringTable::new().freeze(),
         DiagnosticLimits::production(),
         InstallMode::Frozen,
     );
@@ -168,7 +168,7 @@ fn freeze_interleaved_domains_keep_pushed_order() {
     batch.push(project, None, unreachable_match_arm(Some(exact_span(4, 1))));
 
     let set = batch.freeze(
-        StringTable::new(),
+        StringTable::new().freeze(),
         DiagnosticLimits::production(),
         InstallMode::Frozen,
     );
@@ -200,7 +200,7 @@ fn freeze_merges_a_run_across_a_refused_stretch() {
     batch.push(package, None, unreachable_match_arm(Some(exact_span(6, 1))));
     batch.push(project, None, unreachable_match_arm(Some(exact_span(8, 1))));
 
-    let set = batch.freeze(StringTable::new(), limits, InstallMode::Frozen);
+    let set = batch.freeze(StringTable::new().freeze(), limits, InstallMode::Frozen);
     let owners = owning_reports(&set);
 
     assert_eq!(set.iter().count(), 4);
@@ -237,7 +237,7 @@ fn freeze_shared_domain_reuses_the_earlier_context() {
     );
 
     let set = batch.freeze(
-        StringTable::new(),
+        StringTable::new().freeze(),
         DiagnosticLimits::production(),
         InstallMode::Frozen,
     );
@@ -273,7 +273,7 @@ fn freeze_unowned_domain_resolves_no_spans() {
     );
 
     let set = batch.freeze(
-        StringTable::new(),
+        StringTable::new().freeze(),
         DiagnosticLimits::production(),
         InstallMode::Frozen,
     );
@@ -311,7 +311,7 @@ fn freeze_unowned_domain_leaves_an_unmatched_donor_uninstalled() {
     );
 
     let set = batch.freeze(
-        StringTable::new(),
+        StringTable::new().freeze(),
         DiagnosticLimits::production(),
         InstallMode::Frozen,
     );
@@ -338,7 +338,7 @@ fn freeze_domain_less_handle_on_package_draft_stays_uninstalled() {
     );
 
     let set = batch.freeze(
-        StringTable::new(),
+        StringTable::new().freeze(),
         DiagnosticLimits::production(),
         InstallMode::Frozen,
     );
@@ -372,7 +372,7 @@ fn freeze_domain_less_handles_install_their_own_none_domain() {
     );
 
     let set = batch.freeze(
-        StringTable::new(),
+        StringTable::new().freeze(),
         DiagnosticLimits::production(),
         InstallMode::Frozen,
     );
@@ -420,7 +420,7 @@ fn freeze_domain_less_handles_follow_none_domain_across_interleaved_drafts() {
     );
 
     let set = batch.freeze(
-        StringTable::new(),
+        StringTable::new().freeze(),
         DiagnosticLimits::production(),
         InstallMode::Frozen,
     );
@@ -459,7 +459,7 @@ fn freeze_package_handle_installs_the_first_matching_domain() {
     );
 
     let set = batch.freeze(
-        StringTable::new(),
+        StringTable::new().freeze(),
         DiagnosticLimits::production(),
         InstallMode::Frozen,
     );
@@ -496,7 +496,7 @@ fn freeze_keeps_a_preinstalled_handle() {
     );
 
     let set = batch.freeze(
-        StringTable::new(),
+        StringTable::new().freeze(),
         DiagnosticLimits::production(),
         InstallMode::Frozen,
     );
@@ -526,7 +526,7 @@ fn freeze_panics_on_donor_primary_without_its_domain() {
     );
 
     let _set = batch.freeze(
-        StringTable::new(),
+        StringTable::new().freeze(),
         DiagnosticLimits::production(),
         InstallMode::Frozen,
     );
@@ -556,7 +556,7 @@ fn freeze_panics_on_donor_label_without_its_domain() {
     );
 
     let _set = batch.freeze(
-        StringTable::new(),
+        StringTable::new().freeze(),
         DiagnosticLimits::production(),
         InstallMode::Frozen,
     );
@@ -591,7 +591,7 @@ fn unfrozen_freeze_skips_identity_installs_and_keeps_none_domain() {
     );
 
     let set = batch.freeze(
-        StringTable::new(),
+        StringTable::new().freeze(),
         DiagnosticLimits::production(),
         InstallMode::Unfrozen,
     );
@@ -630,7 +630,7 @@ fn freeze_full_store_keeps_run_accounting() {
         );
     }
 
-    let set = batch.freeze(StringTable::new(), limits, InstallMode::Frozen);
+    let set = batch.freeze(StringTable::new().freeze(), limits, InstallMode::Frozen);
 
     // One draft is stored, the second becomes the stand-in, and the third is dropped without a record.
     assert_eq!(set.iter().count(), 2);
@@ -659,7 +659,7 @@ fn freeze_keeps_a_type_display_fault_as_one_error_record() {
     );
 
     let set = batch.freeze(
-        StringTable::new(),
+        StringTable::new().freeze(),
         DiagnosticLimits::production(),
         InstallMode::Frozen,
     );
@@ -734,7 +734,7 @@ fn freeze_resolves_type_words_through_their_domain_snapshot() {
     );
 
     let set = batch.freeze(
-        StringTable::new(),
+        StringTable::new().freeze(),
         DiagnosticLimits::production(),
         InstallMode::Frozen,
     );

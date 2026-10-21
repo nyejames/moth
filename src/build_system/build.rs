@@ -112,9 +112,7 @@ fn finalize_backend_failure_messages(
     if let Some(source_database) = project_source_database {
         messages.set_source_database(source_database);
     }
-    if let Err(freeze_error) = messages.freeze_source_contexts() {
-        messages.set_infrastructure_error(freeze_error);
-    }
+    messages.mark_frozen();
     messages
 }
 
@@ -1664,9 +1662,7 @@ impl BuildResult {
     /// report publication point. Clean builds release the table and source snapshots immediately.
     pub(crate) fn take_warning_messages(&mut self) -> Option<CompilerMessages> {
         let mut messages = self.take_warning_messages_before_freeze()?;
-        if let Err(freeze_error) = messages.freeze_source_contexts() {
-            messages.set_infrastructure_error(freeze_error);
-        }
+        messages.mark_frozen();
         Some(messages)
     }
     /// Aggregate a late output-plan/write failure with warnings before freezing one source owner.
@@ -1689,9 +1685,7 @@ impl BuildResult {
             messages.set_source_database(source_database);
         }
         messages.extend_project_source_context_to_diagnostics();
-        if let Err(freeze_error) = messages.freeze_source_contexts() {
-            messages.set_infrastructure_error(freeze_error);
-        }
+        messages.mark_frozen();
         messages
     }
 }
@@ -1756,7 +1750,7 @@ pub fn build_project(
         }
     };
     if frontend_compilation.has_diagnosed_or_blocked() {
-        let messages = frontend_compilation.into_render_messages_with_frozen_identity(
+        let messages = frontend_compilation.into_render_messages(
             &mut string_table,
             project_source_files.take(),
             None,

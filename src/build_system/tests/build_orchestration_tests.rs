@@ -19,7 +19,7 @@ use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilerMessages, RenderSourceContext};
-#[cfg(unix)]
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::compiler_frontend::compiler_messages::{
@@ -39,16 +39,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-fn rendered_error_messages(messages: &CompilerMessages) -> Vec<String> {
-    messages
-        .diagnostics()
-        .enumerate()
-        .filter(|(_, diagnostic)| diagnostic.severity == DiagnosticSeverity::Error)
-        .map(|(diagnostic_index, diagnostic)| {
-            terse::format_terse_diagnostic_with_context(
-                diagnostic,
-                messages.diagnostic_render_context(diagnostic_index),
-            )
+fn rendered_error_messages(messages: CompilerMessages) -> Vec<String> {
+    let failure = into_boundary_failure(messages);
+    failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .map(|(report, view)| {
+            terse::format_terse_diagnostic_view(view, DiagnosticRenderContext::for_report(report))
         })
         .collect()
 }
@@ -242,14 +239,15 @@ fn build_result_warning_handoff_resolves_generated_donor_source_context() {
     let messages = result
         .take_warning_messages()
         .expect("spanful warning should produce a report");
-    assert!(!messages.has_infrastructure_error(), "{messages:?}");
-    let diagnostic = messages
-        .diagnostics()
+    let failure = into_boundary_failure(messages);
+    assert!(!failure.has_infrastructure_error(), "{failure:?}");
+    let (report, view) = failure
+        .reports
+        .iter()
         .next()
         .expect("warning report should retain its diagnostic");
-    let position = messages
-        .diagnostic_render_context(0)
-        .primary_position(diagnostic)
+    let position = DiagnosticRenderContext::for_report(report)
+        .site_position(view.primary_site())
         .expect("donor warning should resolve through its package identity");
     assert_eq!(position.host_path, Some(package_path.as_path()));
     assert!(
@@ -362,14 +360,16 @@ fn build_result_warning_handoff_keeps_related_package_label_out_of_default_conte
     let messages = result
         .take_warning_messages()
         .expect("spanful warning should produce a report");
-    assert!(!messages.has_infrastructure_error(), "{messages:?}");
-    let diagnostic = messages
-        .diagnostics()
+    let failure = into_boundary_failure(messages);
+    assert!(!failure.has_infrastructure_error(), "{failure:?}");
+    let (report, view) = failure
+        .reports
+        .iter()
         .next()
         .expect("warning report should retain its diagnostic");
-    let context = messages.diagnostic_render_context(0);
+    let context = DiagnosticRenderContext::for_report(report);
     let primary = context
-        .primary_position(diagnostic)
+        .site_position(view.primary_site())
         .expect("ownerless primary should use the project default context");
     assert_eq!(primary.host_path, Some(project_path.as_path()));
     assert!(
@@ -377,8 +377,12 @@ fn build_result_warning_handoff_keeps_related_package_label_out_of_default_conte
         "ownerless primary should render the project snapshot: {}",
         primary.line
     );
+    let label = view
+        .durable_labels()
+        .next()
+        .expect("package-owned secondary label should remain");
     let label = context
-        .label_position(&diagnostic.labels[0])
+        .site_position(label.site)
         .expect("package-owned secondary label should resolve through its explicit owner");
     assert_eq!(label.host_path, Some(package_path.as_path()));
     assert!(
@@ -420,33 +424,16 @@ fn build_project_preserves_package_warnings_on_late_backend_failure() {
         panic!("late backend failure should return compiler messages");
     };
 
+    let messages = into_boundary_failure(messages);
     assert!(messages.has_infrastructure_error());
     assert!(
         messages.warning_count() >= 1,
         "frontend package warnings must survive a late backend failure"
     );
-    let warning_contexts_are_frozen = messages
-        .diagnostics()
-        .enumerate()
-        .filter(|(_, diagnostic)| diagnostic.severity == DiagnosticSeverity::Warning)
-        .map(|(index, diagnostic)| {
-            (
-                messages
-                    .diagnostic_render_context(index)
-                    .frozen_identity
-                    .is_some(),
-                terse::format_terse_diagnostic_with_context(
-                    diagnostic,
-                    messages.diagnostic_render_context(index),
-                ),
-            )
-        })
-        .collect::<Vec<_>>();
+    let rendered = terse::format_terse_boundary_messages(&messages);
     assert!(
-        warning_contexts_are_frozen
-            .iter()
-            .any(|(frozen, rendered)| *frozen && rendered.contains("@mod.moth")),
-        "package warning should retain a frozen package source owner: {warning_contexts_are_frozen:?}"
+        rendered.iter().any(|line| line.contains("@mod.moth")),
+        "package warning should render its frozen package source owner: {rendered:?}"
     );
 }
 
@@ -1328,7 +1315,7 @@ fn skip_unchanged_mode_still_cleans_stale_manifest_tracked_outputs() {
 }
 
 #[test]
-fn build_project_preserves_frozen_identity_for_frontend_signature_diagnostics() {
+fn build_project_preserves_frontend_signature_diagnostic_source_position() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -1345,33 +1332,21 @@ fn build_project_preserves_frozen_identity_for_frontend_signature_diagnostics() 
         else {
             panic!("build should fail with a frontend signature diagnostic");
         };
-        let errors = messages.error_diagnostics().collect::<Vec<_>>();
-
-        assert!(
-            errors
-                .iter()
-                .any(|diagnostic| diagnostic.kind.code() == "MOTH-RULE-0035"),
-            "expected the named-type diagnostic to be preserved"
-        );
-        let identity = messages
-            .frozen_identity_context_for_diagnostic(0)
-            .expect("frontend diagnostics should retain their frozen identity context");
-        let diagnostic = errors
+        let failure = into_boundary_failure(messages);
+        let (report, view) = failure
+            .reports
             .iter()
-            .find(|diagnostic| diagnostic.kind.code() == "MOTH-RULE-0035")
+            .find(|(_, view)| view.descriptor().code == "MOTH-RULE-0035")
             .expect("named-type diagnostic should be retained");
-        let source_span = diagnostic
-            .primary_span
-            .expect("frontend diagnostic should retain its authored span");
-        let source = identity
-            .get(source_span.source())
-            .expect("frozen identity should resolve the diagnostic source");
+        let position = DiagnosticRenderContext::for_report(report)
+            .site_position(view.primary_site())
+            .expect("frontend diagnostic should retain its authored source position");
         let canonical_path =
             fs::canonicalize(root.join("main.moth")).expect("main file should canonicalize");
         assert_eq!(
-            source.canonical_os_path.as_deref(),
+            position.host_path,
             Some(canonical_path.as_path()),
-            "frozen identity should retain the diagnostic source's canonical path"
+            "frontend diagnostic should retain its source path"
         );
     }
 }
@@ -1394,7 +1369,7 @@ fn config_validation_failure_returns_config_error_before_compilation() {
         };
         assert_has_config_error(&messages);
         assert!(
-            rendered_error_messages(&messages)
+            rendered_error_messages(messages)
                 .iter()
                 .any(|message| message.contains("fake_config_error")),
             "expected fake config validation message"
@@ -1488,9 +1463,7 @@ html #= (
     assert!(
         result.is_ok(),
         "Stage 0 must skip the normalized output root instead of compiling stale output: {:?}",
-        result
-            .err()
-            .map(|messages| rendered_error_messages(&messages))
+        result.err().map(rendered_error_messages)
     );
 }
 
@@ -1538,9 +1511,7 @@ html #= (
     assert!(
         result.is_ok(),
         "Stage 0 must skip the output root reached through a symlink ancestor: {:?}",
-        result
-            .err()
-            .map(|messages| rendered_error_messages(&messages))
+        result.err().map(rendered_error_messages)
     );
 }
 
@@ -1590,9 +1561,7 @@ html #= (
     assert!(
         result.is_ok(),
         "Stage 0 must skip symlink aliases that target output descendants: {:?}",
-        result
-            .err()
-            .map(|messages| rendered_error_messages(&messages))
+        result.err().map(rendered_error_messages)
     );
 }
 
@@ -1650,10 +1619,20 @@ fn validated_output_settings_reject_canonical_root_aliases() {
         diagnostic.primary_span, None,
         "synthetic Config values have no authored source span",
     );
-    let rendered = terse::format_terse_diagnostic_with_context(
-        diagnostic,
-        DiagnosticRenderContext::new(&string_table),
+    let diagnostic_code = diagnostic.kind.code();
+    let messages = CompilerMessages::from_diagnostics(errors, string_table.clone());
+    let failure = into_boundary_failure(messages);
+    let (report, view) = failure
+        .reports
+        .iter()
+        .find(|(_, view)| view.descriptor().code == diagnostic_code)
+        .expect("output-folder collision should remain in the boundary report");
+    assert_eq!(
+        view.reason_key(),
+        Some("invalid_config.output_folders_not_distinct")
     );
+    let rendered =
+        terse::format_terse_diagnostic_view(view, DiagnosticRenderContext::for_report(report));
     assert!(
         rendered.contains("resolve to the same output root and must be distinct"),
         "canonical-alias rejection should explain the physical output-root conflict: {rendered}"
@@ -2560,22 +2539,34 @@ fn late_output_failure_keeps_authored_setting_source_owner() {
     )
     .expect_err("a foreign output owner should produce a late diagnostic");
 
-    let messages = second_build.take_output_failure_messages(late_messages);
-    assert!(!messages.has_infrastructure_error(), "{messages:?}");
-    let diagnostic = messages
-        .error_diagnostics()
+    let failure = into_boundary_failure(second_build.take_output_failure_messages(late_messages));
+    assert!(!failure.has_infrastructure_error(), "{failure:?}");
+    let (report, view) = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
         .next()
         .expect("late output diagnostic should remain");
-    assert_eq!(diagnostic.primary_span, Some(setting_span));
-    let context = messages.diagnostic_render_context(0);
     assert!(
-        context.frozen_identity.is_some(),
-        "late output diagnostic should retain the project source owner"
+        matches!(
+            view.primary_site(),
+            crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(span)
+                if span == setting_span
+        ),
+        "late output diagnostic should retain the authored setting span"
     );
-    let rendered = terse::format_terse_diagnostic_with_context(diagnostic, context);
+    let context = DiagnosticRenderContext::for_report(report);
+    let position = context
+        .site_position(view.primary_site())
+        .expect("late output diagnostic should retain its project source owner");
     assert!(
-        rendered.contains("config.moth"),
-        "late output diagnostic should render its authored config path: {rendered}"
+        position.path.ends_with("config.moth"),
+        "late output diagnostic should render its authored config path: {:?}",
+        position.path
+    );
+    let rendered = terse::format_terse_boundary_messages(&failure);
+    assert!(
+        rendered.iter().any(|line| line.contains("config.moth")),
+        "late output diagnostic should render its authored config path: {rendered:?}"
     );
 }
 

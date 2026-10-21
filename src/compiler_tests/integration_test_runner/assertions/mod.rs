@@ -49,7 +49,8 @@ use super::{
 };
 use crate::build_system::build::{BuildResult, DeferredResourceOutput, OutputFile};
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+use crate::compiler_frontend::compiler_messages::compiler_errors::BoundaryFailure;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -171,9 +172,13 @@ pub(crate) fn validate_success_result(
     mut build_result: BuildResult,
     expectation: &SuccessExpectation,
 ) -> CaseExecutionResult {
-    if let Some(reason) =
-        warnings::validate_warning_expectation(build_result.warnings.iter(), &expectation.warnings)
-    {
+    if let Some(reason) = warnings::validate_warning_expectation(
+        build_result
+            .warnings
+            .iter()
+            .map(|warning| warning.kind.descriptor().code),
+        &expectation.warnings,
+    ) {
         return fail(build_result, reason, FailureKind::ExpectationViolation);
     }
 
@@ -281,13 +286,17 @@ fn fail(build_result: BuildResult, reason: String, kind: FailureKind) -> CaseExe
 }
 
 pub(crate) fn validate_failure_result(
-    messages: CompilerMessages,
+    messages: BoundaryFailure,
     expectation: &FailureExpectation,
     fixture_root: &Path,
 ) -> CaseExecutionResult {
-    if let Some(reason) =
-        warnings::validate_warning_expectation(messages.warnings(), &expectation.warnings)
-    {
+    if let Some(reason) = warnings::validate_warning_expectation(
+        messages
+            .reports
+            .iter_severity(DiagnosticSeverity::Warning)
+            .map(|(_, view)| view.descriptor().code),
+        &expectation.warnings,
+    ) {
         return failure_messages(messages, reason);
     }
 
@@ -305,7 +314,7 @@ pub(crate) fn validate_failure_result(
     }
 }
 
-fn failure_messages(messages: CompilerMessages, reason: String) -> CaseExecutionResult {
+fn failure_messages(messages: BoundaryFailure, reason: String) -> CaseExecutionResult {
     CaseExecutionResult {
         passed: false,
         panic_message: None,

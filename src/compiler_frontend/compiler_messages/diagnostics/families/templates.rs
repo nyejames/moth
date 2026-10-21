@@ -465,6 +465,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: MalformedCssTemplateView,
         render: render_malformed_css_template,
     }
@@ -481,6 +482,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: MalformedHtmlTemplateView,
         render: render_malformed_html_template,
     }
@@ -520,6 +522,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: InvalidTemplateDirectiveView,
         render: render_invalid_template_directive,
     }
@@ -540,6 +543,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: InvalidTemplateStructureView,
         render: render_invalid_template_structure,
     }
@@ -575,6 +579,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: generated invalid_template_slot,
+        reason_key: reason,
         view: InvalidTemplateSlotView,
         render: render_invalid_template_slot,
     }

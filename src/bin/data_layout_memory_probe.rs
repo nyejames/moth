@@ -325,7 +325,7 @@ fn main() {
 
     match result {
         Ok(run) => {
-            // The owner-preserving benchmark result keeps CompilerMessages and its frozen source
+            // The owner-preserving benchmark result keeps BoundaryFailure and its frozen source
             // contexts alive while this sample is taken. `into_report` then drops that owner;
             // dropping the returned report separately gives the after-report-drop sample its
             // explicit lifetime rather than calling it "live".

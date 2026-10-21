@@ -1140,14 +1140,18 @@ fn provider_backed_opaque_type_from_different_package_is_rejected() {
     )
     .expect("diagnosed modules are retained in the typed frontend outcome");
     let project_source = frontend.project_source_database.take();
-    let messages =
-        frontend.into_render_messages_with_frozen_identity(&mut string_table, project_source, None);
-
+    let messages = frontend.into_render_messages(&mut string_table, project_source, None);
+    let type_mismatch_code = messages
+        .error_diagnostics()
+        .find(|diagnostic| matches!(&diagnostic.payload, DiagnosticPayload::TypeMismatch { .. }))
+        .map(|diagnostic| diagnostic.kind.code());
+    let failure = into_boundary_failure(messages);
     assert!(
-        messages.error_diagnostics().any(|diagnostic| {
-            matches!(&diagnostic.payload, DiagnosticPayload::TypeMismatch { .. })
-        }),
-        "expected type mismatch diagnostic for cross-package opaque type, got {messages:?}"
+        failure
+            .reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| Some(view.descriptor().code) == type_mismatch_code),
+        "expected type mismatch diagnostic for cross-package opaque type, got {failure:?}"
     );
 }
 
@@ -1646,24 +1650,24 @@ fn html_js_provider_receiver_method_in_project_local_js_rejected() {
         Ok(_) => panic!("project-local JS receiver-style signature should be rejected"),
         Err(messages) => messages,
     };
+    let failure = into_boundary_failure(messages);
 
     assert!(
-        messages.has_errors(),
+        failure.has_errors(),
         "expected at least one error diagnostic for project-local JS receiver-style signature"
     );
-    assert_has_diagnostic_code(&messages, "MOTH-IMPORT-0022");
+    assert_has_diagnostic_code(&failure, "MOTH-IMPORT-0022");
 
     // The provider interned the logical JS source path into the caller-owned discovery fork, so
     // the diagnostic's primary path renders as the JS source, not the importing `@page.moth` (and
     // without panicking on a foreign PathId).
-    let diagnostic = messages
-        .error_diagnostics()
+    let (report, view) = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
         .next()
         .expect("expected at least one error diagnostic");
-    let rendered = terse::format_terse_diagnostic_with_context(
-        diagnostic,
-        messages.diagnostic_render_context(0),
-    );
+    let context = DiagnosticRenderContext::for_report(report);
+    let rendered = terse::format_terse_diagnostic_view(view, context);
     assert!(
         rendered.contains("drawing.js"),
         "provider diagnostic primary path should resolve to the JS source, got: {rendered}"

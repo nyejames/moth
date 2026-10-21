@@ -173,11 +173,8 @@ pub(crate) fn compile_single_file_boracle_frontend(
             }
             // The canonical scheduler retains failed package reports and blocks their consumer.
             // Render only after the synthetic source owner has finalised its span tables.
-            let messages = compilation.into_render_messages_with_frozen_identity(
-                string_table,
-                project_source_files,
-                None,
-            );
+            let messages =
+                compilation.into_render_messages(string_table, project_source_files, None);
             Err(messages)
         }
     }

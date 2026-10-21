@@ -21,9 +21,9 @@ use super::{
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerErrorMetadataKey, CompilerMessages, ErrorType, RenderFrozenContext,
-    RenderTypeContext,
+    CompilerError, CompilerErrorMetadataKey, CompilerMessages, ErrorType, RenderTypeContext,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, dev_server, invalid_config_message, terminal, terse,
 };
@@ -733,185 +733,6 @@ fn infrastructure_setter_and_message_append_preserve_every_ordered_cause() {
 }
 
 #[test]
-fn infrastructure_causes_keep_colliding_source_owners_through_append_and_freeze() {
-    let fixtures = [
-        (
-            Path::new("/project/first.moth"),
-            "project source",
-            "first.moth",
-        ),
-        (
-            Path::new("/package/second.moth"),
-            "package source",
-            "second.moth",
-        ),
-    ];
-    let source = SourceId::from_index(1);
-    let mut messages = CompilerMessages::empty(StringTable::new());
-    let mut weak_alias = None;
-    for (path, text, logical_path) in fixtures {
-        let mut string_table = StringTable::new();
-        let mut source_database =
-            SourceDatabase::build(std::iter::once(path), path, None, &mut string_table)
-                .expect("source owner should build");
-        assert_eq!(
-            source_database
-                .get_by_canonical_path(path)
-                .expect("source should exist")
-                .id,
-            source,
-            "independent owners must exercise the same numeric SourceId"
-        );
-        source_database
-            .retain_text(source, text.to_owned())
-            .expect("source snapshot should be retained");
-        let mut span_builder = ExtendedSpanBuilder::new();
-        let error = CompilerError::new(
-            text,
-            Some(exact_span(source, 0, 1, &mut span_builder)),
-            ErrorType::File,
-        );
-        let mut incoming = CompilerMessages::from_error(error, string_table);
-        let source_database = Arc::new(source_database);
-        if weak_alias.is_none() {
-            weak_alias = Some(Arc::downgrade(&source_database));
-        }
-        incoming.set_source_database(source_database);
-        assert_eq!(
-            incoming
-                .infrastructure_errors()
-                .expect("cause should remain")
-                .source_database_for_cause(0)
-                .expect("cause should retain its producing owner")
-                .retained_text(source),
-            Some(text)
-        );
-        // Premerge sources share the canonical merged string domain. Independently issued
-        // tables cross this boundary only after freezing their own identity contexts.
-        incoming
-            .freeze_source_contexts()
-            .expect("a weak-only alias must not block freeze");
-        let identity = incoming
-            .infrastructure_errors()
-            .expect("cause should remain")
-            .frozen_identity_for_cause(0)
-            .expect("cause should retain its frozen producing owner");
-        assert_eq!(
-            identity
-                .line_index(source)
-                .expect("source snapshot should remain")
-                .line_text(0),
-            Some(text)
-        );
-        assert_eq!(
-            identity.render_path(
-                identity
-                    .source_logical_path(source)
-                    .expect("source path should remain"),
-                &mut Vec::new(),
-            ),
-            logical_path
-        );
-        messages.append_messages_preserving_context(incoming);
-    }
-    messages
-        .freeze_source_contexts()
-        .expect("already frozen cause owners should remain valid");
-    let causes = messages
-        .infrastructure_errors()
-        .expect("both causes should remain");
-    assert_eq!(
-        causes
-            .iter()
-            .map(|cause| cause.msg.as_str())
-            .collect::<Vec<_>>(),
-        vec!["project source", "package source"]
-    );
-    for (index, (_, text, logical_path)) in fixtures.into_iter().enumerate() {
-        let identity = causes
-            .frozen_identity_for_cause(index)
-            .expect("cause should retain its frozen producing owner");
-        assert_eq!(
-            identity
-                .line_index(source)
-                .expect("source snapshot should remain")
-                .line_text(0),
-            Some(text)
-        );
-        assert_eq!(
-            identity.render_path(
-                identity
-                    .source_logical_path(source)
-                    .expect("source path should remain"),
-                &mut Vec::new(),
-            ),
-            logical_path
-        );
-    }
-    assert_eq!(messages.error_count(), 1);
-    drop(weak_alias);
-}
-
-#[test]
-fn failed_freeze_retains_warnings_causes_and_source_contents_before_appending_failure() {
-    let mut messages = colliding_owner_messages(
-        "warning-name",
-        "WarningType",
-        Path::new("/project/main.moth"),
-        "original source contents",
-        "foreign warning contents",
-    );
-    for diagnostic in &mut messages.diagnostics {
-        diagnostic.severity = DiagnosticSeverity::Warning;
-    }
-    let diagnostics = messages.diagnostic_slice().to_vec();
-    let original_causes = [
-        CompilerError::file_error(Path::new("original.moth"), "original file failure"),
-        CompilerError::compiler_error("original compiler failure"),
-    ];
-    for cause in &original_causes {
-        messages.set_infrastructure_error(cause.clone());
-    }
-    // An alias outside the message vessel makes move-only freezing fail on every platform.
-    let external_alias = Arc::clone(&messages.render_source_contexts[0].source_database);
-    messages.set_source_database(Arc::clone(&external_alias));
-    let freeze_error = messages
-        .freeze_source_contexts()
-        .expect_err("external alias must block freeze");
-    assert_eq!(messages.diagnostic_slice(), diagnostics);
-    assert_infrastructure_causes(&messages, &original_causes);
-    let mut expected = original_causes.to_vec();
-    expected.push(freeze_error.clone());
-    messages.set_infrastructure_error(freeze_error);
-    assert_infrastructure_causes(&messages, &expected);
-    assert_eq!(messages.warning_count(), 2);
-    assert_eq!(messages.diagnostic_slice(), diagnostics);
-    assert_eq!(
-        messages.string_table.resolve(StringId::from_index(0)),
-        "warning-name"
-    );
-    let causes = messages
-        .infrastructure_errors()
-        .expect("original causes should remain paired");
-    for index in 0..original_causes.len() {
-        assert_eq!(
-            causes
-                .source_database_for_cause(index)
-                .expect("original cause should keep its source owner after failed freeze")
-                .retained_text(SourceId::from_index(1)),
-            Some("original source contents")
-        );
-    }
-    assert_eq!(
-        messages
-            .source_database_for_diagnostic(0)
-            .expect("warning should keep its original source owner")
-            .retained_text(SourceId::from_index(1)),
-        Some("original source contents")
-    );
-}
-
-#[test]
 fn attach_rejects_foreign_domain_table_behind_rendered_path_payload() {
     // The batch's string table only knows its own domain. The candidate table was issued by
     // an independent domain whose component IDs exceed the batch's next ID, so the rendered
@@ -1011,11 +832,8 @@ fn attach_ignores_foreign_domain_table_for_diagnostics_without_path_payloads() {
         "local",
         "the incoming name must follow the non-identity string merge"
     );
-    let rendered =
-        crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
-            &messages,
-        )
-        .join("\n");
+    let failure = into_boundary_failure(messages);
+    let rendered = terse::format_terse_boundary_messages(&failure).join("\n");
     assert!(
         rendered.contains("local"),
         "path-free rendering lost its authored name after aggregation: {rendered}"
@@ -1066,11 +884,7 @@ fn attach_rejects_unresolvable_unused_path_table_node() {
 
 #[test]
 fn not_exported_by_public_surface_remaps_path_and_surface_name_after_aggregation() {
-    // The destination already owns a string at the source surface-name index. The diagnostic's
-    // requested path and public surface name must both survive the non-identity aggregation and
-    // the final frozen render boundary: the source context freezes into a FrozenIdentityContext
-    // that consumes the aggregate table, so the exact user-facing names must be asserted through
-    // the frozen owner rather than the mutable aggregate table after it is moved.
+    // Both values must survive a non-identity aggregation and final boundary conversion.
     let mut local_table = StringTable::new();
     let surface_name = local_table.intern("surface-name");
     let mut local_fork = PathInternerFork::empty();
@@ -1088,9 +902,6 @@ fn not_exported_by_public_surface_remaps_path_and_surface_name_after_aggregation
         .attach_path_table_if_missing(Arc::new(local_fork.snapshot_table()))
         .expect("requested path table must pair with the local string table");
 
-    // The aggregate table already owns the string at the source surface-name index, so the merge
-    // into it is a genuinely shifting remap. Building the frozen source domain from the aggregate
-    // table keeps the frozen path trie inside the frozen string domain.
     let mut aggregate_table = StringTable::new();
     aggregate_table.intern("collision-padding");
     let mut messages = CompilerMessages::empty(aggregate_table);
@@ -1114,50 +925,13 @@ fn not_exported_by_public_surface_remaps_path_and_surface_name_after_aggregation
         .expect("frozen source identity should build")
     };
     messages.set_source_database(Arc::new(source_database));
-    messages
-        .freeze_source_contexts()
-        .expect("aggregation should freeze the attached source context");
-    assert!(
-        messages.frozen_identity_context_for_diagnostic(0).is_some(),
-        "a real source context must freeze into an immutable identity owner"
-    );
-
-    let DiagnosticPayload::NotExportedByPublicSurface {
-        requested_path,
-        public_surface_name,
-        ..
-    } = &messages.diagnostic_slice()[0].payload
-    else {
-        panic!("expected public-surface diagnostic");
-    };
-    // The frozen context consumed the aggregate table during freezing; the surface name must
-    // resolve through that immutable owner under the destination-colliding remapped ID.
-    let frozen_identity = messages
-        .frozen_identity_context_for_diagnostic(0)
-        .expect("the frozen render boundary owns this diagnostic's strings");
-    assert_eq!(
-        frozen_identity.try_resolve_string(*public_surface_name),
-        Some("surface-name"),
-        "the surface name must follow the colliding destination string remap"
-    );
-    // Freezing consumes only string/source ownership; the remapped premerge path table remains
-    // the renderer's path owner, now resolving components through the frozen strings.
     assert!(
         messages.path_table_for_diagnostic(0).is_some(),
-        "the retained premerge path table must survive freezing to serve the rendered path"
+        "the retained path table must serve the requested path"
     );
-    assert_eq!(
-        messages
-            .diagnostic_render_context(0)
-            .render_path(*requested_path),
-        "module/root",
-        "the requested path must render exactly through the frozen identity owner"
-    );
-    let rendered =
-        crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
-            &messages,
-        )
-        .join("\n");
+    messages.mark_frozen();
+    let failure = into_boundary_failure(messages);
+    let rendered = terse::format_terse_boundary_messages(&failure).join("\n");
     assert!(
         rendered.contains("Cannot bind 'module/root' from module 'surface-name'"),
         "public-surface path/name remapping rendered incorrectly: {rendered}"
@@ -1202,11 +976,8 @@ fn attach_retains_table_for_nominal_type_render_context_without_path_payloads() 
     aggregate_table.intern("aggregate-padding");
     let mut aggregate = CompilerMessages::empty(aggregate_table);
     aggregate.append_messages_preserving_context(messages);
-    let rendered =
-        crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
-            &aggregate,
-        )
-        .join("\n");
+    let failure = into_boundary_failure(aggregate);
+    let rendered = terse::format_terse_boundary_messages(&failure).join("\n");
     assert!(
         rendered.contains("expected NominalType, found I32"),
         "nominal type rendering lost its path context after aggregation: {rendered}"
@@ -1273,11 +1044,8 @@ fn batch_attaches_table_for_nominal_type_context_and_survives_canonical_round_tr
     aggregate_table.intern("aggregate-padding");
     let mut aggregate = CompilerMessages::empty(aggregate_table);
     aggregate.append_messages_preserving_context(messages);
-    let rendered =
-        crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
-            &aggregate,
-        )
-        .join("\n");
+    let failure = into_boundary_failure(aggregate);
+    let rendered = terse::format_terse_boundary_messages(&failure).join("\n");
     assert!(
         rendered.contains("Type mismatch in assignment: expected NominalType, found I32"),
         "batch-level nominal type rendering lost its path context through the canonical \
@@ -1370,11 +1138,6 @@ fn compiler_messages_preserve_type_context_ranges_when_prepending_and_appending(
         .expect("test path tables must pair with the test string table");
 
     first_messages.append_messages_preserving_context(second_messages);
-    let rendered =
-        crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
-            &first_messages,
-        );
-
     assert_eq!(
         first_messages.render_type_contexts()[0].diagnostic_range,
         1..2
@@ -1383,6 +1146,8 @@ fn compiler_messages_preserve_type_context_ranges_when_prepending_and_appending(
         first_messages.render_type_contexts()[1].diagnostic_range,
         2..3
     );
+    let failure = into_boundary_failure(first_messages);
+    let rendered = terse::format_terse_boundary_messages(&failure);
     assert!(
         rendered[0].contains("expected Point, found I32"),
         "errors should render before warnings; first rendered line should be the Point error, got: {}",
@@ -1392,509 +1157,6 @@ fn compiler_messages_preserve_type_context_ranges_when_prepending_and_appending(
         rendered[1].contains("expected Status, found String"),
         "second rendered line should be the Status error, got: {}",
         rendered[1]
-    );
-}
-
-#[test]
-fn append_preserves_frozen_and_remaps_unfrozen_string_and_type_owners() {
-    let mut frozen_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let frozen_name = frozen_table.intern("frozen-name");
-    let frozen_path = path_fork
-        .try_intern_portable_path("FrozenType", &mut frozen_table)
-        .expect("test path fits");
-    let frozen_registration =
-        SourceRegistrationIndex::from_rows(std::iter::empty::<(&Path, SourceKind)>());
-    let frozen_sources =
-        SourceDatabase::from_registration_index_sorted_by_logical_path_with_path_builder(
-            &frozen_registration,
-            Path::new("frozen.moth"),
-            None,
-            &mut frozen_table,
-            path_fork.clone_path_builder(),
-        )
-        .expect("frozen identity path table should build");
-    let frozen_identity = Arc::new(FrozenIdentityContext::from_parts(
-        frozen_table.clone(),
-        frozen_sources,
-    ));
-
-    let make_frozen_messages = || {
-        let local_table = frozen_table.clone();
-        let mut type_environment = TypeEnvironment::new();
-        let (_, frozen_type) = type_environment.register_nominal_struct(StructTypeDefinition {
-            id: NominalTypeId(0),
-            path: frozen_path,
-            fields: Box::new([]),
-            generic_parameters: None,
-            const_record: false,
-        });
-        let diagnostics = vec![
-            CompilerDiagnostic::unknown_value_name(frozen_name, None),
-            CompilerDiagnostic::type_mismatch(
-                frozen_type,
-                builtin_type_ids::fixed_scalar(FixedScalar::I32),
-                TypeMismatchContext::Assignment,
-                None,
-            ),
-        ];
-        let mut messages = CompilerMessages::from_diagnostics(diagnostics, local_table)
-            .with_type_context_for_all_diagnostics(type_environment);
-        messages.render_frozen_contexts.push(RenderFrozenContext {
-            diagnostic_range: 0..2,
-            identity: Arc::clone(&frozen_identity),
-        });
-        messages
-    };
-
-    let make_unfrozen_messages = || {
-        let mut local_table = StringTable::new();
-        let mut path_fork = PathInternerFork::empty();
-        let unfrozen_name = local_table.intern("unfrozen-name");
-        let unfrozen_path = path_fork
-            .try_intern_portable_path("UnfrozenType", &mut local_table)
-            .expect("test path fits");
-        let mut type_environment = TypeEnvironment::new();
-        let (_, unfrozen_type) = type_environment.register_nominal_struct(StructTypeDefinition {
-            id: NominalTypeId(0),
-            path: unfrozen_path,
-            fields: Box::new([]),
-            generic_parameters: None,
-            const_record: false,
-        });
-        let mut messages = CompilerMessages::from_diagnostics(
-            vec![
-                CompilerDiagnostic::unknown_value_name(unfrozen_name, None),
-                CompilerDiagnostic::type_mismatch(
-                    unfrozen_type,
-                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
-                    TypeMismatchContext::Assignment,
-                    None,
-                ),
-            ],
-            local_table,
-        )
-        .with_type_context_for_all_diagnostics(type_environment);
-        messages
-            .attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()))
-            .expect("test path tables must pair with the test string table");
-        messages
-    };
-
-    let make_mixed_messages = || {
-        let mut messages = make_frozen_messages();
-        messages.append_messages_preserving_context(make_unfrozen_messages());
-        messages
-    };
-
-    let mut standalone_messages = make_mixed_messages();
-    let mut standalone_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    standalone_table.intern("standalone-collision");
-    let standalone_remap = standalone_table.merge_from(standalone_messages.string_table.as_ref());
-    standalone_messages.remap_string_ids(&standalone_remap);
-    *standalone_messages.string_table = standalone_table;
-    let standalone_rendered =
-        crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
-            &standalone_messages,
-        )
-        .join("\n");
-    assert!(
-        standalone_rendered.contains("frozen-name"),
-        "{standalone_rendered}"
-    );
-    assert!(
-        standalone_rendered.contains("unfrozen-name"),
-        "{standalone_rendered}"
-    );
-    assert!(
-        standalone_rendered.contains("expected FrozenType"),
-        "{standalone_rendered}"
-    );
-    assert!(
-        standalone_rendered.contains("expected UnfrozenType"),
-        "{standalone_rendered}"
-    );
-
-    let mut aggregate_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    aggregate_table.intern("aggregate-collision");
-    let mut messages = CompilerMessages::empty(aggregate_table);
-    messages.append_messages_preserving_context(standalone_messages);
-    // Repeat the same mixed-owner append. The second merge is non-identity for both local
-    // tables, so this checks that ownership survives more than one aggregation step.
-    messages.append_messages_preserving_context(make_mixed_messages());
-
-    assert_eq!(
-        messages
-            .render_type_contexts()
-            .iter()
-            .map(|context| context.diagnostic_range.clone())
-            .collect::<Vec<_>>(),
-        vec![0..2, 2..4, 4..6, 6..8]
-    );
-    assert_eq!(
-        messages
-            .render_frozen_contexts
-            .iter()
-            .map(|context| context.diagnostic_range.clone())
-            .collect::<Vec<_>>(),
-        vec![0..2, 4..6]
-    );
-
-    let frozen_name_id = StringId::from_index(0);
-    assert_eq!(
-        messages.string_table.resolve(frozen_name_id),
-        "aggregate-collision"
-    );
-    for diagnostic_index in [0, 4] {
-        let DiagnosticPayload::UnknownName { name, .. } =
-            &messages.diagnostic_slice()[diagnostic_index].payload
-        else {
-            panic!("expected frozen unknown-name diagnostic");
-        };
-        assert_eq!(*name, frozen_name_id);
-        assert_eq!(
-            messages
-                .frozen_identity_context_for_diagnostic(diagnostic_index)
-                .expect("frozen diagnostic owner")
-                .try_resolve_string(*name),
-            Some("frozen-name")
-        );
-    }
-    for diagnostic_index in [2, 6] {
-        let DiagnosticPayload::UnknownName { name, .. } =
-            &messages.diagnostic_slice()[diagnostic_index].payload
-        else {
-            panic!("expected unfrozen unknown-name diagnostic");
-        };
-        assert_eq!(messages.string_table.resolve(*name), "unfrozen-name");
-    }
-
-    let rendered =
-        crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
-            &messages,
-        )
-        .join("\n");
-    assert!(rendered.contains("frozen-name"), "{rendered}");
-    assert!(rendered.contains("unfrozen-name"), "{rendered}");
-    assert!(rendered.contains("expected FrozenType"), "{rendered}");
-    assert!(rendered.contains("expected UnfrozenType"), "{rendered}");
-}
-
-#[test]
-fn append_and_remap_keep_frozen_path_tables_in_owner_domain() {
-    let mut frozen_table = StringTable::new();
-    let frozen_name = frozen_table.intern("frozen-name");
-    let mut frozen_path_fork = PathInternerFork::empty();
-    frozen_path_fork
-        .try_intern_portable_path("FrozenType", &mut frozen_table)
-        .expect("test path fits");
-    let frozen_registration =
-        SourceRegistrationIndex::from_rows(std::iter::empty::<(&Path, SourceKind)>());
-    let frozen_sources =
-        SourceDatabase::from_registration_index_sorted_by_logical_path_with_path_builder(
-            &frozen_registration,
-            Path::new("frozen.moth"),
-            None,
-            &mut frozen_table,
-            frozen_path_fork.clone_path_builder(),
-        )
-        .expect("frozen identity path table should build");
-    let frozen_identity = Arc::new(FrozenIdentityContext::from_parts(
-        frozen_table.clone(),
-        frozen_sources,
-    ));
-
-    // One local message set whose single path table serves both owner domains: rows 0..2 are
-    // frozen facts and rows 2..4 are premerge facts extending the same cloned string table.
-    let make_mixed_messages = || {
-        let mut local_table = frozen_table.clone();
-        let mut path_fork = PathInternerFork::empty();
-        let frozen_path = path_fork
-            .try_intern_portable_path("FrozenType", &mut local_table)
-            .expect("test path fits");
-        let unfrozen_name = local_table.intern("unfrozen-name");
-        let unfrozen_path = path_fork
-            .try_intern_portable_path("UnfrozenType", &mut local_table)
-            .expect("test path fits");
-        let diagnostics = vec![
-            CompilerDiagnostic::missing_import_target(frozen_path, None),
-            CompilerDiagnostic::unknown_value_name(frozen_name, None),
-            CompilerDiagnostic::missing_import_target(unfrozen_path, None),
-            CompilerDiagnostic::unknown_value_name(unfrozen_name, None),
-        ];
-        let mut messages = CompilerMessages::from_diagnostics(diagnostics, local_table);
-        messages
-            .attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()))
-            .expect("test path tables must pair with the test string table");
-        messages.render_frozen_contexts.push(RenderFrozenContext {
-            diagnostic_range: 0..2,
-            identity: Arc::clone(&frozen_identity),
-        });
-        messages
-    };
-
-    let assert_owner_paths_render = |rendered: &str| {
-        assert!(
-            rendered.contains("Cannot resolve dependency 'FrozenType'."),
-            "{rendered}"
-        );
-        assert!(
-            rendered.contains("Cannot resolve dependency 'UnfrozenType'."),
-            "{rendered}"
-        );
-        assert!(rendered.contains("frozen-name"), "{rendered}");
-        assert!(rendered.contains("unfrozen-name"), "{rendered}");
-    };
-
-    let mut standalone_messages = make_mixed_messages();
-    let mut standalone_table = StringTable::new();
-    standalone_table.intern("standalone-collision");
-    let standalone_remap = standalone_table.merge_from(standalone_messages.string_table.as_ref());
-    standalone_messages.remap_string_ids(&standalone_remap);
-    *standalone_messages.string_table = standalone_table;
-    let standalone_rendered =
-        crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
-            &standalone_messages,
-        )
-        .join("\n");
-    assert_owner_paths_render(&standalone_rendered);
-
-    let mut aggregate_table = StringTable::new();
-    aggregate_table.intern("aggregate-collision");
-    let mut messages = CompilerMessages::empty(aggregate_table);
-    messages.append_messages_preserving_context(make_mixed_messages());
-    let rendered =
-        crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
-            &messages,
-        )
-        .join("\n");
-    assert_owner_paths_render(&rendered);
-}
-
-fn colliding_owner_messages(
-    name: &str,
-    type_name: &str,
-    primary: &Path,
-    primary_text: &str,
-    foreign_text: &str,
-) -> CompilerMessages {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let name_id = string_table.intern(name);
-    assert_eq!(name_id, StringId::from_index(0));
-    let type_path = path_fork
-        .try_intern_portable_path(type_name, &mut string_table)
-        .expect("test path fits");
-
-    let registration = SourceRegistrationIndex::from_rows(std::iter::once((
-        primary,
-        SourceKind::Compiler(SourceFileKind::Moth),
-    )));
-    let mut source_database =
-        SourceDatabase::from_registration_index_sorted_by_logical_path_with_path_builder(
-            &registration,
-            primary,
-            None,
-            &mut string_table,
-            path_fork.clone_path_builder(),
-        )
-        .expect("colliding owner source identities should build");
-    let primary_source = source_database
-        .get_by_canonical_path(primary)
-        .expect("colliding owner entry should be registered")
-        .id;
-    assert_eq!(primary_source, SourceId::from_index(1));
-    source_database
-        .retain_text(primary_source, primary_text.to_owned())
-        .expect("colliding owner source text should be retained");
-
-    let mut foreign_table = StringTable::new();
-    let path_fork = PathInternerFork::empty();
-    let foreign_path = Path::new("/package/foreign.moth");
-    let foreign_registration = SourceRegistrationIndex::from_rows(std::iter::once((
-        foreign_path,
-        SourceKind::Compiler(SourceFileKind::Moth),
-    )));
-    let mut foreign_database =
-        SourceDatabase::from_registration_index_sorted_by_logical_path_with_path_builder(
-            &foreign_registration,
-            foreign_path,
-            None,
-            &mut foreign_table,
-            path_fork.clone_path_builder(),
-        )
-        .expect("foreign source identities should build");
-    let foreign_source = foreign_database
-        .get_by_canonical_path(foreign_path)
-        .expect("foreign source should be registered")
-        .id;
-    assert_eq!(
-        foreign_source, primary_source,
-        "independently built domains should exercise colliding SourceIds"
-    );
-    foreign_database
-        .retain_text(foreign_source, foreign_text.to_owned())
-        .expect("foreign source text should be retained");
-    let foreign_handle = FrozenIdentityHandle::new();
-    foreign_handle
-        .install(Arc::new(FrozenIdentityContext::from_parts(
-            foreign_table,
-            foreign_database,
-        )))
-        .expect("foreign identity should install once");
-
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let primary_span = Some(exact_span(primary_source, 0, 1, &mut span_builder));
-    let foreign_span = exact_span(foreign_source, 0, 1, &mut span_builder);
-
-    let mut type_environment = TypeEnvironment::new();
-    let (_, expected_type) = type_environment.register_nominal_struct(StructTypeDefinition {
-        id: NominalTypeId(0),
-        path: type_path,
-        fields: Box::new([]),
-        generic_parameters: None,
-        const_record: false,
-    });
-    let duplicate_name = CompilerDiagnostic::duplicate_declaration(name_id, None, primary_span)
-        .with_labels(vec![DiagnosticLabel::secondary_with_frozen_identity(
-            Some(foreign_span),
-            Some(DiagnosticLabelMessage::PreviousDeclaration),
-            foreign_handle,
-        )]);
-    let type_mismatch = CompilerDiagnostic::type_mismatch(
-        expected_type,
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        TypeMismatchContext::Assignment,
-        primary_span,
-    );
-
-    let mut messages =
-        CompilerMessages::from_diagnostics(vec![duplicate_name, type_mismatch], string_table)
-            .with_type_context_for_all_diagnostics(type_environment);
-    messages.set_source_database(Arc::new(source_database));
-    messages
-}
-
-fn assert_foreign_secondary_site(messages: &CompilerMessages, diagnostic_index: usize, line: &str) {
-    let diagnostic = &messages.diagnostic_slice()[diagnostic_index];
-    let position = messages
-        .diagnostic_render_context(diagnostic_index)
-        .label_position(&diagnostic.labels[0])
-        .expect("foreign secondary site should resolve through its installed owner");
-    assert_eq!(position.line, line);
-}
-
-struct MixedFreezeExpectation<'a> {
-    first_name: &'a str,
-    second_name: &'a str,
-    first_type: &'a str,
-    second_type: &'a str,
-    first_foreign_line: &'a str,
-    second_foreign_line: &'a str,
-}
-
-fn assert_mixed_freeze_keeps_originating_owners(
-    first: CompilerMessages,
-    second: CompilerMessages,
-    expected: MixedFreezeExpectation<'_>,
-) {
-    let first_len = first.diagnostic_slice().len();
-    let mut messages = first;
-    messages.append_messages_preserving_context(second);
-    messages
-        .freeze_source_contexts()
-        .expect("mixed frozen and transitional owners should freeze together");
-
-    let first_identity = messages
-        .frozen_identity_context_for_diagnostic(0)
-        .expect("first diagnostic should keep its originating frozen owner");
-    assert_eq!(
-        first_identity.try_resolve_string(StringId::from_index(0)),
-        Some(expected.first_name)
-    );
-    assert_foreign_secondary_site(&messages, 0, expected.first_foreign_line);
-
-    let second_identity = messages
-        .frozen_identity_context_for_diagnostic(first_len)
-        .expect("appended diagnostic should keep its originating frozen owner");
-    assert_eq!(
-        second_identity.try_resolve_string(StringId::from_index(0)),
-        Some(expected.second_name)
-    );
-    assert_foreign_secondary_site(&messages, first_len, expected.second_foreign_line);
-
-    let rendered =
-        crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
-            &messages,
-        )
-        .join("\n");
-    assert!(rendered.contains(expected.first_name), "{rendered}");
-    assert!(rendered.contains(expected.second_name), "{rendered}");
-    assert!(rendered.contains(expected.first_type), "{rendered}");
-    assert!(rendered.contains(expected.second_type), "{rendered}");
-}
-
-#[test]
-fn freeze_keeps_existing_frozen_owners_when_later_rows_still_need_conversion() {
-    let primary = Path::new("/project/main.moth");
-
-    let mut frozen = colliding_owner_messages(
-        "frozen-name",
-        "FrozenType",
-        primary,
-        "frozen_primary_alpha",
-        "frozen_foreign_omega",
-    );
-    frozen
-        .freeze_source_contexts()
-        .expect("frozen owner should freeze before mixed aggregation");
-    assert_mixed_freeze_keeps_originating_owners(
-        frozen,
-        colliding_owner_messages(
-            "mutable-name",
-            "MutableType",
-            primary,
-            "mutable_primary_gamma",
-            "mutable_foreign_delta",
-        ),
-        MixedFreezeExpectation {
-            first_name: "frozen-name",
-            second_name: "mutable-name",
-            first_type: "FrozenType",
-            second_type: "MutableType",
-            first_foreign_line: "frozen_foreign_omega",
-            second_foreign_line: "mutable_foreign_delta",
-        },
-    );
-    let mut frozen = colliding_owner_messages(
-        "frozen-name",
-        "FrozenType",
-        primary,
-        "frozen_primary_alpha",
-        "frozen_foreign_omega",
-    );
-    frozen
-        .freeze_source_contexts()
-        .expect("frozen owner should freeze before mixed aggregation");
-    assert_mixed_freeze_keeps_originating_owners(
-        colliding_owner_messages(
-            "mutable-name",
-            "MutableType",
-            primary,
-            "mutable_primary_gamma",
-            "mutable_foreign_delta",
-        ),
-        frozen,
-        MixedFreezeExpectation {
-            first_name: "mutable-name",
-            second_name: "frozen-name",
-            first_type: "MutableType",
-            second_type: "FrozenType",
-            first_foreign_line: "mutable_foreign_delta",
-            second_foreign_line: "frozen_foreign_omega",
-        },
     );
 }
 
@@ -3467,12 +2729,6 @@ fn render_boundary_smoke_coverage_hides_internal_debug_names_by_family() {
             span(source_path),
         ),
         CompilerDiagnostic::missing_import_target(import_path, span(source_path)),
-        borrow_conflict_diagnostic(
-            DiagnosticPlace::Local(value_name),
-            BorrowAccessKind::Shared,
-            BorrowAccessKind::Mutable,
-            span(source_path),
-        ),
         CompilerDiagnostic::invalid_config_reason(
             Some(config_key),
             InvalidConfigReason::UnsupportedScalarValue,
@@ -4310,37 +3566,6 @@ fn token_diagnostics_render_source_spelling_not_token_debug_names() {
         !expected_terse.contains("OpenParenthesis") && !expected_terse.contains("Symbol"),
         "{expected_terse}"
     );
-}
-
-#[test]
-fn borrow_conflict_rendering_hides_payload_debug_names() {
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let value_name = string_table.intern("value");
-    let span = None;
-
-    let diagnostic = borrow_conflict_diagnostic(
-        DiagnosticPlace::Local(value_name),
-        BorrowAccessKind::Shared,
-        BorrowAccessKind::Mutable,
-        span,
-    );
-
-    let render_context = DiagnosticRenderContext::new(&string_table);
-    let terminal_guidance =
-        terminal::format_diagnostic_guidance(&diagnostic, render_context).join("\n");
-    let terse_line = terse::format_terse_diagnostic_with_context(&diagnostic, render_context);
-
-    assert!(
-        terminal_guidance
-            .contains("existing shared access conflicts with requested mutable access"),
-        "{terminal_guidance}"
-    );
-    assert!(
-        !terminal_guidance.contains("DiagnosticPlace") && !terminal_guidance.contains("Shared"),
-        "{terminal_guidance}"
-    );
-    assert!(!terse_line.contains("BorrowConflict"), "{terse_line}");
 }
 
 #[test]

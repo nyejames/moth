@@ -81,7 +81,9 @@ use crate::compiler_frontend::compiler_messages::{
     RangeOperandKind, SourceSpanCapacityResource, UnsupportedBackendFeatureReason,
 };
 use crate::compiler_frontend::compiler_messages::{DiagnosticToken, TokenDescriptorPayload};
-use crate::compiler_frontend::datatypes::display::{TypeDisplayShape, TypeDisplayView};
+use crate::compiler_frontend::datatypes::display::{
+    BOOL_TYPE_SPELLING, TypeDisplayShape, TypeDisplayView,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -528,7 +530,7 @@ pub(crate) fn unsupported_operator_types_message(
 
     let operator_spelling = operator.source_spelling();
     if operator == DiagnosticOperator::Not {
-        let expected = diagnostic_type_name(builtin_type_ids::BOOL, context);
+        let expected = BOOL_TYPE_SPELLING;
         let found = diagnostic_type_display_name(types, lhs, context);
         return format!(
             "Operator `{operator_spelling}` requires a `{expected}` operand, found `{found}`."
@@ -725,15 +727,16 @@ fn is_plain_string(types: &TypeDisplaySnapshot, type_id: TypeDisplayId) -> bool 
     }
 }
 
+/// The generic parameter an operand names, if any. A captured type answers from the snapshot; an unresolved one needs
+/// the live environment.
 fn generic_parameter_name(
     type_id: TypeDisplayId,
     types: &TypeDisplaySnapshot,
     context: DiagnosticRenderContext<'_>,
 ) -> Option<String> {
-    let type_environment = context.type_environment?;
     match types.unresolved_type_id(type_id) {
         Some(type_id) => matches!(
-            type_environment.shape(type_id),
+            context.type_environment?.shape(type_id),
             TypeDisplayShape::GenericParameter { .. }
         )
         .then(|| diagnostic_type_name(type_id, context)),

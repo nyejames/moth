@@ -32,6 +32,7 @@ pub(crate) fn borrow_access_name(access: BorrowAccessKind) -> &'static str {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn borrow_conflict_message(
     place: &DiagnosticPlace,
     existing_access: BorrowAccessKind,

@@ -13,6 +13,7 @@ use super::schema::FamilyRow;
 use super::store::{DiagnosticId, DiagnosticStore, RecordRef};
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::diagnostic_types::type_display_snapshot::TypeDisplaySnapshot;
+use crate::compiler_frontend::compiler_messages::{DiagnosticCategory, DiagnosticDescriptor};
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
 /// Decodes one stored record into a family's typed facts.
@@ -23,6 +24,11 @@ use crate::compiler_frontend::symbols::string_interning::StringId;
 /// dispatch boundary rather than producing a silently wrong message.
 pub(super) trait FamilyView: Sized {
     fn from_record(record: RecordRef<'_>) -> Option<Self>;
+
+    /// The stable reason key of the decoded record; families without a reason fact report `None`.
+    fn reason_key(&self) -> Option<&'static str> {
+        None
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -80,4 +86,23 @@ impl<'a> DiagnosticView<'a> {
     pub(super) fn family_view<View: FamilyView>(&self) -> Option<View> {
         View::from_record(self.record)
     }
+
+    pub(crate) fn descriptor(&self) -> &'static DiagnosticDescriptor {
+        &self.family.descriptor
+    }
+
+    pub(crate) fn category(&self) -> DiagnosticCategory {
+        self.family.category
+    }
+
+    pub(crate) fn reason_key(&self) -> Option<&'static str> {
+        (self.family.reason_key)(self)
+    }
+}
+
+/// Reads one family's reason key through its typed view; each family row points at this instantiation.
+pub(super) fn reason_key_through<View: FamilyView>(
+    view: &DiagnosticView<'_>,
+) -> Option<&'static str> {
+    view.family_view::<View>()?.reason_key()
 }

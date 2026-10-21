@@ -6,23 +6,25 @@
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::BuiltinFailureWitness;
+#[cfg(test)]
+use crate::compiler_frontend::compiler_messages::DiagnosticIdentity;
 use crate::compiler_frontend::compiler_messages::{
     BorrowAccessKind, BorrowDiagnosticKind, BuiltinFailureOriginKind, CapacityResource,
     ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason, ConfigDiagnosticKind,
     DeferredFeatureDiagnosticKind, DeferredFeatureReason, DependencyClauseKind, DiagnosticBag,
-    DiagnosticIdentity, DiagnosticKind, DiagnosticLabel, DiagnosticLabelMessage,
-    DiagnosticOperator, DiagnosticPayload, DiagnosticPlace, DiagnosticSeverity, DiagnosticToken,
-    GenericApplicationErrorReason, GenericInferenceSubject, ImportDiagnosticKind,
-    ImportPublicSurfaceType, IncompatibleChoiceComparisonReason, InvalidCastReason,
-    InvalidChoiceVariantReason, InvalidCollectionTypeReason, InvalidCompileTimePathReason,
-    InvalidConfigReason, InvalidDependencyClauseReason, InvalidExpressionReason,
-    InvalidExternalModuleReason, InvalidFallibleHandlingReason, InvalidFunctionSignatureReason,
-    InvalidGenericParameterReason, InvalidImportPathReason, InvalidLoopHeaderReason,
-    InvalidMapLiteralReason, InvalidMapTypeReason, InvalidMatchArmReason,
-    InvalidMutableAccessReason, InvalidPageMetadataReason, InvalidParameterContractReason,
-    InvalidRangeOperandReason, InvalidRouteOutputReason, InvalidSignatureMemberReason,
-    InvalidStandaloneStatementReason, InvalidStatementPositionReason, InvalidStringEscapeReason,
-    InvalidTemplateDirectiveReason, InvalidTemplateStructureReason, InvalidTraitConformanceReason,
+    DiagnosticKind, DiagnosticLabel, DiagnosticLabelMessage, DiagnosticOperator, DiagnosticPayload,
+    DiagnosticPlace, DiagnosticSeverity, DiagnosticToken, GenericApplicationErrorReason,
+    GenericInferenceSubject, ImportDiagnosticKind, ImportPublicSurfaceType,
+    IncompatibleChoiceComparisonReason, InvalidCastReason, InvalidChoiceVariantReason,
+    InvalidCollectionTypeReason, InvalidCompileTimePathReason, InvalidConfigReason,
+    InvalidDependencyClauseReason, InvalidExpressionReason, InvalidExternalModuleReason,
+    InvalidFallibleHandlingReason, InvalidFunctionSignatureReason, InvalidGenericParameterReason,
+    InvalidImportPathReason, InvalidLoopHeaderReason, InvalidMapLiteralReason,
+    InvalidMapTypeReason, InvalidMatchArmReason, InvalidMutableAccessReason,
+    InvalidPageMetadataReason, InvalidParameterContractReason, InvalidRangeOperandReason,
+    InvalidRouteOutputReason, InvalidSignatureMemberReason, InvalidStandaloneStatementReason,
+    InvalidStatementPositionReason, InvalidStringEscapeReason, InvalidTemplateDirectiveReason,
+    InvalidTemplateStructureReason, InvalidTraitConformanceReason,
     InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason,
     LegacyDependencyClauseReason, MalformedTemplateReason, NameNamespace,
     NamespaceTypeValueMisuseKind, NamingConvention, OperatorOperandPosition, PathKind,
@@ -2192,6 +2194,7 @@ impl CompilerDiagnostic {
     ///
     /// The descriptor remains the sole code authority and `severity` is the actual severity on
     /// this diagnostic, including deliberate overrides. The payload owns the optional reason key.
+    #[cfg(test)]
     pub(crate) fn identity(&self) -> DiagnosticIdentity {
         DiagnosticIdentity::new(self.kind.descriptor().code, self.severity, &self.payload)
     }

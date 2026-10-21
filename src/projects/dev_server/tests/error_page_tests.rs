@@ -3,7 +3,10 @@
 use super::{
     escape_html, format_compiler_messages, render_compiler_error_page, render_runtime_error_page,
 };
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::compiler_errors::{
+    BoundaryFailure, CompilerMessages,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceSpan,
@@ -11,6 +14,11 @@ use crate::compiler_frontend::source::{
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
 use std::sync::Arc;
+
+fn boundary_failure(mut messages: CompilerMessages) -> BoundaryFailure {
+    messages.mark_frozen();
+    into_boundary_failure(messages)
+}
 
 #[test]
 fn escape_html_rewrites_special_characters() {
@@ -40,7 +48,7 @@ fn formatted_compiler_messages_include_typed_diagnostics() {
     );
     let messages = CompilerMessages::from_diagnostic(diagnostic, StringTable::new());
 
-    let formatted = format_compiler_messages(&messages);
+    let formatted = format_compiler_messages(&boundary_failure(messages));
 
     assert!(formatted.contains("MOTH-CONFIG-0001"));
     assert!(formatted.contains("Unsupported value"));
@@ -85,7 +93,7 @@ fn compiler_error_page_links_to_project_relative_resolved_source_path() {
     let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
     messages.set_source_database(Arc::new(source_database));
 
-    let page = render_compiler_error_page(&messages, &root, "/docs", 7);
+    let page = render_compiler_error_page(&boundary_failure(messages), &root, "/docs", 7);
 
     // The browser card should not visibly show MOTH-* codes but should
     // carry them as data attributes for debugging.

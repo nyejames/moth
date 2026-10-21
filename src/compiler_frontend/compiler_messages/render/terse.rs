@@ -1,9 +1,15 @@
-//! Terse rendering for `CompilerDiagnostic`.
+//! Terse rendering for frozen diagnostic views.
 //!
 //! WHAT: produces single-line machine-friendly diagnostic records.
 //! WHY: CI, test runners, and IDEs often prefer compact output without ASCII art or colours.
 
-use crate::compiler_frontend::compiler_errors::{CompilerMessages, InfrastructureErrors};
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, InfrastructureErrors};
+#[cfg(test)]
+use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+#[cfg(test)]
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::compact_render_for_test;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::render::infrastructure::{
     INFRASTRUCTURE_FAILURE_CODE, ISSUE_URL, InfrastructureClass, format_error_guidance_lines,
     infrastructure_class,
@@ -13,7 +19,6 @@ use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, display_column_number, display_line_number,
     relative_display_path_from_root, terse_diagnostic_message,
 };
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
 use crate::compiler_frontend::utilities::basic::portable_path_text;
 use std::fmt::Write;
 
@@ -28,26 +33,29 @@ pub(crate) fn format_terse_diagnostics_with_context(
         .collect()
 }
 
-pub(crate) fn format_terse_compiler_messages(messages: &CompilerMessages) -> Vec<String> {
-    // The outer infrastructure failure renders as an error record beside the diagnostics,
-    // after every error diagnostic and before warnings/notes — mirroring the severity-bucket
-    // display order without fabricating a user diagnostic.
+/// Renders every record of a boundary failure. The infrastructure record follows the error records and precedes the
+/// warnings and notes, mirroring the severity-bucket order without inventing a user diagnostic.
+pub(crate) fn format_terse_boundary_messages(failure: &BoundaryFailure) -> Vec<String> {
     let mut lines = Vec::new();
-    let mut outer_emitted = messages.infrastructure_errors().is_none();
-    for diagnostic_index in messages.diagnostic_display_order() {
-        let diagnostic = &messages.diagnostic_slice()[diagnostic_index];
-        if !outer_emitted && diagnostic.severity != DiagnosticSeverity::Error {
-            if let Some(errors) = messages.infrastructure_errors() {
-                lines.push(format_terse_infrastructure_errors(errors));
-            }
-            outer_emitted = true;
+    let mut infrastructure = failure.infrastructure_errors();
+    for severity in [
+        DiagnosticSeverity::Error,
+        DiagnosticSeverity::Warning,
+        DiagnosticSeverity::Note,
+    ] {
+        if severity != DiagnosticSeverity::Error
+            && let Some(errors) = infrastructure.take()
+        {
+            lines.push(format_terse_infrastructure_errors(errors));
         }
-        lines.push(format_terse_diagnostic_with_context(
-            diagnostic,
-            messages.diagnostic_render_context(diagnostic_index),
-        ));
+        for (report, view) in failure.reports.iter_severity(severity) {
+            lines.push(format_terse_diagnostic_view(
+                view,
+                DiagnosticRenderContext::for_report(report),
+            ));
+        }
     }
-    if !outer_emitted && let Some(errors) = messages.infrastructure_errors() {
+    if let Some(errors) = infrastructure.take() {
         lines.push(format_terse_infrastructure_errors(errors));
     }
     lines
@@ -95,11 +103,12 @@ fn format_terse_infrastructure_errors(errors: &InfrastructureErrors) -> String {
     )
 }
 
-pub(crate) fn format_terse_diagnostic_with_context(
-    diagnostic: &CompilerDiagnostic,
+/// Renders one diagnostic view as a single terse record.
+pub(crate) fn format_terse_diagnostic_view(
+    view: DiagnosticView<'_>,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let subject = DiagnosticSubject::new(diagnostic, context);
+    let subject = DiagnosticSubject::new(view);
     let descriptor = subject.descriptor();
     let severity_char = match subject.severity() {
         DiagnosticSeverity::Error => 'E',
@@ -130,6 +139,15 @@ pub(crate) fn format_terse_diagnostic_with_context(
         sanitize_terse_field(&location),
         sanitize_terse_field(&message)
     )
+}
+
+#[cfg(test)]
+pub(crate) fn format_terse_diagnostic_with_context(
+    diagnostic: &CompilerDiagnostic,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    let compact = compact_render_for_test(diagnostic, context);
+    format_terse_diagnostic_view(compact.view(), context)
 }
 
 fn sanitize_terse_field(value: &str) -> String {

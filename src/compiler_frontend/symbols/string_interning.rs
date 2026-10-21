@@ -538,6 +538,34 @@ impl StringTable {
         }
     }
 
+    /// Consume this table into immutable lookup storage, flattening a module fork first.
+    ///
+    /// WHAT: a root table freezes exactly as [`Self::freeze`] does. A module fork moves its inherited
+    /// prefix when it holds the last reference to it, copies the prefix otherwise, and appends its
+    /// local suffix, so every `StringId` keeps its index.
+    /// WHY: a legacy diagnostic vessel can still hold a module fork when it reaches the boundary
+    /// converter. The canonical merge (P4.5 S4) merges every diagnostic into the build root first,
+    /// which retires this copy.
+    pub(crate) fn freeze_flattening(mut self) -> FrozenStringTable {
+        let Some(base) = self.base.take() else {
+            return self.freeze();
+        };
+        let mut strings = Vec::with_capacity(base.len() + self.strings.len());
+        match Arc::try_unwrap(base) {
+            Ok(base) => strings.extend(Vec::from(base.strings)),
+            Err(shared) => {
+                increment_frontend_counter(FrontendCounter::StringTableFullClones);
+                strings.extend(shared.strings.iter().cloned());
+            }
+        }
+        strings.append(&mut self.strings);
+        debug_assert_eq!(self.next_id as usize, strings.len());
+
+        FrozenStringTable {
+            strings: strings.into_boxed_slice(),
+        }
+    }
+
     /// Iterate over all interned strings with their IDs.
     pub fn iter(&self) -> impl Iterator<Item = (StringId, &str)> + use<'_> {
         let base_iter = self

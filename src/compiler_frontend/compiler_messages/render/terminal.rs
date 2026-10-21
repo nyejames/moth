@@ -1,25 +1,28 @@
-//! Terminal rendering for `CompilerDiagnostic`.
+//! Terminal rendering for frozen diagnostic views.
 //!
 //! WHAT: converts structured diagnostics into coloured terminal output.
 //! WHY: this is the primary human-facing render path for compiler errors and warnings.
 
+#[cfg(test)]
+use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+#[cfg(test)]
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::compact_render_for_test;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::render::subject::DiagnosticSubject;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticPrimaryPosition, DiagnosticRenderContext, ResolvedDiagnosticLabel,
     display_column_number, display_gutter_width, display_line_number, expand_tabs_for_display,
     primary_caret_padding, primary_underline_length, relative_display_path_from_root,
 };
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticLabelStyle, DiagnosticSeverity,
-};
+use crate::compiler_frontend::compiler_messages::{DiagnosticLabelStyle, DiagnosticSeverity};
 use saying::say;
 use std::path::Path;
 
-pub(crate) fn print_diagnostic_with_context(
-    diagnostic: &CompilerDiagnostic,
+pub(crate) fn print_diagnostic_view(
+    view: DiagnosticView<'_>,
     context: DiagnosticRenderContext<'_>,
 ) {
-    let subject = DiagnosticSubject::new(diagnostic, context);
+    let subject = DiagnosticSubject::new(view);
     let descriptor = subject.descriptor();
     let severity = subject.severity();
     let severity_name = severity_display_name(severity);
@@ -130,7 +133,8 @@ pub(crate) fn format_terminal_source_frame_for_test(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
 ) -> Option<String> {
-    let subject = DiagnosticSubject::new(diagnostic, context);
+    let compact = compact_render_for_test(diagnostic, context);
+    let subject = DiagnosticSubject::new(compact.view());
     let position = subject.primary_position(context)?;
     let frame = terminal_source_frame(&position)?;
     Some(format!(
@@ -144,11 +148,13 @@ pub(crate) fn format_terminal_source_frame_for_test(
     ))
 }
 
+#[cfg(test)]
 pub(crate) fn format_label_messages_with_context(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
 ) -> Vec<String> {
-    let subject = DiagnosticSubject::new(diagnostic, context);
+    let compact = compact_render_for_test(diagnostic, context);
+    let subject = DiagnosticSubject::new(compact.view());
     let root = std::env::current_dir().unwrap_or_default();
     format_label_messages_from_subject(&subject, context, &root)
 }
@@ -159,7 +165,8 @@ pub(crate) fn format_label_messages_with_context_from_root(
     context: DiagnosticRenderContext<'_>,
     root: &Path,
 ) -> Vec<String> {
-    let subject = DiagnosticSubject::new(diagnostic, context);
+    let compact = compact_render_for_test(diagnostic, context);
+    let subject = DiagnosticSubject::new(compact.view());
     format_label_messages_from_subject(&subject, context, root)
 }
 
@@ -213,11 +220,28 @@ fn format_label_messages_from_subject(
     rendered_labels
 }
 
+pub(crate) fn format_label_messages_view(
+    view: DiagnosticView<'_>,
+    context: DiagnosticRenderContext<'_>,
+) -> Vec<String> {
+    let root = std::env::current_dir().unwrap_or_default();
+    format_label_messages_from_subject(&DiagnosticSubject::new(view), context, &root)
+}
+
+pub(crate) fn format_guidance_view(
+    view: DiagnosticView<'_>,
+    context: DiagnosticRenderContext<'_>,
+) -> Vec<String> {
+    format_guidance_from_subject(&DiagnosticSubject::new(view), context)
+}
+
+#[cfg(test)]
 pub(crate) fn format_diagnostic_guidance(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
 ) -> Vec<String> {
-    let subject = DiagnosticSubject::new(diagnostic, context);
+    let compact = compact_render_for_test(diagnostic, context);
+    let subject = DiagnosticSubject::new(compact.view());
     format_guidance_from_subject(&subject, context)
 }
 

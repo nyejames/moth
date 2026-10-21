@@ -12,9 +12,13 @@
 //! MUST NOT: concatenate package artefacts into one vector with a count, place build-local
 //! `ModuleId` values inside [`CompiledModuleArtifact`], or mutate package root metadata.
 
+#[cfg(feature = "data_layout_memory_probe")]
+use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerMessages, RenderSourceContext,
 };
+#[cfg(feature = "data_layout_memory_probe")]
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::module_diagnostics::ModuleDiagnostics;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PremergeDiagnosticBatch};
 #[cfg(feature = "data_layout_memory_probe")]
@@ -26,9 +30,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::source::SourceDatabase;
 #[cfg(feature = "data_layout_memory_probe")]
-use crate::compiler_frontend::source::{
-    FrozenIdentityContext, FrozenIdentityHandle, SourceDatabaseRetentionMetrics,
-};
+use crate::compiler_frontend::source::{FrozenIdentityContext, SourceDatabaseRetentionMetrics};
 use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -1057,67 +1059,49 @@ impl FrozenRenderRetentionMetrics {
         self.source_identity_slots += metrics.source_identity_slots;
     }
 
-    /// Count only owners still reachable from the report, including live sources on freeze failure.
-    fn add_report_source_owners(&mut self, messages: &CompilerMessages) {
+    /// Count only the identity and source owners the converted boundary failure still reaches.
+    ///
+    /// WHAT: walks each report's frozen identity context, which owns its frozen source database,
+    ///       then the infrastructure causes' identity contexts and live source databases. Each
+    ///       owner is counted once, by pointer.
+    /// WHY: the returned failure is the retention owner after the build boundary drops, so the
+    ///      probe must describe only the owners its renderers can still dereference.
+    fn add_report_source_owners(&mut self, failure: &BoundaryFailure) {
         let mut identities = FxHashSet::<*const FrozenIdentityContext>::default();
         let mut add_identity = |identity: &FrozenIdentityContext| {
             if identities.insert(identity as *const FrozenIdentityContext) {
                 self.add_source(identity.retention_metrics());
             }
         };
-        for context in &messages.render_frozen_contexts {
-            add_identity(&context.identity);
+        for identity in failure.reports.contexts() {
+            add_identity(identity);
         }
-        if let Some(errors) = messages.infrastructure_errors() {
+        let causes = failure.infrastructure_errors();
+        if let Some(errors) = causes {
             for identity in errors.frozen_identities() {
                 add_identity(identity);
             }
         }
-        for diagnostic in messages.diagnostic_slice() {
-            if let Some(identity) = diagnostic
-                .primary_frozen_identity_handle
-                .as_ref()
-                .and_then(FrozenIdentityHandle::get)
-            {
-                add_identity(identity);
-            }
-            for label in &diagnostic.labels {
-                if let Some(identity) = label
-                    .frozen_identity_handle
-                    .as_ref()
-                    .and_then(FrozenIdentityHandle::get)
-                {
-                    add_identity(identity);
+        self.retained_identity_contexts = identities.len();
+        let mut live_sources = FxHashSet::<*const SourceDatabase>::default();
+        if let Some(errors) = causes {
+            for source in errors.source_databases() {
+                if live_sources.insert(Arc::as_ptr(source)) {
+                    self.add_source(source.retention_metrics());
                 }
             }
         }
-        self.retained_identity_contexts = identities.len();
-        let mut live_sources = FxHashSet::<*const SourceDatabase>::default();
-        let cause_sources = messages
-            .infrastructure_errors()
-            .into_iter()
-            .flat_map(|errors| errors.source_databases());
-        for source in messages
-            .render_source_contexts
-            .iter()
-            .map(|context| &context.source_database)
-            .chain(cause_sources)
-        {
-            if live_sources.insert(Arc::as_ptr(source)) {
-                self.add_source(source.retention_metrics());
-            }
-        }
     }
-    /// Count distinct path-table owners reachable from the returned diagnostic report.
+
+    /// Count distinct path-table owners reachable from the converted boundary failure.
     ///
-    /// WHAT: walks the exact owner set the diagnostic renderer can still dereference after the
-    ///       render tail: the frozen identity contexts behind range rows or donor-only handles,
-    ///       the explicit `RenderPathContext` tables, and any transitional
-    ///       `RenderSourceContext` table still present. Deduplication is by table pointer.
-    /// WHY: the report is the retention owner after the build boundary drops; counting
-    ///      executable-row tables instead would describe storage the returned report cannot
+    /// WHAT: walks each report's frozen identity path table, then the infrastructure causes'
+    ///       identity path tables and live source path tables. Each table is counted once, by
+    ///       pointer.
+    /// WHY: the returned failure is the retention owner after the build boundary drops; counting
+    ///      executable-row tables instead would describe storage the returned failure cannot
     ///      reach, including all-diagnosed results with no successful module at all.
-    fn add_report_path_tables(&mut self, messages: &CompilerMessages) {
+    fn add_report_path_tables(&mut self, failure: &BoundaryFailure) {
         let mut seen = FxHashSet::<usize>::default();
         let mut add = |path_table: &PathTable| {
             let address = path_table as *const PathTable as usize;
@@ -1127,44 +1111,13 @@ impl FrozenRenderRetentionMetrics {
                 self.path_table_storage_bytes += path_table.storage_bytes();
             }
         };
-        let mut add_identity = |identity: &FrozenIdentityContext| {
-            add(identity.paths());
-        };
-        for frozen_context in &messages.render_frozen_contexts {
-            add_identity(&frozen_context.identity);
+        for context in failure.reports.contexts() {
+            add(context.paths());
         }
-        if let Some(errors) = messages.infrastructure_errors() {
+        if let Some(errors) = failure.infrastructure_errors() {
             for identity in errors.frozen_identities() {
-                add_identity(identity);
+                add(identity.paths());
             }
-        }
-        for diagnostic in messages.diagnostic_slice() {
-            if let Some(identity) = diagnostic
-                .primary_frozen_identity_handle
-                .as_ref()
-                .and_then(FrozenIdentityHandle::get)
-            {
-                add_identity(identity);
-            }
-            for label in &diagnostic.labels {
-                if let Some(identity) = label
-                    .frozen_identity_handle
-                    .as_ref()
-                    .and_then(FrozenIdentityHandle::get)
-                {
-                    add_identity(identity);
-                }
-            }
-        }
-        if let Some(path_contexts) = messages.render_path_contexts.as_deref() {
-            for path_context in path_contexts {
-                add(path_context.path_table.as_ref());
-            }
-        }
-        for source_context in &messages.render_source_contexts {
-            add(source_context.source_database.paths());
-        }
-        if let Some(errors) = messages.infrastructure_errors() {
             for source in errors.source_databases() {
                 add(source.paths());
             }
@@ -1268,22 +1221,24 @@ impl ProjectFrontendCompilation {
         )
     }
 
-    /// Build the frozen-identity render-boundary message set for this outcome.
+    /// Build the render-boundary message set for this outcome.
     ///
-    /// WHAT: merges every retained local table exactly once into the caller aggregate, pairs
-    ///       each diagnostic range and infrastructure cause with its issuing source owner, then
-    ///       freezes through the shared message owner. Order is project warnings, package warnings,
-    ///       project diagnosed, package diagnosed, then transient batches and trailing messages.
-    ///       Freeze failures append to the original vessel; live source/string owners remain intact.
-    /// WHY: production build/check/benchmark render against exact snapshots without source/table
-    ///      copies or filesystem rereads, and finalisation cannot replace an earlier failure.
-    pub(crate) fn into_render_messages_with_frozen_identity(
+    /// WHAT: merges every retained local table exactly once into the caller aggregate, remaps
+    ///       mutable contexts as those tables are merged, pairs diagnostic ranges and
+    ///       infrastructure causes with their issuing source owners, then marks the vessel frozen
+    ///       for identity installation during the single boundary conversion. Order is project
+    ///       warnings, package warnings, project diagnosed, package diagnosed, then transient
+    ///       batches and trailing messages.
+    /// WHY: production renderers resolve against frozen reports without source/table copies or
+    ///      filesystem rereads; the caller converts the returned vessel once to a
+    ///      `BoundaryFailure` before rendering.
+    pub(crate) fn into_render_messages(
         self,
         string_table: &mut StringTable,
         project_source: Option<Arc<SourceDatabase>>,
         trailing_project_messages: Option<CompilerMessages>,
     ) -> CompilerMessages {
-        self.into_render_messages_with_optional_retention(
+        self.into_render_messages_with_retention(
             string_table,
             project_source,
             trailing_project_messages,
@@ -1291,21 +1246,31 @@ impl ProjectFrontendCompilation {
         .0
     }
 
+    /// Convert this outcome once to the boundary failure and count the probe owners it reaches.
+    ///
+    /// WHAT: builds the render-boundary vessel, converts it once with `into_boundary_failure`, and
+    ///       counts the identity contexts, path tables and source owners of the converted reports.
+    /// WHY: the probe must measure the owners the returned `BoundaryFailure` can still dereference,
+    ///      not the vessel state the converter consumes.
     #[cfg(feature = "data_layout_memory_probe")]
-    pub(crate) fn into_render_messages_with_frozen_identity_and_metrics(
+    pub(crate) fn into_render_messages_and_metrics(
         self,
         string_table: &mut StringTable,
         project_source: Option<Arc<SourceDatabase>>,
         trailing_project_messages: Option<CompilerMessages>,
-    ) -> (CompilerMessages, FrozenRenderRetentionMetrics) {
-        self.into_render_messages_with_optional_retention(
+    ) -> (BoundaryFailure, FrozenRenderRetentionMetrics) {
+        let (messages, mut retention) = self.into_render_messages_with_retention(
             string_table,
             project_source,
             trailing_project_messages,
-        )
+        );
+        let failure = into_boundary_failure(messages);
+        retention.add_report_source_owners(&failure);
+        retention.add_report_path_tables(&failure);
+        (failure, retention)
     }
 
-    fn into_render_messages_with_optional_retention(
+    fn into_render_messages_with_retention(
         self,
         string_table: &mut StringTable,
         project_source: Option<Arc<SourceDatabase>>,
@@ -1424,7 +1389,7 @@ impl ProjectFrontendCompilation {
         }
 
         #[cfg(feature = "data_layout_memory_probe")]
-        let mut retention = {
+        let retention = {
             let mut retention = FrozenRenderRetentionMetrics::from_ledger(ledger_snapshot);
             retention.diagnostic_records = messages.diagnostic_slice().len();
             retention.diagnostic_label_slots = messages
@@ -1459,13 +1424,9 @@ impl ProjectFrontendCompilation {
                     (Some(source), Some(package)) => {
                         (source.as_ref(), Some(package.package_identity.clone()))
                     }
-                    _ => {
-                        messages.set_infrastructure_error(CompilerError::compiler_error(format!(
-                            "diagnostic range references missing source package identity index {index}",
-                        )));
-                        can_freeze = false;
-                        continue;
-                    }
+                    _ => panic!(
+                        "diagnostic range references missing source package identity index {index}"
+                    ),
                 },
                 None => (project_source.as_ref(), None),
             };
@@ -1505,13 +1466,8 @@ impl ProjectFrontendCompilation {
             }
         }
         messages.install_source_contexts(source_contexts, 0);
-        if can_freeze && let Err(error) = messages.freeze_source_contexts() {
-            messages.set_infrastructure_error(error);
-        }
-        #[cfg(feature = "data_layout_memory_probe")]
-        {
-            retention.add_report_source_owners(&messages);
-            retention.add_report_path_tables(&messages);
+        if can_freeze {
+            messages.mark_frozen();
         }
         (messages, retention)
     }

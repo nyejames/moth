@@ -856,6 +856,7 @@ diagnostic_family! {
         labels: [LabelMessageCode::GENERIC_INFERENCE_PREVIOUS_EVIDENCE],
         extra: StringIds,
         ctor: manual,
+        reason_key: shape,
         view: InvalidGenericInstantiationView,
         render: render_invalid_generic_instantiation,
     }
@@ -872,6 +873,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: generated invalid_generic_application,
+        reason_key: reason,
         view: InvalidGenericApplicationView,
         render: render_invalid_generic_application,
     }
@@ -888,6 +890,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: code,
         view: InvalidGenericParameterView,
         render: render_invalid_generic_parameter,
     }
@@ -908,6 +911,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: code,
         view: InvalidParameterContractView,
         render: render_invalid_parameter_contract,
     }
@@ -924,6 +928,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: code,
         view: InvalidThisUsageView,
         render: render_invalid_this_usage,
     }
@@ -944,6 +949,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: code,
         view: InvalidReceiverDeclarationView,
         render: render_invalid_receiver_declaration,
     }
@@ -960,6 +966,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: code,
         view: InvalidFunctionSignatureView,
         render: render_invalid_function_signature,
     }
@@ -1468,6 +1475,7 @@ diagnostic_family! {
         ],
         extra: StringIds,
         ctor: manual,
+        reason_key: shape,
         view: InvalidTraitConformanceView,
         render: render_invalid_trait_conformance,
     }
@@ -1520,6 +1528,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: generated invalid_trait_keyword_usage,
+        reason_key: reason,
         view: InvalidTraitKeywordUsageView,
         render: render_invalid_trait_keyword_usage,
     }
@@ -1620,6 +1629,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: generated invalid_trait_incompatibility,
+        reason_key: reason,
         view: InvalidTraitIncompatibilityView,
         render: render_invalid_trait_incompatibility,
     }

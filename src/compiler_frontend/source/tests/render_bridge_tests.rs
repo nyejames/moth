@@ -4,7 +4,8 @@ use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::builder_surface::SourceFileKindRegistry;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
-use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::render::dev_server::render_boundary_messages_html;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -88,7 +89,8 @@ fn source_span_selects_exact_source_when_logical_paths_are_ambiguous() {
     let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
     messages.set_source_database(Arc::new(database));
 
-    let rendered = render_compiler_messages_html(&messages, temporary_directory.path());
+    let failure = into_boundary_failure(messages);
+    let rendered = render_boundary_messages_html(&failure, temporary_directory.path());
     assert!(
         !rendered.contains("root config snapshot"),
         "the exact source span must not render the colliding root source: {rendered}"

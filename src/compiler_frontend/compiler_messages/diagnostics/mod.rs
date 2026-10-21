@@ -11,7 +11,7 @@ mod extras;
 mod facts;
 pub(crate) mod families;
 pub(crate) mod foreign;
-mod freeze;
+pub(crate) mod freeze;
 pub(crate) mod labels;
 pub(crate) mod legacy_adapter;
 mod record;

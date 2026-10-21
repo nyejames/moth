@@ -9,10 +9,11 @@ use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
+use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, diagnostic_type_name,
 };
-use crate::compiler_frontend::compiler_messages::{DiagnosticLabelMessage, DiagnosticPayload};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::blocks::HirBlock;
@@ -2138,27 +2139,53 @@ fn completed_service_diagnoses_retained_generic_assertion_and_custom_catch_sites
         for (source, assertion) in [(assertion_source, true), (catch_source, false)] {
             let (frontend, mut strings) = compile_owned_service_fixture(source, single_file, &[]);
             assert!(frontend.has_diagnosed_or_blocked());
-            let messages =
-                frontend.into_render_messages_with_frozen_identity(&mut strings, None, None);
-            let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
-            assert_eq!(diagnostics.len(), 1);
-            let diagnostic = diagnostics[0];
-            let context = messages.diagnostic_render_context(0);
-            let identity = messages
-                .frozen_identity_context_for_diagnostic(0)
-                .expect("the retained diagnosis owns its compiled source snapshot");
-            let span_start = |span: Option<SourceSpan>| {
-                span.expect("the diagnosed semantic site retains an exact source span")
-                    .byte_range(identity)
-                    .start() as usize
+            let messages = frontend.into_render_messages(&mut strings, None, None);
+            let failure = into_boundary_failure(messages);
+            assert_eq!(failure.error_count(), 1);
+            let (report, view) = failure
+                .reports
+                .iter_severity(
+                    crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error,
+                )
+                .next()
+                .expect("concrete generated failure should retain one diagnostic");
+            let expected_reason_key = if assertion {
+                "invalid_fallible_handling.assertion_message_cannot_escape"
+            } else {
+                "invalid_fallible_handling.custom_error_mixed_with_implicit_failure"
+            };
+            assert_eq!(view.reason_key(), Some(expected_reason_key));
+            let identity = report.context();
+            let context = DiagnosticRenderContext::for_report(report);
+            let primary_site = view.primary_site();
+            let span_start = |site: crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef<'_>| {
+                match site {
+                    crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(span) => {
+                        span.byte_range(identity).start() as usize
+                    }
+                    crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+                        span,
+                        context,
+                    } => span
+                        .byte_range(context.get().expect("foreign site identity should be installed"))
+                        .start() as usize,
+                    crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent => {
+                        panic!("the diagnosed semantic site retains an exact source span")
+                    }
+                }
+            };
+            let source_id = match primary_site {
+                crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(span)
+                | crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+                    span,
+                    ..
+                } => span.source(),
+                crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent => {
+                    panic!("the source diagnosis retains its primary source")
+                }
             };
             let snapshot = identity
-                .line_index(
-                    diagnostic
-                        .primary_span
-                        .expect("the source diagnosis retains its primary source")
-                        .source(),
-                )
+                .line_index(source_id)
                 .expect("the completed diagnosis retains its source line index");
             assert_eq!(
                 (0..snapshot.line_count())
@@ -2168,73 +2195,57 @@ fn completed_service_diagnoses_retained_generic_assertion_and_custom_catch_sites
                     .collect::<Vec<_>>(),
                 source.lines().collect::<Vec<_>>()
             );
-            let DiagnosticPayload::InvalidFallibleHandling { reason } = &diagnostic.payload else {
-                panic!("concrete generated failure must diagnose its retained boundary fact");
-            };
             if assertion {
                 assert_eq!(
-                    *reason,
-                    InvalidFallibleHandlingReason::AssertionMessageCannotEscape
-                );
-                assert_eq!(
-                    span_start(diagnostic.primary_span),
+                    span_start(primary_site),
                     source
                         .find("message(value, 1)")
                         .expect("the fixture contains its inert message call")
                 );
                 assert_eq!(
                     context
-                        .primary_position(diagnostic)
+                        .site_position(primary_site)
                         .expect("the retained inert message span resolves after source deletion")
                         .line,
                     "    assert(true, message(value, 1))"
                 );
             } else {
-                let InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
-                    error_type_id,
-                    typed_producer_span,
-                    implicit_producer_span,
-                } = reason
-                else {
-                    panic!("the completed generated operand must conflict with custom Failure");
-                };
-                assert_eq!(diagnostic_type_name(*error_type_id, context), "Failure");
                 assert_eq!(
-                    span_start(diagnostic.primary_span),
+                    span_start(primary_site),
                     source
                         .find("catch |failure| then 0")
                         .expect("the fixture contains its custom handler")
                 );
+                let labels = view.durable_labels().collect::<Vec<_>>();
+                assert_eq!(labels.len(), 2);
+                assert!(matches!(
+                    labels[0].message,
+                    crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage::TypedFailureProducer { .. }
+                ));
+                assert!(matches!(
+                    labels[1].message,
+                    crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage::ImplicitFailureProducer
+                ));
                 assert_eq!(
-                    span_start(*typed_producer_span),
+                    span_start(labels[0].site),
                     source
                         .find("load(operand(value, value))")
                         .expect("the fixture contains its typed producer")
                 );
                 assert_eq!(
-                    span_start(*implicit_producer_span),
+                    span_start(labels[1].site),
                     source
                         .find("operand(value, value)")
                         .expect("the fixture contains its generated private operand")
                 );
-                assert_eq!(
-                    diagnostic
-                        .labels
-                        .iter()
-                        .map(|label| (label.span, label.message.as_ref()))
-                        .collect::<Vec<_>>(),
-                    [
-                        (
-                            *typed_producer_span,
-                            Some(&DiagnosticLabelMessage::TypedFailureProducer {
-                                error_type_id: *error_type_id,
-                            })
-                        ),
-                        (
-                            *implicit_producer_span,
-                            Some(&DiagnosticLabelMessage::ImplicitFailureProducer)
-                        ),
-                    ]
+                let label_text = crate::compiler_frontend::compiler_messages::render::terminal::format_label_messages_view(
+                    view,
+                    context,
+                )
+                .join("\n");
+                assert!(
+                    label_text.contains("Failure"),
+                    "the typed producer label should name the custom error type: {label_text}"
                 );
             }
         }

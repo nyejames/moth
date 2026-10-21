@@ -11,10 +11,10 @@ use super::{
     SummaryCounts, TestCaseSpec, WarningExpectation,
 };
 use super::{PolicyEvaluation, PolicyFinding};
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::render::{terminal, terse};
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticCategory, DiagnosticSeverity,
-};
+use crate::compiler_frontend::compiler_messages::{DiagnosticCategory, DiagnosticSeverity};
 use saying::say;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -719,32 +719,18 @@ pub(crate) fn render_case_result(
     }
 
     if let Some(messages) = &result.messages {
-        for (diagnostic_index, diagnostic) in messages
-            .diagnostics()
-            .enumerate()
-            .filter(|(_, diagnostic)| diagnostic.severity == DiagnosticSeverity::Error)
-        {
+        for (report, view) in messages.reports.iter_severity(DiagnosticSeverity::Error) {
             if result.passed && matches!(case.expected, ExpectedOutcome::Failure(_)) {
-                say!(Yellow diagnostic_summary_label(diagnostic));
+                say!(Yellow diagnostic_summary_label(view));
                 continue;
             }
 
-            terminal::print_diagnostic_with_context(
-                diagnostic,
-                messages.diagnostic_render_context(diagnostic_index),
-            );
+            terminal::print_diagnostic_view(view, DiagnosticRenderContext::for_report(report));
         }
 
         if show_warnings {
-            for (diagnostic_index, warning) in messages
-                .diagnostics()
-                .enumerate()
-                .filter(|(_, diagnostic)| diagnostic.severity == DiagnosticSeverity::Warning)
-            {
-                terminal::print_diagnostic_with_context(
-                    warning,
-                    messages.diagnostic_render_context(diagnostic_index),
-                );
+            for (report, view) in messages.reports.iter_severity(DiagnosticSeverity::Warning) {
+                terminal::print_diagnostic_view(view, DiagnosticRenderContext::for_report(report));
             }
         }
     }
@@ -795,22 +781,18 @@ pub(crate) fn expected_outcome_label(expected: &ExpectedOutcome) -> &'static str
 
 pub(crate) fn observed_failure_reason(result: &CaseExecutionResult) -> String {
     if let Some(messages) = &result.messages
-        && let Some(first_diagnostic) = messages
-            .diagnostics()
-            .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+        && let Some((report, first_diagnostic)) = messages
+            .reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .next()
     {
         let base = result
             .failure_reason
             .as_deref()
             .unwrap_or("Compilation failed.");
-        let diagnostic_index = messages
-            .diagnostic_slice()
-            .iter()
-            .position(|diagnostic| std::ptr::eq(diagnostic, first_diagnostic))
-            .unwrap_or(0);
-        let terse_line = terse::format_terse_diagnostic_with_context(
+        let terse_line = terse::format_terse_diagnostic_view(
             first_diagnostic,
-            messages.diagnostic_render_context(diagnostic_index),
+            DiagnosticRenderContext::for_report(report),
         );
 
         return format!("{base} First diagnostic: {terse_line}");
@@ -827,9 +809,9 @@ pub(crate) fn observed_failure_reason(result: &CaseExecutionResult) -> String {
     "No failure reason was recorded.".to_string()
 }
 
-fn diagnostic_summary_label(diagnostic: &CompilerDiagnostic) -> String {
-    let descriptor = diagnostic.kind.descriptor();
-    let category = match diagnostic.kind.category() {
+fn diagnostic_summary_label(diagnostic: DiagnosticView<'_>) -> String {
+    let descriptor = diagnostic.descriptor();
+    let category = match diagnostic.category() {
         DiagnosticCategory::Syntax => "Syntax Error",
         DiagnosticCategory::Type => "Type Error",
         DiagnosticCategory::Rule
@@ -842,7 +824,6 @@ fn diagnostic_summary_label(diagnostic: &CompilerDiagnostic) -> String {
 
     format!("{category} [{}]", descriptor.code)
 }
-
 pub(crate) fn write_failure_triage_report(
     report_path_str: &str,
     run: &RunIdentity,
@@ -971,23 +952,16 @@ fn format_terse_failure_lines(
     }
 
     if let Some(messages) = &result.messages {
-        for diagnostic_index in messages.diagnostic_display_order() {
-            let diagnostic = &messages.diagnostic_slice()[diagnostic_index];
-
-            let should_render = match diagnostic.severity {
-                DiagnosticSeverity::Error => true,
-                DiagnosticSeverity::Warning => show_warnings,
-                DiagnosticSeverity::Note => false,
-            };
-
-            if !should_render {
+        for severity in [DiagnosticSeverity::Error, DiagnosticSeverity::Warning] {
+            if severity == DiagnosticSeverity::Warning && !show_warnings {
                 continue;
             }
-
-            lines.push(terse::format_terse_diagnostic_with_context(
-                diagnostic,
-                messages.diagnostic_render_context(diagnostic_index),
-            ));
+            for (report, view) in messages.reports.iter_severity(severity) {
+                lines.push(terse::format_terse_diagnostic_view(
+                    view,
+                    DiagnosticRenderContext::for_report(report),
+                ));
+            }
         }
     }
 

@@ -20,7 +20,10 @@ use super::synthetic_build_results::{
     build_result_with_output_files, success_test_case,
 };
 use crate::build_system::build::{BuildResult, FileKind};
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::compiler_errors::{
+    BoundaryFailure, CompilerMessages,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidOutputFolderReason,
 };
@@ -40,7 +43,12 @@ fn test_span(source: SourceId, start: u32, length: u32) -> SourceSpan {
     )
 }
 
-fn diagnostic_messages(codes: &[&str]) -> CompilerMessages {
+fn boundary_failure(mut messages: CompilerMessages) -> BoundaryFailure {
+    messages.mark_frozen();
+    into_boundary_failure(messages)
+}
+
+fn diagnostic_messages(codes: &[&str]) -> BoundaryFailure {
     let string_table = StringTable::new();
     let diagnostics = codes
         .iter()
@@ -59,7 +67,10 @@ fn diagnostic_messages(codes: &[&str]) -> CompilerMessages {
         })
         .collect();
 
-    CompilerMessages::from_diagnostics(diagnostics, string_table)
+    boundary_failure(CompilerMessages::from_diagnostics(
+        diagnostics,
+        string_table,
+    ))
 }
 
 fn diagnostic_expectation(
@@ -103,7 +114,7 @@ fn failure_message_contains_uses_structured_render_output() {
         message_contains: vec!["Cannot reassign `value`".to_string()],
     };
 
-    let result = validate_failure_result(messages, &expectation, Path::new("."));
+    let result = validate_failure_result(boundary_failure(messages), &expectation, Path::new("."));
 
     assert!(result.passed, "{:?}", result.failure_reason);
 }
@@ -148,7 +159,7 @@ fn failure_message_contains_includes_rendered_label_text() {
         message_contains: vec!["immutable binding declared here".to_string()],
     };
 
-    let result = validate_failure_result(messages, &expectation, Path::new("."));
+    let result = validate_failure_result(boundary_failure(messages), &expectation, Path::new("."));
 
     assert!(result.passed, "{:?}", result.failure_reason);
 }
@@ -264,7 +275,7 @@ fn contains_matching_requires_every_expected_occurrence() {
     assert!(!reason.contains("Unexpected codes"), "{reason}");
 }
 
-fn structured_diagnostic_messages(fixture_root: &Path) -> CompilerMessages {
+fn structured_diagnostic_messages(fixture_root: &Path) -> BoundaryFailure {
     let primary_path = fixture_root.join("input/main.moth");
     let secondary_path = fixture_root.join("input/helper.moth");
     let entry_path = fixture_root.join("config.moth");
@@ -307,7 +318,7 @@ fn structured_diagnostic_messages(fixture_root: &Path) -> CompilerMessages {
 
     let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
     messages.set_source_database(Arc::new(source_database));
-    messages
+    boundary_failure(messages)
 }
 
 fn structured_diagnostic_expectation(assertion: DiagnosticAssertion) -> FailureExpectation {
@@ -356,7 +367,7 @@ fn structured_diagnostic_assertions_consume_compiler_identity_and_locations() {
     assert!(result.passed, "{:?}", result.failure_reason);
 }
 
-fn relative_structured_diagnostic_messages(scope: &str, fixture_root: &Path) -> CompilerMessages {
+fn relative_structured_diagnostic_messages(scope: &str, fixture_root: &Path) -> BoundaryFailure {
     let source_scope = scope
         .strip_suffix("/declaration.header")
         .unwrap_or(scope)
@@ -391,7 +402,7 @@ fn relative_structured_diagnostic_messages(scope: &str, fixture_root: &Path) -> 
     );
     let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
     messages.set_source_database(Arc::new(source_database));
-    messages
+    boundary_failure(messages)
 }
 
 #[test]
@@ -713,7 +724,7 @@ fn exact_warning_codes_match_warnings_retained_in_failed_compilation_messages() 
         diagnostic_match_reason: None,
     };
 
-    let result = validate_failure_result(messages, &expectation, Path::new("."));
+    let result = validate_failure_result(boundary_failure(messages), &expectation, Path::new("."));
 
     assert!(result.passed, "{:?}", result.failure_reason);
 }
@@ -733,7 +744,7 @@ fn warnings_ignore_truly_ignores_warnings_on_a_failed_compilation() {
         diagnostic_match_reason: None,
     };
 
-    let result = validate_failure_result(messages, &expectation, Path::new("."));
+    let result = validate_failure_result(boundary_failure(messages), &expectation, Path::new("."));
 
     assert!(result.passed, "{:?}", result.failure_reason);
 }
@@ -755,7 +766,7 @@ fn warning_code_cannot_satisfy_failure_diagnostic_codes() {
         diagnostic_match_reason: None,
     };
 
-    let result = validate_failure_result(messages, &expectation, Path::new("."));
+    let result = validate_failure_result(boundary_failure(messages), &expectation, Path::new("."));
 
     assert!(
         !result.passed,
@@ -788,7 +799,7 @@ fn warning_prose_cannot_satisfy_error_message_contains() {
         diagnostic_match_reason: None,
     };
 
-    let result = validate_failure_result(messages, &expectation, Path::new("."));
+    let result = validate_failure_result(boundary_failure(messages), &expectation, Path::new("."));
 
     assert!(
         !result.passed,

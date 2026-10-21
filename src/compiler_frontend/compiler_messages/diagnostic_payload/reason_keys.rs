@@ -13,6 +13,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_
     InvalidFallibleHandlingCode, InvalidLoopHeaderCode,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
+    GenericInstantiationShape, InvalidTraitConformanceShape,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
     InvalidFunctionSignatureCode, InvalidGenericInstantiationCode, InvalidGenericParameterCode,
     InvalidParameterContractCode, InvalidReceiverDeclarationCode, InvalidThisUsageCode,
     InvalidTraitConformanceCode,
@@ -30,6 +33,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::template
     CssTemplateWarningCode, HtmlTemplateWarningCode, InvalidTemplateDirectiveCode,
     InvalidTemplateStructureCode,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::UnexpectedTokenShape;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
     CommonSyntaxMistakeCode, InvalidStringEscapeCode, NumberLiteralCode,
 };
@@ -792,6 +796,38 @@ macro_rules! define_reasoned_diagnostic_registry {
 
 pub(crate) trait StableReasonKey {
     fn stable_reason_key(&self) -> &'static str;
+}
+
+/// A decoded diagnostic fact that may have no stable reason key for some variants.
+pub(crate) trait OptionalStableReasonKey {
+    fn optional_stable_reason_key(&self) -> Option<&'static str>;
+}
+
+impl<T: StableReasonKey> OptionalStableReasonKey for T {
+    fn optional_stable_reason_key(&self) -> Option<&'static str> {
+        Some(StableReasonKey::stable_reason_key(self))
+    }
+}
+
+impl<Type> StableReasonKey for GenericInstantiationShape<Type> {
+    fn stable_reason_key(&self) -> &'static str {
+        self.code().stable_reason_key()
+    }
+}
+
+impl<Type> StableReasonKey for InvalidTraitConformanceShape<Type> {
+    fn stable_reason_key(&self) -> &'static str {
+        self.code().stable_reason_key()
+    }
+}
+
+impl OptionalStableReasonKey for UnexpectedTokenShape {
+    fn optional_stable_reason_key(&self) -> Option<&'static str> {
+        match self {
+            UnexpectedTokenShape::Token(_) => None,
+            UnexpectedTokenShape::MultiBind { code, .. } => Some(code.stable_reason_key()),
+        }
+    }
 }
 
 macro_rules! define_stable_reason_keys {

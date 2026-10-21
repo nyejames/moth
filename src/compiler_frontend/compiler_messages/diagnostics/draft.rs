@@ -47,7 +47,6 @@ pub(super) struct DraftCore {
     pub(super) span: Option<SourceSpan>,
     pub(super) facts: [u32; FACT_WORDS],
     /// Exact mask of fact words that hold type words, whether pending or captured.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(super) type_facts: u8,
     /// Exact mask of fact words still holding raw `TypeId`s; the family mask may be a superset.
     pub(super) pending_facts: u8,
@@ -265,7 +264,6 @@ impl DiagnosticDraft {
     /// Rebase every captured type word after its snapshot is appended to another snapshot.
     ///
     /// The first pass checks every present word before any write, so overflow leaves the draft unchanged.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(super) fn rebase_type_displays(
         &mut self,
         base: u32,
@@ -347,7 +345,6 @@ fn is_marked(mask: u8, bit: usize) -> bool {
 }
 
 /// Rebases one present display word. `NO_TYPE_WORD` is the absent-type representation.
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 fn rebased_type_word(word: u32, base: u32) -> Result<u32, TypeDisplayCapacityError> {
     if word == NO_TYPE_WORD {
         return Ok(NO_TYPE_WORD);
@@ -380,7 +377,6 @@ impl DiagnosticDraft {
 
     /// Rewrites every path ID in this draft through `remap`, which must come from the interner the draft was
     /// built against. An identity remap changes nothing.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(super) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         if remap.is_identity() {
             return;
@@ -391,7 +387,6 @@ impl DiagnosticDraft {
     /// Applies `remap` to the fact words and the extra part. A value the remap cannot store turns the draft into
     /// the capacity stand-in at the same local span, as `with_facts` does for an unencodable value. Spans are
     /// left alone: a `SourceId` names a source record, not a string or a path.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     fn remap_draft(&mut self, remap: IdRemap<'_>) {
         if self.rewrite_draft(remap).is_err() {
             let span = self.capacity_span();
@@ -403,7 +398,6 @@ impl DiagnosticDraft {
     }
 
     /// Walks the family layout, rewriting each fact's words in place, then the extra part.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     fn rewrite_draft(&mut self, remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
         let mut offset = 0;
         for fact in self.core.family.layout {

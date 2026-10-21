@@ -298,7 +298,6 @@ impl PathInternerBuilder {
     ///
     /// Returns [`PathInternError::TableFull`] when a new node cannot be addressed. Nodes appended
     /// before that point stay in the append-only table, as with [`Self::merge_delta_from`].
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(crate) fn merge_snapshot(
         &mut self,
         snapshot: &PathTable,
@@ -362,7 +361,6 @@ impl PathInternerBuilder {
     }
 
     /// Name the node at `index`; every index below a table's length fits the compact domain.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     fn snapshot_path_id(index: usize) -> PathId {
         PathId::try_from_index(index).unwrap_or_else(|| {
             panic!(

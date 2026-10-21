@@ -1,9 +1,14 @@
-//! Dev-server HTML rendering for `CompilerDiagnostic`.
+//! Dev-server HTML rendering for frozen diagnostic views.
 //!
 //! WHAT: converts structured diagnostics into escaped HTML cards for the dev-server error page.
 //! WHY: the dev-server needs clickable source links and readable diagnostic output.
 
-use crate::compiler_frontend::compiler_errors::{CompilerMessages, InfrastructureErrors};
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, InfrastructureErrors};
+#[cfg(test)]
+use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+#[cfg(test)]
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::compact_render_for_test;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::render::infrastructure::{
     INFRASTRUCTURE_FAILURE_CODE, INFRASTRUCTURE_FAILURE_TITLE, ISSUE_URL, InfrastructureClass,
     format_error_guidance_lines, infrastructure_class, infrastructure_heading,
@@ -14,9 +19,7 @@ use crate::compiler_frontend::compiler_messages::render::{
     display_line_number, expand_tabs_for_display, primary_caret_padding, primary_underline_length,
     relative_display_path_from_root,
 };
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticLabelStyle, DiagnosticSeverity,
-};
+use crate::compiler_frontend::compiler_messages::{DiagnosticLabelStyle, DiagnosticSeverity};
 use crate::compiler_frontend::utilities::basic::{normalize_path, portable_path_text};
 #[cfg(test)]
 use std::path::Path;
@@ -96,35 +99,41 @@ pub(crate) fn render_diagnostics_html_with_context(
 
     diagnostics
         .iter()
-        .map(|d| render_diagnostic_card(d, project_root, context))
+        .map(|d| {
+            let compact = compact_render_for_test(d, context);
+            render_diagnostic_card(compact.view(), project_root, context)
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-pub(crate) fn render_compiler_messages_html(
-    messages: &CompilerMessages,
+/// Renders every record of a boundary failure as an HTML card. The infrastructure card follows the error cards and
+/// precedes the warnings and notes.
+pub(crate) fn render_boundary_messages_html(
+    failure: &BoundaryFailure,
     project_root: &std::path::Path,
 ) -> String {
-    // The outer infrastructure failure renders as an error card beside the diagnostics,
-    // after every error diagnostic and before warnings/notes — mirroring the severity-bucket
-    // display order without fabricating a user diagnostic.
     let mut cards = Vec::new();
-    let mut outer_emitted = messages.infrastructure_errors().is_none();
-    for diagnostic_index in messages.diagnostic_display_order() {
-        let diagnostic = &messages.diagnostic_slice()[diagnostic_index];
-        if !outer_emitted && diagnostic.severity != DiagnosticSeverity::Error {
-            if let Some(errors) = messages.infrastructure_errors() {
-                cards.push(render_infrastructure_card(errors));
-            }
-            outer_emitted = true;
+    let mut infrastructure = failure.infrastructure_errors();
+    for severity in [
+        DiagnosticSeverity::Error,
+        DiagnosticSeverity::Warning,
+        DiagnosticSeverity::Note,
+    ] {
+        if severity != DiagnosticSeverity::Error
+            && let Some(errors) = infrastructure.take()
+        {
+            cards.push(render_infrastructure_card(errors));
         }
-        cards.push(render_diagnostic_card(
-            diagnostic,
-            project_root,
-            messages.diagnostic_render_context(diagnostic_index),
-        ));
+        for (report, view) in failure.reports.iter_severity(severity) {
+            cards.push(render_diagnostic_card(
+                view,
+                project_root,
+                DiagnosticRenderContext::for_report(report),
+            ));
+        }
     }
-    if !outer_emitted && let Some(errors) = messages.infrastructure_errors() {
+    if let Some(errors) = infrastructure.take() {
         cards.push(render_infrastructure_card(errors));
     }
     if cards.is_empty() {
@@ -177,11 +186,11 @@ fn render_infrastructure_card(errors: &InfrastructureErrors) -> String {
     )
 }
 fn render_diagnostic_card(
-    diagnostic: &CompilerDiagnostic,
+    view: DiagnosticView<'_>,
     project_root: &std::path::Path,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let subject = DiagnosticSubject::new(diagnostic, context);
+    let subject = DiagnosticSubject::new(view);
     let descriptor = subject.descriptor();
     let (severity_label, severity_visual, badge_class) = severity_display(subject.severity());
 

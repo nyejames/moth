@@ -282,7 +282,6 @@ impl TypeDisplaySnapshot {
 
 impl TypeDisplaySnapshot {
     /// Moves another snapshot after this one and returns its zero-based display-word offset.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(crate) fn append(
         &mut self,
         mut other: TypeDisplaySnapshot,
@@ -367,7 +366,6 @@ impl TypeDisplaySnapshot {
 }
 
 /// Checks that appending `additional` items keeps this arena in the `u32` index space.
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 fn checked_arena_end(current: usize, additional: usize) -> Result<u32, TypeDisplayCapacityError> {
     let current = arena_index(current)?;
     let additional = arena_index(additional)?;
@@ -377,13 +375,11 @@ fn checked_arena_end(current: usize, additional: usize) -> Result<u32, TypeDispl
 }
 
 /// Offsets a child-arena index without allowing it to wrap.
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 fn offset_index(index: u32, base: u32) -> Result<u32, TypeDisplayCapacityError> {
     index.checked_add(base).ok_or(TypeDisplayCapacityError)
 }
 
 /// Offsets the start of a child-arena range. Lengths stay unchanged.
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 fn offset_range(range: ChildRange, base: u32) -> Result<ChildRange, TypeDisplayCapacityError> {
     Ok(ChildRange {
         start: offset_index(range.start, base)?,
@@ -392,7 +388,6 @@ fn offset_range(range: ChildRange, base: u32) -> Result<ChildRange, TypeDisplayC
 }
 
 /// Offsets a type-display id by the number of records already in the destination snapshot.
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 fn offset_type_display_id(
     type_id: TypeDisplayId,
     base: u32,
@@ -421,7 +416,6 @@ impl TypeDisplaySnapshot {
     }
 
     /// Rewrites every path id after the path table that issued them merged into another table.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         if remap.is_identity() {
             return;

@@ -7,9 +7,10 @@
 //! causes, so the constructor moves every cause back out through its typed error lane.
 
 use super::compiler_errors::{
-    CompilerError, CompilerMessages, InfrastructureErrors, RenderFrozenContext, RenderPathContext,
-    RenderSourceContext, RenderTypeContext,
+    CompilerError, CompilerMessages, InfrastructureErrors, RenderPathContext, RenderSourceContext,
+    RenderTypeContext,
 };
+use super::diagnostics::freeze::InstallMode;
 use super::{CompilerDiagnostic, DiagnosticSeverity, PremergeDiagnosticBatch};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -24,7 +25,6 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 pub(crate) struct ModuleDiagnostics {
     diagnostics: Vec<CompilerDiagnostic>,
     string_table: StringTable,
-    render_frozen_contexts: Vec<RenderFrozenContext>,
     render_source_contexts: Vec<RenderSourceContext>,
     render_type_contexts: Vec<RenderTypeContext>,
     render_path_contexts: Vec<RenderPathContext>,
@@ -48,7 +48,8 @@ impl ModuleDiagnostics {
             diagnostics,
             infrastructure_errors,
             string_table,
-            render_frozen_contexts,
+            // Pre-merge owners carry no freeze mode; freezing happens only after the final merge.
+            install_mode: _,
             render_source_contexts,
             render_type_contexts,
             render_path_contexts,
@@ -86,7 +87,6 @@ impl ModuleDiagnostics {
                 Ok(ModuleDiagnostics {
                     diagnostics,
                     string_table: *string_table,
-                    render_frozen_contexts,
                     render_source_contexts,
                     render_type_contexts,
                     render_path_contexts: render_path_contexts
@@ -119,7 +119,7 @@ impl ModuleDiagnostics {
             diagnostics: self.diagnostics,
             infrastructure_errors: None,
             string_table: Box::new(self.string_table),
-            render_frozen_contexts: self.render_frozen_contexts,
+            install_mode: InstallMode::Unfrozen,
             render_source_contexts: self.render_source_contexts,
             render_type_contexts: self.render_type_contexts,
             render_path_contexts: (!self.render_path_contexts.is_empty())
@@ -158,7 +158,6 @@ impl ModuleDiagnostics {
         Ok(Self {
             diagnostics,
             string_table,
-            render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
             render_type_contexts,
             render_path_contexts,
@@ -182,14 +181,6 @@ impl ModuleDiagnostics {
                 "diagnosed module reached canonical merging with {} attached source contexts \
                  beside {} diagnostics; source attachment must happen after merging",
                 self.render_source_contexts.len(),
-                self.diagnostics.len(),
-            )));
-        }
-        if !self.render_frozen_contexts.is_empty() {
-            return Err(CompilerError::compiler_error(format!(
-                "diagnosed module reached canonical merging with {} attached frozen identity \
-                 contexts beside {} diagnostics; frozen attachment must happen after merging",
-                self.render_frozen_contexts.len(),
                 self.diagnostics.len(),
             )));
         }

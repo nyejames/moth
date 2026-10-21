@@ -15,9 +15,10 @@ use crate::compiler_frontend::compiler_messages::compiler_errors::{
 };
 use crate::compiler_frontend::compiler_messages::diagnostic_types::type_display_snapshot_builder::ForcedTypeDisplayExhaustionGuard;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::{
+    compact_render_for_test, into_boundary_failure,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
-use crate::compiler_frontend::compiler_messages::render::subject::DiagnosticSubject;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticPrimaryPosition, DiagnosticRenderContext, compact_label_message_text,
     resolve_label_render_facts_from_root,
@@ -92,11 +93,16 @@ fn legacy_render(messages: &CompilerMessages) -> Vec<Rendered> {
         .enumerate()
         .map(|(index, diagnostic)| {
             let context = messages.diagnostic_render_context(index);
-            let subject = DiagnosticSubject::new(diagnostic, context);
-            let position = subject
-                .primary_position(context)
+            let position = context
+                .primary_position(diagnostic)
                 .map(|position| owned_position(&position));
-            let payload = subject.payload(context);
+            let compact = compact_render_for_test(diagnostic, context);
+            let view = compact.view();
+            let render = view
+                .family()
+                .render
+                .expect("matched family rows declare a renderer");
+            let payload = render(&view, context);
             Rendered {
                 position,
                 message: payload.message,
@@ -223,12 +229,21 @@ fn assert_render_parity(legacy: &[Rendered], frozen: &[Rendered]) {
 }
 
 /// Converts `messages` and asserts that the frozen render equals the legacy render of the same vessel.
-fn assert_legacy_parity(messages: CompilerMessages, install: InstallMode) -> Vec<Rendered> {
+fn assert_legacy_parity(mut messages: CompilerMessages, install: InstallMode) -> Vec<Rendered> {
     let legacy = legacy_render(&messages);
-    let failure = into_boundary_failure(messages, install);
+    if install == InstallMode::Frozen {
+        messages.mark_frozen();
+    }
+    let failure = into_boundary_failure(messages);
     let frozen = frozen_render(&failure);
     assert_render_parity(&legacy, &frozen);
     frozen
+}
+
+/// Convert a vessel in frozen mode after recording that mode on the vessel.
+fn into_frozen_boundary_failure(mut messages: CompilerMessages) -> BoundaryFailure {
+    messages.mark_frozen();
+    into_boundary_failure(messages)
 }
 
 /// Writes `text` to `src/<relative_name>` under `directory` and builds a database that retains it.
@@ -363,6 +378,30 @@ fn identity_less_database_row_uses_the_legacy_database_branch() {
     assert_eq!(position.end, (0, 4));
 }
 
+/// A vessel whose module never merged into the build root still holds its module fork. Its inherited and local names
+/// both render.
+#[test]
+fn module_fork_vessel_renders_its_inherited_and_local_names() {
+    let dir = tempfile::tempdir().expect("should create temp dir");
+    let mut root = StringTable::new();
+    let (db, id) = retained_database(dir.path(), "main.moth", "main alpha", &mut root);
+    let inherited = root.intern("main");
+    let (mut fork, _) = root.fork_for_module().into_parts();
+    let local = fork.intern("alpha");
+    let mut messages = CompilerMessages::from_diagnostics(
+        vec![
+            CompilerDiagnostic::unknown_value_name(inherited, Some(inline_span(id, 0, 4))),
+            CompilerDiagnostic::unknown_value_name(local, Some(inline_span(id, 5, 5))),
+        ],
+        fork,
+    );
+    messages.set_source_database(Arc::new(db));
+
+    let frozen = assert_legacy_parity(messages, InstallMode::Unfrozen);
+    assert!(frozen[0].message.contains("main"));
+    assert!(frozen[1].message.contains("alpha"));
+}
+
 /// When several rows cover one diagnostic, the first covering row owns it.
 #[test]
 fn first_covering_row_owns_the_diagnostic() {
@@ -487,7 +526,7 @@ fn named_domains_over_one_database_share_one_frozen_identity() {
     );
 
     let legacy = legacy_render(&messages);
-    let failure = into_boundary_failure(messages, InstallMode::Frozen);
+    let failure = into_frozen_boundary_failure(messages);
     assert_render_parity(&legacy, &frozen_render(&failure));
     assert!(std::ptr::eq(
         failure.reports.report(0).context(),
@@ -537,7 +576,7 @@ fn interleaved_domain_runs_keep_legacy_order() {
     );
 
     let legacy = legacy_render(&messages);
-    let failure = into_boundary_failure(messages, InstallMode::Frozen);
+    let failure = into_frozen_boundary_failure(messages);
     assert_render_parity(&legacy, &frozen_render(&failure));
     assert_eq!(failure.reports.report(0).len(), 2);
     assert_eq!(failure.reports.report(1).len(), 1);
@@ -553,7 +592,7 @@ fn infrastructure_cause_row_keeps_its_frozen_identity() {
     messages.set_infrastructure_error(CompilerError::compiler_error("cause"));
     messages.set_source_database(Arc::new(db));
 
-    let failure = into_boundary_failure(messages, InstallMode::Frozen);
+    let failure = into_frozen_boundary_failure(messages);
     assert_eq!(failure.error_count(), 1);
     assert!(
         failure
@@ -584,7 +623,7 @@ fn forced_type_display_capacity_keeps_the_diagnostic_position() {
     // The legacy render must run before the guard: it panics once display capture is forced to fail.
     let legacy = legacy_render(&messages);
     let _guard = ForcedTypeDisplayExhaustionGuard::new();
-    let failure = into_boundary_failure(messages, InstallMode::Frozen);
+    let failure = into_frozen_boundary_failure(messages);
     let frozen = frozen_render(&failure);
 
     assert_eq!(
@@ -636,7 +675,7 @@ fn path_table_capacity_fault_matches_the_legacy_capacity_render() {
 
     let frozen = {
         let _exhausted = ForcedExhaustionGuard::new();
-        let failure = into_boundary_failure(messages, InstallMode::Frozen);
+        let failure = into_frozen_boundary_failure(messages);
         frozen_render(&failure)
     };
     assert_render_parity(&expected, &frozen);
@@ -764,7 +803,7 @@ fn boundary_failure_counts_records_and_infrastructure_separately() {
     messages.set_infrastructure_error(CompilerError::compiler_error("cause"));
 
     let legacy = legacy_render(&messages);
-    let failure = into_boundary_failure(messages, InstallMode::Frozen);
+    let failure = into_frozen_boundary_failure(messages);
     assert_eq!(failure.error_count(), 3);
     assert_eq!(failure.warning_count(), 1);
     assert!(failure.has_infrastructure_error());
@@ -811,7 +850,7 @@ fn donor_primary_handle_resolves_through_its_installed_identity() {
         0,
     );
 
-    let failure = into_boundary_failure(messages, InstallMode::Frozen);
+    let failure = into_frozen_boundary_failure(messages);
     let frozen = frozen_render(&failure);
     assert_eq!(frozen[0].position, expected[0].position);
     assert!(std::ptr::eq(
@@ -838,7 +877,7 @@ fn legacy_only_borrow_conflict_is_rejected_at_the_boundary() {
         },
     );
     let messages = CompilerMessages::from_diagnostics(vec![diagnostic], string_table);
-    let _failure = into_boundary_failure(messages, InstallMode::Frozen);
+    let _failure = into_frozen_boundary_failure(messages);
 }
 
 /// A database still held outside the messages cannot be taken over at the frozen handoff.
@@ -858,29 +897,72 @@ fn database_shared_outside_the_messages_is_rejected_at_the_handoff() {
         string_table,
     );
     messages.set_source_database(Arc::clone(&shared));
-    let _failure = into_boundary_failure(messages, InstallMode::Frozen);
+    let _failure = into_frozen_boundary_failure(messages);
 }
 
-/// Source contexts frozen before conversion must be refused; the converter takes them unfrozen.
+/// A vessel marked frozen installs its source identity as part of boundary conversion.
 #[test]
-#[should_panic(expected = "pre-frozen render contexts reached the boundary converter")]
-fn pre_frozen_render_contexts_are_rejected_by_the_converter() {
+fn marked_frozen_mode_installs_identity_during_conversion() {
     let dir = tempfile::tempdir().expect("should create temp dir");
-    let mut string_table = StringTable::new();
-    let (db, id) = retained_database(dir.path(), "main.moth", "main", &mut string_table);
-    let name = string_table.intern("main");
-    let mut messages = CompilerMessages::from_diagnostics(
-        vec![CompilerDiagnostic::unknown_value_name(
-            name,
-            Some(inline_span(id, 0, 4)),
-        )],
-        string_table,
+    let identity = StablePackageIdentity::project_local("pkg-x");
+    let fixture = |relative_name: &str| {
+        let mut string_table = StringTable::new();
+        let (db, id) = retained_database(dir.path(), relative_name, "main", &mut string_table);
+        let name = string_table.intern("main");
+        let handle = FrozenIdentityHandle::for_domain(identity.clone());
+        let mut diagnostic =
+            CompilerDiagnostic::unknown_value_name(name, Some(inline_span(id, 0, 4)));
+        diagnostic.primary_frozen_identity_handle = Some(handle.clone());
+        let mut messages = CompilerMessages::from_diagnostics(vec![diagnostic], string_table);
+        messages.install_source_contexts(
+            [RenderSourceContext {
+                diagnostic_range: 0..1,
+                source_database: Arc::new(db),
+                domain: Some(identity.clone()),
+            }],
+            0,
+        );
+        (messages, handle)
+    };
+
+    let (messages, unmarked_handle) = fixture("unmarked.moth");
+    assert!(unmarked_handle.get().is_none());
+    let unmarked_failure = into_boundary_failure(messages);
+    assert!(unmarked_handle.get().is_none());
+    let (report, view) = unmarked_failure
+        .reports
+        .iter()
+        .next()
+        .expect("the unmarked diagnostic should remain");
+    assert!(
+        DiagnosticRenderContext::for_report(report)
+            .site_position(view.primary_site())
+            .is_none(),
+        "an unmarked vessel must not install the identity-named handle"
     );
-    messages.set_source_database(Arc::new(db));
-    messages
-        .freeze_source_contexts()
-        .expect("source contexts should freeze");
-    let _failure = into_boundary_failure(messages, InstallMode::Frozen);
+
+    let (mut messages, frozen_handle) = fixture("frozen.moth");
+    let frozen_path = dir.path().join("src/frozen.moth");
+    assert!(frozen_handle.get().is_none());
+    messages.mark_frozen();
+    let frozen_failure = into_boundary_failure(messages);
+    let installed = frozen_handle
+        .get()
+        .expect("frozen conversion should install the identity-named handle");
+    let (report, view) = frozen_failure
+        .reports
+        .iter()
+        .next()
+        .expect("the frozen diagnostic should remain");
+    assert!(
+        std::ptr::eq(installed, report.context()),
+        "the installed handle should own the report's identity context"
+    );
+    let position = DiagnosticRenderContext::for_report(report)
+        .site_position(view.primary_site())
+        .expect("the frozen primary site should resolve through its installed owner");
+    assert_eq!(position.host_path, Some(frozen_path.as_path()));
+    assert_eq!(position.line, "main");
 }
 
 /// A primary donor handle whose identity was never installed must be refused, not resolved against the row.
@@ -899,7 +981,7 @@ fn primary_donor_without_an_installed_identity_is_rejected() {
     ));
     let mut messages = CompilerMessages::from_diagnostics(vec![diagnostic], string_table);
     messages.set_source_database(Arc::new(db));
-    let _failure = into_boundary_failure(messages, InstallMode::Frozen);
+    let _failure = into_frozen_boundary_failure(messages);
 }
 
 /// A label donor handle whose identity was never installed must be refused, not resolved against the row.
@@ -921,7 +1003,7 @@ fn label_donor_without_an_installed_identity_is_rejected() {
         CompilerDiagnostic::duplicate_declaration(name, None, None).with_labels(vec![label]);
     let mut messages = CompilerMessages::from_diagnostics(vec![diagnostic], string_table);
     messages.set_source_database(Arc::new(db));
-    let _failure = into_boundary_failure(messages, InstallMode::Frozen);
+    let _failure = into_frozen_boundary_failure(messages);
 }
 
 /// Infrastructure source rows frozen before conversion must be refused by the converter.
@@ -941,7 +1023,7 @@ fn pre_frozen_infrastructure_owner_is_rejected_by_the_converter() {
                 SourceDatabase::empty(),
             )),
         )]);
-    let _failure = into_boundary_failure(messages, InstallMode::Frozen);
+    let _failure = into_frozen_boundary_failure(messages);
 }
 
 /// A local secondary label resolves its position through the requester's own database on both sides.

@@ -676,6 +676,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: code,
         view: InvalidTypeAnnotationView,
         render: render_invalid_type_annotation,
     }
@@ -763,6 +764,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: generated invalid_signature_member,
+        reason_key: reason,
         view: InvalidSignatureMemberView,
         render: render_invalid_signature_member,
     }
@@ -892,6 +894,7 @@ diagnostic_family! {
         labels: [],
         extra: StringIds,
         ctor: manual,
+        reason_key: code,
         view: InvalidDeclarationView,
         render: render_invalid_declaration,
     }
@@ -913,6 +916,7 @@ diagnostic_family! {
         labels: [LabelMessageCode::IMMUTABLE_BINDING_DECLARATION],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: InvalidAssignmentTargetView,
         render: render_invalid_assignment_target,
     }
@@ -948,6 +952,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: code,
         view: DeferredFeatureView,
         render: render_deferred_feature,
     }

@@ -18,11 +18,12 @@ use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project};
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
 use crate::builder_surface::PackageOrigin;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_errors::RenderSourceContext;
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerMessages};
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, NamingConvention,
-    RuleDiagnosticKind,
+    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, NameNamespace,
+    NamingConvention, RuleDiagnosticKind,
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
@@ -126,7 +127,7 @@ fn passed_result() -> CaseExecutionResult {
 }
 
 /// Valid failed result with messages: when build fails, the runner carries
-/// the `CompilerMessages` so diagnostics can be rendered.
+/// a `BoundaryFailure` so diagnostics can be rendered.
 fn failed_result(reason: &str, kind: FailureKind) -> CaseExecutionResult {
     let messages = error_and_warning_messages();
     CaseExecutionResult {
@@ -171,22 +172,30 @@ fn format_single_case(
     )
 }
 
-fn error_and_warning_messages() -> CompilerMessages {
-    let string_table = StringTable::new();
+fn error_and_warning_messages() -> BoundaryFailure {
+    let mut string_table = StringTable::new();
+    let name = string_table.intern("missing_name");
     let error_diag = CompilerDiagnostic::with_severity(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
+        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownValueName),
         DiagnosticSeverity::Error,
         None,
-        DiagnosticPayload::None,
+        DiagnosticPayload::UnknownName {
+            name,
+            namespace: NameNamespace::Value,
+        },
     );
     let warning_diag = CompilerDiagnostic::with_severity(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
+        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownValueName),
         DiagnosticSeverity::Warning,
         None,
-        DiagnosticPayload::None,
+        DiagnosticPayload::UnknownName {
+            name,
+            namespace: NameNamespace::Value,
+        },
     );
 
-    CompilerMessages::from_diagnostics(vec![error_diag, warning_diag], string_table)
+    let messages = CompilerMessages::from_diagnostics(vec![error_diag, warning_diag], string_table);
+    into_boundary_failure(messages)
 }
 
 fn build_result_with_warning(

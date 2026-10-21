@@ -2,7 +2,10 @@ use super::*;
 use crate::build_system::resource_unions::ResourceOriginUnion;
 use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::compiler_errors::{CompilerMessages, RenderSourceContext};
-use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::render::{
+    DiagnosticRenderContext, dev_server::render_boundary_messages_html,
+};
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidConfigReason};
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::hir::ids::FunctionId;
@@ -500,19 +503,23 @@ fn resource_collision_render_keeps_project_primary_and_package_secondary_domains
         }),
         0,
     );
-    messages
-        .freeze_source_contexts()
-        .expect("mixed project/package source contexts should freeze");
-    let diagnostic = messages
-        .diagnostics()
+    messages.mark_frozen();
+    let failure = into_boundary_failure(messages);
+    let (report, diagnostic) = failure
+        .reports
+        .iter()
         .next()
         .expect("collision should retain one diagnostic");
-    let context = messages.diagnostic_render_context(0);
+    let context = DiagnosticRenderContext::for_report(report);
     let primary = context
-        .primary_position(diagnostic)
+        .site_position(diagnostic.primary_site())
         .expect("project primary span should resolve");
+    let secondary_label = diagnostic
+        .durable_labels()
+        .next()
+        .expect("collision should retain the package secondary label");
     let secondary = context
-        .label_position(&diagnostic.labels[0])
+        .site_position(secondary_label.site)
         .expect("package secondary span should resolve through its domain handle");
     assert!(
         primary.line.contains("project_collision_snapshot")
@@ -526,7 +533,7 @@ fn resource_collision_render_keeps_project_primary_and_package_secondary_domains
         "secondary should use the package snapshot, not the colliding project snapshot: {}",
         secondary.line
     );
-    let rendered = render_compiler_messages_html(&messages, project_directory.path());
+    let rendered = render_boundary_messages_html(&failure, project_directory.path());
     assert!(
         rendered.contains("project_collision_snapshot"),
         "HTML rendering should include the project primary excerpt: {rendered}"
@@ -624,16 +631,16 @@ fn reserved_package_resource_render_uses_package_extended_span_table() {
         }),
         0,
     );
-    messages
-        .freeze_source_contexts()
-        .expect("mixed project/package source contexts should freeze");
-    let diagnostic = messages
-        .diagnostics()
+    messages.mark_frozen();
+    let failure = into_boundary_failure(messages);
+    let (report, diagnostic) = failure
+        .reports
+        .iter()
         .next()
         .expect("reserved-path collision should retain one diagnostic");
-    let context = messages.diagnostic_render_context(0);
+    let context = DiagnosticRenderContext::for_report(report);
     let primary = context
-        .primary_position(diagnostic)
+        .site_position(diagnostic.primary_site())
         .expect("package primary span should resolve");
     assert_eq!(
         primary.end.column, extended_length,
@@ -645,7 +652,7 @@ fn reserved_package_resource_render_uses_package_extended_span_table() {
         "reserved-path diagnostics must render the package snapshot through its domain: {}",
         primary.line
     );
-    let rendered = render_compiler_messages_html(&messages, project_directory.path());
+    let rendered = render_boundary_messages_html(&failure, project_directory.path());
     assert!(
         rendered.contains("package_reserved_snapshot")
             && !rendered.contains("project_reserved_snapshot"),

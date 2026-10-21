@@ -77,6 +77,7 @@ static REMAP_LABEL_FAMILY: FamilyRow = FamilyRow {
         LabelMessageCode::GENERIC_INFERENCE_PREVIOUS_EVIDENCE,
     ],
     render: None,
+    reason_key: |_| None,
 };
 
 /// One draft compacted into its own store, with the type snapshot its type words index into.

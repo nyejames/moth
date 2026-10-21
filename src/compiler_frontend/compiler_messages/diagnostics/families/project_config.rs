@@ -167,6 +167,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: InvalidDependencyClauseView,
         render: render_invalid_dependency_clause,
     }
@@ -199,6 +200,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: LegacyDependencyClauseView,
         render: render_legacy_dependency_clause,
     }
@@ -365,6 +367,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: generated invalid_page_metadata,
+        reason_key: reason,
         view: InvalidPageMetadataView,
         render: render_invalid_page_metadata,
     }
@@ -386,6 +389,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: InvalidCompileTimePathView,
         render: render_invalid_compile_time_path,
     }
@@ -481,6 +485,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: generated project_context_escape,
+        reason_key: reason,
         view: ProjectContextEscapeView,
         render: render_project_context_escape,
     }
@@ -900,6 +905,7 @@ diagnostic_family! {
         // Candidate arrays occupy the remainder after their fixed string-field prefixes.
         extra: StringIds,
         ctor: manual,
+        reason_key: reason,
         view: InvalidConfigView,
         render: render_invalid_config,
     }

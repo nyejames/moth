@@ -611,6 +611,7 @@ diagnostic_family! {
         labels: [],
         extra: StringIds,
         ctor: manual,
+        reason_key: reason,
         view: NonExhaustiveMatchView,
         render: render_non_exhaustive_match,
     }
@@ -718,6 +719,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: generated invalid_standalone_statement,
+        reason_key: reason,
         view: InvalidStandaloneStatementView,
         render: render_invalid_standalone_statement,
     }
@@ -734,6 +736,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: generated invalid_match_arm,
+        reason_key: reason,
         view: InvalidMatchArmView,
         render: render_invalid_match_arm,
     }
@@ -753,6 +756,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: InvalidLoopHeaderView,
         render: render_invalid_loop_header,
     }
@@ -769,6 +773,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: generated invalid_statement_position,
+        reason_key: reason,
         view: InvalidStatementPositionView,
         render: render_invalid_statement_position,
     }
@@ -789,6 +794,7 @@ diagnostic_family! {
         labels: [],
         extra: StringIds,
         ctor: manual,
+        reason_key: reason,
         view: InvalidChoiceVariantView,
         render: render_invalid_choice_variant,
     }
@@ -805,6 +811,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: generated invalid_control_flow_statement,
+        reason_key: reason,
         view: InvalidControlFlowStatementView,
         render: render_invalid_control_flow_statement,
     }
@@ -825,6 +832,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: generated invalid_match_pattern,
+        reason_key: reason,
         view: InvalidMatchPatternView,
         render: render_invalid_match_pattern,
     }
@@ -852,6 +860,7 @@ diagnostic_family! {
         ],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: InvalidFallibleHandlingView,
         render: render_invalid_fallible_handling,
     }
@@ -871,6 +880,7 @@ diagnostic_family! {
         labels: [LabelMessageCode::CONFIG_INPUT_ORIGIN],
         extra: None,
         ctor: generated compile_time_evaluation_error,
+        reason_key: reason,
         view: CompileTimeEvaluationErrorView,
         render: render_compile_time_evaluation_error,
     }

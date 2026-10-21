@@ -12,6 +12,7 @@
 use super::compiler_errors::{
     CompilerError, CompilerMessages, InfrastructureErrors, RenderPathContext, RenderTypeContext,
 };
+use super::diagnostics::freeze::InstallMode;
 use super::module_diagnostics::ModuleDiagnostics;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase};
@@ -440,7 +441,7 @@ impl PremergeDiagnosticBatch {
             diagnostics: bag.into_diagnostics(),
             infrastructure_errors: None,
             string_table: Box::new(string_table),
-            render_frozen_contexts: Vec::new(),
+            install_mode: InstallMode::Unfrozen,
             render_source_contexts: Vec::new(),
             render_type_contexts,
             render_path_contexts: (!render_path_contexts.is_empty())

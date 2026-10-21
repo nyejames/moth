@@ -777,7 +777,6 @@ fn forced_path_exhaustion_during_module_publication_reports_capacity_diagnostic(
     );
     assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Error);
 }
-
 #[test]
 fn source_finish_failures_preserve_every_cause_and_original_provenance() {
     use crate::compiler_frontend::compiler_errors::{
@@ -798,9 +797,6 @@ fn source_finish_failures_preserve_every_cause_and_original_provenance() {
         );
         let mut messages = CompilerMessages::from_error(primary, StringTable::new());
         messages.set_source_database(Arc::new(SourceDatabase::empty()));
-        messages
-            .freeze_source_contexts()
-            .expect("the original source context should freeze");
         let PremergeFailure::Infrastructure(errors) = PremergeFailure::from(messages) else {
             panic!("an infrastructure-only vessel must retain its typed lane");
         };
@@ -849,7 +845,7 @@ fn source_finish_failures_preserve_every_cause_and_original_provenance() {
                 .map(String::as_str),
             Some("semantic compilation"),
         );
-        assert!(errors.frozen_identity_for_cause(0).is_some());
+        assert!(errors.source_database_for_cause(0).is_some());
         assert_eq!(causes[1].msg, "first finish failure");
         assert_eq!(causes[1].error_type, ErrorType::File);
         assert_eq!(causes[1].source_span, None);
@@ -864,7 +860,7 @@ fn source_finish_failures_preserve_every_cause_and_original_provenance() {
                 .map(String::as_str),
             Some("source finalization"),
         );
-        assert!(errors.frozen_identity_for_cause(1).is_none());
+        assert!(errors.source_database_for_cause(1).is_none());
         assert_eq!(causes[2].msg, "second finish failure");
         assert!(causes[2].metadata.is_empty());
     }
@@ -992,7 +988,8 @@ fn check_only_success_batches_render_local_paths_through_production_construction
     use crate::build_system::create_project_modules::module_artifact_store::ModuleArtifactStore;
     use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
     use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
-    use crate::compiler_frontend::compiler_messages::display_messages;
+    use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+    use crate::compiler_frontend::compiler_messages::render::terse;
 
     let (compiled, _spelling) = check_only_success_result_with_warnings();
     // Route through the real canonical check-only success construction: it collects the
@@ -1025,8 +1022,8 @@ fn check_only_success_batches_render_local_paths_through_production_construction
     let mut string_table = StringTable::new();
     string_table.intern("sidecar");
     let messages =
-        frontend.into_render_messages_with_frozen_identity(&mut string_table, None, None);
-    let rendered = display_messages::format_terse_compiler_messages(&messages);
+        into_boundary_failure(frontend.into_render_messages(&mut string_table, None, None));
+    let rendered = terse::format_terse_boundary_messages(&messages);
     assert_eq!(
         rendered.len(),
         2,
@@ -1041,7 +1038,7 @@ fn check_only_success_batches_render_local_paths_through_production_construction
 }
 
 #[test]
-fn render_tail_retains_trailing_causes_warning_and_source_when_freeze_fails() {
+fn render_tail_retains_trailing_causes_warning_and_source_owners() {
     use crate::build_system::create_project_modules::compiled_boundary::{
         CompiledGraphBoundary, CompletedSourcePackageRegistry, ProjectFrontendCompilation,
     };
@@ -1049,6 +1046,8 @@ fn render_tail_retains_trailing_causes_warning_and_source_when_freeze_fails() {
     use crate::compiler_frontend::compiler_errors::{
         CompilerErrorMetadataKey, CompilerMessages, ErrorType,
     };
+    #[cfg(not(feature = "data_layout_memory_probe"))]
+    use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
     use crate::compiler_frontend::compiler_messages::{
         CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, NameNamespace,
         RuleDiagnosticKind,
@@ -1070,8 +1069,9 @@ fn render_tail_retains_trailing_causes_warning_and_source_when_freeze_fails() {
     source
         .retain_text(source_id, "original trailing source".to_owned())
         .expect("source snapshot should be retained");
-    // This real external owner makes move-only freezing fail without a platform-specific seam.
-    let external_source = Arc::new(source);
+    #[cfg(feature = "data_layout_memory_probe")]
+    let expected_retention = source.retention_metrics();
+
     let mut spans = ExtendedSpanBuilder::new();
     let span = SourceSpan::new(
         source_id,
@@ -1087,7 +1087,7 @@ fn render_tail_retains_trailing_causes_warning_and_source_when_freeze_fails() {
         CompilerError::file_error(Path::new("trailing-input.moth"), "original file cause");
     let expected = [primary.clone(), secondary.clone()];
     let warning = CompilerDiagnostic::with_severity(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
+        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownValueName),
         DiagnosticSeverity::Warning,
         None,
         DiagnosticPayload::UnknownName {
@@ -1095,6 +1095,7 @@ fn render_tail_retains_trailing_causes_warning_and_source_when_freeze_fails() {
             namespace: NameNamespace::Value,
         },
     );
+    let expected_warning_code = warning.kind.code();
     let mut trailing = CompilerMessages::from_diagnostics(vec![warning.clone()], strings.clone());
     trailing.set_infrastructure_error(primary);
     trailing.set_infrastructure_error(secondary);
@@ -1113,43 +1114,49 @@ fn render_tail_retains_trailing_causes_warning_and_source_when_freeze_fails() {
     )
     .expect("empty frontend should validate");
     #[cfg(feature = "data_layout_memory_probe")]
-    let (messages, retention) = frontend.into_render_messages_with_frozen_identity_and_metrics(
+    let (messages, retention) = frontend.into_render_messages_and_metrics(
         &mut strings,
-        Some(Arc::clone(&external_source)),
+        Some(Arc::new(source)),
         Some(trailing),
     );
     #[cfg(not(feature = "data_layout_memory_probe"))]
-    let messages = frontend.into_render_messages_with_frozen_identity(
+    let messages = into_boundary_failure(frontend.into_render_messages(
         &mut strings,
-        Some(Arc::clone(&external_source)),
+        Some(Arc::new(source)),
         Some(trailing),
-    );
+    ));
     #[cfg(feature = "data_layout_memory_probe")]
     {
-        let expected = external_source.retention_metrics();
         assert_eq!(
             retention.source_snapshot_bytes,
-            expected.source_snapshot_bytes
+            expected_retention.source_snapshot_bytes
         );
-        assert_eq!(retention.extended_span_rows, expected.extended_span_rows);
+        assert_eq!(
+            retention.extended_span_rows,
+            expected_retention.extended_span_rows
+        );
         assert_eq!(
             retention.source_identity_slots,
-            expected.source_identity_slots
+            expected_retention.source_identity_slots
         );
-        assert_eq!(retention.retained_identity_contexts, 0);
+        assert_eq!(retention.retained_identity_contexts, 1);
         assert_eq!(retention.path_table_count, 1);
     }
-    assert_eq!(messages.warning_count(), 1);
-    assert_eq!(messages.error_count(), 1);
-    assert_eq!(messages.diagnostic_slice(), &[warning]);
+    let (warning_report, warning_view) = messages
+        .reports
+        .iter()
+        .next()
+        .expect("the trailing warning should remain");
+    assert_eq!(warning_view.descriptor().code, expected_warning_code);
+    assert_eq!(warning_view.severity(), DiagnosticSeverity::Warning);
     let errors = messages
         .infrastructure_errors()
         .expect("original failures must remain");
     let actual = errors.iter().collect::<Vec<_>>();
     assert_eq!(
         actual.len(),
-        3,
-        "freeze failure must append, not replace, original causes"
+        2,
+        "render-tail aggregation must append, not replace, original causes"
     );
     for (actual, expected) in actual.iter().zip(expected) {
         assert_eq!(actual.msg, expected.msg);
@@ -1158,38 +1165,158 @@ fn render_tail_retains_trailing_causes_warning_and_source_when_freeze_fails() {
         assert_eq!(actual.source_span, expected.source_span);
         assert_eq!(actual.metadata, expected.metadata);
     }
-    assert_eq!(actual[2].error_type, ErrorType::Compiler);
-    let cause_sources = (0..2).map(|index| {
+    let cause_identities = (0..2).map(|index| {
         errors
-            .source_database_for_cause(index)
-            .expect("exact live cause owner")
+            .frozen_identity_for_cause(index)
+            .expect("exact frozen cause owner")
     });
-    let warning_source = messages
-        .source_database_for_diagnostic(0)
-        .expect("live warning owner");
-    for source in cause_sources.chain(std::iter::once(warning_source)) {
-        assert_eq!(
-            source
-                .get_by_canonical_path(path)
-                .expect("original physical source")
-                .id,
-            source_id
+    let warning_identity = warning_report.context();
+    for identity in cause_identities.chain(std::iter::once(warning_identity)) {
+        assert!(
+            identity.get(source_id).is_some(),
+            "the original physical source must retain its identity slot"
         );
+        let line_index = identity
+            .line_index(source_id)
+            .expect("the original physical source line index");
+        assert_eq!(line_index.line_text(0), Some("original trailing source"));
+        let path_id = identity
+            .source_logical_path(source_id)
+            .expect("logical source path");
         assert_eq!(
-            source.retained_text(source_id),
-            Some("original trailing source")
-        );
-        assert_eq!(
-            source.paths().render_portable(
-                source
-                    .source_logical_path(source_id)
-                    .expect("logical source path"),
-                &messages.string_table,
-                &mut Vec::new(),
-            ),
-            "trailing.moth",
+            identity.render_path(path_id, &mut Vec::new()),
+            "trailing.moth"
         );
     }
+}
+#[cfg(feature = "data_layout_memory_probe")]
+#[test]
+fn render_tail_retention_counts_donor_only_identity_domains() {
+    use crate::build_system::create_project_modules::compiled_boundary::{
+        CompiledGraphBoundary, CompletedSourcePackageRegistry, ProjectFrontendCompilation,
+    };
+    use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
+    use crate::compiler_frontend::compiler_errors::{CompilerMessages, RenderSourceContext};
+    use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+    use crate::compiler_frontend::source::{
+        ExtendedSpanBuilder, FrozenIdentityHandle, LocalSpan, SourceDatabase, SourceSpan,
+    };
+
+    let requester_root = tempfile::tempdir().expect("requester source root should exist");
+    let requester_path = requester_root.path().join("requester.moth");
+    std::fs::write(&requester_path, "requester").expect("requester source should be written");
+    let donor_root = tempfile::tempdir().expect("donor source root should exist");
+    let donor_path = donor_root.path().join("donor.moth");
+    std::fs::write(&donor_path, "donor").expect("donor source should be written");
+
+    let mut strings = StringTable::new();
+    let mut requester_source = SourceDatabase::build(
+        std::iter::once(requester_path.as_path()),
+        requester_root.path(),
+        None,
+        &mut strings,
+    )
+    .expect("requester source identity should build");
+    let requester_id = requester_source
+        .get_by_canonical_path(&requester_path)
+        .expect("requester source should be registered")
+        .id;
+    requester_source
+        .retain_text(requester_id, "requester".to_owned())
+        .expect("requester snapshot should be retained");
+    let requester = Arc::new(requester_source);
+    let requester_metrics = requester.retention_metrics();
+    let requester_path_rows = requester.paths().len();
+    let requester_path_bytes = requester.paths().storage_bytes();
+
+    let mut donor_source = SourceDatabase::build(
+        std::iter::once(donor_path.as_path()),
+        donor_root.path(),
+        None,
+        &mut strings,
+    )
+    .expect("donor source identity should build");
+    let donor_id = donor_source
+        .get_by_canonical_path(&donor_path)
+        .expect("donor source should be registered")
+        .id;
+    donor_source
+        .retain_text(donor_id, "donor".to_owned())
+        .expect("donor snapshot should be retained");
+    let donor = Arc::new(donor_source);
+    let donor_metrics = donor.retention_metrics();
+    let donor_path_rows = donor.paths().len();
+    let donor_path_bytes = donor.paths().storage_bytes();
+
+    let name = strings.intern("donor-only-diagnostic");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let span = SourceSpan::new(
+        donor_id,
+        LocalSpan::exact(0, 5, &mut span_builder).expect("donor span should be compact"),
+    );
+    let mut diagnostic = CompilerDiagnostic::unknown_value_name(name, Some(span));
+    let donor_identity = StablePackageIdentity::project_local("donor-only");
+    diagnostic.primary_frozen_identity_handle =
+        Some(FrozenIdentityHandle::for_domain(donor_identity.clone()));
+    let mut trailing = CompilerMessages::from_diagnostics(vec![diagnostic], strings.clone());
+    trailing.install_source_contexts(
+        [
+            RenderSourceContext {
+                diagnostic_range: 0..1,
+                source_database: Arc::clone(&requester),
+                domain: None,
+            },
+            RenderSourceContext {
+                diagnostic_range: 0..0,
+                source_database: Arc::clone(&donor),
+                domain: Some(donor_identity),
+            },
+        ],
+        0,
+    );
+    drop(donor);
+
+    let project = CompiledGraphBoundary {
+        structure: ProjectModuleGraph::from_normal_roots(Vec::new()),
+        modules: ModuleArtifactStore::new(0),
+        generated: BoundaryGeneratedFunctionStore::default(),
+        diagnosed: Vec::new(),
+        blocked: Vec::new(),
+    };
+    let frontend = ProjectFrontendCompilation::new(
+        project,
+        CompletedSourcePackageRegistry::new(),
+        ResourceInputRegistry::new(),
+        Vec::new(),
+    )
+    .expect("empty frontend should validate");
+    let (failure, retention) =
+        frontend.into_render_messages_and_metrics(&mut strings, Some(requester), Some(trailing));
+
+    assert_eq!(failure.reports.iter().count(), 1);
+    assert_eq!(retention.diagnostic_records, 1);
+    assert_eq!(
+        retention.source_snapshot_bytes,
+        requester_metrics.source_snapshot_bytes + donor_metrics.source_snapshot_bytes
+    );
+    assert_eq!(
+        retention.extended_span_rows,
+        requester_metrics.extended_span_rows + donor_metrics.extended_span_rows
+    );
+    assert_eq!(
+        retention.source_identity_slots,
+        requester_metrics.source_identity_slots + donor_metrics.source_identity_slots
+    );
+    assert_eq!(retention.retained_identity_contexts, 2);
+    assert_eq!(retention.path_table_count, 2);
+    assert_eq!(
+        retention.path_table_node_rows,
+        requester_path_rows + donor_path_rows
+    );
+    assert_eq!(
+        retention.path_table_storage_bytes,
+        requester_path_bytes + donor_path_bytes
+    );
 }
 
 #[test]

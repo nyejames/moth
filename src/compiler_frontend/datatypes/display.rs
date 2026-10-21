@@ -253,6 +253,10 @@ impl TypeDisplayView for TypeEnvironment {
 //  Shared Spelling
 // -----------------------------------------------------------
 
+/// The spelling of the builtin `Bool`. Its shape alone names it, so a renderer that names `Bool` without a captured
+/// type reads this rather than a type environment.
+pub(crate) const BOOL_TYPE_SPELLING: &str = "Bool";
+
 /// Renders one type through a view. The live environment and the frozen snapshot both call this,
 /// so each spelling rule exists exactly once.
 pub(crate) fn display_view_type<View: TypeDisplayView>(
@@ -263,7 +267,7 @@ pub(crate) fn display_view_type<View: TypeDisplayView>(
 ) -> String {
     match view.shape(type_id) {
         TypeDisplayShape::Unknown => "<unknown type>".to_owned(),
-        TypeDisplayShape::Bool => "Bool".to_owned(),
+        TypeDisplayShape::Bool => BOOL_TYPE_SPELLING.to_owned(),
         TypeDisplayShape::String => "String".to_owned(),
         TypeDisplayShape::Char => "Char".to_owned(),
         TypeDisplayShape::Range => "Range".to_owned(),

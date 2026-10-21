@@ -432,6 +432,7 @@ static OPT_TYPE_FAMILY: FamilyRow = FamilyRow {
     extra: ExtraDataKind::None,
     labels: &[],
     render: None,
+    reason_key: |_| None,
 };
 
 #[test]

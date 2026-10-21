@@ -7,15 +7,15 @@ use super::run_check_for_tests;
 use super::{CheckCommandReport, CheckOutcome, run_check_command};
 use crate::build_system::build::{ProjectBuilder, build_project};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-#[cfg(feature = "timers")]
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 #[cfg(unix)]
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidConfigReason, InvalidOutputFolderReason,
 };
-use crate::compiler_frontend::source::{FrozenIdentityContext, SourceDatabase};
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_fs::assert_path_missing;
 use crate::compiler_tests::test_support::run_stack_budgeted_child;
@@ -456,25 +456,27 @@ fn diagnostic_identity_sequence<'a>(
         .collect()
 }
 
-/// Collect diagnostic identity rows through the canonical frozen identity context.
-fn diagnostic_identity_sequence_frozen<'a>(
-    diagnostics: impl IntoIterator<Item = &'a CompilerDiagnostic>,
-    string_table: &'a StringTable,
-    frozen_identity: &'a FrozenIdentityContext,
+/// Collect ordered identity rows from the frozen boundary reports.
+///
+/// WHAT: records each report view's stable code and reason key, plus its frozen source path and
+///       one-based start line.
+/// WHY: check/build parity must exercise the same immutable report data that production renders.
+fn diagnostic_identity_sequence_boundary(
+    mut messages: CompilerMessages,
     project_root: &std::path::Path,
 ) -> Vec<DiagnosticIdentityRow> {
+    messages.mark_frozen();
+    let failure = into_boundary_failure(messages);
     let canonical_project_root = project_root
         .canonicalize()
         .expect("diagnostic fixture root should canonicalize");
-    let render_context =
-        DiagnosticRenderContext::new(string_table).with_frozen_identity(frozen_identity);
 
-    diagnostics
-        .into_iter()
-        .map(|diagnostic| {
-            let identity = diagnostic.identity();
-            let position = render_context
-                .primary_position(diagnostic)
+    failure
+        .reports
+        .iter()
+        .map(|(report, view)| {
+            let position = DiagnosticRenderContext::for_report(report)
+                .site_position(view.primary_site())
                 .expect("frontend diagnostics should retain a resolvable primary source span");
             let relative_path = position
                 .path
@@ -485,7 +487,12 @@ fn diagnostic_identity_sequence_frozen<'a>(
                 .expect("diagnostic logical path should be valid UTF-8")
                 .replace('\\', "/");
             let line = position.start.line.saturating_add(1) as i32;
-            (identity.code, identity.reason_key, normalized_path, line)
+            (
+                view.descriptor().code,
+                view.reason_key(),
+                normalized_path,
+                line,
+            )
         })
         .collect()
 }
@@ -550,20 +557,12 @@ if value is:
             && remaining.iter().any(|name| name == "src"),
         "check should leave the authored config and source tree, got {remaining:?}"
     );
-    let check_warning_identity_context = check_warning_outcome
-        .messages
-        .frozen_identity_context_for_diagnostic(0)
-        .expect("check warnings should retain their frozen identity context");
     let build_warning_source_database = build_warning_result
         .source_database
         .as_deref()
         .expect("build warnings should retain their source database");
-    let check_warning_identity = diagnostic_identity_sequence_frozen(
-        check_warning_outcome.messages.diagnostic_slice().iter(),
-        &check_warning_outcome.messages.string_table,
-        check_warning_identity_context,
-        &warning_root,
-    );
+    let check_warning_identity =
+        diagnostic_identity_sequence_boundary(check_warning_outcome.messages, &warning_root);
     let build_warning_identity = diagnostic_identity_sequence(
         build_warning_result.warnings.iter(),
         &build_warning_result.string_table,
@@ -625,25 +624,10 @@ increment(count)
         panic!("error fixture should fail the build frontend");
     };
 
-    let check_error_identity_context = check_error_outcome
-        .messages
-        .frozen_identity_context_for_diagnostic(0)
-        .expect("check errors should retain their frozen identity context");
-    let build_error_identity_context = build_error_messages
-        .frozen_identity_context_for_diagnostic(0)
-        .expect("build errors should retain their frozen identity context");
-    let check_error_identity = diagnostic_identity_sequence_frozen(
-        check_error_outcome.messages.diagnostic_slice().iter(),
-        &check_error_outcome.messages.string_table,
-        check_error_identity_context,
-        &error_root,
-    );
-    let build_error_identity = diagnostic_identity_sequence_frozen(
-        build_error_messages.diagnostic_slice().iter(),
-        &build_error_messages.string_table,
-        build_error_identity_context,
-        &error_root,
-    );
+    let check_error_identity =
+        diagnostic_identity_sequence_boundary(check_error_outcome.messages, &error_root);
+    let build_error_identity =
+        diagnostic_identity_sequence_boundary(build_error_messages, &error_root);
 
     let expected_error_identity = vec![(
         "MOTH-RULE-0054",

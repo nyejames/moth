@@ -1,54 +1,61 @@
 //! User-facing message display helpers.
 //!
-//! WHAT: renders compiled diagnostics and errors into human-readable terminal output.
+//! WHAT: renders frozen boundary failures and legacy vessels into human-readable terminal output.
 //! WHY: this is the final boundary between internal structured diagnostics and what the user sees.
 
-use crate::compiler_frontend::compiler_errors::{CompilerMessages, InfrastructureErrors};
+use crate::compiler_frontend::compiler_errors::{
+    BoundaryFailure, CompilerMessages, InfrastructureErrors,
+};
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::render::infrastructure::{
     ISSUE_URL, InfrastructureClass, format_error_guidance_lines, infrastructure_class,
     infrastructure_heading,
 };
 use crate::compiler_frontend::compiler_messages::render::relative_display_path_from_root;
+use crate::compiler_frontend::compiler_messages::render::{terminal, terse};
 use saying::say;
 use std::fmt::Write;
 
-pub fn print_compiler_messages(messages: CompilerMessages) {
-    // The outer infrastructure failure prints as a standalone error beside the diagnostics,
-    // after every error diagnostic and before warnings/notes — mirroring the severity-bucket
-    // display order without fabricating a user diagnostic.
-    let mut outer_emitted = messages.infrastructure_errors().is_none();
-    for diagnostic_index in messages.diagnostic_display_order() {
-        let diagnostic = &messages.diagnostic_slice()[diagnostic_index];
-        if !outer_emitted
-            && diagnostic.severity
-                != crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error
+/// Prints every record of a boundary failure. The infrastructure block follows the error records and precedes the
+/// warnings and notes.
+pub fn print_boundary_messages(failure: &BoundaryFailure) {
+    let mut infrastructure = failure.infrastructure_errors();
+    for severity in [
+        DiagnosticSeverity::Error,
+        DiagnosticSeverity::Warning,
+        DiagnosticSeverity::Note,
+    ] {
+        if severity != DiagnosticSeverity::Error
+            && let Some(errors) = infrastructure.take()
         {
-            if let Some(errors) = messages.infrastructure_errors() {
-                say!(Reset format_infrastructure_errors(errors));
-            }
-            outer_emitted = true;
+            say!(Reset format_infrastructure_errors(errors));
         }
-        let render_context = messages.diagnostic_render_context(diagnostic_index);
-        crate::compiler_frontend::compiler_messages::render::terminal::print_diagnostic_with_context(
-            diagnostic,
-            render_context,
-        );
+        for (report, view) in failure.reports.iter_severity(severity) {
+            terminal::print_diagnostic_view(view, DiagnosticRenderContext::for_report(report));
+        }
     }
-    if !outer_emitted && let Some(errors) = messages.infrastructure_errors() {
+    if let Some(errors) = infrastructure.take() {
         say!(Reset format_infrastructure_errors(errors));
     }
 }
 
-pub fn print_terse_compiler_messages(messages: &CompilerMessages) {
-    for line in format_terse_compiler_messages(messages) {
+/// Prints the terse records of a boundary failure, one line per record.
+pub fn print_terse_boundary_messages(failure: &BoundaryFailure) {
+    for line in terse::format_terse_boundary_messages(failure) {
         println!("{line}");
     }
 }
 
-pub fn format_terse_compiler_messages(messages: &CompilerMessages) -> Vec<String> {
-    crate::compiler_frontend::compiler_messages::render::terse::format_terse_compiler_messages(
-        messages,
-    )
+/// Prints a legacy vessel after converting it once to the boundary form.
+pub fn print_compiler_messages(messages: CompilerMessages) {
+    print_boundary_messages(&into_boundary_failure(messages));
+}
+
+/// Prints the terse records of a legacy vessel after converting it once to the boundary form.
+pub fn print_terse_compiler_messages(messages: CompilerMessages) {
+    print_terse_boundary_messages(&into_boundary_failure(messages));
 }
 
 /// Format the complete outer event without cloning errors or synthesising source frames.

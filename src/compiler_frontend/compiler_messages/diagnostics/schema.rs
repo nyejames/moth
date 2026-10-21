@@ -26,7 +26,6 @@ pub(super) struct FactDescriptor {
     /// Relative words that some value of this codec may leave as raw type ids.
     pub(super) possible_pending_mask: u8,
     /// Rewrites this codec's identity words through a remap. Other words are left as they are.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(super) remap_ids: fn(&mut [u32], IdRemap<'_>) -> Result<(), FactCapacityError>,
 }
 
@@ -48,10 +47,6 @@ type FamilyRenderer = fn(&DiagnosticView<'_>, DiagnosticRenderContext<'_>) -> Re
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FamilyRow {
     pub(super) code: DiagnosticCode,
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "P4.6 producer sweep reads family categories")
-    )]
     pub(super) category: DiagnosticCategory,
     pub(super) reserved: bool,
     /// The legacy descriptor served by this family.
@@ -62,6 +57,8 @@ pub(crate) struct FamilyRow {
     pub(super) labels: &'static [LabelMessageCode],
     /// Renders records from the family's typed view. Reserved families have no records to render.
     pub(crate) render: Option<FamilyRenderer>,
+    /// The stable reason key the family's view reports; `None` when the family has no reason fact.
+    pub(super) reason_key: fn(&DiagnosticView<'_>) -> Option<&'static str>,
 }
 
 impl FamilyRow {
@@ -207,6 +204,7 @@ macro_rules! diagnostic_family {
             labels: [$($label:expr),* $(,)?],
             extra: $extra:ident,
             ctor: generated $ctor:ident,
+            $(reason_key: $reason:ident,)?
             $(#[$view_attr:meta])*
             view: $view:ident,
             render: $render:ident $(, $reserved:ident)? $(,)?
@@ -235,6 +233,7 @@ macro_rules! diagnostic_family {
                 ),*],
                 extra: $crate::compiler_frontend::compiler_messages::diagnostics::extras::ExtraDataKind::$extra,
                 labels: &[$($label),*],
+                reason_key: $crate::compiler_frontend::compiler_messages::diagnostics::view::reason_key_through::<$view>,
                 render: $crate::compiler_frontend::compiler_messages::diagnostics::schema::family_renderer!(
                     $render,
                     $view
@@ -247,6 +246,12 @@ macro_rules! diagnostic_family {
         }
 
         impl $crate::compiler_frontend::compiler_messages::diagnostics::view::FamilyView for $view {
+            $(
+                fn reason_key(&self) -> Option<&'static str> {
+                    use $crate::compiler_frontend::compiler_messages::diagnostic_payload::reason_keys::OptionalStableReasonKey as _;
+                    self.$reason.optional_stable_reason_key()
+                }
+            )?
             fn from_record(
                 record: $crate::compiler_frontend::compiler_messages::diagnostics::store::RecordRef<'_>,
             ) -> Option<Self> {
@@ -288,6 +293,7 @@ macro_rules! diagnostic_family {
             labels: [$($label:expr),* $(,)?],
             extra: $extra:ident,
             ctor: manual,
+            $(reason_key: $reason:ident,)?
             $(#[$view_attr:meta])*
             view: $view:ident,
             render: $render:ident $(, $reserved:ident)? $(,)?
@@ -316,6 +322,7 @@ macro_rules! diagnostic_family {
                 ),*],
                 extra: $crate::compiler_frontend::compiler_messages::diagnostics::extras::ExtraDataKind::$extra,
                 labels: &[$($label),*],
+                reason_key: $crate::compiler_frontend::compiler_messages::diagnostics::view::reason_key_through::<$view>,
                 render: $crate::compiler_frontend::compiler_messages::diagnostics::schema::family_renderer!(
                     $render,
                     $view
@@ -328,6 +335,12 @@ macro_rules! diagnostic_family {
         }
 
         impl $crate::compiler_frontend::compiler_messages::diagnostics::view::FamilyView for $view {
+            $(
+                fn reason_key(&self) -> Option<&'static str> {
+                    use $crate::compiler_frontend::compiler_messages::diagnostic_payload::reason_keys::OptionalStableReasonKey as _;
+                    self.$reason.optional_stable_reason_key()
+                }
+            )?
             fn from_record(
                 record: $crate::compiler_frontend::compiler_messages::diagnostics::store::RecordRef<'_>,
             ) -> Option<Self> {

@@ -7,29 +7,32 @@
 //!      entries here; warning identity stays owned by `assertions/warnings.rs`.
 
 use super::super::{DiagnosticAssertion, DiagnosticMatchMode, FailureExpectation};
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::render::{terminal, terse};
+use crate::compiler_frontend::compiler_errors::BoundaryFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReport;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
+use crate::compiler_frontend::compiler_messages::render::{
+    DiagnosticRenderContext, terminal, terse,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticLabelStyle, DiagnosticSeverity,
-    InfrastructureDiagnosticKind,
+    DiagnosticKind, DiagnosticSeverity, InfrastructureDiagnosticKind,
 };
 use crate::compiler_frontend::utilities::basic::portable_path_text;
 use std::collections::BTreeMap;
 use std::path::Path;
+type IndexedDiagnostic<'a> = (&'a DiagnosticReport, DiagnosticView<'a>);
 pub(super) fn validate_diagnostics(
-    messages: &CompilerMessages,
+    messages: &BoundaryFailure,
     expectation: &FailureExpectation,
     fixture_root: &Path,
 ) -> Option<String> {
     // Failure diagnostics select only error-severity entries. Warnings remain owned by
     // `assertions/warnings.rs` so a warning code or rendered warning can never satisfy an error
-    // diagnostic contract. `CompilerMessages::diagnostics()` still owns the complete ordered
-    // stream; this is a local selection owner, not a second boundary view.
-    let error_diagnostics = error_diagnostics_with_render_indices(messages);
+    // diagnostic contract.
+    let error_diagnostics = error_diagnostics(messages);
 
     let mut diagnostic_codes: Vec<&str> = error_diagnostics
         .iter()
-        .map(|(_, diagnostic)| diagnostic.identity().code)
+        .map(|(_, view)| view.descriptor().code)
         .collect();
     // The outer infrastructure failure carries no user diagnostic, but its stable code stays
     // observable at the failure boundary exactly like a rendered error diagnostic code.
@@ -49,12 +52,9 @@ pub(super) fn validate_diagnostics(
         return Some(reason);
     }
 
-    if let Some(reason) = validate_structured_diagnostic_assertions(
-        &error_diagnostics,
-        messages,
-        expectation,
-        fixture_root,
-    ) {
+    if let Some(reason) =
+        validate_structured_diagnostic_assertions(&error_diagnostics, expectation, fixture_root)
+    {
         return Some(reason);
     }
 
@@ -63,33 +63,18 @@ pub(super) fn validate_diagnostics(
     if !expectation.message_contains.is_empty() {
         let mut rendered_messages: Vec<String> = error_diagnostics
             .iter()
-            .map(|(diagnostic_index, diagnostic)| {
-                terminal::format_diagnostic_guidance(
-                    diagnostic,
-                    messages.diagnostic_render_context(*diagnostic_index),
-                )
-                .join("\n")
+            .map(|(report, view)| {
+                terminal::format_guidance_view(*view, DiagnosticRenderContext::for_report(report))
+                    .join("\n")
             })
             .collect();
-        rendered_messages.extend(error_diagnostics.iter().flat_map(
-            |(diagnostic_index, diagnostic)| {
-                terminal::format_label_messages_with_context(
-                    diagnostic,
-                    messages.diagnostic_render_context(*diagnostic_index),
-                )
-            },
-        ));
+        rendered_messages.extend(error_diagnostics.iter().flat_map(|(report, view)| {
+            terminal::format_label_messages_view(*view, DiagnosticRenderContext::for_report(report))
+        }));
 
-        rendered_messages.extend(
-            error_diagnostics
-                .iter()
-                .map(|(diagnostic_index, diagnostic)| {
-                    terse::format_terse_diagnostic_with_context(
-                        diagnostic,
-                        messages.diagnostic_render_context(*diagnostic_index),
-                    )
-                }),
-        );
+        rendered_messages.extend(error_diagnostics.iter().map(|(report, view)| {
+            terse::format_terse_diagnostic_view(*view, DiagnosticRenderContext::for_report(report))
+        }));
         // Search each retained cause independently so fragments cannot straddle unrelated failures.
         if let Some(errors) = messages.infrastructure_errors() {
             rendered_messages.extend(errors.iter().map(|error| error.msg.clone()));
@@ -107,25 +92,15 @@ pub(super) fn validate_diagnostics(
     None
 }
 
-/// Selects error-severity diagnostics paired with their original render-boundary index.
-///
-/// WHAT: filters `CompilerMessages::diagnostics()` to `DiagnosticSeverity::Error` and carries the
-///       original index so render-context lookups stay aligned with stored diagnostic positions.
-/// WHY: failure diagnostics are error-only; warnings are validated independently by
-///      `assertions/warnings.rs`. Keeping selection here gives the error contract one local owner.
-fn error_diagnostics_with_render_indices(
-    messages: &CompilerMessages,
-) -> Vec<(usize, &CompilerDiagnostic)> {
+/// Select error-severity records in canonical order with their owning frozen report.
+fn error_diagnostics(messages: &BoundaryFailure) -> Vec<IndexedDiagnostic<'_>> {
     messages
-        .diagnostics()
-        .enumerate()
-        .filter(|(_, diagnostic)| diagnostic.severity == DiagnosticSeverity::Error)
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
         .collect()
 }
-
 fn validate_structured_diagnostic_assertions(
-    error_diagnostics: &[(usize, &CompilerDiagnostic)],
-    messages: &CompilerMessages,
+    error_diagnostics: &[IndexedDiagnostic<'_>],
     expectation: &FailureExpectation,
     fixture_root: &Path,
 ) -> Option<String> {
@@ -136,7 +111,8 @@ fn validate_structured_diagnostic_assertions(
         // code can never satisfy a failure diagnostic contract.
         let matching_diagnostics = error_diagnostics
             .iter()
-            .filter(|(_, diagnostic)| diagnostic.identity().code == assertion.code)
+            .copied()
+            .filter(|(_, view)| view.descriptor().code == assertion.code)
             .collect::<Vec<_>>();
         let actual_count = matching_diagnostics.len();
 
@@ -152,7 +128,7 @@ fn validate_structured_diagnostic_assertions(
             );
         }
 
-        let Some(&(diagnostic_index, diagnostic)) = assertion
+        let Some((report, view)) = assertion
             .occurrence
             .checked_sub(1)
             .and_then(|index| matching_diagnostics.get(index).copied())
@@ -167,12 +143,11 @@ fn validate_structured_diagnostic_assertions(
             continue;
         };
 
-        let identity = diagnostic.identity();
         if let Some(expected_reason) = &assertion.reason {
             // A diagnostic with no reason key cannot satisfy a reason contract, whatever the
             // authored text says. Comparing a rendered placeholder instead would let an
             // unclassified diagnostic match a case that authored that placeholder as its reason.
-            let actual_reason = identity.reason_key;
+            let actual_reason = view.reason_key();
             if actual_reason != Some(expected_reason.as_str()) {
                 append_structured_mismatch(
                     &mut mismatches,
@@ -184,8 +159,9 @@ fn validate_structured_diagnostic_assertions(
             }
         }
 
+        let context = DiagnosticRenderContext::for_report(report);
         if let Some(expected_path) = &assertion.path {
-            let actual_path = diagnostic_path(diagnostic_index, diagnostic, messages, fixture_root);
+            let actual_path = diagnostic_path(report, view, fixture_root);
             if actual_path != *expected_path {
                 append_structured_mismatch(
                     &mut mismatches,
@@ -197,9 +173,7 @@ fn validate_structured_diagnostic_assertions(
             }
         }
 
-        let primary_position = messages
-            .diagnostic_render_context(diagnostic_index)
-            .primary_position(diagnostic);
+        let primary_position = context.site_position(view.primary_site());
         if let Some(expected_line) = assertion.line {
             let actual_line = primary_position
                 .as_ref()
@@ -239,9 +213,8 @@ fn validate_structured_diagnostic_assertions(
         validate_secondary_label_assertions(
             &mut mismatches,
             assertion,
-            diagnostic_index,
-            diagnostic,
-            messages,
+            view,
+            context,
             fixture_root,
         );
     }
@@ -252,16 +225,11 @@ fn validate_structured_diagnostic_assertions(
 fn validate_secondary_label_assertions(
     mismatches: &mut Vec<String>,
     assertion: &DiagnosticAssertion,
-    diagnostic_index: usize,
-    diagnostic: &CompilerDiagnostic,
-    messages: &CompilerMessages,
+    view: DiagnosticView<'_>,
+    context: DiagnosticRenderContext<'_>,
     fixture_root: &Path,
 ) {
-    let secondary_labels = diagnostic
-        .labels
-        .iter()
-        .filter(|label| label.style == DiagnosticLabelStyle::Secondary)
-        .collect::<Vec<_>>();
+    let secondary_labels = view.durable_labels().collect::<Vec<_>>();
 
     for secondary_assertion in &assertion.secondary_labels {
         let Some(label) = secondary_assertion
@@ -283,9 +251,7 @@ fn validate_secondary_label_assertions(
             continue;
         };
 
-        let label_position = messages
-            .diagnostic_render_context(diagnostic_index)
-            .label_position(label);
+        let label_position = context.site_position(label.site);
 
         if let Some(expected_path) = &secondary_assertion.path {
             let actual_path = label_position
@@ -372,14 +338,12 @@ fn append_secondary_mismatch(
 }
 
 fn diagnostic_path(
-    diagnostic_index: usize,
-    diagnostic: &CompilerDiagnostic,
-    messages: &CompilerMessages,
+    report: &DiagnosticReport,
+    view: DiagnosticView<'_>,
     fixture_root: &Path,
 ) -> String {
-    messages
-        .diagnostic_render_context(diagnostic_index)
-        .primary_position(diagnostic)
+    DiagnosticRenderContext::for_report(report)
+        .site_position(view.primary_site())
         .map(|position| display_path(&position.path, fixture_root))
         .unwrap_or_else(|| String::from("<no source position>"))
 }

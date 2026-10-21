@@ -79,26 +79,30 @@ fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_s
             Err(messages) => messages,
             Ok(_) => panic!("{entry_mode}: invalid package default unexpectedly compiled"),
         };
+        let failure = into_boundary_failure(messages);
         assert!(
-            !messages.has_infrastructure_error(),
-            "{entry_mode}: {messages:?}"
+            !failure.has_infrastructure_error(),
+            "{entry_mode}: {failure:?}"
         );
-        let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
-        assert_eq!(diagnostics.len(), 1, "{entry_mode}: {messages:?}");
+        let errors = failure
+            .reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .collect::<Vec<_>>();
+        assert_eq!(errors.len(), 1, "{entry_mode}: {failure:?}");
+        let (report, view) = errors[0];
         assert_eq!(
-            diagnostics[0].kind.code(),
+            view.descriptor().code,
             "MOTH-SYNTAX-0008",
-            "{entry_mode}: {messages:?}"
+            "{entry_mode}: {failure:?}"
         );
 
-        let rendered = render_compiler_messages_html(&messages, &project_root);
+        let rendered = render_boundary_messages_html(&failure, &project_root);
         assert!(
             rendered.contains(default_line),
             "{entry_mode}: the diagnostic must render its package-owned source excerpt: {rendered}"
         );
-        let position = messages
-            .diagnostic_render_context(0)
-            .primary_position(diagnostics[0])
+        let position = DiagnosticRenderContext::for_report(report)
+            .site_position(view.primary_site())
             .expect("invalid package default should retain its authored source position");
         assert_eq!(
             portable_path_text(&position.path),
@@ -174,11 +178,11 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
     let Err(mut messages) = result else {
         panic!("source-package config contract must not consume the project input");
     };
-    messages.set_source_database(Arc::clone(
+    messages.set_source_database(
         project_source_files
-            .as_ref()
+            .take()
             .expect("directory frontend should retain the project source database"),
-    ));
+    );
     let observed_identities = messages
         .error_diagnostics()
         .map(|diagnostic| diagnostic.identity())
@@ -204,7 +208,7 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
         1,
         "the isolated source package should report exactly one missing-input diagnostic; observed {observed_identities:?}"
     );
-    let (diagnostic_index, diagnostic) = matching[0];
+    let (_, diagnostic) = matching[0];
     let DiagnosticPayload::InvalidConfig {
         key: Some(key),
         reason: InvalidConfigReason::MissingConfigInput,
@@ -221,14 +225,23 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
         crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
         "source-package diagnostics must not use the synthetic compilation-root span",
     );
-    assert!(
-        messages
-            .diagnostic_render_context(diagnostic_index)
-            .primary_position(diagnostic)
-            .is_some(),
-        "source-package diagnostics should retain source context",
+    let code = diagnostic.kind.code();
+    drop(matching);
+    let failure = into_boundary_failure(messages);
+    let (report, view) = failure
+        .reports
+        .iter()
+        .find(|(_, view)| view.descriptor().code == code)
+        .expect("missing-input diagnostic should remain in the boundary");
+    assert_eq!(
+        view.reason_key(),
+        Some("invalid_config.missing_config_input")
     );
-    let rendered = render_compiler_messages_html(&messages, &dir);
+    let position = DiagnosticRenderContext::for_report(report)
+        .site_position(view.primary_site())
+        .expect("source-package diagnostics should retain source context");
+    assert_eq!(position.source, span.source());
+    let rendered = render_boundary_messages_html(&failure, &dir);
     assert!(
         rendered.contains("enabled #Config of Bool"),
         "the missing-input frame should use the package snapshot: {rendered}"
@@ -291,27 +304,23 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
     )
     .expect("diagnosed source packages are retained in the typed frontend outcome");
     let project_source = frontend.project_source_database.take();
-    let messages =
-        frontend.into_render_messages_with_frozen_identity(&mut string_table, project_source, None);
+    let messages = into_boundary_failure(frontend.into_render_messages(
+        &mut string_table,
+        project_source,
+        None,
+    ));
 
     assert!(
         messages.error_count() >= 2,
         "both diagnosed source packages should retain their errors"
     );
     let diagnosed_paths = messages
-        .diagnostics()
-        .enumerate()
-        .filter(|(_, diagnostic)| {
-            diagnostic.severity
-                == crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error
-        })
-        .filter_map(|(diagnostic_index, diagnostic)| {
-            Some(
-                messages
-                    .diagnostic_render_context(diagnostic_index)
-                    .primary_position(diagnostic)?
-                    .path,
-            )
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .filter_map(|(report, view)| {
+            DiagnosticRenderContext::for_report(report)
+                .site_position(view.primary_site())
+                .map(|position| position.path)
         })
         .collect::<Vec<_>>();
     assert!(
@@ -426,17 +435,17 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
         );
 
         let project_source = frontend.project_source_database.take();
-        let messages = frontend.into_render_messages_with_frozen_identity(
+        let messages = into_boundary_failure(frontend.into_render_messages(
             &mut string_table,
             project_source,
             None,
-        );
+        ));
         assert_eq!(
             messages.error_count(),
             1,
             "the package diagnostic should render once"
         );
-        let rendered = render_compiler_messages_html(&messages, &dir);
+        let rendered = render_boundary_messages_html(&messages, &dir);
         assert!(
             rendered.contains("return missing_package_value"),
             "the diagnosed package must retain its own source snapshot: {rendered}"
@@ -463,16 +472,24 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
             Err(messages) => messages,
             Ok(_) => panic!("Boracle consumer of a diagnosed package unexpectedly compiled"),
         };
-        assert!(!messages.has_infrastructure_error(), "{messages:?}");
-        let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
-        assert_eq!(diagnostics.len(), 1, "{messages:?}");
-        assert_eq!(diagnostics[0].kind.code(), "MOTH-RULE-0034");
-        let position = messages
-            .diagnostic_render_context(0)
-            .primary_position(diagnostics[0])
+        let failure = into_boundary_failure(messages);
+        assert!(!failure.has_infrastructure_error(), "{failure:?}");
+        assert_eq!(
+            failure.error_count(),
+            1,
+            "Boracle should report exactly one diagnosed source-package error"
+        );
+        let (report, view) = failure
+            .reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .next()
+            .expect("the package diagnosis should remain");
+        assert_eq!(view.descriptor().code, "MOTH-RULE-0034");
+        let position = DiagnosticRenderContext::for_report(report)
+            .site_position(view.primary_site())
             .expect("Boracle must retain the failed package's authored source span");
         assert!(position.line.contains("return missing_package_value"));
-        let rendered = render_compiler_messages_html(&messages, &dir);
+        let rendered = render_boundary_messages_html(&failure, &dir);
         assert!(rendered.contains("return missing_package_value"));
     }
 }
@@ -1349,38 +1366,42 @@ fn generated_materialisation_preserves_exact_request_span_in_recursive_diagnosti
     )
     .expect("diagnosed recursive materialisation should remain a retained frontend outcome");
     let project_source = frontend.project_source_database.take();
-    let messages =
-        frontend.into_render_messages_with_frozen_identity(&mut string_table, project_source, None);
-
-    let diagnostic = messages
-        .error_diagnostics()
+    let messages = frontend.into_render_messages(&mut string_table, project_source, None);
+    let failure = into_boundary_failure(messages);
+    let (report, view) = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
         .next()
         .expect("recursive materialisation should retain one error diagnostic");
-    assert!(matches!(
-        &diagnostic.payload,
-        DiagnosticPayload::InvalidGenericInstantiation {
-            reason: InvalidGenericInstantiationReason::RecursiveFunctionInstantiation,
-            ..
+    assert_eq!(
+        view.reason_key(),
+        Some("invalid_generic_instantiation.recursive_function_instantiation")
+    );
+    let (span, span_context) = match view.primary_site() {
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(span) => {
+            (span, report.context())
         }
-    ));
-    let frozen_identity = messages
-        .frozen_identity_context_for_diagnostic(0)
-        .expect("generated diagnostic should retain its frozen identity context");
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+            span,
+            context,
+        } => (
+            span,
+            context
+                .get()
+                .expect("the donor identity should be installed for the generated diagnostic"),
+        ),
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent => {
+            panic!("recursive generated diagnostic should retain its request span")
+        }
+    };
+    let context = DiagnosticRenderContext::for_report(report);
+    let position = context
+        .site_position(view.primary_site())
+        .expect("the retained request span should resolve in its report");
     let entry_path = fs::canonicalize(dir.join("src/@page.moth"))
         .expect("entry source path should canonicalize");
-    let span = diagnostic
-        .primary_span
-        .expect("recursive generated diagnostic should retain the request span");
-    let entry_id = span.source();
-    let entry_slot = frozen_identity
-        .get(entry_id)
-        .expect("frozen identity should resolve the request source");
-    assert_eq!(
-        entry_slot.canonical_os_path.as_deref(),
-        Some(entry_path.as_path()),
-        "request span should resolve to the entry source in the frozen identity"
-    );
-    let range = span.byte_range(frozen_identity);
+    assert_eq!(position.host_path, Some(entry_path.as_path()));
+    let range = span.byte_range(span_context);
     let final_call = format!("{function_name}(1)");
     let expected_start = entry_source
         .rfind(&final_call)
@@ -1467,22 +1488,24 @@ html #= ()\n",
         "project and package databases should begin with colliding SourceId values"
     );
 
-    let messages = frontend.into_render_messages_with_frozen_identity(
-        &mut string_table,
-        project_source_files.take(),
-        None,
-    );
-    let (diagnostic_index, diagnostic) = messages
+    let messages =
+        frontend.into_render_messages(&mut string_table, project_source_files.take(), None);
+    let type_mismatch_code = messages
         .diagnostics()
-        .enumerate()
-        .find(|(_, diagnostic)| {
-            matches!(&diagnostic.payload, DiagnosticPayload::TypeMismatch { .. })
-        })
-        .expect("imported generic materialisation should retain one type mismatch diagnostic");
+        .find(|diagnostic| matches!(&diagnostic.payload, DiagnosticPayload::TypeMismatch { .. }))
+        .expect("imported generic materialisation should retain one type mismatch diagnostic")
+        .kind
+        .code();
+    let failure = into_boundary_failure(messages);
+    let (report, view) = failure
+        .reports
+        .iter()
+        .find(|(_, view)| view.descriptor().code == type_mismatch_code)
+        .expect("type mismatch should remain in the boundary report");
 
-    let context = messages.diagnostic_render_context(diagnostic_index);
+    let context = DiagnosticRenderContext::for_report(report);
     let primary = context
-        .primary_position(diagnostic)
+        .site_position(view.primary_site())
         .expect("request primary span should resolve through the project snapshot");
     let project_path = fs::canonicalize(project_path).expect("project path should canonicalize");
     let package_path = fs::canonicalize(package_path).expect("package path should canonicalize");
@@ -1492,30 +1515,44 @@ html #= ()\n",
         "request primary path should be the project snapshot: {}",
         primary.path.display()
     );
+    let primary_span = match view.primary_site() {
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(span)
+        | crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+            span,
+            ..
+        } => span,
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent => {
+            panic!("materialised diagnostic should retain the project request span")
+        }
+    };
     assert_eq!(
-        diagnostic
-            .primary_span
-            .expect("materialised diagnostic should retain the project request span")
-            .source(),
+        primary_span.source(),
         project_source_id,
         "request span should retain the project database's colliding source ID"
     );
 
-    let body_label = diagnostic
-        .labels
-        .iter()
-        .find(|label| label.message == Some(DiagnosticLabelMessage::GenericInstantiationBodySite))
-        .expect("generic diagnostic should retain a donor body label");
-    let declaration_label = diagnostic
-        .labels
+    let labels = view.durable_labels().collect::<Vec<_>>();
+    let body_label = labels
         .iter()
         .find(|label| {
-            label.message == Some(DiagnosticLabelMessage::GenericInstantiationDeclarationSite)
+            matches!(
+                label.message,
+                crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage::GenericInstantiationBodySite
+            )
+        })
+        .expect("generic diagnostic should retain a donor body label");
+    let declaration_label = labels
+        .iter()
+        .find(|label| {
+            matches!(
+                label.message,
+                crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage::GenericInstantiationDeclarationSite
+            )
         })
         .expect("generic diagnostic should retain a donor declaration label");
     for label in [body_label, declaration_label] {
         let position = context
-            .label_position(label)
+            .site_position(label.site)
             .expect("donor label should resolve through its frozen identity handle");
         assert_eq!(position.host_path, Some(package_path.as_path()));
         assert!(
@@ -1527,63 +1564,63 @@ html #= ()\n",
             !position.line.is_empty(),
             "donor label should retain its package source line"
         );
+        let label_source = match label.site {
+            crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(
+                span,
+            )
+            | crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+                span,
+                ..
+            } => span.source(),
+            crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent => {
+                panic!("donor label should retain a source span")
+            }
+        };
         assert_eq!(
-            label
-                .span
-                .expect("donor label should retain a source span")
-                .source(),
-            package_source_id,
+            label_source, package_source_id,
             "donor label should retain the package database's colliding source ID"
         );
     }
 
-    let extended_label = [body_label, declaration_label]
+    let (extended_label, extended_span) = [*body_label, *declaration_label]
         .into_iter()
-        .find(|label| {
-            let Some(span) = label.span else {
-                return false;
-            };
-            let Some(identity) = label
-                .frozen_identity_handle
-                .as_ref()
-                .and_then(|handle| handle.get())
+        .find_map(|label| {
+            let crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+                span,
+                context,
+            } = label.site
             else {
-                return false;
+                return None;
             };
+            let identity = context.get()?;
             let range = span.byte_range(identity);
-            range.end() - range.start() > 1023
+            (range.end() - range.start() > 1023).then_some((label, span))
         })
         .expect("at least one donor label should resolve an extended span-table row");
     let extended_position = context
-        .label_position(extended_label)
+        .site_position(extended_label.site)
         .expect("extended donor label should resolve through package identity");
     assert_eq!(extended_position.host_path, Some(package_path.as_path()));
-    let project_identity = messages
-        .frozen_identity_context_for_diagnostic(diagnostic_index)
-        .expect("request diagnostic should retain the project frozen identity");
-    let project_slot = project_identity
-        .get(
-            extended_label
-                .span
-                .expect("extended label should have a span")
-                .source(),
-        )
+    let project_slot = report
+        .context()
+        .get(extended_span.source())
         .expect("the colliding source ID should resolve in the project identity");
     assert_eq!(
         project_slot.canonical_os_path.as_deref(),
         Some(project_path.as_path()),
         "a package span must not be resolved through the project identity context"
     );
-    let (warning_index, warning) = messages
-        .diagnostics()
-        .enumerate()
-        .find(|(_, diagnostic)| {
-            diagnostic.severity == DiagnosticSeverity::Warning && diagnostic.primary_span.is_some()
+    let (warning_report, warning_view) = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Warning)
+        .find(|(report, view)| {
+            DiagnosticRenderContext::for_report(report)
+                .site_position(view.primary_site())
+                .is_some()
         })
         .expect("generated generic body should retain a spanful warning");
-    let warning_context = messages.diagnostic_render_context(warning_index);
-    let warning_position = warning_context
-        .primary_position(warning)
+    let warning_position = DiagnosticRenderContext::for_report(warning_report)
+        .site_position(warning_view.primary_site())
         .expect("generated warning should resolve through its donor identity");
     assert_eq!(warning_position.host_path, Some(package_path.as_path()));
     assert!(
@@ -1675,23 +1712,29 @@ export:
 
     let project_path = fs::canonicalize(project_path).expect("project path should canonicalize");
     let package_path = fs::canonicalize(package_path).expect("package path should canonicalize");
-    let messages = frontend.into_render_messages_with_frozen_identity(
-        &mut string_table,
-        project_source_files.take(),
-        None,
-    );
-    let (diagnostic_index, diagnostic) = messages
-        .diagnostics()
-        .enumerate()
-        .find(|(_, diagnostic)| {
-            diagnostic
-                .primary_span
-                .is_some_and(|span| span.source() == package_source_id)
+    let messages =
+        frontend.into_render_messages(&mut string_table, project_source_files.take(), None);
+    let failure = into_boundary_failure(messages);
+    let (report, view) = failure
+        .reports
+        .iter()
+        .find(|(_, view)| {
+            match view.primary_site() {
+            crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(
+                span,
+            )
+            | crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+                span,
+                ..
+            } => span.source() == package_source_id,
+            crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent => {
+                false
+            }
+        }
         })
         .expect("nested generic failure should retain its package-owned call-site span");
-    let context = messages.diagnostic_render_context(diagnostic_index);
-    let primary = context
-        .primary_position(diagnostic)
+    let primary = DiagnosticRenderContext::for_report(report)
+        .site_position(view.primary_site())
         .expect("nested generic call-site span should resolve");
     assert_eq!(primary.host_path, Some(package_path.as_path()));
     assert!(
@@ -2836,21 +2879,9 @@ fn exported_private_chain_witness_rendering_is_stable_across_repeated_compilatio
         );
         let project_source = frontend.project_source_database.clone();
         let mut string_table = StringTable::new();
-        let messages = frontend.into_render_messages_with_frozen_identity(
-            &mut string_table,
-            project_source,
-            None,
-        );
-        messages
-            .diagnostics()
-            .enumerate()
-            .map(|(index, diagnostic)| {
-                terse::format_terse_diagnostic_with_context(
-                    diagnostic,
-                    messages.diagnostic_render_context(index),
-                )
-            })
-            .collect()
+        let messages = frontend.into_render_messages(&mut string_table, project_source, None);
+        let failure = into_boundary_failure(messages);
+        terse::format_terse_boundary_messages(&failure)
     }
     let first = terse_error_lines(temp_dir.path());
     assert_eq!(
@@ -2965,10 +2996,10 @@ fn source_package_warning_retained_by_frontend_outcome() {
     );
 
     let project_source = frontend.project_source_database.take();
-    let messages =
-        frontend.into_render_messages_with_frozen_identity(&mut string_table, project_source, None);
+    let messages = frontend.into_render_messages(&mut string_table, project_source, None);
+    let failure = into_boundary_failure(messages);
     assert!(
-        messages.warning_count() >= 1,
+        failure.warning_count() >= 1,
         "render boundary should retain the source-package warning"
     );
 }
@@ -3043,7 +3074,7 @@ fn successful_source_package_warning_uses_package_snapshot_for_colliding_logical
     fs::write(package_root.join("@mod.moth"), package_text).expect("should write package module");
 
     let builder = ProjectBuilder::new(SuccessfulPackageWarningBuilder { package_root });
-    let build_result = build_project(
+    let mut build_result = build_project(
         &builder,
         project_root
             .to_str()
@@ -3065,11 +3096,12 @@ fn successful_source_package_warning_uses_package_snapshot_for_colliding_logical
         build_result.warnings.clone(),
         build_result.string_table.clone(),
     );
-    messages.install_source_contexts(build_result.warning_source_contexts.clone(), 0);
-    if let Some(source_database) = build_result.source_database.as_ref() {
-        messages.set_source_database(Arc::clone(source_database));
+    messages.install_source_contexts(std::mem::take(&mut build_result.warning_source_contexts), 0);
+    if let Some(source_database) = build_result.source_database.take() {
+        messages.set_source_database(source_database);
     }
-    let rendered = render_compiler_messages_html(&messages, &project_root);
+    let failure = into_boundary_failure(messages);
+    let rendered = render_boundary_messages_html(&failure, &project_root);
 
     assert!(
         rendered.contains("&quot;one&quot; =&gt; result = &quot;one&quot;"),
@@ -3127,12 +3159,10 @@ fn source_package_diagnostic_uses_package_snapshot_for_colliding_logical_path() 
         FrontendCompilationMode::Canonical,
     )
     .expect("the package diagnostic should remain a retained frontend outcome");
-    let messages = frontend.into_render_messages_with_frozen_identity(
-        &mut string_table,
-        project_source_files.take(),
-        None,
-    );
-    let rendered = render_compiler_messages_html(&messages, &project_root);
+    let messages =
+        frontend.into_render_messages(&mut string_table, project_source_files.take(), None);
+    let failure = into_boundary_failure(messages);
+    let rendered = render_boundary_messages_html(&failure, &project_root);
 
     assert!(
         rendered.contains(package_text.trim_end()),

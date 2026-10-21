@@ -180,3 +180,30 @@ fn freezing_module_fork_requires_merge_into_root_first() {
 
     let _ = fork.freeze();
 }
+
+#[test]
+fn flattening_freeze_keeps_fork_ids_whether_or_not_the_prefix_is_shared() {
+    let mut root = StringTable::new();
+    let inherited_id = root.intern("inherited");
+    let source = root.fork_source();
+
+    // `source` still holds the prefix, so this fork copies it.
+    let (mut shared_fork, _) = source.fork_for_module().into_parts();
+    let shared_local_id = shared_fork.intern("shared-local");
+    let shared = shared_fork.freeze_flattening();
+
+    // This fork holds the last reference to the prefix, so the prefix strings move.
+    let (mut sole_fork, _) = source.fork_for_module().into_parts();
+    drop(source);
+    let sole_local_id = sole_fork.intern("sole-local");
+    let sole = sole_fork.freeze_flattening();
+
+    for (frozen, local_id, local) in [
+        (&shared, shared_local_id, "shared-local"),
+        (&sole, sole_local_id, "sole-local"),
+    ] {
+        assert_eq!(frozen.len(), 2);
+        assert_eq!(frozen.resolve(inherited_id), "inherited");
+        assert_eq!(frozen.resolve(local_id), local);
+    }
+}

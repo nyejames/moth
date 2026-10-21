@@ -24,6 +24,7 @@ impl DiagnosticKind {
         super::diagnostic_kind_descriptors::descriptor_for_kind(self)
     }
 
+    #[cfg(test)]
     pub(crate) fn category(self) -> DiagnosticCategory {
         match self {
             DiagnosticKind::Syntax(_) => DiagnosticCategory::Syntax,
@@ -58,6 +59,7 @@ pub(crate) enum DiagnosticCategory {
     Import,
     Borrow,
     Config,
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.6 tests move to typed views"))]
     Infrastructure,
     DeferredFeature,
 }

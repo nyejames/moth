@@ -61,4 +61,5 @@ pub(super) static TEST_LABEL_FAMILY: FamilyRow = FamilyRow {
         LabelMessageCode::BUILTIN_WRITE_BACK_ORIGIN,
     ],
     render: None,
+    reason_key: |_| None,
 };

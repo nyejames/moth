@@ -10,7 +10,8 @@
 
 use super::{FoldedMothTemplate, MothTemplateCompilationRequest, compile_moth_template_source};
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
-use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::render::dev_server::render_boundary_messages_html;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareOutput, HeaderParseOptions, SourcePreparationDelta,
@@ -194,7 +195,8 @@ fn whole_interpolation_above_the_i32_default_is_diagnosed_not_folded() {
         )),
         "the I32 default must diagnose the out-of-range interpolation literal",
     );
-    let rendered = render_compiler_messages_html(&messages, directory.path());
+    let rendered =
+        render_boundary_messages_html(&into_boundary_failure(messages), directory.path());
     assert!(rendered.contains(r#"<span class="source-line">[:[3_000_000_000]]</span>"#));
     assert!(!rendered.contains("mutated direct template"));
 }

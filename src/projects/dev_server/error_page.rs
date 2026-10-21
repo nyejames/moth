@@ -3,7 +3,7 @@
 //! Compiler diagnostics are converted into escaped HTML so failed builds still render safely and
 //! remain connected to hot reload via the injected SSE client snippet.
 
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_messages::render::dev_server;
 use crate::projects::dev_server::dev_client::dev_client_snippet;
 use std::fmt::Write;
@@ -190,11 +190,11 @@ pub fn escape_html(input: &str) -> String {
     escaped
 }
 
-pub fn format_compiler_messages(messages: &CompilerMessages) -> String {
+pub fn format_compiler_messages(failure: &BoundaryFailure) -> String {
     let mut output = String::new();
 
-    if messages.has_errors() || messages.has_warnings() {
-        write_structured_diagnostic_summary(messages, &mut output);
+    if failure.has_errors() || failure.has_warnings() {
+        write_structured_diagnostic_summary(failure, &mut output);
         return output;
     }
 
@@ -202,10 +202,10 @@ pub fn format_compiler_messages(messages: &CompilerMessages) -> String {
     output
 }
 
-fn write_structured_diagnostic_summary(messages: &CompilerMessages, output: &mut String) {
+fn write_structured_diagnostic_summary(failure: &BoundaryFailure, output: &mut String) {
     for line in
-        crate::compiler_frontend::compiler_messages::render::terse::format_terse_compiler_messages(
-            messages,
+        crate::compiler_frontend::compiler_messages::render::terse::format_terse_boundary_messages(
+            failure,
         )
     {
         let _ = writeln!(output, "{line}");
@@ -213,12 +213,12 @@ fn write_structured_diagnostic_summary(messages: &CompilerMessages, output: &mut
 }
 
 pub fn render_compiler_error_page(
-    messages: &CompilerMessages,
+    failure: &BoundaryFailure,
     project_root: &Path,
     origin: &str,
     build_version: u64,
 ) -> String {
-    let diagnostics_html = render_compiler_diagnostics(messages, project_root);
+    let diagnostics_html = render_compiler_diagnostics(failure, project_root);
     render_error_page_shell("Build Failed", &diagnostics_html, origin, build_version)
 }
 
@@ -266,10 +266,10 @@ fn render_error_page_shell(
     )
 }
 
-fn render_compiler_diagnostics(messages: &CompilerMessages, project_root: &Path) -> String {
+fn render_compiler_diagnostics(failure: &BoundaryFailure, project_root: &Path) -> String {
     let mut diagnostics_html = String::from("<section class=\"diagnostics\">");
 
-    if messages.diagnostic_slice().is_empty() && !messages.has_infrastructure_error() {
+    if failure.reports.is_empty() && !failure.has_infrastructure_error() {
         diagnostics_html.push_str(
             "<div class=\"empty-state\">No compiler diagnostics were available for this failed build.</div>",
         );
@@ -277,8 +277,8 @@ fn render_compiler_diagnostics(messages: &CompilerMessages, project_root: &Path)
         return diagnostics_html;
     }
 
-    diagnostics_html.push_str(&dev_server::render_compiler_messages_html(
-        messages,
+    diagnostics_html.push_str(&dev_server::render_boundary_messages_html(
+        failure,
         project_root,
     ));
 

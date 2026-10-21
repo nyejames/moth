@@ -22,9 +22,10 @@ use crate::compiler_frontend::build_config::{
     BuildCommandLocation, BuildConfigInputEntry, BuildConfigInputSet, BuildConfigInputValue,
     BuildConfigValueLocation, BuildInputName, PrimitiveBuildValue,
 };
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::diagnostic_severity::DiagnosticSeverity;
-use crate::compiler_frontend::display_messages::format_terse_compiler_messages;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::render::terse::format_terse_boundary_messages;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
@@ -385,7 +386,7 @@ pub fn prepare_frontend_memory_ledger() {
 #[derive(Debug)]
 pub struct FrontendBenchmarkReportWithOwner {
     pub report: FrontendBenchmarkReport,
-    owner: CompilerMessages,
+    owner: BoundaryFailure,
 }
 
 #[cfg(feature = "data_layout_memory_probe")]
@@ -409,7 +410,7 @@ pub fn run_frontend_benchmark_with_report_owner(
 
 fn run_frontend_benchmark_with_owner_internal(
     options: FrontendBenchmarkOptions,
-) -> Result<(FrontendBenchmarkReport, CompilerMessages), FrontendBenchmarkError> {
+) -> Result<(FrontendBenchmarkReport, BoundaryFailure), FrontendBenchmarkError> {
     let start = Instant::now();
 
     // Acquire the raw session before resetting the command ledger. If another benchmark owns the
@@ -443,7 +444,8 @@ fn run_frontend_benchmark_with_owner_internal(
     let valid_path = match check_if_valid_path(normalized) {
         Ok(path) => path,
         Err(error) => {
-            let messages = CompilerMessages::from_error(error, StringTable::new());
+            let messages =
+                into_boundary_failure(CompilerMessages::from_error(error, StringTable::new()));
             let mut diagnostic_codes = collect_diagnostic_codes(&messages);
             if messages.has_infrastructure_error() {
                 diagnostic_codes.push("MOTH-INFRA-0001".to_owned());
@@ -467,6 +469,7 @@ fn run_frontend_benchmark_with_owner_internal(
     } = match bootstrap_project_build(&project_builder, valid_path, &requested_inputs) {
         Ok(bootstrap) => bootstrap,
         Err(messages) => {
+            let messages = into_boundary_failure(messages);
             let diagnostic_codes = collect_diagnostic_codes(&messages);
             return Err(frontend_benchmark_error(
                 FrontendBenchmarkFailureKind::Bootstrap,
@@ -494,25 +497,28 @@ fn run_frontend_benchmark_with_owner_internal(
     ) {
         Ok(frontend) => {
             #[cfg(feature = "data_layout_memory_probe")]
-            let (messages, retention) = frontend
-                .into_render_messages_with_frozen_identity_and_metrics(
-                    &mut string_table,
-                    project_source_files.take(),
-                    None,
-                );
-            #[cfg(not(feature = "data_layout_memory_probe"))]
-            let messages = frontend.into_render_messages_with_frozen_identity(
+            let (messages, retention) = frontend.into_render_messages_and_metrics(
                 &mut string_table,
                 project_source_files.take(),
                 None,
             );
+            #[cfg(not(feature = "data_layout_memory_probe"))]
+            let messages = into_boundary_failure(frontend.into_render_messages(
+                &mut string_table,
+                project_source_files.take(),
+                None,
+            ));
             #[cfg(feature = "data_layout_memory_probe")]
             let retention = FrontendBenchmarkRetention::from(retention);
             #[cfg(not(feature = "data_layout_memory_probe"))]
             let retention = FrontendBenchmarkRetention::default();
             (messages, retention, false)
         }
-        Err(messages) => (messages, snapshot_ledger_retention(), true),
+        Err(messages) => {
+            drop(project_source_files.take());
+            let retention = snapshot_ledger_retention();
+            (into_boundary_failure(messages), retention, true)
+        }
     };
 
     #[cfg(feature = "timers")]
@@ -567,8 +573,9 @@ fn run_frontend_benchmark_with_owner_internal(
 
     let warning_count = messages.warning_count();
     let warning_codes = messages
-        .warnings()
-        .map(|warning| warning.kind.code().to_owned())
+        .reports
+        .iter_severity(DiagnosticSeverity::Warning)
+        .map(|(_, view)| view.descriptor().code.to_owned())
         .collect();
     let outcome = if error_count == 0 {
         FrontendBenchmarkOutcome::Success
@@ -603,8 +610,8 @@ fn run_frontend_benchmark_with_owner_internal(
     ))
 }
 
-fn format_compiler_messages(messages: &CompilerMessages) -> String {
-    let mut lines = format_terse_compiler_messages(messages);
+fn format_compiler_messages(messages: &BoundaryFailure) -> String {
+    let mut lines = format_terse_boundary_messages(messages);
     if lines.is_empty() {
         lines.push(format!("{} error(s) found", messages.error_count()));
     }
@@ -613,10 +620,10 @@ fn format_compiler_messages(messages: &CompilerMessages) -> String {
 
 /// Collects the stable diagnostic codes from the error diagnostics, preserving
 /// order and multiplicity.
-fn collect_diagnostic_codes(messages: &CompilerMessages) -> Vec<String> {
+fn collect_diagnostic_codes(messages: &BoundaryFailure) -> Vec<String> {
     messages
-        .diagnostics()
-        .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
-        .map(|diagnostic| diagnostic.kind.code().to_owned())
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .map(|(_, view)| view.descriptor().code.to_owned())
         .collect()
 }

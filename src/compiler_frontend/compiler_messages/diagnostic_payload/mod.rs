@@ -12,6 +12,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRema
 
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 pub(crate) mod reason_keys;
+#[cfg(test)]
 use self::reason_keys::StableReasonKey;
 mod remap;
 mod types;
@@ -314,6 +315,7 @@ macro_rules! emit_reasoned_payload_stable_key {
         )*
     ) => {
         impl DiagnosticPayload {
+            #[cfg(test)]
             fn reasoned_stable_reason_key(&self) -> Option<&'static str> {
                 match self {
                     $(
@@ -340,6 +342,7 @@ impl DiagnosticPayload {
     ///
     /// Reasonless payloads deliberately return `None`; every reasoned variant is dispatched by
     /// the central registry above.
+    #[cfg(test)]
     pub(super) fn stable_reason_key(&self) -> Option<&'static str> {
         self.reasoned_stable_reason_key()
     }

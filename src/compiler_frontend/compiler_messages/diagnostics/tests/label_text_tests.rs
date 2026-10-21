@@ -1,10 +1,10 @@
-//! Label text parity: compact label decoding and legacy rendering print the same text for every label kind.
+//! Label text parity: compact label decoding and the legacy label resolver print the same text for every label kind.
 //!
-//! WHAT: one table pairs each `DiagnosticLabelMessage` kind with its exact text. The labels are decoded by
-//! `compact_label_message_text`, then rendered on `InvalidDeclaration` with no payload; the family adapter declines
-//! that diagnostic, so its labels still take the legacy text path.
-//! WHY: the compact label decoder must read every field the legacy renderer reads, including labels on a declined
-//! diagnostic.
+//! WHAT: one table pairs each `DiagnosticLabelMessage` kind with its exact text; compact decoding and the legacy
+//! label resolver must agree for every entry.
+//! WHY: each decoder must read every field that contributes to user-visible label text.
+
+use std::path::Path;
 
 use crate::compiler_frontend::build_config::BuildConfigValueOrigin;
 use crate::compiler_frontend::compiler_messages::diagnostic_label::GenericSubstitutionDiagnostic;
@@ -18,7 +18,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::schema::FamilyRow;
 use crate::compiler_frontend::compiler_messages::diagnostics::store::DiagnosticStore;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::render::context::compact_label_message_text;
-use crate::compiler_frontend::compiler_messages::render::terminal::format_label_messages_with_context;
+use crate::compiler_frontend::compiler_messages::render::context::resolve_label_render_facts_from_root;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticCategory, DiagnosticLabel, DiagnosticLabelMessage,
 };
@@ -56,6 +56,7 @@ static ALL_LABEL_ROLES_FAMILY: FamilyRow = FamilyRow {
         LabelMessageCode::BUILTIN_WRITE_BACK_ORIGIN,
     ],
     render: None,
+    reason_key: |_| None,
 };
 
 /// Each label kind with the exact text it renders. Type names resolve through `type_environment`, which is the
@@ -158,6 +159,7 @@ fn compact_and_legacy_label_text_agree_for_every_label_kind() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
     let cases = label_cases(&mut string_table, &type_environment);
+    let missing_name = string_table.intern("missing");
     let path_fork = PathInternerFork::empty();
     let path_table = path_fork.snapshot_table();
     let context = DiagnosticRenderContext::new(&string_table)
@@ -194,25 +196,29 @@ fn compact_and_legacy_label_text_agree_for_every_label_kind() {
         None,
     );
 
-    // Legacy: a test-only mismatched kind/payload keeps this generic label check on the legacy path.
+    // The legacy resolver reads the labels independently of the carrier's family.
     let carrier_labels: Vec<DiagnosticLabel> = cases
         .iter()
         .map(|(message, _)| DiagnosticLabel::secondary(None, Some(message.clone())))
         .collect();
     let diagnostic = CompilerDiagnostic::new(
         crate::compiler_frontend::compiler_messages::DiagnosticKind::Rule(
-            crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::InvalidDeclaration,
+            crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::UnknownValueName,
         ),
         None,
-        crate::compiler_frontend::compiler_messages::DiagnosticPayload::None,
+        crate::compiler_frontend::compiler_messages::DiagnosticPayload::UnknownName {
+            name: missing_name,
+            namespace: crate::compiler_frontend::compiler_messages::NameNamespace::Value,
+        },
     )
     .with_labels(carrier_labels);
-    let expected_lines: Vec<String> = cases
+    let legacy_messages = resolve_label_render_facts_from_root(&diagnostic, context, Path::new(""))
+        .into_iter()
+        .map(|fact| fact.message)
+        .collect::<Vec<_>>();
+    let expected_messages = cases
         .iter()
-        .map(|(_, text)| format!("info: - {text}"))
-        .collect();
-    assert_eq!(
-        format_label_messages_with_context(&diagnostic, context),
-        expected_lines
-    );
+        .map(|(_, text)| text.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(legacy_messages, expected_messages);
 }

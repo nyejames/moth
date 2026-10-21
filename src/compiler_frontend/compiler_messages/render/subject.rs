@@ -1,71 +1,51 @@
 //! One diagnostic as the render boundary reads it.
 //!
 //! WHAT: answers the questions every renderer asks of a diagnostic (severity, descriptor, primary
-//! position, resolved labels and payload) from one value per render entry.
-//! WHY: a matching family adapter arm renders from its compact record while a declined diagnostic renders from the
-//! legacy value. Routing both through one seam keeps the terminal, terse and dev-server renderers independent of
-//! that choice, so P4.6 can delete the legacy path without touching them.
+//! position, resolved labels and payload) from one frozen report view.
+//! WHY: the terminal, terse and dev-server renderers read every record through this seam, so they
+//! share one reading of each record.
 
 use super::context::{
     DiagnosticPrimaryPosition, DiagnosticRenderContext, ResolvedDiagnosticLabel,
-    compact_label_message_text, resolve_label_render_facts_from_root, resolved_label_fact,
+    compact_label_message_text, resolved_label_fact,
 };
-use super::payload::{RenderedPayload, render_payload};
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::{
-    CompactRender, compact_for_render,
-};
+use super::payload::RenderedPayload;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticDescriptor, DiagnosticLabelStyle, DiagnosticSeverity,
+    DiagnosticDescriptor, DiagnosticLabelStyle, DiagnosticSeverity,
 };
 use std::path::Path;
 
-/// A diagnostic prepared for one render entry.
+/// One diagnostic prepared for a render entry.
 ///
-/// WHAT: holds the legacy value and, when a family adapter arm matches, its compact record. The record is
-/// built once here, so every read in the same render entry sees the same record.
-/// WHY: compacting per read would repeat the work and let two reads of one diagnostic disagree.
-pub(crate) struct DiagnosticSubject<'d> {
-    diagnostic: &'d CompilerDiagnostic,
-    compact: Option<CompactRender>,
+/// WHAT: wraps the frozen view of one record. Every read in the same render entry goes through
+/// this value, so severity, descriptor, position, labels and payload all come from one record.
+/// WHY: each renderer reads the record the same way, and no read reaches back into the legacy
+/// diagnostic model.
+pub(crate) struct DiagnosticSubject<'a> {
+    view: DiagnosticView<'a>,
 }
 
-impl<'d> DiagnosticSubject<'d> {
-    /// Prepares `diagnostic` for rendering. A matching family adapter arm compacts it; a declined
-    /// diagnostic keeps the legacy value.
-    pub(crate) fn new(
-        diagnostic: &'d CompilerDiagnostic,
-        context: DiagnosticRenderContext<'_>,
-    ) -> Self {
-        Self {
-            diagnostic,
-            compact: compact_for_render(diagnostic, context),
-        }
+impl<'a> DiagnosticSubject<'a> {
+    /// Wraps the view of one record from a frozen report.
+    pub(crate) fn new(view: DiagnosticView<'a>) -> Self {
+        Self { view }
     }
 
     pub(crate) fn severity(&self) -> DiagnosticSeverity {
-        match &self.compact {
-            Some(compact) => compact.view().severity(),
-            None => self.diagnostic.severity,
-        }
+        self.view.severity()
     }
 
     pub(crate) fn descriptor(&self) -> DiagnosticDescriptor {
-        match &self.compact {
-            Some(compact) => compact.view().family().descriptor(),
-            None => self.diagnostic.kind.descriptor(),
-        }
+        self.view.family().descriptor()
     }
 
-    /// The primary source position. A compact primary resolves through its site; a legacy one
-    /// resolves through the requester context.
+    /// The primary source position, resolved through the primary site's identity handle.
     pub(crate) fn primary_position<'r>(
         &'r self,
         context: DiagnosticRenderContext<'r>,
     ) -> Option<DiagnosticPrimaryPosition<'r>> {
-        match &self.compact {
-            Some(compact) => context.site_position(compact.view().primary_site()),
-            None => context.primary_position(self.diagnostic),
-        }
+        context.site_position(self.view.primary_site())
     }
 
     /// The secondary labels that have a resolvable span or a message, in declaration order.
@@ -74,12 +54,9 @@ impl<'d> DiagnosticSubject<'d> {
         context: DiagnosticRenderContext<'_>,
         root: &Path,
     ) -> Vec<ResolvedDiagnosticLabel> {
-        let Some(compact) = &self.compact else {
-            return resolve_label_render_facts_from_root(self.diagnostic, context, root);
-        };
-        let view = compact.view();
-        let types = view.types();
-        view.durable_labels()
+        let types = self.view.types();
+        self.view
+            .durable_labels()
             .filter_map(|label| {
                 resolved_label_fact(
                     DiagnosticLabelStyle::Secondary,
@@ -92,18 +69,13 @@ impl<'d> DiagnosticSubject<'d> {
             .collect()
     }
 
-    /// The primary message and guidance. A matching family row renders through its renderer.
+    /// The primary message and guidance. The record's family row renders them.
     pub(crate) fn payload(&self, context: DiagnosticRenderContext<'_>) -> RenderedPayload {
-        match &self.compact {
-            Some(compact) => {
-                let view = compact.view();
-                let render = view
-                    .family()
-                    .render
-                    .expect("matched family rows declare a renderer");
-                render(&view, context)
-            }
-            None => render_payload(&self.diagnostic.payload, context),
-        }
+        let render = self
+            .view
+            .family()
+            .render
+            .expect("matched family rows declare a renderer");
+        render(&self.view, context)
     }
 }

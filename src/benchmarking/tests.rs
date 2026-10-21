@@ -301,6 +301,29 @@ fn frontend_benchmark_fails_for_missing_file() {
         "missing-file benchmark should report an infrastructure diagnostic code"
     );
 }
+#[test]
+fn frontend_benchmark_converts_failed_directory_compilation() {
+    let _guard = benchmark_test_guard();
+    let temp_dir = tempfile::tempdir().expect("should create temp directory");
+    let source_root = temp_dir.path().join("src");
+    std::fs::create_dir_all(&source_root).expect("should create the configured entry root");
+    std::fs::write(
+        temp_dir.path().join("config.moth"),
+        "project #= (name = \"empty\", entry_root = \"src\")\nhtml #= ()\n",
+    )
+    .expect("should write the project config");
+
+    let report = run_frontend_benchmark(FrontendBenchmarkOptions {
+        entry_path: temp_dir.path().to_path_buf(),
+        build_profile: FrontendBenchmarkBuildProfile::Dev,
+        build_config_inputs: Vec::new(),
+    })
+    .expect("a diagnosed empty directory should produce a benchmark report");
+
+    assert_eq!(report.outcome, FrontendBenchmarkOutcome::Diagnosed);
+    assert!(report.error_count > 0);
+    assert!(!report.diagnostic_codes.is_empty());
+}
 
 /// A frontend benchmark must acquire its raw session before it validates the entry path,
 /// otherwise an outer caller-owned snapshot could receive its observations.

@@ -5,7 +5,9 @@
 //! WHY: reason keys are a compiler-owned contract independent of rendered wording, titles, and
 //! `Debug` output, so renderers can evolve without changing structured identity.
 
+#[cfg(test)]
 use super::diagnostic_payload::DiagnosticPayload;
+#[cfg(test)]
 use super::diagnostic_severity::DiagnosticSeverity;
 
 /// Returns whether `reason` uses the compiler's qualified lower-snake-case identity format.
@@ -54,6 +56,7 @@ fn is_well_formed_reason_key_segment(segment: &str) -> bool {
 }
 
 // The identity record is the compiler-facing boundary value consumed by tests and tooling.
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct DiagnosticIdentity {
     pub(crate) code: &'static str,
@@ -61,6 +64,7 @@ pub(crate) struct DiagnosticIdentity {
     pub(crate) reason_key: Option<&'static str>,
 }
 
+#[cfg(test)]
 impl DiagnosticIdentity {
     // Keep construction beside the identity record so callers cannot rebuild the reason bridge.
     pub(super) fn new(

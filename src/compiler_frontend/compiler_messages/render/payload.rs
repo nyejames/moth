@@ -7,6 +7,8 @@
 use super::subject::DiagnosticSubject;
 use super::*;
 use crate::builder_surface::SourceFileKind;
+#[cfg(test)]
+use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidValueReceiverView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
     DuplicatePublicExportView, DuplicateTraitRequirementView, GenericBoundPrivateSurfaceLeakView,
@@ -37,9 +39,8 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::types_bo
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticCapacityResource, DiagnosticPayload, InvalidTraitIncompatibilityReason,
-    InvalidTraitKeywordUsageReason, ProjectContextEscapeReason, PublicGenericOwnerKind,
-    TypeMismatchContext, ValueReceiverContext,
+    DiagnosticCapacityResource, InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason,
+    ProjectContextEscapeReason, PublicGenericOwnerKind, TypeMismatchContext, ValueReceiverContext,
 };
 
 pub(crate) struct RenderedPayload {
@@ -80,6 +81,7 @@ pub(crate) fn render_invalid_value_receiver(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn render_payload(
     payload: &DiagnosticPayload,
     context: DiagnosticRenderContext<'_>,
@@ -201,6 +203,7 @@ pub(crate) fn terse_diagnostic_message(
     }
 }
 
+#[cfg(test)]
 fn render_payload_message(
     payload: &DiagnosticPayload,
     context: DiagnosticRenderContext<'_>,
@@ -1110,6 +1113,7 @@ pub(crate) fn render_bare_file_import(
     }
 }
 
+#[cfg(test)]
 fn borrow_payload_message(
     payload: &DiagnosticPayload,
     context: DiagnosticRenderContext<'_>,

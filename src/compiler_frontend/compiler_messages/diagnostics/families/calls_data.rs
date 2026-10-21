@@ -450,6 +450,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: InvalidMultiBindView,
         render: render_invalid_multi_bind,
     }
@@ -863,6 +864,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: InvalidCollectionTypeView,
         render: render_invalid_collection_type,
     }
@@ -879,6 +881,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: InvalidMapLiteralView,
         render: render_invalid_map_literal,
     }
@@ -899,6 +902,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: InvalidMapTypeView,
         render: render_invalid_map_type,
     }
@@ -918,6 +922,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: InvalidBuiltinCallView,
         render: render_invalid_builtin_call,
     }
@@ -939,6 +944,7 @@ diagnostic_family! {
         labels: [],
         extra: StringIds,
         ctor: manual,
+        reason_key: reason,
         view: InvalidReceiverCallView,
         render: render_invalid_receiver_call,
     }
@@ -968,6 +974,7 @@ diagnostic_family! {
         labels: [],
         extra: StringIds,
         ctor: manual,
+        reason_key: reason,
         view: InvalidFieldAccessView,
         render: render_invalid_field_access,
     }
@@ -989,6 +996,7 @@ diagnostic_family! {
         labels: [],
         extra: StringIds,
         ctor: manual,
+        reason_key: reason,
         view: InvalidCallShapeView,
         render: render_invalid_call_shape,
     }
@@ -1105,6 +1113,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: InvalidReturnShapeView,
         render: render_invalid_return_shape,
     }
@@ -1121,6 +1130,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: InvalidCopyTargetView,
         render: render_invalid_copy_target,
     }
@@ -1141,6 +1151,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: InvalidRangeOperandView,
         render: render_invalid_range_operand,
     }
@@ -1161,6 +1172,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: InvalidCastView,
         render: render_invalid_cast,
     }

@@ -548,6 +548,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: InvalidImportPathView,
         render: render_invalid_import_path,
     }
@@ -678,6 +679,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: reason_code,
         view: InvalidExternalModuleView,
         render: render_invalid_external_module,
     }

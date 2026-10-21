@@ -1045,6 +1045,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: generated invalid_expression,
+        reason_key: reason,
         view: InvalidExpressionView,
         render: render_invalid_expression,
     }
@@ -1114,6 +1115,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: CommonSyntaxMistakeView,
         render: render_common_syntax_mistake,
     }
@@ -1130,6 +1132,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: reason,
         view: InvalidStringEscapeView,
         render: render_invalid_string_escape,
     }
@@ -1215,6 +1218,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: shape,
         view: UnexpectedTokenView,
         render: render_unexpected_token,
     }
@@ -1339,6 +1343,7 @@ diagnostic_family! {
         labels: [],
         extra: None,
         ctor: manual,
+        reason_key: code,
         view: InvalidNumberLiteralView,
         render: render_invalid_number_literal,
     }

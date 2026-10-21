@@ -8,20 +8,23 @@ use crate::builder_surface::{BuilderSurface, PackageOrigin};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::render::dev_server::render_boundary_messages_html;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_diagnostics_html_with_context;
 use crate::compiler_frontend::compiler_messages::render::terminal::{
     format_label_messages_with_context, format_label_messages_with_context_from_root,
     format_terminal_source_frame_for_test,
 };
-use crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_with_context;
+use crate::compiler_frontend::compiler_messages::render::terse::{
+    format_terse_diagnostic_view, format_terse_diagnostic_with_context,
+};
 use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, ResolvedDiagnosticLabel, diagnostic_type_name, primary_caret_padding,
-    primary_underline_length, resolve_label_render_facts_from_root,
+    DiagnosticRenderContext, ResolvedDiagnosticLabel, compact_label_message_text,
+    primary_caret_padding, primary_underline_length, resolve_label_render_facts_from_root,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticLabel, DiagnosticLabelMessage, DiagnosticLabelStyle, DiagnosticPayload,
-    GenericSubstitutionDiagnostic, TypeMismatchContext,
+    DiagnosticLabel, DiagnosticLabelMessage, DiagnosticLabelStyle, GenericSubstitutionDiagnostic,
 };
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityContext, FrozenIdentityHandle, LocalSpan, SourceDatabase,
@@ -66,7 +69,8 @@ fn rendered_source_frame_uses_retained_snapshot_after_disk_mutation() {
     let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
     messages.set_source_database(Arc::new(source_database));
 
-    let rendered = render_compiler_messages_html(&messages, temporary_directory.path());
+    let failure = into_boundary_failure(messages);
+    let rendered = render_boundary_messages_html(&failure, temporary_directory.path());
 
     assert!(
         rendered.contains("compiled snapshot"),
@@ -126,75 +130,72 @@ fn materialised_diagnostic_renders_owned_requester_and_donor_snapshots_after_ser
         )
         .expect("the generated source diagnosis should return its complete transaction");
         assert!(frontend.has_diagnosed_or_blocked());
-        frontend.into_render_messages_with_frozen_identity(&mut strings, source_files.take(), None)
+        frontend.into_render_messages(&mut strings, source_files.take(), None)
     };
     fs::write(&requester_path, "requester disk replacement\n")
         .expect("the requester should be replaced");
     fs::write(&donor_path, "donor disk replacement\n").expect("the donor should be replaced");
 
-    let diagnostics = messages.diagnostics().collect::<Vec<_>>();
-    assert_eq!(diagnostics.len(), 1);
-    let diagnostic = diagnostics[0];
-    let DiagnosticPayload::TypeMismatch {
-        expected,
-        found,
-        context: mismatch_context,
-    } = &diagnostic.payload
-    else {
-        panic!("the concrete donor call must retain a typed mismatch");
-    };
-    assert_eq!(*mismatch_context, TypeMismatchContext::FunctionArgument);
-    let context = messages.diagnostic_render_context(0);
-    assert!(context.type_environment.is_some());
-    assert_eq!(diagnostic_type_name(*expected, context), "String");
-    assert_eq!(diagnostic_type_name(*found, context), "I32");
+    let failure = into_boundary_failure(messages);
+    let mut reports = failure.reports.iter();
+    let (report, view) = reports
+        .next()
+        .expect("the concrete donor call must retain one typed mismatch");
+    assert!(reports.next().is_none());
+    let context = DiagnosticRenderContext::for_report(report);
+
     let primary = context
-        .primary_position(diagnostic)
+        .site_position(view.primary_site())
         .expect("the retained requester span should resolve");
     assert_eq!(primary.host_path, Some(requester_path.as_path()));
     assert_eq!(primary.line, "value I32 = outer(1)");
     assert_eq!(primary.start.line, 1);
-    assert_eq!(diagnostic.labels.len(), 3);
+
+    let labels = view.durable_labels().collect::<Vec<_>>();
+    assert_eq!(labels.len(), 3);
+    let rendered_labels = labels
+        .iter()
+        .map(|label| {
+            compact_label_message_text(label.message, view.types(), context)
+                .expect("each retained label has a message")
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
-        diagnostic.labels[0].message,
-        Some(DiagnosticLabelMessage::GenericInstantiationBodySite)
+        rendered_labels,
+        vec![
+            "generic body operation failed here".to_owned(),
+            "generic function declared here".to_owned(),
+            "generic substitution: T = I32".to_owned(),
+        ]
     );
-    assert_eq!(
-        diagnostic.labels[1].message,
-        Some(DiagnosticLabelMessage::GenericInstantiationDeclarationSite)
-    );
-    let Some(DiagnosticLabelMessage::GenericInstantiationSubstitutions { substitutions }) =
-        &diagnostic.labels[2].message
+    let DurableLabelMessage::GenericInstantiationSubstitutions(substitutions) = labels[2].message
     else {
-        panic!("the final label should retain concrete substitution provenance");
+        panic!("the last label should retain generic substitutions");
     };
-    assert_eq!(substitutions.len(), 1);
-    assert_eq!(
-        diagnostic_type_name(substitutions[0].concrete_type_id, context),
-        "I32"
+    assert_eq!(substitutions.iter().count(), 1);
+
+    let terse = format_terse_diagnostic_view(view, context);
+    assert!(
+        terse.contains("Type mismatch in function argument: expected String, found I32"),
+        "the frozen type mismatch must retain direction and context: {terse}"
     );
-    for (label, expected_line) in diagnostic.labels.iter().zip([
+
+    for (label, expected_line) in labels.iter().zip([
         "        return inner(value, 1)",
         "    outer type T |value T| -> I32:",
     ]) {
         let donor = context
-            .label_position(label)
+            .site_position(label.site)
             .expect("the retained donor label should resolve in its own domain");
         assert_eq!(donor.host_path, Some(donor_path.as_path()));
         assert_eq!(donor.line, expected_line);
         assert_eq!(
-            label
-                .span
-                .expect("the donor label retains its source")
-                .source(),
-            diagnostic
-                .primary_span
-                .expect("the requester retains its source")
-                .source(),
+            primary.source, donor.source,
             "colliding source IDs still resolve through their explicit provenance"
         );
     }
-    let rendered = render_compiler_messages_html(&messages, project_directory.path());
+
+    let rendered = render_boundary_messages_html(&failure, project_directory.path());
     assert!(
         rendered.contains(r#"<span class="source-line">value I32 = outer(1)</span>"#),
         "the source frame should render the exact compiled requester line: {rendered}"
@@ -202,19 +203,6 @@ fn materialised_diagnostic_renders_owned_requester_and_donor_snapshots_after_ser
     assert!(rendered.contains("String") && rendered.contains("I32"));
     assert!(!rendered.contains("disk replacement"));
     assert_eq!(rendered.matches("source-frame").count(), 1);
-    let label_facts =
-        resolve_label_render_facts_from_root(diagnostic, context, project_directory.path());
-    assert_eq!(
-        label_facts
-            .iter()
-            .map(|label| label.message.as_str())
-            .collect::<Vec<_>>(),
-        [
-            "generic body operation failed here",
-            "generic function declared here",
-            "generic substitution: T = I32",
-        ]
-    );
 }
 
 /// Build one database whose single source is `src/<relative_name>` with the given retained text.
@@ -447,7 +435,8 @@ fn aggregated_diagnostics_keep_their_own_snapshot_across_prepend_and_append() {
     ]);
     alpha_messages.append_messages_preserving_context(beta_messages);
 
-    let rendered = render_compiler_messages_html(&alpha_messages, alpha_directory.path());
+    let failure = into_boundary_failure(alpha_messages);
+    let rendered = render_boundary_messages_html(&failure, alpha_directory.path());
     let alpha_frame = rendered
         .split("<article")
         .find(|article| article.contains("alpha_value"))
@@ -566,7 +555,8 @@ fn rendered_crlf_source_line_matches_str_lines() {
     let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
     messages.set_source_database(Arc::new(source_database));
 
-    let rendered = render_compiler_messages_html(&messages, temporary_directory.path());
+    let failure = into_boundary_failure(messages);
+    let rendered = render_boundary_messages_html(&failure, temporary_directory.path());
     assert!(
         rendered.contains(r#"<span class="source-line">hello</span>"#),
         "the source frame must render the CRLF line without a trailing CR: {rendered}"

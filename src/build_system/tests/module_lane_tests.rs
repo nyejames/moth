@@ -19,6 +19,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::module_diagnostics::ModuleDiagnostics;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, NameNamespace,
@@ -922,10 +923,11 @@ fn generated_sidecar_warnings_survive_render_and_success_only_compilation() {
     let _path_fork = PathInternerFork::empty();
     let frontend = frontend_with_sidecar_warnings(&mut string_table);
     let messages =
-        frontend.into_render_messages_with_frozen_identity(&mut string_table, None, None);
+        into_boundary_failure(frontend.into_render_messages(&mut string_table, None, None));
     let rendered_codes = messages
-        .warnings()
-        .map(|warning| warning.kind.code().to_owned())
+        .reports
+        .iter_severity(DiagnosticSeverity::Warning)
+        .map(|(_, view)| view.descriptor().code.to_owned())
         .collect::<Vec<_>>();
     assert_eq!(
         rendered_codes.len(),
@@ -1648,7 +1650,7 @@ fn test_warning_diagnostic(
     let name = string_table.intern("unused_warning_name");
     CompilerDiagnostic::with_severity(
         DiagnosticKind::Rule(
-            crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::UnknownName,
+            crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::UnknownValueName,
         ),
         DiagnosticSeverity::Warning,
         None,

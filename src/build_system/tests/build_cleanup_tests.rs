@@ -9,7 +9,8 @@ use crate::build_system::output::manifest::{
     BuildManifest, ManifestReadResult, ManifestRecoveryReason,
 };
 use crate::build_system::output::{BuilderKind, OutputOwner, WriteMode, WriteOptions};
-use crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::render::terse::format_terse_boundary_messages;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1593,7 +1594,7 @@ fn builder_owner_conflict_fails_without_mutation() {
         "single-file output plans carry no authored config span",
     );
     assert!(
-        format_terse_compiler_messages(&messages)
+        format_terse_boundary_messages(&into_boundary_failure(messages))
             .iter()
             .any(|line| line.contains("already owned")),
         "owner-conflict diagnostics should retain their reason text"

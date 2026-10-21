@@ -180,7 +180,7 @@ fn execute_check(
             let facade_messages = validate_frontend_facade_boundaries(&frontend)
                 .err()
                 .map(ProjectAssemblyError::into_owned_messages);
-            frontend.into_render_messages_with_frozen_identity(
+            frontend.into_render_messages(
                 &mut string_table,
                 project_source_files.take(),
                 facade_messages,

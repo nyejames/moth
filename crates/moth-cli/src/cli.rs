@@ -382,7 +382,7 @@ fn render_build_outcome(report: BuildCommandReport) {
 
 fn render_check_outcome(report: CheckCommandReport, terse: bool) {
     if terse {
-        print_terse_compiler_messages(&report.messages);
+        print_terse_compiler_messages(report.messages);
         println!(
             "{}",
             format_terse_summary_line(report.duration, report.error_count, report.warning_count)

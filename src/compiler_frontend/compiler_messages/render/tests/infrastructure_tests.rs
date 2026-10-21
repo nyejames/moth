@@ -2,14 +2,15 @@
 
 use crate::backends::error_types::BackendErrorType;
 use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerErrorMetadataKey, CompilerMessages, ErrorType,
+    BoundaryFailure, CompilerError, CompilerErrorMetadataKey, CompilerMessages, ErrorType,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::display_messages::format_infrastructure_errors;
-use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
+use crate::compiler_frontend::compiler_messages::render::dev_server::render_boundary_messages_html;
 use crate::compiler_frontend::compiler_messages::render::infrastructure::{
     INFRASTRUCTURE_FAILURE_CODE, INFRASTRUCTURE_FAILURE_TITLE,
 };
-use crate::compiler_frontend::compiler_messages::render::terse::format_terse_compiler_messages;
+use crate::compiler_frontend::compiler_messages::render::terse::format_terse_boundary_messages;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
     InfrastructureDiagnosticKind, InvalidConfigReason, InvalidImportPathReason, NameNamespace,
@@ -32,19 +33,21 @@ const OPERATIONAL_INTRODUCTION: &str =
     "OPERATIONAL FAILURE: Moth could not complete a filesystem, host or tooling operation.";
 const ISSUE_URL: &str = "https://github.com/nyejames/moth/issues";
 
-fn render_views(messages: &CompilerMessages) -> [String; 3] {
-    [
-        format_infrastructure_errors(messages.infrastructure_errors().expect("outer failure")),
-        format_terse_compiler_messages(messages).join("\n"),
-        render_compiler_messages_html(messages, Path::new(".")),
-    ]
+fn render_views(messages: CompilerMessages) -> (BoundaryFailure, [String; 3]) {
+    let failure = into_boundary_failure(messages);
+    let rendered = [
+        format_infrastructure_errors(failure.infrastructure_errors().expect("outer failure")),
+        format_terse_boundary_messages(&failure).join("\n"),
+        render_boundary_messages_html(&failure, Path::new(".")),
+    ];
+    (failure, rendered)
 }
 
 /// Let a boundary regression carry its actual failure through the production render paths.
 pub(crate) fn assert_compiler_bug_views(error: CompilerError, invariant_detail: &str) {
     let original = error.msg.clone();
     let messages = CompilerMessages::from_error(error, StringTable::new());
-    let [terminal, terse, html] = render_views(&messages);
+    let (failure, [terminal, terse, html]) = render_views(messages);
     for view in [&terminal, &terse, &html] {
         assert!(view.contains(BUG_INTRODUCTION), "{view}");
         assert!(view.contains(BUG_GUIDANCE), "{view}");
@@ -55,9 +58,10 @@ pub(crate) fn assert_compiler_bug_views(error: CompilerError, invariant_detail: 
     assert!(terse.contains(invariant_detail), "{terse}");
     assert!(html.contains(invariant_detail), "{html}");
     assert_eq!(
-        messages
-            .primary_infrastructure_error()
-            .expect("original")
+        failure
+            .infrastructure_errors()
+            .expect("boundary cause")
+            .primary
             .msg,
         original
     );
@@ -87,7 +91,7 @@ fn every_cause_type_has_truthful_introduction_in_all_views() {
             "specific next action".into(),
         );
         let messages = CompilerMessages::from_error(error, StringTable::new());
-        let [terminal, terse, html] = render_views(&messages);
+        let (failure, [terminal, terse, html]) = render_views(messages);
         let expected = if compiler_bug {
             BUG_INTRODUCTION
         } else {
@@ -116,9 +120,10 @@ fn every_cause_type_has_truthful_introduction_in_all_views() {
         if compiler_bug {
             assert!(html.contains(&format!("href=\"{ISSUE_URL}\"")), "{html}");
         }
-        if messages
-            .primary_infrastructure_error()
-            .expect("cause")
+        if failure
+            .infrastructure_errors()
+            .expect("boundary cause")
+            .primary
             .error_type
             == ErrorType::File
         {
@@ -135,7 +140,11 @@ fn every_cause_type_has_truthful_introduction_in_all_views() {
         );
         assert!(!html.contains("source-frame"));
         assert_eq!(
-            messages.primary_infrastructure_error().expect("raw").msg,
+            failure
+                .infrastructure_errors()
+                .expect("boundary cause")
+                .primary
+                .msg,
             "original cause detail"
         );
     }
@@ -168,7 +177,7 @@ fn mixed_and_same_class_causes_render_in_production_order_after_append() {
         let mut appended = CompilerMessages::from_error(additional, StringTable::new());
         appended.set_infrastructure_error(CompilerError::compiler_error("third cause detail"));
         messages.append_messages_preserving_context(appended);
-        let [terminal, terse, html] = render_views(&messages);
+        let (failure, [terminal, terse, html]) = render_views(messages);
         for view in [&terminal, &terse, &html] {
             let first = view.find("first cause detail").expect("first detail");
             let second = view.find("second cause detail").expect("second detail");
@@ -197,9 +206,9 @@ fn mixed_and_same_class_causes_render_in_production_order_after_append() {
         assert_eq!(terse.split('|').collect::<Vec<_>>()[2], "primary.moth");
         assert_eq!(terse.matches(ISSUE_URL).count(), 1, "{terse}");
         assert_eq!(html.matches("<article ").count(), 1, "{html}");
-        assert_eq!(messages.error_count(), 1);
+        assert_eq!(failure.error_count(), 1);
         assert_eq!(
-            messages
+            failure
                 .infrastructure_errors()
                 .expect("causes")
                 .iter()
@@ -240,7 +249,7 @@ fn hostile_causes_are_escaped_without_losing_raw_details_or_terse_fields() {
         guidance.into(),
     );
     messages.set_infrastructure_error(additional);
-    let [terminal, terse, html] = render_views(&messages);
+    let (failure, [terminal, terse, html]) = render_views(messages);
     assert!(terminal.contains(detail));
     assert!(terminal.contains(guidance));
     for escaped in [
@@ -264,7 +273,7 @@ fn hostile_causes_are_escaped_without_losing_raw_details_or_terse_fields() {
         "{terse}"
     );
     assert_eq!(terse.matches(ISSUE_URL).count(), 1);
-    for error in messages.infrastructure_errors().expect("causes").iter() {
+    for error in failure.infrastructure_errors().expect("causes").iter() {
         assert_eq!(error.msg, detail);
         assert_eq!(error.source_span, Some(unpaired_span));
         assert_eq!(error.host_path.as_deref(), Some(Path::new(path)));
@@ -279,7 +288,8 @@ fn permission_denial_is_operational_without_platform_permission_assumptions() {
     );
     let error = CompilerError::file_error(Path::new("provider.js"), denied.to_string());
     let messages = CompilerMessages::from_error(error, StringTable::new());
-    for view in render_views(&messages) {
+    let (_, [terminal, terse, html]) = render_views(messages);
+    for view in [terminal, terse, html] {
         assert!(view.contains(OPERATIONAL_INTRODUCTION), "{view}");
         assert!(
             view.contains("permission denied reading provider"),
@@ -301,7 +311,7 @@ fn normal_import_config_and_type_diagnostics_keep_codes_without_infrastructure_b
     let warning_name = strings.intern("warning_name");
     let diagnostics = vec![
         CompilerDiagnostic::with_severity(
-            DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
+            DiagnosticKind::Rule(RuleDiagnosticKind::UnknownValueName),
             DiagnosticSeverity::Warning,
             None,
             DiagnosticPayload::UnknownName {
@@ -330,12 +340,15 @@ fn normal_import_config_and_type_diagnostics_keep_codes_without_infrastructure_b
         .iter()
         .map(|diagnostic| diagnostic.kind.descriptor().code)
         .collect();
-    let mut messages = CompilerMessages::from_diagnostics(diagnostics, strings);
+    let path_table = Arc::new(paths.snapshot_table());
+
+    let mut messages = CompilerMessages::from_diagnostics(diagnostics.clone(), strings.clone());
     messages
-        .attach_path_table_if_missing(Arc::new(paths.snapshot_table()))
+        .attach_path_table_if_missing(Arc::clone(&path_table))
         .expect("path context");
-    let terse = format_terse_compiler_messages(&messages);
-    let html = render_compiler_messages_html(&messages, Path::new("."));
+    let failure = into_boundary_failure(messages);
+    let terse = format_terse_boundary_messages(&failure);
+    let html = render_boundary_messages_html(&failure, Path::new("."));
     assert_eq!(terse.len(), 4);
     for (line, expected) in terse.iter().zip(expected_codes.iter()) {
         assert_eq!(line.split('|').nth(1), Some(*expected), "{line}");
@@ -347,15 +360,20 @@ fn normal_import_config_and_type_diagnostics_keep_codes_without_infrastructure_b
         assert!(!view.contains("MOTH-INFRA-0001"), "{view}");
     }
 
+    let mut messages = CompilerMessages::from_diagnostics(diagnostics, strings);
+    messages
+        .attach_path_table_if_missing(path_table)
+        .expect("path context");
     messages.set_infrastructure_error(CompilerError::file_error(
         Path::new("output.html"),
         "late output write failed",
     ));
-    let with_infrastructure = format_terse_compiler_messages(&messages);
+    let failure = into_boundary_failure(messages);
+    let with_infrastructure = format_terse_boundary_messages(&failure);
     assert_eq!(&with_infrastructure[..3], &terse[..3]);
     assert!(with_infrastructure[3].starts_with("E|MOTH-INFRA-0001|"));
     assert_eq!(with_infrastructure[4], terse[3]);
-    let html = render_compiler_messages_html(&messages, Path::new("."));
+    let html = render_boundary_messages_html(&failure, Path::new("."));
     assert!(
         html.find("late output write failed")
             .expect("infrastructure detail")

@@ -97,10 +97,12 @@ pub mod projects {
         BuildConfigInputSet, BuildConfigInputValue, BuildConfigValueLocation, BuildInputName,
         BuildInputNameError, BuildInputValueError, PrimitiveBuildValue,
     };
+    pub use crate::compiler_frontend::compiler_errors::BoundaryFailure;
     pub use crate::compiler_frontend::compiler_errors::CompilerError;
     pub use crate::compiler_frontend::compiler_errors::CompilerMessages;
     pub use crate::compiler_frontend::display_messages::{
-        print_compiler_messages, print_terse_compiler_messages,
+        print_boundary_messages, print_compiler_messages, print_terse_boundary_messages,
+        print_terse_compiler_messages,
     };
     pub use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 

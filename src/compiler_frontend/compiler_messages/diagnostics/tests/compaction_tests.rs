@@ -81,6 +81,7 @@ static TYPE_WORD_TEST_FAMILY: FamilyRow = FamilyRow {
     extra: ExtraDataKind::None,
     labels: &[LabelMessageCode::TYPED_FAILURE_PRODUCER],
     render: None,
+    reason_key: |_| None,
 };
 
 static OPTIONAL_TYPE_TEST_FAMILY: FamilyRow = FamilyRow {
@@ -96,6 +97,7 @@ static OPTIONAL_TYPE_TEST_FAMILY: FamilyRow = FamilyRow {
     extra: ExtraDataKind::None,
     labels: &[],
     render: None,
+    reason_key: |_| None,
 };
 
 /// Builds a draft with type words in facts, a label and a substitution.

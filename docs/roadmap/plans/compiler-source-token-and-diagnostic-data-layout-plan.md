@@ -109,11 +109,12 @@ ACTIVE_PLAN:
   checklists remain the acceptance contract. Only their order and grouping changed, under the
   architecture document's repository-discovered corrections rule.
 - NEXT_SUBSTEP: P4.5 slice S3 of `PHASE_4_5_SEQUENCE`, the boundary cut (4D, 4E, 4F and the 4H
-  boundary items), at sub-slice S3.2. S1 is accepted in the checkpoints "Phase 4 P4.5 S1a: frozen
-  diagnostic report types" through "Phase 4 P4.5 S1c: draft string and path ID remaps", S2 in
-  "Phase 4 P4.5 S2: diagnostic freeze side" and S3.1 in "Phase 4 P4.5 S3.1: legacy-to-boundary
-  converter". The CP0 pre-flight re-verified the sequence against the post-P4.4 tree; after S1
-  the boundary cut moved ahead of owning-site capture (see the sequence note).
+  boundary items), at sub-slice S3.3; S3.3a–S3.3c and S3.4 land as one checkpoint. S1 is accepted
+  in the checkpoints "Phase 4 P4.5 S1a: frozen diagnostic report types" through "Phase 4 P4.5 S1c:
+  draft string and path ID remaps", S2 in "Phase 4 P4.5 S2: diagnostic freeze side", S3.1 in
+  "Phase 4 P4.5 S3.1: legacy-to-boundary converter" and S3.2 in "Phase 4 P4.5 S3.2: renderers read
+  frozen reports". The CP0 pre-flight re-verified the sequence against the post-P4.4 tree; after
+  S1 the boundary cut moved ahead of owning-site capture (see the sequence note).
   P4.4 (the schema side of 4G1–4G8) is accepted in the checkpoints "Phase 4 P4.4 prep" through
   "Phase 4 P4.4 close: every family on a full row": every family has a full row, a mirror
   constructor, a typed view, a legacy-adapter arm and a view renderer, while producers still build

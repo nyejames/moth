@@ -23,9 +23,15 @@ use crate::build_system::create_project_modules::{
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::compiler_errors::{
+    BoundaryFailure, CompilerMessages,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::render::{
+    DiagnosticRenderContext, dev_server::render_boundary_messages_html, terse,
+};
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidControlFlowStatementReason, InvalidFallibleHandlingReason,
+    DiagnosticPayload, DiagnosticSeverity, InvalidControlFlowStatementReason,
     UnsupportedBackendFeatureReason,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -43,6 +49,11 @@ use crate::projects::settings::Config;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
+
+fn boundary_failure(mut messages: CompilerMessages) -> BoundaryFailure {
+    messages.mark_frozen();
+    into_boundary_failure(messages)
+}
 
 #[test]
 fn panic_execution_results_are_always_failures() {
@@ -117,19 +128,19 @@ impl EntryFixture {
         .expect("entry frontend should complete without infrastructure failure");
         if frontend.has_diagnosed_or_blocked() {
             let source_database = frontend.project_source_database.take();
-            let messages = frontend.into_render_messages_with_frozen_identity(
-                &mut string_table,
-                source_database,
-                None,
-            );
-            let rendered = crate::compiler_frontend::compiler_messages::render::terse::
-                format_terse_compiler_messages(&messages);
+            let messages = frontend.into_render_messages(&mut string_table, source_database, None);
+            let failure = boundary_failure(messages);
+            let rendered = terse::format_terse_boundary_messages(&failure);
+            let structured = failure
+                .reports
+                .iter()
+                .map(|(_, view)| (view.descriptor().code, view.reason_key()))
+                .collect::<Vec<_>>();
             let source = fs::read_to_string(&self.root_source).expect("fixture source must exist");
             panic!(
-                "entry source must compile: {}\nsource:\n{source}\ndiagnostics:\n{}\nstructured: {:?}",
+                "entry source must compile: {}\nsource:\n{source}\ndiagnostics:\n{}\nstructured: {structured:?}",
                 self.entry.display(),
                 rendered.join("\n"),
-                messages.error_diagnostics().collect::<Vec<_>>(),
             );
         }
         frontend
@@ -158,18 +169,18 @@ impl EntryFixture {
         .expect("HTML entry frontend should complete without infrastructure failure");
         if frontend.has_diagnosed_or_blocked() {
             let source_database = frontend.project_source_database.take();
-            let messages = frontend.into_render_messages_with_frozen_identity(
-                &mut string_table,
-                source_database,
-                None,
-            );
-            let rendered = crate::compiler_frontend::compiler_messages::render::terse::
-                format_terse_compiler_messages(&messages);
+            let messages = frontend.into_render_messages(&mut string_table, source_database, None);
+            let failure = boundary_failure(messages);
+            let rendered = terse::format_terse_boundary_messages(&failure);
+            let structured = failure
+                .reports
+                .iter()
+                .map(|(_, view)| (view.descriptor().code, view.reason_key()))
+                .collect::<Vec<_>>();
             panic!(
-                "HTML entry source must compile: {}\ndiagnostics:\n{}\nstructured: {:?}",
+                "HTML entry source must compile: {}\ndiagnostics:\n{}\nstructured: {structured:?}",
                 self.entry.display(),
                 rendered.join("\n"),
-                messages.error_diagnostics().collect::<Vec<_>>(),
             );
         }
         frontend
@@ -622,14 +633,18 @@ fn synthetic_single_file_missing_package_keeps_its_authored_diagnostic_span() {
             Err(messages) => messages,
             Ok(_) => panic!("unregistered source package unexpectedly built"),
         };
-        assert!(!messages.has_infrastructure_error(), "{messages:?}");
-        let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
-        assert_eq!(diagnostics.len(), 1, "{messages:?}");
-        assert_eq!(diagnostics[0].kind.code(), "MOTH-IMPORT-0005");
+        let failure = boundary_failure(messages);
+        assert!(!failure.has_infrastructure_error(), "{failure:?}");
+        let diagnostics = failure
+            .reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .collect::<Vec<_>>();
+        assert_eq!(diagnostics.len(), 1, "{failure:?}");
+        let (report, diagnostic) = diagnostics[0];
+        assert_eq!(diagnostic.descriptor().code, "MOTH-IMPORT-0005");
 
-        let position = messages
-            .diagnostic_render_context(0)
-            .primary_position(diagnostics[0])
+        let position = DiagnosticRenderContext::for_report(report)
+            .site_position(diagnostic.primary_site())
             .expect("missing package diagnostic should retain its authored span");
         assert_eq!(position.line, import_clause);
         assert_eq!(position.start, LinePosition { line: 0, column: 0 });
@@ -641,8 +656,7 @@ fn synthetic_single_file_missing_package_keeps_its_authored_diagnostic_span() {
             }
         );
 
-        let rendered = crate::compiler_frontend::compiler_messages::render::dev_server::
-            render_compiler_messages_html(&messages, fixture.directory.path());
+        let rendered = render_boundary_messages_html(&failure, fixture.directory.path());
         assert!(rendered.contains("data-diagnostic-code=\"MOTH-IMPORT-0005\""));
         assert!(rendered.contains(&format!(
             "<span class=\"source-line\">{import_clause}</span>"
@@ -768,23 +782,38 @@ fn synthetic_start_custom_error_propagation_is_a_source_diagnostic() {
             result.build_result.is_none(),
             "source diagnostics must precede runtime execution"
         );
-        let messages = result
+        let failure = result
             .messages
             .expect("source rejection must retain compiler diagnostics");
-        assert!(!messages.has_infrastructure_error(), "{messages:?}");
-        let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
+        assert!(!failure.has_infrastructure_error(), "{failure:?}");
+        let diagnostics = failure
+            .reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .collect::<Vec<_>>();
         assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].kind.code(), "MOTH-RULE-0051");
-        assert!(matches!(
-            diagnostics[0].payload,
-            DiagnosticPayload::InvalidFallibleHandling {
-                reason: InvalidFallibleHandlingReason::EntryHasIncompatibleError {
-                    produced_error_type,
-                    entry_error_type,
-                },
-            } if produced_error_type != entry_error_type
-        ));
-        assert!(diagnostics[0].primary_span.is_some());
+        let (report, diagnostic) = diagnostics[0];
+        assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0051");
+        assert_eq!(
+            diagnostic.reason_key(),
+            Some("invalid_fallible_handling.entry_has_incompatible_error")
+        );
+        let context = DiagnosticRenderContext::for_report(report);
+        assert!(context.site_position(diagnostic.primary_site()).is_some());
+
+        let rendered = terse::format_terse_diagnostic_view(diagnostic, context);
+        let (_, types) = rendered
+            .split_once("produces `")
+            .expect("incompatible-error rendering should name the produced type");
+        let (produced_type, types) = types
+            .split_once("!`, which is incompatible with the entry's built-in `start` `")
+            .expect("incompatible-error rendering should name the entry boundary type");
+        let (entry_type, _) = types
+            .split_once("!` boundary")
+            .expect("entry boundary type should be followed by the boundary explanation");
+        assert_ne!(
+            produced_type, entry_type,
+            "custom error propagation should keep its type distinct from the entry error"
+        );
     }
 }
 
