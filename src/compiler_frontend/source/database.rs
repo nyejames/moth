@@ -348,6 +348,16 @@ impl SourceDatabase {
         self.path_interner.clone()
     }
 
+    /// Borrow the registration builder mutably for an append-only path-snapshot merge.
+    ///
+    /// WHAT: hands the source-path builder to a converter that merges a frozen path snapshot.
+    /// WHY: a converted diagnostic carries its own path IDs, so they must be remapped into this
+    ///      builder; the merge only appends, so existing source `PathId`s keep their numbers.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
+    pub(crate) fn path_builder_mut(&mut self) -> &mut PathInternerBuilder {
+        &mut self.path_interner
+    }
+
     /// Fork the registered logical-path table for one local frontend preparation wave.
     #[cfg(test)]
     pub(crate) fn fork_path_interner(
@@ -764,7 +774,7 @@ impl FrozenSourceDatabase {
     /// Builds a frozen database with no sources, so an unowned domain carries only its path trie.
     ///
     /// Every span it names misses the slot table and resolves to no position.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3 boundary cut"))]
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(crate) fn with_paths(paths: Arc<PathTable>) -> Self {
         Self {
             slots: Vec::new(),

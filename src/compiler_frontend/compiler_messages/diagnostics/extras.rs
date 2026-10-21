@@ -104,7 +104,7 @@ pub(super) struct DiagnosticExtraDraft {
 
 impl ExtraDataDraft {
     /// Rewrites the string IDs of a string-list extra. A path remap leaves them as they are.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(super) fn remap_ids(&mut self, remap: IdRemap<'_>) {
         if let (Self::StringIds(ids), IdRemap::Strings(strings)) = (self, remap) {
             for id in ids {
@@ -117,7 +117,7 @@ impl ExtraDataDraft {
 impl DiagnosticExtraDraft {
     /// Rewrites the identity words of this extra part: label and substitution words, then string IDs.
     /// Foreign sites are not remapped, since their identity belongs to another context.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(super) fn remap_ids(&mut self, remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
         for label in &mut self.labels {
             label.remap_ids(remap)?;

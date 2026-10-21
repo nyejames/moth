@@ -187,10 +187,7 @@ pub(crate) struct InfrastructureErrors {
 }
 
 /// Boundary failure carrying frozen user diagnostics and the transitional infrastructure lane.
-#[allow(
-    dead_code,
-    reason = "P4.5 S4 makes the build boundary return it; no test can use it before then"
-)]
+#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 #[derive(Debug)]
 pub(crate) struct BoundaryFailure {
     pub(crate) reports: DiagnosticReportSet,
@@ -199,6 +196,47 @@ pub(crate) struct BoundaryFailure {
 }
 
 const _: () = assert!(std::mem::size_of::<BoundaryFailure>() <= 56);
+
+impl BoundaryFailure {
+    /// Count error records plus one for the infrastructure lane, matching `CompilerMessages`.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
+    pub(crate) fn error_count(&self) -> usize {
+        let record_errors = usize::try_from(self.reports.counts().errors)
+            .expect("a report set's error count fits in usize");
+        record_errors + usize::from(self.has_infrastructure_error())
+    }
+
+    /// Count warning records, matching `CompilerMessages`.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
+    pub(crate) fn warning_count(&self) -> usize {
+        usize::try_from(self.reports.counts().warnings)
+            .expect("a report set's warning count fits in usize")
+    }
+
+    /// Return whether the infrastructure lane or any error record is present.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
+    pub(crate) fn has_errors(&self) -> bool {
+        self.has_infrastructure_error() || self.reports.counts().errors > 0
+    }
+
+    /// Return whether any warning record is present.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
+    pub(crate) fn has_warnings(&self) -> bool {
+        self.reports.counts().warnings > 0
+    }
+
+    /// Return whether the transitional infrastructure lane is populated.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
+    pub(crate) fn has_infrastructure_error(&self) -> bool {
+        self.infrastructure.is_some()
+    }
+
+    /// Borrow the transitional infrastructure lane when it is populated.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
+    pub(crate) fn infrastructure_errors(&self) -> Option<&InfrastructureErrors> {
+        self.infrastructure.as_deref()
+    }
+}
 
 #[derive(Debug)]
 struct InfrastructureSourceContext {
@@ -314,6 +352,39 @@ impl InfrastructureErrors {
             }
             None
         })
+    }
+
+    /// Move the source-owned cause rows out so the boundary converter can re-home their databases.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
+    pub(crate) fn take_source_rows(&mut self) -> Vec<(Range<usize>, Arc<SourceDatabase>)> {
+        std::mem::take(&mut self.source_contexts)
+            .into_iter()
+            .map(|context| match context.owner {
+                InfrastructureSourceOwner::Source(database) => (context.cause_range, database),
+                InfrastructureSourceOwner::Frozen(_) => {
+                    panic!("pre-frozen infrastructure source owner reached the boundary converter")
+                }
+            })
+            .collect()
+    }
+
+    /// Restore the cause rows as frozen owners once the converter has built their domains.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
+    pub(crate) fn set_frozen_source_rows(
+        &mut self,
+        rows: Vec<(Range<usize>, Arc<FrozenIdentityContext>)>,
+    ) {
+        assert!(
+            self.source_contexts.is_empty(),
+            "frozen cause rows replace only the rows taken for the converter"
+        );
+        self.source_contexts = rows
+            .into_iter()
+            .map(|(cause_range, identity)| InfrastructureSourceContext {
+                cause_range,
+                owner: InfrastructureSourceOwner::Frozen(identity),
+            })
+            .collect();
     }
 }
 

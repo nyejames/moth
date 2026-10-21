@@ -23,7 +23,7 @@ mod declarations;
 mod import_config;
 mod paths;
 mod payload;
-mod subject;
+pub(super) mod subject;
 mod suggestions;
 mod syntax;
 mod templates;

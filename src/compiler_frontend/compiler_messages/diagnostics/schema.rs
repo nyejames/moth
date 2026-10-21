@@ -26,7 +26,7 @@ pub(super) struct FactDescriptor {
     /// Relative words that some value of this codec may leave as raw type ids.
     pub(super) possible_pending_mask: u8,
     /// Rewrites this codec's identity words through a remap. Other words are left as they are.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(super) remap_ids: fn(&mut [u32], IdRemap<'_>) -> Result<(), FactCapacityError>,
 }
 

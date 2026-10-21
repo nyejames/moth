@@ -26,6 +26,31 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use rustc_hash::FxHashMap;
 
+#[cfg(test)]
+thread_local! {
+    /// Test-only: while set on this thread, every top-level capture reports capacity exhaustion.
+    static FORCED_TYPE_DISPLAY_EXHAUSTION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Test-only guard that forces top-level type-display capture to fail on this thread until dropped.
+#[cfg(test)]
+pub(crate) struct ForcedTypeDisplayExhaustionGuard;
+
+#[cfg(test)]
+impl ForcedTypeDisplayExhaustionGuard {
+    pub(crate) fn new() -> Self {
+        FORCED_TYPE_DISPLAY_EXHAUSTION.with(|forced| forced.set(true));
+        Self
+    }
+}
+
+#[cfg(test)]
+impl Drop for ForcedTypeDisplayExhaustionGuard {
+    fn drop(&mut self) {
+        FORCED_TYPE_DISPLAY_EXHAUSTION.with(|forced| forced.set(false));
+    }
+}
+
 pub(crate) struct TypeDisplaySnapshotBuilder<'environment> {
     environment: Option<&'environment TypeEnvironment>,
     snapshot: TypeDisplaySnapshot,
@@ -83,6 +108,10 @@ impl<'environment> TypeDisplaySnapshotBuilder<'environment> {
         &mut self,
         type_id: TypeId,
     ) -> Result<TypeDisplayId, TypeDisplayCapacityError> {
+        #[cfg(test)]
+        if FORCED_TYPE_DISPLAY_EXHAUSTION.with(std::cell::Cell::get) {
+            return Err(TypeDisplayCapacityError);
+        }
         match self.environment {
             Some(environment) if environment.get(type_id).is_some() => self.display_id(type_id),
             _ => self.push_unresolved(type_id),

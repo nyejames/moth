@@ -109,11 +109,11 @@ ACTIVE_PLAN:
   checklists remain the acceptance contract. Only their order and grouping changed, under the
   architecture document's repository-discovered corrections rule.
 - NEXT_SUBSTEP: P4.5 slice S3 of `PHASE_4_5_SEQUENCE`, the boundary cut (4D, 4E, 4F and the 4H
-  boundary items), starting with sub-slice S3.1. S1 is accepted in the checkpoints "Phase 4 P4.5
-  S1a: frozen diagnostic report types" through "Phase 4 P4.5 S1c: draft string and path ID
-  remaps", and S2 in "Phase 4 P4.5 S2: diagnostic freeze side". The CP0 pre-flight re-verified the
-  sequence against the post-P4.4 tree; after S1 the boundary cut moved ahead of owning-site
-  capture (see the sequence note).
+  boundary items), at sub-slice S3.2. S1 is accepted in the checkpoints "Phase 4 P4.5 S1a: frozen
+  diagnostic report types" through "Phase 4 P4.5 S1c: draft string and path ID remaps", S2 in
+  "Phase 4 P4.5 S2: diagnostic freeze side" and S3.1 in "Phase 4 P4.5 S3.1: legacy-to-boundary
+  converter". The CP0 pre-flight re-verified the sequence against the post-P4.4 tree; after S1
+  the boundary cut moved ahead of owning-site capture (see the sequence note).
   P4.4 (the schema side of 4G1–4G8) is accepted in the checkpoints "Phase 4 P4.4 prep" through
   "Phase 4 P4.4 close: every family on a full row": every family has a full row, a mirror
   constructor, a typed view, a legacy-adapter arm and a view renderer, while producers still build
@@ -156,7 +156,7 @@ while bags still held `CompilerDiagnostic`; the boundary cut therefore moved ahe
 |---|---|
 | S1 | additive, unit-tested types: `DiagnosticReport`, `DiagnosticReportSet` with `DiagnosticRun`, `SeverityCounts`, `BoundaryFailure`; `TypeDisplaySnapshot::append` and draft type-display rebasing; draft fact, extra and label ID remaps |
 | S2 | additive, unit-tested freeze side: `PendingDiagnostics` with per-domain accumulators and canonical segments; an infallible `freeze` that compacts one store per domain and records runs; domain owners (owned sources, or a shared path table with no sources); type-display capacity failures reported as `CompilerCapacityExceeded` |
-| S3 [G] | boundary cut in sub-slices S3.1–S3.4b: one converter turns each public boundary exit's legacy `CompilerMessages` into `BoundaryFailure` (build, the `BuildResult` take functions, check, benchmark, boracle single-file, dev server); terminal, terse, dev-server, test-runner and benchmark rendering read `DiagnosticView`; `diagnostic_display_order`, `compact_for_render`, the legacy freezers and `RenderFrozenContext` go. Legacy-input render wrappers exist only between S3.2 and S3.3c |
+| S3 [G] | boundary cut in sub-slices S3.1–S3.4: S3.1 adds the one legacy-to-compact converter (`into_boundary_failure`), test-only; S3.2 makes terminal, terse, dev-server, test-runner and benchmark rendering read `DiagnosticView` and deletes every legacy freeze, `RenderFrozenContext` and `diagnostic_display_order` (the vessel records only whether legacy would have frozen it); S3.3a–S3.3c move the exits (the `BuildResult` take functions, `build_project`, check, benchmark, boracle single-file) to `BoundaryFailure`; S3.4 deletes the remaining per-diagnostic legacy accessors |
 | S4 [G] | canonical merge: `PendingDiagnostics` accumulates module batches; freeze at canonical failure aggregation and after the build's last producer; `BoundaryPremergeFailure`, `transient_batches` and `trailing_project_messages` retire |
 | S5 [G] | `ModuleCompilationOutcome::Diagnosed` and `PremergeFailure` carry `PreparedDiagnosticBatch`; `module_diagnostics.rs` and `PremergeDiagnosticBatch` retire; module warnings become drafts beside `ModuleSemanticResult` |
 | S6 [G] | the AST/HIR error channel becomes a draft bag; owning sites capture types before their environment drops; `RenderTypeContext`, environment retention and the type-display fallbacks go |

@@ -4,6 +4,7 @@
 //! WHY: the store packs words and checks arena limits by hand, so a layout slip would otherwise
 //! surface only when a diagnostic is rendered.
 
+mod boundary_conversion_tests;
 mod capacity_tests;
 mod codec_tests;
 mod compaction_tests;

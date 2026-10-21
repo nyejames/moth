@@ -93,3 +93,7 @@ mod module_diagnostics_tests;
 #[cfg(test)]
 #[path = "tests/type_rendering_tests.rs"]
 mod type_rendering_tests;
+
+#[cfg(test)]
+#[path = "tests/boundary_failure_tests.rs"]
+mod boundary_failure_tests;

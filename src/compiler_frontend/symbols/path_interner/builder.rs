@@ -283,6 +283,94 @@ impl PathInternerBuilder {
         Ok(PathIdRemap::new(base_len, mapped_suffix, is_identity))
     }
 
+    /// Append-only merge of a flat path-table snapshot into this builder.
+    ///
+    /// WHAT: returns the remap from snapshot `PathId`s to this builder's `PathId`s. Nodes before
+    ///       the first disagreement with this builder keep their numbers; every later node is
+    ///       re-interned under its already-mapped parent, reusing an existing child when one
+    ///       matches. Snapshot component IDs must already belong to this builder's string domain.
+    /// WHY:  a converted diagnostic carries a path table frozen in its own build, so its IDs must
+    ///       be rewritten before they can join this builder without renumbering existing paths.
+    ///
+    /// `is_identity` is exact by value: it is set exactly when every snapshot ID keeps its own
+    /// number. That includes a builder that is a strict prefix of the snapshot, where each
+    /// appended node lands at its snapshot index. `false` means "rewrite", not "moved".
+    ///
+    /// Returns [`PathInternError::TableFull`] when a new node cannot be addressed. Nodes appended
+    /// before that point stay in the append-only table, as with [`Self::merge_delta_from`].
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
+    pub(crate) fn merge_snapshot(
+        &mut self,
+        snapshot: &PathTable,
+    ) -> Result<PathIdRemap, PathInternError> {
+        let snapshot_len = snapshot.len();
+        let shared_len = snapshot_len.min(self.len());
+
+        // Nodes before the first disagreement name the same parent and component in both tables,
+        // so their IDs keep their numbers.
+        let identity_prefix_len = (0..shared_len)
+            .find(|&index| {
+                let path = Self::snapshot_path_id(index);
+                self.table.try_parent(path) != snapshot.try_parent(path)
+                    || self.table.try_component(path) != snapshot.try_component(path)
+            })
+            .unwrap_or(shared_len);
+
+        let mut mapped_suffix = Vec::with_capacity(snapshot_len - identity_prefix_len);
+        for index in identity_prefix_len..snapshot_len {
+            let path = Self::snapshot_path_id(index);
+            let (Some(parent), Some(component)) =
+                (snapshot.try_parent(path), snapshot.try_component(path))
+            else {
+                panic!(
+                    "path snapshot node {index} lacks a parent or component link; this is a compiler bug"
+                );
+            };
+
+            // Parents precede children, so a parent is either inside the identity prefix or
+            // already mapped into `mapped_suffix`.
+            let parent_index = parent.index();
+            if parent_index >= index {
+                panic!(
+                    "path snapshot node {index} names parent {parent_index} that does not precede it; this is a compiler bug"
+                );
+            }
+            let mapped_parent = if parent_index < identity_prefix_len {
+                parent
+            } else {
+                mapped_suffix[parent_index - identity_prefix_len]
+            };
+
+            let mapped = self
+                .try_intern_child(mapped_parent, component)
+                .ok_or(PathInternError::TableFull)?;
+            mapped_suffix.push(mapped);
+        }
+
+        // Compare by value: a node keeps its number when it lands at its snapshot index. A
+        // builder that is a strict prefix of the snapshot does this for every appended node.
+        let is_identity = mapped_suffix
+            .iter()
+            .enumerate()
+            .all(|(offset, mapped)| mapped.index() == identity_prefix_len + offset);
+
+        Ok(PathIdRemap::new(
+            identity_prefix_len,
+            mapped_suffix,
+            is_identity,
+        ))
+    }
+
+    /// Name the node at `index`; every index below a table's length fits the compact domain.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
+    fn snapshot_path_id(index: usize) -> PathId {
+        PathId::try_from_index(index).unwrap_or_else(|| {
+            panic!(
+                "path table index {index} exceeds the compact path domain; this is a compiler bug"
+            )
+        })
+    }
+
     /// Freeze the append-only table into lookup-only path storage.
     pub fn freeze(self) -> PathTable {
         self.table

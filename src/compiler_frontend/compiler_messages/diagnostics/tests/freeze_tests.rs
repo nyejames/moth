@@ -23,7 +23,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::foreign::{
     ForeignSiteDraft, ForeignSlot, SiteRef,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::{
-    DomainSource, PendingDiagnostics,
+    DomainSource, InstallMode, PendingDiagnostics,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::report::{
     DiagnosticReport, DiagnosticReportSet, SeverityCounts,
@@ -69,7 +69,7 @@ fn push_choice_comparison(
     draft
         .rebase_type_displays(base)
         .expect("the rebased display ids fit");
-    batch.push(domain, draft);
+    batch.push(domain, None, draft);
 }
 
 /// The spelling that `type_id` gets from a snapshot that holds that type alone.
@@ -110,8 +110,11 @@ fn assert_runs(set: &DiagnosticReportSet, expected: &[(u32, u32, u32)]) {
 
 #[test]
 fn freeze_empty_batch_yields_an_empty_set() {
-    let set =
-        PendingDiagnostics::default().freeze(StringTable::new(), DiagnosticLimits::production());
+    let set = PendingDiagnostics::default().freeze(
+        StringTable::new(),
+        DiagnosticLimits::production(),
+        InstallMode::Frozen,
+    );
 
     assert!(set.is_empty());
     assert_eq!(set.counts(), SeverityCounts::default());
@@ -128,12 +131,17 @@ fn freeze_keeps_one_domain_records_in_one_run() {
     let domain = batch.add_domain(None, DomainSource::Sources(SourceDatabase::empty()));
     batch.push(
         domain,
+        None,
         unknown_value_name(StringId::from_index(1), Some(exact_span(0, 1))),
     );
-    batch.push(domain, unreachable_match_arm(Some(exact_span(2, 1))));
-    batch.push(domain, unreachable_match_arm(Some(exact_span(4, 1))));
+    batch.push(domain, None, unreachable_match_arm(Some(exact_span(2, 1))));
+    batch.push(domain, None, unreachable_match_arm(Some(exact_span(4, 1))));
 
-    let set = batch.freeze(StringTable::new(), DiagnosticLimits::production());
+    let set = batch.freeze(
+        StringTable::new(),
+        DiagnosticLimits::production(),
+        InstallMode::Frozen,
+    );
 
     assert_eq!(set.iter().count(), 3);
     assert_eq!(
@@ -155,11 +163,15 @@ fn freeze_interleaved_domains_keep_pushed_order() {
         Some(StablePackageIdentity::project_local("freeze-order")),
         DomainSource::Sources(SourceDatabase::empty()),
     );
-    batch.push(project, unreachable_match_arm(Some(exact_span(0, 1))));
-    batch.push(package, unreachable_match_arm(Some(exact_span(2, 1))));
-    batch.push(project, unreachable_match_arm(Some(exact_span(4, 1))));
+    batch.push(project, None, unreachable_match_arm(Some(exact_span(0, 1))));
+    batch.push(package, None, unreachable_match_arm(Some(exact_span(2, 1))));
+    batch.push(project, None, unreachable_match_arm(Some(exact_span(4, 1))));
 
-    let set = batch.freeze(StringTable::new(), DiagnosticLimits::production());
+    let set = batch.freeze(
+        StringTable::new(),
+        DiagnosticLimits::production(),
+        InstallMode::Frozen,
+    );
     let owners = owning_reports(&set);
 
     assert_eq!(owners.len(), 3);
@@ -182,13 +194,13 @@ fn freeze_merges_a_run_across_a_refused_stretch() {
         Some(StablePackageIdentity::project_local("freeze-merge")),
         DomainSource::Sources(SourceDatabase::empty()),
     );
-    batch.push(package, unreachable_match_arm(Some(exact_span(0, 1))));
-    batch.push(package, unreachable_match_arm(Some(exact_span(2, 1))));
-    batch.push(project, unreachable_match_arm(Some(exact_span(4, 1))));
-    batch.push(package, unreachable_match_arm(Some(exact_span(6, 1))));
-    batch.push(project, unreachable_match_arm(Some(exact_span(8, 1))));
+    batch.push(package, None, unreachable_match_arm(Some(exact_span(0, 1))));
+    batch.push(package, None, unreachable_match_arm(Some(exact_span(2, 1))));
+    batch.push(project, None, unreachable_match_arm(Some(exact_span(4, 1))));
+    batch.push(package, None, unreachable_match_arm(Some(exact_span(6, 1))));
+    batch.push(project, None, unreachable_match_arm(Some(exact_span(8, 1))));
 
-    let set = batch.freeze(StringTable::new(), limits);
+    let set = batch.freeze(StringTable::new(), limits, InstallMode::Frozen);
     let owners = owning_reports(&set);
 
     assert_eq!(set.iter().count(), 4);
@@ -208,54 +220,36 @@ fn freeze_merges_a_run_across_a_refused_stretch() {
 }
 
 #[test]
-fn freeze_installs_each_donor_handle_with_its_domain_context() {
-    let package = StablePackageIdentity::project_local("freeze-package");
+fn freeze_shared_domain_reuses_the_earlier_context() {
+    let package = StablePackageIdentity::project_local("freeze-shared-context");
     let package_handle = FrozenIdentityHandle::for_domain(package.clone());
-    let project_handle = identity();
-    let package_context = Arc::new(FrozenIdentityContext::from_parts(
-        StringTable::new(),
-        SourceDatabase::empty(),
-    ));
-
     let mut batch = PendingDiagnostics::default();
     let project = batch.add_domain(None, DomainSource::Sources(SourceDatabase::empty()));
-    let package_domain = batch.add_domain(
-        Some(package),
-        DomainSource::Frozen(Arc::clone(&package_context)),
-    );
+    let shared = batch.add_domain(Some(package), DomainSource::Shares(project));
+    batch.push(project, None, unreachable_match_arm(Some(exact_span(0, 1))));
     batch.push(
-        project,
-        unreachable_match_arm(Some(exact_span(0, 1))).with_foreign(ForeignSiteDraft {
-            slot: ForeignSlot::Primary,
-            context: project_handle.clone(),
-        }),
-    );
-    batch.push(
-        package_domain,
+        shared,
+        None,
         unreachable_match_arm(Some(exact_span(2, 1))).with_foreign(ForeignSiteDraft {
             slot: ForeignSlot::Primary,
             context: package_handle.clone(),
         }),
     );
 
-    let set = batch.freeze(StringTable::new(), DiagnosticLimits::production());
+    let set = batch.freeze(
+        StringTable::new(),
+        DiagnosticLimits::production(),
+        InstallMode::Frozen,
+    );
     let contexts: Vec<&FrozenIdentityContext> =
         set.iter().map(|(report, _)| report.context()).collect();
 
     assert_eq!(contexts.len(), 2);
-    assert!(std::ptr::eq(
-        project_handle
-            .get()
-            .expect("the project donor is installed"),
-        contexts[0]
-    ));
-    assert!(std::ptr::eq(
-        package_handle
-            .get()
-            .expect("the package donor is installed"),
-        contexts[1]
-    ));
-    assert!(std::ptr::eq(Arc::as_ptr(&package_context), contexts[1]));
+    assert!(std::ptr::eq(contexts[0], contexts[1]));
+    let installed = package_handle
+        .get()
+        .expect("the shared domain's donor is installed");
+    assert!(std::ptr::eq(installed, contexts[1]));
 }
 
 #[test]
@@ -271,13 +265,18 @@ fn freeze_unowned_domain_resolves_no_spans() {
     );
     batch.push(
         domain,
+        None,
         unreachable_match_arm(Some(exact_span(0, 1))).with_foreign(ForeignSiteDraft {
             slot: ForeignSlot::Primary,
             context: handle.clone(),
         }),
     );
 
-    let set = batch.freeze(StringTable::new(), DiagnosticLimits::production());
+    let set = batch.freeze(
+        StringTable::new(),
+        DiagnosticLimits::production(),
+        InstallMode::Frozen,
+    );
     let (report, _) = set.iter().next().expect("the pushed draft is stored");
     assert!(std::ptr::eq(report.context().paths(), Arc::as_ptr(&paths)));
 
@@ -292,6 +291,36 @@ fn freeze_unowned_domain_resolves_no_spans() {
 }
 
 #[test]
+fn freeze_unowned_domain_leaves_an_unmatched_donor_uninstalled() {
+    let handle = FrozenIdentityHandle::for_domain(StablePackageIdentity::project_local(
+        "freeze-unowned-orphan",
+    ));
+    let paths = Arc::new(PathInternerBuilder::new().freeze());
+    let mut batch = PendingDiagnostics::default();
+    let domain = batch.add_domain(
+        Some(StablePackageIdentity::project_local("freeze-unowned-owner")),
+        DomainSource::Unowned(Arc::clone(&paths)),
+    );
+    batch.push(
+        domain,
+        None,
+        unreachable_match_arm(Some(exact_span(0, 1))).with_foreign(ForeignSiteDraft {
+            slot: ForeignSlot::Primary,
+            context: handle.clone(),
+        }),
+    );
+
+    let set = batch.freeze(
+        StringTable::new(),
+        DiagnosticLimits::production(),
+        InstallMode::Frozen,
+    );
+
+    assert_eq!(set.iter().count(), 1);
+    assert!(handle.get().is_none());
+}
+
+#[test]
 fn freeze_domain_less_handle_on_package_draft_stays_uninstalled() {
     let handle = identity();
     let mut batch = PendingDiagnostics::default();
@@ -301,13 +330,18 @@ fn freeze_domain_less_handle_on_package_draft_stays_uninstalled() {
     );
     batch.push(
         package,
+        None,
         unreachable_match_arm(Some(exact_span(0, 1))).with_foreign(ForeignSiteDraft {
             slot: ForeignSlot::Primary,
             context: handle.clone(),
         }),
     );
 
-    let set = batch.freeze(StringTable::new(), DiagnosticLimits::production());
+    let set = batch.freeze(
+        StringTable::new(),
+        DiagnosticLimits::production(),
+        InstallMode::Frozen,
+    );
 
     assert_eq!(set.iter().count(), 1);
     assert!(handle.get().is_none());
@@ -322,6 +356,7 @@ fn freeze_domain_less_handles_install_their_own_none_domain() {
     let second = batch.add_domain(None, DomainSource::Sources(SourceDatabase::empty()));
     batch.push(
         first,
+        Some(first),
         unreachable_match_arm(Some(exact_span(0, 1))).with_foreign(ForeignSiteDraft {
             slot: ForeignSlot::Primary,
             context: first_handle.clone(),
@@ -329,13 +364,18 @@ fn freeze_domain_less_handles_install_their_own_none_domain() {
     );
     batch.push(
         second,
+        Some(second),
         unreachable_match_arm(Some(exact_span(2, 1))).with_foreign(ForeignSiteDraft {
             slot: ForeignSlot::Primary,
             context: second_handle.clone(),
         }),
     );
 
-    let set = batch.freeze(StringTable::new(), DiagnosticLimits::production());
+    let set = batch.freeze(
+        StringTable::new(),
+        DiagnosticLimits::production(),
+        InstallMode::Frozen,
+    );
     let contexts: Vec<&FrozenIdentityContext> =
         set.iter().map(|(report, _)| report.context()).collect();
 
@@ -352,6 +392,53 @@ fn freeze_domain_less_handles_install_their_own_none_domain() {
 }
 
 #[test]
+fn freeze_domain_less_handles_follow_none_domain_across_interleaved_drafts() {
+    let first_handle = identity();
+    let second_handle = identity();
+    let mut batch = PendingDiagnostics::default();
+    let first = batch.add_domain(None, DomainSource::Sources(SourceDatabase::empty()));
+    let second = batch.add_domain(
+        Some(StablePackageIdentity::project_local("freeze-none-second")),
+        DomainSource::Sources(SourceDatabase::empty()),
+    );
+    // Each identity-less handle takes its draft's `none_domain` context, not the owning domain's context.
+    batch.push(
+        first,
+        Some(second),
+        unreachable_match_arm(Some(exact_span(0, 1))).with_foreign(ForeignSiteDraft {
+            slot: ForeignSlot::Primary,
+            context: first_handle.clone(),
+        }),
+    );
+    batch.push(
+        second,
+        Some(first),
+        unreachable_match_arm(Some(exact_span(2, 1))).with_foreign(ForeignSiteDraft {
+            slot: ForeignSlot::Primary,
+            context: second_handle.clone(),
+        }),
+    );
+
+    let set = batch.freeze(
+        StringTable::new(),
+        DiagnosticLimits::production(),
+        InstallMode::Frozen,
+    );
+    let contexts: Vec<&FrozenIdentityContext> =
+        set.iter().map(|(report, _)| report.context()).collect();
+
+    assert_eq!(contexts.len(), 2);
+    let first_installed = first_handle
+        .get()
+        .expect("the first draft's handle is installed");
+    let second_installed = second_handle
+        .get()
+        .expect("the second draft's handle is installed");
+    assert!(std::ptr::eq(first_installed, contexts[1]));
+    assert!(std::ptr::eq(second_installed, contexts[0]));
+}
+
+#[test]
 fn freeze_package_handle_installs_the_first_matching_domain() {
     let shared = StablePackageIdentity::project_local("freeze-shared");
     let handle = FrozenIdentityHandle::for_domain(shared.clone());
@@ -361,16 +448,21 @@ fn freeze_package_handle_installs_the_first_matching_domain() {
         DomainSource::Sources(SourceDatabase::empty()),
     );
     let second = batch.add_domain(Some(shared), DomainSource::Sources(SourceDatabase::empty()));
-    batch.push(first, unreachable_match_arm(Some(exact_span(0, 1))));
+    batch.push(first, None, unreachable_match_arm(Some(exact_span(0, 1))));
     batch.push(
         second,
+        None,
         unreachable_match_arm(Some(exact_span(2, 1))).with_foreign(ForeignSiteDraft {
             slot: ForeignSlot::Primary,
             context: handle.clone(),
         }),
     );
 
-    let set = batch.freeze(StringTable::new(), DiagnosticLimits::production());
+    let set = batch.freeze(
+        StringTable::new(),
+        DiagnosticLimits::production(),
+        InstallMode::Frozen,
+    );
     let contexts: Vec<&FrozenIdentityContext> =
         set.iter().map(|(report, _)| report.context()).collect();
 
@@ -396,13 +488,18 @@ fn freeze_keeps_a_preinstalled_handle() {
     let domain = batch.add_domain(Some(shared), DomainSource::Sources(SourceDatabase::empty()));
     batch.push(
         domain,
+        None,
         unreachable_match_arm(Some(exact_span(0, 1))).with_foreign(ForeignSiteDraft {
             slot: ForeignSlot::Primary,
             context: handle.clone(),
         }),
     );
 
-    let set = batch.freeze(StringTable::new(), DiagnosticLimits::production());
+    let set = batch.freeze(
+        StringTable::new(),
+        DiagnosticLimits::production(),
+        InstallMode::Frozen,
+    );
     let (report, _) = set.iter().next().expect("the pushed draft is stored");
 
     let installed = handle.get().expect("the early donor stays installed");
@@ -419,6 +516,7 @@ fn freeze_panics_on_donor_primary_without_its_domain() {
     let project = batch.add_domain(None, DomainSource::Sources(SourceDatabase::empty()));
     batch.push(
         project,
+        None,
         unreachable_match_arm(Some(exact_span(0, 1))).with_foreign(ForeignSiteDraft {
             slot: ForeignSlot::Primary,
             context: FrozenIdentityHandle::for_domain(StablePackageIdentity::project_local(
@@ -427,7 +525,11 @@ fn freeze_panics_on_donor_primary_without_its_domain() {
         }),
     );
 
-    let _set = batch.freeze(StringTable::new(), DiagnosticLimits::production());
+    let _set = batch.freeze(
+        StringTable::new(),
+        DiagnosticLimits::production(),
+        InstallMode::Frozen,
+    );
 }
 
 #[test]
@@ -439,6 +541,7 @@ fn freeze_panics_on_donor_label_without_its_domain() {
     let project = batch.add_domain(None, DomainSource::Sources(SourceDatabase::empty()));
     batch.push(
         project,
+        None,
         duplicate_declaration(StringId::from_index(1), Some(exact_span(10, 2)))
             .with_label(
                 Some(exact_span(0, 2)),
@@ -452,7 +555,63 @@ fn freeze_panics_on_donor_label_without_its_domain() {
             }),
     );
 
-    let _set = batch.freeze(StringTable::new(), DiagnosticLimits::production());
+    let _set = batch.freeze(
+        StringTable::new(),
+        DiagnosticLimits::production(),
+        InstallMode::Frozen,
+    );
+}
+
+#[test]
+fn unfrozen_freeze_skips_identity_installs_and_keeps_none_domain() {
+    let package = StablePackageIdentity::project_local("freeze-unfrozen");
+    let named_handle = FrozenIdentityHandle::for_domain(package.clone());
+    let domain_less_handle = identity();
+    let mut batch = PendingDiagnostics::default();
+    let project = batch.add_domain(None, DomainSource::Sources(SourceDatabase::empty()));
+    batch.add_domain(
+        Some(package),
+        DomainSource::Sources(SourceDatabase::empty()),
+    );
+    batch.push(
+        project,
+        Some(project),
+        unreachable_match_arm(Some(exact_span(0, 1))).with_foreign(ForeignSiteDraft {
+            slot: ForeignSlot::Primary,
+            context: domain_less_handle.clone(),
+        }),
+    );
+    batch.push(
+        project,
+        None,
+        unreachable_match_arm(Some(exact_span(2, 1))).with_foreign(ForeignSiteDraft {
+            slot: ForeignSlot::Primary,
+            context: named_handle.clone(),
+        }),
+    );
+
+    let set = batch.freeze(
+        StringTable::new(),
+        DiagnosticLimits::production(),
+        InstallMode::Unfrozen,
+    );
+    let contexts: Vec<&FrozenIdentityContext> =
+        set.iter().map(|(report, _)| report.context()).collect();
+
+    assert_eq!(contexts.len(), 2);
+    let installed = domain_less_handle
+        .get()
+        .expect("the none domain's donor is installed");
+    assert!(std::ptr::eq(installed, contexts[0]));
+    assert!(named_handle.get().is_none());
+}
+
+#[test]
+#[should_panic(expected = "diagnostic domains may share only the context of an earlier domain")]
+fn add_domain_panics_when_a_share_names_a_later_domain() {
+    let mut batch = PendingDiagnostics::default();
+    batch.add_domain(None, DomainSource::Sources(SourceDatabase::empty()));
+    batch.add_domain(None, DomainSource::Shares(1));
 }
 
 #[test]
@@ -464,10 +623,14 @@ fn freeze_full_store_keeps_run_accounting() {
     let mut batch = PendingDiagnostics::default();
     let domain = batch.add_domain(None, DomainSource::Sources(SourceDatabase::empty()));
     for start in [0, 2, 4] {
-        batch.push(domain, unreachable_match_arm(Some(exact_span(start, 1))));
+        batch.push(
+            domain,
+            None,
+            unreachable_match_arm(Some(exact_span(start, 1))),
+        );
     }
 
-    let set = batch.freeze(StringTable::new(), limits);
+    let set = batch.freeze(StringTable::new(), limits, InstallMode::Frozen);
 
     // One draft is stored, the second becomes the stand-in, and the third is dropped without a record.
     assert_eq!(set.iter().count(), 2);
@@ -488,13 +651,18 @@ fn freeze_keeps_a_type_display_fault_as_one_error_record() {
     let domain = batch.add_domain(None, DomainSource::Sources(SourceDatabase::empty()));
     batch.push(
         domain,
+        None,
         compiler_capacity_exceeded(
             CapacityResource::Store(DiagnosticCapacityResource::TypeDisplays),
             Some(exact_span(0, 1)),
         ),
     );
 
-    let set = batch.freeze(StringTable::new(), DiagnosticLimits::production());
+    let set = batch.freeze(
+        StringTable::new(),
+        DiagnosticLimits::production(),
+        InstallMode::Frozen,
+    );
 
     assert_eq!(set.iter().count(), 1);
     assert_eq!(
@@ -565,7 +733,11 @@ fn freeze_resolves_type_words_through_their_domain_snapshot() {
         4,
     );
 
-    let set = batch.freeze(StringTable::new(), DiagnosticLimits::production());
+    let set = batch.freeze(
+        StringTable::new(),
+        DiagnosticLimits::production(),
+        InstallMode::Frozen,
+    );
     let resolved: Vec<(String, String)> = set
         .iter()
         .map(|(report, view)| {

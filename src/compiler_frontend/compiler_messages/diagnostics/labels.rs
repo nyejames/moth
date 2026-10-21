@@ -92,7 +92,7 @@ pub(super) struct DraftLabel {
     pub(super) span: Option<SourceSpan>,
     pub(super) message: LabelMessageCode,
     /// Bit `i` set means `data[i]` holds a type word.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(super) type_words: u8,
     /// Bit `i` set means `data[i]` still holds a raw `TypeId` that needs a display ID.
     pub(super) pending_types: u8,
@@ -418,7 +418,7 @@ pub(crate) struct DurableLabel<'a> {
 impl DraftLabel {
     /// Rewrites the string word in `data[0]` of a config-origin or rendered-text label.
     /// Type words stay pending, and substitution indices are not IDs.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(super) fn remap_ids(&mut self, remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
         if self.message == LabelMessageCode::CONFIG_INPUT_ORIGIN
             || self.message == LabelMessageCode::RENDERED_TEXT
@@ -431,7 +431,7 @@ impl DraftLabel {
 
 impl DraftSubstitution {
     /// Rewrites the parameter name. The concrete type is a type word and is left as it is.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(super) fn remap_ids(&mut self, remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
         remap.rewrite_string(&mut self.parameter)
     }

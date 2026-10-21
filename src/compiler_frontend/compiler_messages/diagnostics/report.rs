@@ -13,10 +13,7 @@ use crate::compiler_frontend::source::FrozenIdentityContext;
 use std::sync::Arc;
 
 /// The number of stored diagnostics at each resolved severity.
-#[cfg_attr(
-    not(test),
-    allow(dead_code, reason = "P4.5 S3 freeze computes report severity counts")
-)]
+#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct SeverityCounts {
     pub(crate) errors: u32,
@@ -25,13 +22,7 @@ pub(crate) struct SeverityCounts {
 }
 
 /// One frozen diagnostic identity domain and the compact records produced in it.
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "P4.5 S3 freeze constructs immutable diagnostic reports"
-    )
-)]
+#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 #[derive(Debug)]
 pub(crate) struct DiagnosticReport {
     context: Arc<FrozenIdentityContext>,
@@ -42,10 +33,7 @@ pub(crate) struct DiagnosticReport {
 
 impl DiagnosticReport {
     /// Build a report and resolve its severity counts once from the stored records.
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "P4.5 S3 freeze constructs diagnostic reports")
-    )]
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(super) fn new(
         context: Arc<FrozenIdentityContext>,
         diagnostics: DiagnosticStore,
@@ -74,49 +62,37 @@ impl DiagnosticReport {
     }
 
     /// The resolved severity counts computed when this report was built.
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "P4.5 S4 boundary reads report severity counts")
-    )]
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(crate) fn counts(&self) -> SeverityCounts {
         self.counts
     }
 
     /// Number of stored diagnostics in production order.
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "P4.5 S4 boundary reads report record counts")
-    )]
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(crate) fn len(&self) -> usize {
         self.diagnostics.records.len()
     }
 
     /// The immutable identity context that owns this report's compact ids.
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "P4.5 S4 boundary renders reports with their identity context"
-        )
-    )]
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(crate) fn context(&self) -> &FrozenIdentityContext {
         &self.context
     }
 
+    /// A shared handle to this report's identity context, for infrastructure cause rows.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
+    pub(crate) fn shared_context(&self) -> Arc<FrozenIdentityContext> {
+        Arc::clone(&self.context)
+    }
+
     /// Every diagnostic in this report's production order, without allocating.
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "P4.5 S4 boundary renders report diagnostics")
-    )]
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(crate) fn iter(&self) -> impl Iterator<Item = DiagnosticView<'_>> + '_ {
         (0..self.len()).map(move |index| self.view_at(index))
     }
 
     /// Diagnostics of `severity` in production order, without allocating.
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "P4.5 S4 boundary renders severity passes")
-    )]
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(crate) fn iter_severity(
         &self,
         severity: DiagnosticSeverity,
@@ -134,10 +110,7 @@ impl DiagnosticReport {
 }
 
 /// One contiguous run of a report's records in canonical boundary order.
-#[cfg_attr(
-    not(test),
-    allow(dead_code, reason = "P4.5 S3 freeze constructs canonical report runs")
-)]
+#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct DiagnosticRun {
     pub(super) report: u32,
@@ -148,10 +121,7 @@ pub(crate) struct DiagnosticRun {
 const _: () = assert!(std::mem::size_of::<DiagnosticRun>() == 12);
 
 /// Move-only ordered reports and the runs that preserve their canonical cross-domain order.
-#[cfg_attr(
-    not(test),
-    allow(dead_code, reason = "P4.5 S4 boundary carries the frozen report set")
-)]
+#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 #[derive(Debug)]
 pub(crate) struct DiagnosticReportSet {
     reports: Vec<DiagnosticReport>,
@@ -162,13 +132,7 @@ const _: () = assert!(std::mem::size_of::<DiagnosticReportSet>() <= 48);
 
 impl DiagnosticReportSet {
     /// Construct a report set after validating its producer-built run index.
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "P4.5 S3 freeze validates and constructs report sets"
-        )
-    )]
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(super) fn new(reports: Vec<DiagnosticReport>, runs: Vec<DiagnosticRun>) -> Self {
         let mut next_records = vec![0_u32; reports.len()];
 
@@ -209,13 +173,7 @@ impl DiagnosticReportSet {
     }
 
     /// An empty set for a clean success. It intentionally owns no report or identity context.
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "P4.5 S4 boundary represents a clean success without reports"
-        )
-    )]
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(crate) fn empty() -> Self {
         Self {
             reports: Vec::new(),
@@ -224,10 +182,7 @@ impl DiagnosticReportSet {
     }
 
     /// Sum of each report's severity counts.
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "P4.5 S4 boundary reads aggregate severity counts")
-    )]
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(crate) fn counts(&self) -> SeverityCounts {
         let mut total = SeverityCounts::default();
         for report in &self.reports {
@@ -249,25 +204,19 @@ impl DiagnosticReportSet {
     }
 
     /// Whether this set contains no diagnostic records.
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "P4.5 S4 boundary checks for a clean diagnostic result"
-        )
-    )]
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(crate) fn is_empty(&self) -> bool {
         self.runs.iter().all(|run| run.len == 0)
     }
 
+    /// The report that owns domain `index`; report indices follow domain registration order.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
+    pub(crate) fn report(&self, index: u32) -> &DiagnosticReport {
+        &self.reports[index as usize]
+    }
+
     /// All records in canonical run order, paired with the report that owns each view.
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "P4.5 S4 boundary renders report records in canonical order"
-        )
-    )]
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(crate) fn iter(
         &self,
     ) -> impl Iterator<Item = (&DiagnosticReport, DiagnosticView<'_>)> + '_ {
@@ -281,13 +230,7 @@ impl DiagnosticReportSet {
     }
 
     /// Records of `severity` in canonical run order, paired with their owning reports.
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "P4.5 S4 boundary renders severity passes in canonical order"
-        )
-    )]
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
     pub(crate) fn iter_severity(
         &self,
         severity: DiagnosticSeverity,

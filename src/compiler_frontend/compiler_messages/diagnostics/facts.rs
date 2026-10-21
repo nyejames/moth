@@ -55,7 +55,7 @@ pub(crate) trait FactCodec {
 
 /// The identity remap one draft's words are rewritten through. A remap owns one kind of word and leaves the
 /// other kind alone: a string remap never touches path words, and a path remap never touches string words.
-#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3.2 converter"))]
 #[derive(Clone, Copy)]
 pub(crate) enum IdRemap<'a> {
     Strings(&'a StringIdRemap),
