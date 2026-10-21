@@ -1,12 +1,13 @@
 use super::*;
 use crate::build_system::create_project_modules::compiled_boundary::ProjectFrontendCompilation;
 use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
-use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::InvalidFallibleHandlingReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReport;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureSource,
@@ -1277,23 +1278,29 @@ fn valid_identity_request_before_failed_concrete_body_publishes_nothing() {
         "the earlier valid identity request must not publish a sidecar after the failed transaction"
     );
 
-    let diagnostics = frontend.project.diagnosed[0].diagnostics.diagnostics();
-    let type_mismatches: Vec<_> = diagnostics
-        .iter()
-        .filter(|diagnostic| matches!(&diagnostic.payload, DiagnosticPayload::TypeMismatch { .. }))
-        .collect();
+    let failure = freeze_frontend_diagnostics(frontend);
+    let type_mismatches = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .filter(|(_, view)| view.descriptor().code == "MOTH-TYPE-0001")
+        .collect::<Vec<_>>();
     assert_eq!(
         type_mismatches.len(),
         1,
         "the concrete outer<U64> body should report exactly one type mismatch"
     );
-    let mismatch = type_mismatches[0];
-    assert_eq!(mismatch.kind.code(), "MOTH-TYPE-0001");
+    let (report, mismatch) = type_mismatches[0];
+    let identity = compact_diagnostic_identity(report, mismatch);
+    assert_eq!(identity.0, "MOTH-TYPE-0001");
+    let (_, spanned, location) = identity
+        .2
+        .iter()
+        .find(|(role, _, _)| *role == "generic-body")
+        .expect("the mismatch should keep the concrete generic body site label");
+    assert!(*spanned, "generic body label should retain its source span");
     assert!(
-        mismatch.labels.iter().any(
-            |label| label.message == Some(DiagnosticLabelMessage::GenericInstantiationBodySite)
-        ),
-        "the mismatch should keep the concrete generic body site label"
+        location.is_some(),
+        "generic body label should resolve through the frozen source owner"
     );
 }
 
@@ -2551,6 +2558,67 @@ fn compile_later_request_rejection(project_dir: &std::path::Path) -> ProjectFron
     .expect("a diagnosed declaring module stays a retained frontend outcome")
 }
 
+fn freeze_frontend_diagnostics(mut frontend: ProjectFrontendCompilation) -> BoundaryFailure {
+    let project_source = frontend.project_source_database.take();
+    let mut string_table = StringTable::new();
+    frontend.into_boundary_failure(&mut string_table, project_source, None)
+}
+
+type ResolvedDiagnosticLocation = (String, Option<String>, u32, u32, u32, u32);
+type CompactLabelIdentity = (&'static str, bool, Option<ResolvedDiagnosticLocation>);
+type CompactDiagnosticIdentity = (String, Option<String>, Vec<CompactLabelIdentity>);
+
+fn compact_diagnostic_identity(
+    report: &DiagnosticReport,
+    view: DiagnosticView<'_>,
+) -> CompactDiagnosticIdentity {
+    let context = DiagnosticRenderContext::for_report(report);
+    let labels = view
+        .durable_labels()
+        .map(|label| {
+            let role = match label.message {
+                DurableLabelMessage::BuiltinFailureCall => "call",
+                DurableLabelMessage::BuiltinFailureOrigin => "origin",
+                DurableLabelMessage::GenericInstantiationBodySite => "generic-body",
+                _ => "other",
+            };
+            let location = context.site_position(label.site).map(|position| {
+                (
+                    position.path.to_string_lossy().into_owned(),
+                    position
+                        .host_path
+                        .map(|path| path.to_string_lossy().into_owned()),
+                    position.start.line,
+                    position.start.column,
+                    position.end.line,
+                    position.end.column,
+                )
+            });
+            (role, label.spanned, location)
+        })
+        .collect();
+    (
+        view.descriptor().code.to_owned(),
+        view.reason_key().map(str::to_owned),
+        labels,
+    )
+}
+
+fn assert_spanned_call_origin_labels(identity: &CompactDiagnosticIdentity, call_count: usize) {
+    let mut expected_roles = vec!["call"; call_count];
+    expected_roles.push("origin");
+    let actual_roles = identity
+        .2
+        .iter()
+        .map(|(role, spanned, location)| {
+            assert!(*spanned, "{role} label must retain a source span");
+            assert!(location.is_some(), "{role} source span must resolve");
+            *role
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(actual_roles, expected_roles);
+}
+
 fn assert_later_request_rejected(declaring_source: &str, requester_source: &str, reason_key: &str) {
     let temp_dir = tempfile::tempdir().expect("should create temporary project");
     let src = temp_dir.path().join("src");
@@ -2580,53 +2648,30 @@ fn assert_later_request_rejected(declaring_source: &str, requester_source: &str,
         "the requester stays blocked on its provider"
     );
 
-    let diagnostics = frontend.project.diagnosed[0].diagnostics.diagnostics();
+    let failure = freeze_frontend_diagnostics(frontend);
+    let diagnostics = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
     assert_eq!(
         diagnostics.len(),
         1,
         "one escaping failure is reported once"
     );
-    let diagnostic = &diagnostics[0];
-    assert_eq!(diagnostic.identity().reason_key, Some(reason_key));
-    let DiagnosticPayload::InvalidFallibleHandling {
-        reason:
-            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness }
-            | InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
-                witness, ..
-            },
-    } = &diagnostic.payload
-    else {
-        panic!("later request rejection must carry a failure witness: {diagnostic:?}");
-    };
-    // The witness names the declaring private hop, then the originating multiplication.
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
-    assert_eq!(witness.call_spans.len(), 1);
-    assert_eq!(witness.elided_call_hops, 0);
-    assert!(witness.call_spans[0].is_some() && witness.origin_span.is_some());
-    let labels = diagnostic
-        .labels
-        .iter()
-        .map(|label| (label.span, label.message.clone()))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        labels,
-        vec![
-            (
-                witness.call_spans[0],
-                Some(DiagnosticLabelMessage::BuiltinFailureCall)
-            ),
-            (
-                witness.origin_span,
-                Some(DiagnosticLabelMessage::BuiltinFailureOrigin)
-            ),
-        ],
-    );
+    let identity = compact_diagnostic_identity(diagnostics[0].0, diagnostics[0].1);
+    assert_eq!(identity.0, "MOTH-RULE-0051");
+    assert_eq!(identity.1, Some(reason_key.to_owned()));
+    assert_spanned_call_origin_labels(&identity, 1);
 
-    // Recompiling the same project reports the identical structured rejection.
+    // Recompiling the same project preserves the compact code, reason key, labels, and their
+    // report-resolved source positions.
     let repeat = compile_later_request_rejection(temp_dir.path());
-    let repeated = &repeat.project.diagnosed[0].diagnostics.diagnostics()[0];
-    assert_eq!(repeated.identity(), diagnostic.identity());
-    assert_eq!(repeated.payload, diagnostic.payload);
+    let repeated = freeze_frontend_diagnostics(repeat)
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .map(|(report, view)| compact_diagnostic_identity(report, view))
+        .collect::<Vec<_>>();
+    assert_eq!(repeated, vec![identity]);
 }
 
 #[test]
@@ -2761,31 +2806,33 @@ fn implicit_failure_private_helper_infallible_to_fallible_changes_exported_calle
         1,
         "the requester stays blocked on its provider"
     );
-    let diagnostics = second.project.diagnosed[0].diagnostics.diagnostics();
+    let failure = freeze_frontend_diagnostics(second);
+    let diagnostics = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
     assert_eq!(
         diagnostics.len(),
         1,
         "one escaping failure is reported once"
     );
-    let diagnostic = &diagnostics[0];
+    let identity = compact_diagnostic_identity(diagnostics[0].0, diagnostics[0].1);
+    assert_eq!(identity.0, "MOTH-RULE-0051");
     assert_eq!(
-        diagnostic.identity().reason_key,
+        identity.1.as_deref(),
         Some("invalid_fallible_handling.unhandled_builtin_failure_in_exported_function")
     );
-    let DiagnosticPayload::InvalidFallibleHandling {
-        reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness },
-    } = &diagnostic.payload
-    else {
-        panic!("widened helper rejection must carry an export witness: {diagnostic:?}");
-    };
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
-    assert!(witness.origin_span.is_some());
-    // Recompiling the widened project reports the identical structured rejection,
-    // so the verdict is repeatable and not a one-off ordering artefact.
+    assert_spanned_call_origin_labels(&identity, 1);
+
+    // Recompiling the widened project preserves the identity, labels, and their report-resolved
+    // source positions.
     let repeat = compile_later_request_rejection(temp_dir.path());
-    let repeated = &repeat.project.diagnosed[0].diagnostics.diagnostics()[0];
-    assert_eq!(repeated.identity(), diagnostic.identity());
-    assert_eq!(repeated.payload, diagnostic.payload);
+    let repeated = freeze_frontend_diagnostics(repeat)
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .map(|(report, view)| compact_diagnostic_identity(report, view))
+        .collect::<Vec<_>>();
+    assert_eq!(repeated, vec![identity]);
 }
 
 // D02: the bounded-witness export source must render the identical terse diagnostic
@@ -2871,27 +2918,22 @@ fn exported_private_chain_witness_rendering_is_stable_across_repeated_compilatio
         first,
         "the permuted source must itself render deterministically"
     );
-    // The structured witness behind the rendering carries the exact bounded
-    // content: one IntOverflow code, three kept call spans plus the origin, and
-    // two elided middle hops.
+    // The compact report keeps the stable identity and durable call/origin labels; the
+    // rendered assertion above pins the elided-hop wording.
     let frontend = compile_later_request_rejection(temp_dir.path());
-    let diagnostics = frontend.project.diagnosed[0].diagnostics.diagnostics();
+    let failure = freeze_frontend_diagnostics(frontend);
+    let diagnostics = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
     assert_eq!(diagnostics.len(), 1);
-    let diagnostic = &diagnostics[0];
+    let identity = compact_diagnostic_identity(diagnostics[0].0, diagnostics[0].1);
+    assert_eq!(identity.0, "MOTH-RULE-0051");
     assert_eq!(
-        diagnostic.identity().reason_key,
+        identity.1.as_deref(),
         Some("invalid_fallible_handling.unhandled_builtin_failure_in_exported_function")
     );
-    let DiagnosticPayload::InvalidFallibleHandling {
-        reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness },
-    } = &diagnostic.payload
-    else {
-        panic!("the bounded chain rejection must carry an export witness: {diagnostic:?}");
-    };
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
-    assert_eq!(witness.call_spans.len(), 3);
-    assert_eq!(witness.elided_call_hops, 2);
-    assert!(witness.origin_span.is_some());
+    assert_spanned_call_origin_labels(&identity, 3);
 }
 
 #[test]

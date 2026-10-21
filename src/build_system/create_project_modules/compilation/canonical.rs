@@ -13,9 +13,9 @@ use crate::compiler_frontend::build_config::{
     BuilderConfigGlobalSet, ResolvedBuildConfigMap,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidDependencyClauseReason, ModuleDiagnostics, PremergeDiagnosticBatch,
-    PremergeFailure,
+    CompilerDiagnostic, InvalidDependencyClauseReason, PremergeDiagnosticBatch, PremergeFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
@@ -72,7 +72,7 @@ struct DirectoryModuleTaskResult {
 
 enum DirectoryModuleTaskOutcome {
     Success(Box<ModuleSemanticResult>),
-    Diagnosed(ModuleDiagnostics),
+    Diagnosed(PreparedDiagnosticBatch),
     /// A transient check-only unit whose required canonical provider already failed.
     ///
     /// Check-only units have no graph slot, so this outcome is intentionally not retained in the
@@ -625,10 +625,11 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                 let PreparedModule { mut semantic, .. } = prepared;
                 let table = std::mem::take(&mut semantic.string_table);
                 let batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, table);
-                let outcome = match ModuleDiagnostics::from_batch(batch) {
-                    Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics),
-                    Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error.into()),
-                };
+                let outcome =
+                    match PreparedDiagnosticBatch::from_premerge(batch).classify_premerge() {
+                        Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics),
+                        Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error.into()),
+                    };
                 return DirectoryModuleTaskResult {
                     module_id,
                     string_table_base_len: base_len,
@@ -701,7 +702,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         };
 
         // The typed semantic boundary already classified user diagnostics from infrastructure
-        // failures, so the task outcome carries the retained `ModuleDiagnostics` unchanged.
+        // failures, so the task outcome carries the prepared batch unchanged.
         timing_scope_attributed!(
             timing_guard_frontend_module_semantic_total_2,
             crate::timing::TimingMetric::FrontendModuleSemanticTotal,
@@ -802,10 +803,12 @@ fn compile_check_only_job(
                 fallback_span,
                 &mut prepared.semantic.string_table,
             ) {
-                PremergeFailure::Diagnosed(batch) => match ModuleDiagnostics::from_batch(batch) {
-                    Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics),
-                    Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error.into()),
-                },
+                PremergeFailure::Diagnosed(batch) => {
+                    match PreparedDiagnosticBatch::from_premerge(batch).classify_premerge() {
+                        Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics),
+                        Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error.into()),
+                    }
+                }
                 PremergeFailure::Infrastructure(error) => {
                     DirectoryModuleTaskOutcome::Infrastructure(error)
                 }
@@ -874,11 +877,10 @@ pub(super) fn compile_check_only_batches(
     build_config_index: &BuildConfigResolutionIndex<'_>,
     string_table: &mut StringTable,
     path_interner: &mut PathInternerBuilder,
-) -> Result<Vec<PremergeDiagnosticBatch>, PremergeFailure> {
+) -> Result<Vec<PreparedDiagnosticBatch>, PremergeFailure> {
     // Check-only units are semantically compiled after canonical publication, but their
     // successful artefacts, interfaces, generated deltas and resource associations are discarded.
-    // Only their diagnostics/warnings cross the frontend result boundary. Failures stay in the
-    // premerge lane; the outer wrapper owns the single vessel conversion.
+    // Their prepared diagnostics and warnings stay in the premerge lane until final source pairing.
     add_frontend_counter(
         FrontendCounter::ModuleCompilationSerialCount,
         check_only_jobs.len(),
@@ -913,10 +915,8 @@ pub(super) fn compile_check_only_batches(
                 }
             }
             DirectoryModuleTaskOutcome::Diagnosed(diagnostics) => {
-                // Retain the local table without a premerge remap; the final tail owns
-                // the single merge. No `CompilerMessages` vessel is built here.
-                let batch = diagnostics.into_batch()?;
-                transient_batches.push(batch);
+                // The module boundary already captured these diagnostics after final path pairing.
+                transient_batches.push(diagnostics);
             }
             DirectoryModuleTaskOutcome::Blocked => {
                 // The failed canonical provider's own diagnostics remain authoritative; a
@@ -947,7 +947,7 @@ pub(super) fn compile_check_only_batches(
 ///      branch instead of re-implementing the path-table attachment.
 pub(super) fn check_only_success_batch(
     compiled: ModuleSemanticResult,
-) -> Result<Option<PremergeDiagnosticBatch>, PremergeFailure> {
+) -> Result<Option<PreparedDiagnosticBatch>, PremergeFailure> {
     let ModuleSemanticResult {
         module,
         generated_delta,
@@ -971,7 +971,7 @@ pub(super) fn check_only_success_batch(
     if let Err(error) = batch.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table())) {
         return Err(PremergeFailure::from(error));
     }
-    Ok(Some(batch))
+    Ok(Some(PreparedDiagnosticBatch::from_premerge(batch)))
 }
 
 #[allow(
@@ -988,7 +988,7 @@ pub(super) fn compile_module_waves_in_premerge_lane(
     resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
     path_interner: &mut PathInternerBuilder,
-) -> Result<(CompiledGraphBoundary, Vec<PremergeDiagnosticBatch>), PremergeFailure> {
+) -> Result<(CompiledGraphBoundary, Vec<PreparedDiagnosticBatch>), PremergeFailure> {
     let mut provider_store = ModuleArtifactStore::new(graph.nodes().len());
     let mut generated_store = BoundaryGeneratedFunctionStore::default();
     // The compiler resolves declaring generic templates through this registry, so it never reads a
@@ -1118,11 +1118,7 @@ pub(super) fn compile_module_waves_in_premerge_lane(
                 }
                 DirectoryModuleTaskOutcome::Diagnosed(diagnostics) => {
                     provider_store.mark_diagnosed(outcome.module_id)?;
-                    // Retain the local table without a premerge remap; the canonical boundary tail
-                    // merges it once through its run-scoped `BoundaryAccumulator`, then classify
-                    // back without round-tripping through the final vessel.
-                    let batch = diagnostics.into_batch()?;
-                    let diagnostics = ModuleDiagnostics::from_batch(batch)?;
+                    // The module boundary prepared the diagnostics after its final path pairing.
                     diagnosed.push(DiagnosedModule {
                         module_id: outcome.module_id,
                         diagnostics,

@@ -13,7 +13,6 @@ use super::compiler_errors::{
     CompilerError, CompilerMessages, InfrastructureErrors, RenderPathContext, RenderTypeContext,
 };
 use super::diagnostics::freeze::InstallMode;
-use super::module_diagnostics::ModuleDiagnostics;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase};
 use crate::compiler_frontend::symbols::path_interner::{PathIdRemap, PathTable};
@@ -237,22 +236,18 @@ impl PremergeFailure {
 
 /// Transitional classifier for AST/HIR APIs that still return `CompilerMessages`.
 ///
-/// WHAT: routes a legacy boundary vessel through the single
-/// [`ModuleDiagnostics`](super::module_diagnostics::ModuleDiagnostics) classifier: user-facing
-/// failures become a move-only diagnosed batch, while infrastructure and malformed sequences
-/// become the typed `CompilerError` lane.
+/// WHAT: routes a legacy boundary vessel through the premerge classifier in
+/// [`prepared_batch`](super::prepared_batch), keeping its type contexts until the module owner
+/// attaches the final path table.
 /// WHY: direct migration of those public AST/HIR methods is outside this stage-handoff slice.
 /// New orchestration wrappers classify immediately and carry `PremergeFailure` upward without
 /// rebuilding a second vessel. Warning companions of infrastructure failures are discarded by
 /// the classifier because the typed lane aborts the owning compilation.
 impl From<super::compiler_errors::CompilerMessages> for PremergeFailure {
     fn from(messages: super::compiler_errors::CompilerMessages) -> Self {
-        match ModuleDiagnostics::from_messages(messages) {
-            Ok(diagnostics) => match diagnostics.into_batch() {
-                Ok(batch) => Self::Diagnosed(batch),
-                Err(error) => Self::Infrastructure(error.into()),
-            },
-            Err(error) => Self::Infrastructure(error),
+        match super::prepared_batch::classify_module_messages(messages) {
+            Ok(batch) => Self::Diagnosed(batch),
+            Err(errors) => Self::Infrastructure(errors),
         }
     }
 }
@@ -298,9 +293,6 @@ impl PremergeDiagnosticBatch {
         string_table: StringTable,
     ) -> Self {
         Self::new(DiagnosticBag::from_diagnostics(diagnostics), string_table)
-    }
-    pub(crate) fn has_errors(&self) -> bool {
-        self.bag.has_errors()
     }
 
     /// Attach the generated-source owner only to spans that do not already have one.

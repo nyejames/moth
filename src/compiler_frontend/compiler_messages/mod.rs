@@ -26,7 +26,6 @@ pub(crate) mod diagnostic_token;
 pub(crate) mod diagnostic_types;
 pub(crate) mod diagnostics;
 pub(crate) mod display_messages;
-pub(crate) mod module_diagnostics;
 pub(crate) mod prepared_batch;
 pub(crate) mod render;
 pub(crate) mod trait_keyword_diagnostics;
@@ -80,7 +79,6 @@ pub(crate) use diagnostic_payload::{
 };
 pub(crate) use diagnostic_severity::DiagnosticSeverity;
 pub(crate) use diagnostic_token::DiagnosticToken;
-pub(crate) use module_diagnostics::ModuleDiagnostics;
 
 #[cfg(test)]
 #[path = "tests/diagnostic_model_tests.rs"]
@@ -90,8 +88,8 @@ mod diagnostic_model_tests;
 mod diagnostic_token_projection_tests;
 
 #[cfg(test)]
-#[path = "tests/module_diagnostics_tests.rs"]
-mod module_diagnostics_tests;
+#[path = "tests/prepared_batch_tests.rs"]
+mod prepared_batch_tests;
 
 #[cfg(test)]
 #[path = "tests/type_rendering_tests.rs"]

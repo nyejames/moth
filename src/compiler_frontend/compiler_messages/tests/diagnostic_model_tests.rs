@@ -23,11 +23,15 @@ use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerErrorMetadataKey, CompilerMessages, ErrorType, RenderTypeContext,
 };
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::PremergeDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::{
+    BoundaryAccumulator, into_boundary_failure,
+};
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, dev_server, invalid_config_message, terminal, terse,
 };
-use crate::compiler_frontend::compiler_messages::{ModuleDiagnostics, PremergeDiagnosticBatch};
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, builtin_type_ids};
@@ -985,13 +989,9 @@ fn attach_retains_table_for_nominal_type_render_context_without_path_payloads() 
 }
 
 #[test]
-fn batch_attaches_table_for_nominal_type_context_and_survives_canonical_round_trip() {
-    // The batch-level attach gate duplicates the message-set retention rule: a table is retained
-    // only when a payload renders a path or a type context resolves nominal names. A nominal
-    // TypeMismatch payload stores TypeIds, so without the type-context arm the batch would drop
-    // the table the renderer needs. The batch must retain it, survive the canonical
-    // batch/diagnosed round trip, and still render the exact nominal name after a non-identity
-    // append.
+fn batch_attaches_table_for_nominal_type_context_and_appends_prepared() {
+    // A nominal TypeMismatch stores TypeIds, so its paired table and environment must survive
+    // Pass A and the boundary's non-identity string remap.
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let nominal_path = path_fork
@@ -1011,7 +1011,7 @@ fn batch_attaches_table_for_nominal_type_context_and_survives_canonical_round_tr
         TypeMismatchContext::Assignment,
         None,
     );
-    let batch = PremergeDiagnosticBatch::from_parts(
+    let mut batch = PremergeDiagnosticBatch::from_parts(
         vec![diagnostic],
         string_table,
         vec![RenderTypeContext {
@@ -1020,36 +1020,26 @@ fn batch_attaches_table_for_nominal_type_context_and_survives_canonical_round_tr
         }],
         Vec::new(),
     );
-    let mut batch = batch;
     batch
         .attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()))
         .expect("type rendering must retain its paired path table at the batch boundary");
-
-    let diagnosed = ModuleDiagnostics::from_batch(batch)
-        .expect("a nominal type-context batch must classify as a diagnosed module");
-    assert!(
-        diagnosed.render_type_contexts().len() == 1,
-        "the canonical round trip must keep the nominal type context"
-    );
-    let batch = diagnosed
-        .into_batch()
-        .expect("a diagnosed module without source contexts must return to the batch lane");
-    let messages = batch.into_messages();
-    assert!(
-        messages.path_table_for_diagnostic(0).is_some(),
-        "the batch's retained path table must move into the final vessel"
-    );
+    let prepared = PreparedDiagnosticBatch::from_premerge(batch)
+        .classify_premerge()
+        .expect("a nominal type-context batch must classify as diagnosed");
 
     let mut aggregate_table = StringTable::new();
     aggregate_table.intern("aggregate-padding");
-    let mut aggregate = CompilerMessages::empty(aggregate_table);
-    aggregate.append_messages_preserving_context(messages);
-    let failure = into_boundary_failure(aggregate);
-    let rendered = terse::format_terse_boundary_messages(&failure).join("\n");
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append(CompilerMessages::empty(aggregate_table));
+    accumulator.append_prepared(prepared, None);
+    let failure = accumulator.finish(InstallMode::Unfrozen);
+    let rendered = terse::format_terse_boundary_messages(&failure);
     assert!(
-        rendered.contains("Type mismatch in assignment: expected NominalType, found I32"),
-        "batch-level nominal type rendering lost its path context through the canonical \
-         round trip and append: {rendered}"
+        rendered
+            .iter()
+            .any(|line| line
+                .contains("Type mismatch in assignment: expected NominalType, found I32")),
+        "prepared append lost nominal type rendering after a non-identity table remap: {rendered:?}"
     );
 }
 
@@ -3896,7 +3886,7 @@ impl DeferredFeatureDiagnosticKind {
 }
 
 #[test]
-fn failure_writeback_label_keeps_target_type_through_diagnostic_context_handoff() {
+fn failure_writeback_label_keeps_target_type_through_prepared_handoff() {
     let mut string_table = StringTable::new();
     let source_path = Path::new("/project/writeback.moth");
     let mut sources = SourceDatabase::build(
@@ -3929,9 +3919,9 @@ fn failure_writeback_label_keeps_target_type_through_diagnostic_context_handoff(
         },
         None,
     );
-    // The label still renders its semantic target after the canonical
-    // premerge/diagnosed/message handoff and a non-identity string-table append.
-    let batch = PremergeDiagnosticBatch::from_parts(
+    // The label keeps its semantic target through Pass A, the local path pairing and the
+    // boundary's non-identity string-table append.
+    let mut batch = PremergeDiagnosticBatch::from_parts(
         vec![diagnostic],
         string_table,
         vec![RenderTypeContext {
@@ -3940,20 +3930,26 @@ fn failure_writeback_label_keeps_target_type_through_diagnostic_context_handoff(
         }],
         vec![],
     );
-    let mut messages = ModuleDiagnostics::from_batch(batch)
-        .unwrap()
-        .into_batch()
-        .unwrap()
-        .into_messages();
-    messages.set_source_database(Arc::new(sources));
+    batch
+        .attach_path_table_if_missing(Arc::new(sources.paths().clone()))
+        .expect("the type context must retain its paired source path table");
+    let prepared = PreparedDiagnosticBatch::from_premerge(batch)
+        .classify_premerge()
+        .expect("the diagnostic batch has a user-facing error");
+
     let mut aggregate_table = StringTable::new();
     aggregate_table.intern("aggregate-padding");
-    let mut aggregate = CompilerMessages::empty(aggregate_table);
-    aggregate.append_messages_preserving_context(messages);
-    let labels = terminal::format_label_messages_with_context(
-        aggregate.diagnostics().next().unwrap(),
-        aggregate.diagnostic_render_context(0),
-    );
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append(CompilerMessages::empty(aggregate_table));
+    accumulator.append_prepared(prepared, Some((Arc::new(sources), None)));
+    let failure = accumulator.finish(InstallMode::Unfrozen);
+    let labels = failure
+        .reports
+        .iter()
+        .flat_map(|(report, view)| {
+            terminal::format_label_messages_view(view, DiagnosticRenderContext::for_report(report))
+        })
+        .collect::<Vec<_>>();
     assert!(
         labels.iter().any(|label| label.contains("U8")),
         "{labels:?}"

@@ -8,7 +8,6 @@
 //! per-diagnostic store shim.
 
 use super::super::prepared_batch::{PreparedBatchIdentity, PreparedDiagnosticBatch};
-use super::PreparedDiagnostic;
 #[cfg(test)]
 use super::compaction::CompactOutcome;
 use super::draft::DiagnosticDraft;
@@ -30,7 +29,8 @@ use crate::compiler_frontend::compiler_messages::diagnostic_types::{
 #[cfg(test)]
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
-    CapacityResource, CompilerDiagnostic, DiagnosticCapacityResource, SourceSpanCapacityResource,
+    CapacityResource, CompilerDiagnostic, DiagnosticCapacityResource, DiagnosticSeverity,
+    SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
@@ -41,6 +41,50 @@ use crate::compiler_frontend::symbols::path_interner::{
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::ops::Range;
 use std::sync::Arc;
+
+/// One family draft and its captured type snapshot while a boundary run is accumulated.
+pub(crate) struct PreparedDiagnostic {
+    draft: DiagnosticDraft,
+    types: TypeDisplaySnapshot,
+    /// The first source row that covers the diagnostic.
+    owner: Option<usize>,
+    /// The first explicit path row that covers the diagnostic.
+    explicit_path: Option<usize>,
+    /// The first identity-less source row that covers the diagnostic.
+    identityless_owner: Option<usize>,
+    /// The path-table merge whose remap the draft and snapshot follow.
+    merge: Option<usize>,
+}
+
+impl PreparedDiagnostic {
+    pub(crate) fn severity(&self) -> DiagnosticSeverity {
+        self.draft
+            .core
+            .severity
+            .resolve(self.draft.core.family.default_severity())
+    }
+
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub(crate) fn label_count(&self) -> usize {
+        self.draft
+            .extra
+            .as_ref()
+            .map_or(0, |extra| extra.labels.len())
+    }
+
+    pub(crate) fn requires_source_identity(&self) -> bool {
+        self.draft.core.span.is_some()
+            || self
+                .draft
+                .extra
+                .as_ref()
+                .is_some_and(|extra| extra.labels.iter().any(|label| label.span.is_some()))
+    }
+
+    pub(crate) fn set_explicit_path(&mut self, explicit_path: Option<usize>) {
+        self.explicit_path = explicit_path;
+    }
+}
 
 /// One compacted diagnostic, with the store and the type snapshot that its record reads from.
 #[cfg(test)]
@@ -247,7 +291,6 @@ impl BoundaryAccumulator {
     }
 
     /// Append a Pass-A-prepared premerge batch without constructing a legacy vessel.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5b carrier cut"))]
     pub(crate) fn append_prepared(
         &mut self,
         batch: PreparedDiagnosticBatch,

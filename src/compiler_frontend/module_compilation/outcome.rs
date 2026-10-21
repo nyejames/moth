@@ -6,7 +6,7 @@
 //!       Classifying them once here means graph and render consumers never re-classify a mixed
 //!       message bag.
 
-use crate::compiler_frontend::compiler_messages::ModuleDiagnostics;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::module_compilation::artefact::Module;
 use crate::compiler_frontend::module_compilation::generated::GeneratedFunctionDelta;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
@@ -20,10 +20,10 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 /// An infrastructure failure is a boxed cause aggregate at the call boundary instead.
 pub(crate) enum ModuleCompilationOutcome {
     // `ModuleSemanticResult` carries the full unmerged module (HIR, type environment and borrow
-    // facts) and is far larger than `ModuleDiagnostics`, so the success payload is boxed to keep
-    // the boundary outcome small. The box is transient: the caller moves the payload before merging.
+    // facts) and is far larger than `PreparedDiagnosticBatch`, so the success payload is boxed to
+    // keep the boundary outcome small. The box is transient: the caller moves the payload before merging.
     Success(Box<ModuleSemanticResult>),
-    Diagnosed(ModuleDiagnostics),
+    Diagnosed(PreparedDiagnosticBatch),
 }
 
 /// Everything one successful module compilation produced, before boundary publication.

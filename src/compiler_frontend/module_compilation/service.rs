@@ -15,8 +15,9 @@ use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::AstBuildResult;
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, ModuleDiagnostics, PremergeDiagnosticBatch, PremergeFailure,
+    CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,
 };
 #[cfg(feature = "boracle")]
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -203,10 +204,12 @@ pub(crate) fn compile_module(
         Err(mut failure) => {
             failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()))?;
             match failure {
-                PremergeFailure::Diagnosed(batch) => match ModuleDiagnostics::from_batch(batch) {
-                    Ok(diagnostics) => Ok(ModuleCompilationOutcome::Diagnosed(diagnostics)),
-                    Err(error) => Err(error.into()),
-                },
+                PremergeFailure::Diagnosed(batch) => {
+                    match PreparedDiagnosticBatch::from_premerge(batch).classify_premerge() {
+                        Ok(prepared) => Ok(ModuleCompilationOutcome::Diagnosed(prepared)),
+                        Err(error) => Err(error.into()),
+                    }
+                }
                 PremergeFailure::Infrastructure(error) => Err(error),
                 // Mixed double-failures only arise at source-finalization tails and never reach
                 // module compilation; abort through the typed lane if one ever does.
@@ -979,7 +982,7 @@ fn build_ast_with_registered_types(
         Err(messages) => {
             // Classify the mixed vessel once into the premerge lane, then prepend prior
             // warnings to the diagnosed batch. Infrastructure failures propagate typed and
-            // drop their warning companions, matching the `ModuleDiagnostics` contract.
+            // drop their warning companions, matching the diagnosed-failure contract.
             let mut failure = PremergeFailure::from(messages);
             if let PremergeFailure::Diagnosed(batch) = &mut failure {
                 batch.prepend_diagnostics(std::mem::take(warnings));

@@ -17,7 +17,11 @@ use crate::compiler_frontend::build_config::{
     ResolvedBuildConfigMap,
 };
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::{
+    BoundaryAccumulator, into_boundary_failure,
+};
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure, SourceSpanCapacityResource,
 };
@@ -45,7 +49,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::FrontendCompilationMode;
 use super::compiled_boundary::{
     CompiledSourcePackage, CompletedSourcePackageRegistry, PackageBoundaryId,
-    ProjectFrontendCompilation, TransientPremergeBatch,
+    ProjectFrontendCompilation, TransientPreparedBatch,
 };
 use super::config_boundary;
 use super::generated_store::BoundaryGeneratedFunctionStore;
@@ -299,7 +303,7 @@ struct SourcePackageCheckOnlyInventory {
     build_config_values: ResolvedBuildConfigMap,
     /// Canonical batches retained until the package source finalizes and converts each
     /// batch exactly once with its snapshot.
-    batches: Vec<PremergeDiagnosticBatch>,
+    batches: Vec<PreparedDiagnosticBatch>,
 }
 
 /// Typed boundary-orchestration failure retaining its source owner.
@@ -359,24 +363,38 @@ impl From<SourceDatabaseError> for BoundaryPremergeFailure {
 }
 /// Consume a terminal premerge failure with its package owner or project fallback.
 ///
-/// The owner is moved into the one legacy-adapter run; callers never receive a vessel to attach a
-/// source database to or convert a second time.
+/// Diagnosed batches run Pass A after path pairing and append directly to the one boundary
+/// accumulator. Infrastructure and mixed failures keep their legacy causes and freeze through
+/// the same accumulator without retyping the failure lane.
 pub(super) fn premerge_failure_to_boundary(
     failure: PremergeFailure,
     string_table: &StringTable,
     package_source: Option<Box<SourceDatabase>>,
     project_source: Option<Arc<SourceDatabase>>,
 ) -> BoundaryFailure {
-    let mut messages = match package_source {
-        Some(source) => failure.into_messages_with_source(string_table, Arc::new(*source)),
-        None => failure.into_messages(string_table),
-    };
-    if messages.source_database_for_diagnostic(0).is_none()
-        && let Some(source) = project_source
-    {
-        messages.set_source_database(source);
+    match failure {
+        PremergeFailure::Diagnosed(batch) => {
+            let source = match package_source {
+                Some(source) => Some((Arc::new(*source), None)),
+                None => project_source.map(|source| (source, None)),
+            };
+            let mut accumulator = BoundaryAccumulator::new();
+            accumulator.append_prepared(PreparedDiagnosticBatch::from_premerge(batch), source);
+            accumulator.finish(InstallMode::Unfrozen)
+        }
+        failure @ (PremergeFailure::Infrastructure(_) | PremergeFailure::Mixed { .. }) => {
+            let mut messages = match package_source {
+                Some(source) => failure.into_messages_with_source(string_table, Arc::new(*source)),
+                None => failure.into_messages(string_table),
+            };
+            if messages.source_database_for_diagnostic(0).is_none()
+                && let Some(source) = project_source
+            {
+                messages.set_source_database(source);
+            }
+            into_boundary_failure(messages)
+        }
     }
-    into_boundary_failure(messages)
 }
 
 // Intermediate orchestration stays typed until the terminal wrapper has finalized the relevant
@@ -866,7 +884,7 @@ pub(super) fn compile_source_package_inventories(
     inventories: Vec<SourcePackageModuleInventory>,
     resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
-) -> Result<(CompletedSourcePackageRegistry, Vec<TransientPremergeBatch>), BoundaryPremergeFailure>
+) -> Result<(CompletedSourcePackageRegistry, Vec<TransientPreparedBatch>), BoundaryPremergeFailure>
 {
     let inventories = order_source_package_inventories(inventories)?;
     let config_globals = builder_surface.config_globals().clone();
@@ -1074,7 +1092,7 @@ pub(super) fn compile_source_package_inventories(
         completed_source_packages.set_source_database(package_id, finalized)?;
         batches.extend(check_only_batches);
         for batch in batches {
-            transient_batches.push(TransientPremergeBatch::package(package_id, batch));
+            transient_batches.push(TransientPreparedBatch::package(package_id, batch));
         }
     }
 
@@ -1440,7 +1458,7 @@ fn compile_directory_frontend_in_premerge_lane(
             &mut project_path_interner,
         )?;
         for batch in project_batches {
-            transient_batches.push(TransientPremergeBatch::project(batch));
+            transient_batches.push(TransientPreparedBatch::project(batch));
         }
         #[cfg(feature = "timers")]
         timing_guard_build_boundary_compile_2.finish();

@@ -16,10 +16,10 @@ use crate::build_system::build::ProjectAssemblyError;
 use crate::compiler_frontend::compiler_errors::{
     BoundaryFailure, CompilerError, CompilerMessages, RenderSourceContext,
 };
+use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
-use crate::compiler_frontend::compiler_messages::module_diagnostics::ModuleDiagnostics;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PremergeDiagnosticBatch};
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 #[cfg(feature = "data_layout_memory_probe")]
 use crate::compiler_frontend::instrumentation::MemoryLedgerSnapshot;
 use crate::compiler_frontend::module_compilation::{CompiledModuleArtifact, Module};
@@ -97,11 +97,67 @@ fn diagnostic_range_requires_source_identity(
             || diagnostic.labels.iter().any(|label| label.span.is_some())
     })
 }
+struct PreparedAppendMetrics {
+    diagnostic_count: usize,
+    missing_source_error: bool,
+    #[cfg(feature = "data_layout_memory_probe")]
+    label_count: usize,
+}
+
+fn append_prepared_frontend_diagnostics(
+    accumulator: &mut BoundaryAccumulator,
+    batch: PreparedDiagnosticBatch,
+    source: Option<(&Arc<SourceDatabase>, Option<StablePackageIdentity>)>,
+    diagnostic_offset: usize,
+    can_freeze: &mut bool,
+) -> PreparedAppendMetrics {
+    let diagnostic_count = batch.diagnostic_count();
+    #[cfg(feature = "data_layout_memory_probe")]
+    let label_count = batch.label_count();
+    let requires_source = batch.requires_source_identity();
+
+    if diagnostic_count == 0 {
+        accumulator.append_prepared(batch, None);
+        return PreparedAppendMetrics {
+            diagnostic_count: 0,
+            missing_source_error: false,
+            #[cfg(feature = "data_layout_memory_probe")]
+            label_count,
+        };
+    }
+
+    let Some((source_database, domain)) = source else {
+        *can_freeze = false;
+        let missing_source_error = requires_source;
+        if missing_source_error {
+            let global_range = diagnostic_offset..diagnostic_offset + diagnostic_count;
+            let error = CompilerError::compiler_error(format!(
+                "diagnostic range {global_range:?} has no finalized source identity",
+            ));
+            accumulator.append(CompilerMessages::from_error(error, StringTable::new()));
+        }
+        accumulator.append_prepared(batch, None);
+        return PreparedAppendMetrics {
+            diagnostic_count,
+            missing_source_error,
+            #[cfg(feature = "data_layout_memory_probe")]
+            label_count,
+        };
+    };
+
+    accumulator.append_prepared(batch, Some((Arc::clone(source_database), domain)));
+    PreparedAppendMetrics {
+        diagnostic_count,
+        missing_source_error: false,
+        #[cfg(feature = "data_layout_memory_probe")]
+        label_count,
+    }
+}
 
 #[derive(Debug)]
 pub(crate) struct DiagnosedModule {
     pub(crate) module_id: ModuleId,
-    pub(crate) diagnostics: ModuleDiagnostics,
+    pub(crate) diagnostics: PreparedDiagnosticBatch,
 }
 
 /// The direct provider that prevented one module from compiling.
@@ -1004,28 +1060,27 @@ pub(crate) fn compilation_module_views<'a>(
     Ok(views)
 }
 
-/// Move-only domain-tagged premerge batch lane for transient check-only diagnostics.
+/// Move-only domain-tagged prepared batch lane for transient check-only diagnostics.
 ///
-/// WHAT: retains a [`PremergeDiagnosticBatch`] with its local [`StringTable`] alongside the
-///       package domain that produced it (`None` for project transients).
-/// WHY: transient units have no graph slot, so their diagnostics must cross into the final
-///      render tail as move-only owners with domain tags; the final tail merges each local
-///      table exactly once and installs the matching frozen identity.
+/// WHAT: retains a prepared diagnostic batch alongside the package domain that produced it
+///       (`None` for project transients).
+/// WHY: transient units have no graph slot, so their diagnostics cross into the final render
+///      tail as move-only owners with domain tags and join the run through `append_prepared`.
 #[derive(Debug)]
-pub(crate) struct TransientPremergeBatch {
+pub(crate) struct TransientPreparedBatch {
     pub(crate) package_id: Option<PackageBoundaryId>,
-    pub(crate) batch: PremergeDiagnosticBatch,
+    pub(crate) batch: PreparedDiagnosticBatch,
 }
 
-impl TransientPremergeBatch {
-    pub(crate) fn project(batch: PremergeDiagnosticBatch) -> Self {
+impl TransientPreparedBatch {
+    pub(crate) fn project(batch: PreparedDiagnosticBatch) -> Self {
         Self {
             package_id: None,
             batch,
         }
     }
 
-    pub(crate) fn package(package_id: PackageBoundaryId, batch: PremergeDiagnosticBatch) -> Self {
+    pub(crate) fn package(package_id: PackageBoundaryId, batch: PreparedDiagnosticBatch) -> Self {
         Self {
             package_id: Some(package_id),
             batch,
@@ -1219,7 +1274,7 @@ pub(crate) struct ProjectFrontendCompilation {
     ///
     /// WHAT: move-only premerge batches tagged by domain. They stay retained until the canonical
     ///       tail can append them after project and package graph diagnostics.
-    pub(crate) transient_batches: Vec<TransientPremergeBatch>,
+    pub(crate) transient_batches: Vec<TransientPreparedBatch>,
     /// Project source identity retained by the no-input frontend seam for its caller to pass into
     /// the frozen render tail.
     ///
@@ -1233,7 +1288,7 @@ impl ProjectFrontendCompilation {
         project: CompiledGraphBoundary,
         source_packages: CompletedSourcePackageRegistry,
         resource_inputs: ResourceInputRegistry,
-        transient_batches: Vec<TransientPremergeBatch>,
+        transient_batches: Vec<TransientPreparedBatch>,
     ) -> Result<Self, CompilerError> {
         project.validate_invariants()?;
         source_packages.validate_dependency_edges()?;
@@ -1409,25 +1464,20 @@ impl ProjectFrontendCompilation {
 
         // Diagnosed graph modules are already in canonical ModuleId order.
         for diagnosed in project_diagnosed {
-            let mut messages = diagnosed.diagnostics.into_messages();
-            let end = messages.diagnostics.len();
-            install_frontend_source_context(
-                &mut messages,
-                0..end,
+            let metrics = append_prepared_frontend_diagnostics(
+                &mut accumulator,
+                diagnosed.diagnostics,
+                project_source.as_ref().map(|source| (source, None)),
                 diagnostic_count,
-                project_source.as_ref(),
-                None,
                 &mut can_freeze,
             );
             #[cfg(feature = "data_layout_memory_probe")]
-            record_frontend_diagnostic_metrics(
-                &messages,
-                &mut diagnostic_records,
-                &mut diagnostic_label_slots,
-            );
-            diagnostic_count += end;
-            saw_infrastructure |= messages.infrastructure_errors.is_some();
-            accumulator.append(messages);
+            {
+                diagnostic_records += metrics.diagnostic_count;
+                diagnostic_label_slots += metrics.label_count;
+            }
+            diagnostic_count += metrics.diagnostic_count;
+            saw_infrastructure |= metrics.missing_source_error;
         }
         for (package_index, package) in source_packages.iter_mut().enumerate() {
             let source = package_source_arcs
@@ -1440,25 +1490,20 @@ impl ProjectFrontendCompilation {
                 .as_ref();
             let domain = Some(package.package_identity.clone());
             for diagnosed in std::mem::take(&mut package.boundary.diagnosed) {
-                let mut messages = diagnosed.diagnostics.into_messages();
-                let end = messages.diagnostics.len();
-                install_frontend_source_context(
-                    &mut messages,
-                    0..end,
+                let metrics = append_prepared_frontend_diagnostics(
+                    &mut accumulator,
+                    diagnosed.diagnostics,
+                    source.map(|source| (source, domain.clone())),
                     diagnostic_count,
-                    source,
-                    domain.clone(),
                     &mut can_freeze,
                 );
                 #[cfg(feature = "data_layout_memory_probe")]
-                record_frontend_diagnostic_metrics(
-                    &messages,
-                    &mut diagnostic_records,
-                    &mut diagnostic_label_slots,
-                );
-                diagnostic_count += end;
-                saw_infrastructure |= messages.infrastructure_errors.is_some();
-                accumulator.append(messages);
+                {
+                    diagnostic_records += metrics.diagnostic_count;
+                    diagnostic_label_slots += metrics.label_count;
+                }
+                diagnostic_count += metrics.diagnostic_count;
+                saw_infrastructure |= metrics.missing_source_error;
             }
         }
         for transient in transient_batches {
@@ -1482,25 +1527,20 @@ impl ProjectFrontendCompilation {
                 }
                 None => (project_source.as_ref(), None),
             };
-            let mut messages = transient.batch.into_messages();
-            let end = messages.diagnostics.len();
-            install_frontend_source_context(
-                &mut messages,
-                0..end,
+            let metrics = append_prepared_frontend_diagnostics(
+                &mut accumulator,
+                transient.batch,
+                source.map(|source| (source, domain)),
                 diagnostic_count,
-                source,
-                domain,
                 &mut can_freeze,
             );
             #[cfg(feature = "data_layout_memory_probe")]
-            record_frontend_diagnostic_metrics(
-                &messages,
-                &mut diagnostic_records,
-                &mut diagnostic_label_slots,
-            );
-            diagnostic_count += end;
-            saw_infrastructure |= messages.infrastructure_errors.is_some();
-            accumulator.append(messages);
+            {
+                diagnostic_records += metrics.diagnostic_count;
+                diagnostic_label_slots += metrics.label_count;
+            }
+            diagnostic_count += metrics.diagnostic_count;
+            saw_infrastructure |= metrics.missing_source_error;
         }
         if let Some(facade_failure) = trailing_facade_failure {
             let mut messages = facade_failure.into_owned_messages();

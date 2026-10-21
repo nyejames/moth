@@ -4,7 +4,8 @@
 //! artefacts never enter a retained boundary; this child preserves the diagnostic-only lane.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{PremergeDiagnosticBatch, PremergeFailure};
+use crate::compiler_frontend::compiler_messages::PremergeFailure;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::module_compilation::ProviderMaterialisationRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -41,11 +42,11 @@ fn seed_boundary_materialisations(
 /// This is used for source packages after *all* source-package facades have published. Check-only
 /// jobs can therefore consume any canonical module/package provider without adding package edges
 /// or changing the retained boundary. Successful artefacts, generated deltas and resource
-/// associations are dropped; only diagnostics and warnings are returned as premerge batches.
+/// associations are dropped; only prepared diagnostics and warnings are returned.
 ///
-/// WHAT: stays in the premerge lane and calls the typed canonical batch helper directly.
-/// WHY: the deferred lane never constructs the final vessel; the source-owner tail converts
-///      each batch exactly once with its finalized snapshot.
+/// WHAT: stays in the prepared lane and calls the typed canonical batch helper directly.
+/// WHY: the deferred lane never constructs the final vessel; the source-owner tail appends
+///      each prepared batch with its finalized snapshot.
 #[allow(
     clippy::too_many_arguments,
     reason = "deferred check-only compilation keeps boundary context, provider and generated stores, jobs, provider and package edges, and mutable string/path tables as separate borrows"
@@ -59,7 +60,7 @@ pub(super) fn compile_check_only_jobs_after_canonical(
     source_package_dependencies: &[ResolvedSourcePackageDependency],
     string_table: &mut StringTable,
     path_interner: &mut PathInternerBuilder,
-) -> Result<Vec<PremergeDiagnosticBatch>, PremergeFailure> {
+) -> Result<Vec<PreparedDiagnosticBatch>, PremergeFailure> {
     let mut provider_materialisations =
         seed_completed_package_materialisations(context.completed_packages())?;
     seed_boundary_materialisations(&mut provider_materialisations, provider_store)?;

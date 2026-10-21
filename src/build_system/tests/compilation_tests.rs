@@ -982,7 +982,7 @@ fn check_only_success_batches_render_local_paths_through_production_construction
     use crate::build_system::create_project_modules::compilation::canonical::check_only_success_batch;
     use crate::build_system::create_project_modules::compiled_boundary::{
         CompiledGraphBoundary, CompletedSourcePackageRegistry, ProjectFrontendCompilation,
-        TransientPremergeBatch,
+        TransientPreparedBatch,
     };
     use crate::build_system::create_project_modules::generated_store::BoundaryGeneratedFunctionStore;
     use crate::build_system::create_project_modules::module_artifact_store::ModuleArtifactStore;
@@ -993,7 +993,7 @@ fn check_only_success_batches_render_local_paths_through_production_construction
     let (compiled, _spelling) = check_only_success_result_with_warnings();
     // Route through the real canonical check-only success construction: it collects the
     // direct and generated-sidecar warnings and attaches the issuing path fork's snapshot.
-    // If production ever stops attaching the snapshot, the appended messages lose their
+    // If production ever stops attaching the snapshot, the prepared diagnostics lose their
     // path context and the spelling assertions below fail.
     let batch = check_only_success_batch(compiled)
         .expect("a warning-bearing check-only result must produce a transient batch")
@@ -1011,7 +1011,7 @@ fn check_only_success_batches_render_local_paths_through_production_construction
         project,
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),
-        vec![TransientPremergeBatch::project(batch)],
+        vec![TransientPreparedBatch::project(batch)],
     )
     .expect("transient check-only warning frontend should validate");
 
@@ -1040,7 +1040,7 @@ fn canonical_tail_preserves_facade_failure_and_warning_sources() {
     use crate::build_system::build::ProjectAssemblyError;
     use crate::build_system::create_project_modules::compiled_boundary::{
         CompiledGraphBoundary, CompletedSourcePackageRegistry, ProjectFrontendCompilation,
-        TransientPremergeBatch,
+        TransientPreparedBatch,
     };
     use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
     use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
@@ -1092,7 +1092,9 @@ fn canonical_tail_preserves_facade_failure_and_warning_sources() {
         },
     );
     let expected_warning_code = warning.kind.code();
-    let batch = PremergeDiagnosticBatch::from_diagnostics(vec![warning], strings.clone());
+    let batch = crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch::from_premerge(
+        PremergeDiagnosticBatch::from_diagnostics(vec![warning], strings.clone()),
+    );
     let project = CompiledGraphBoundary {
         structure: ProjectModuleGraph::from_normal_roots(Vec::new()),
         modules: ModuleArtifactStore::new(0),
@@ -1104,7 +1106,7 @@ fn canonical_tail_preserves_facade_failure_and_warning_sources() {
         project,
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),
-        vec![TransientPremergeBatch::project(batch)],
+        vec![TransientPreparedBatch::project(batch)],
     )
     .expect("empty frontend should validate");
     #[cfg(feature = "data_layout_memory_probe")]

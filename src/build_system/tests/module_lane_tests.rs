@@ -18,10 +18,9 @@ use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationConte
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::module_diagnostics::ModuleDiagnostics;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, NameNamespace,
+    CompilerDiagnostic, DiagnosticSeverity, PremergeDiagnosticBatch,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids::NONE;
@@ -862,11 +861,11 @@ fn boundary_outcome_sorting_is_independent_of_wave_order() {
         diagnosed: vec![
             DiagnosedModule {
                 module_id: ModuleId::from_index(2),
-                diagnostics: test_module_diagnostics("z.moth", &mut string_table),
+                diagnostics: test_prepared_diagnostics("z.moth", &mut string_table),
             },
             DiagnosedModule {
                 module_id: ModuleId::from_index(0),
-                diagnostics: test_module_diagnostics("a.moth", &mut string_table),
+                diagnostics: test_prepared_diagnostics("a.moth", &mut string_table),
             },
         ],
         blocked: vec![
@@ -897,23 +896,16 @@ fn boundary_outcome_sorting_is_independent_of_wave_order() {
     assert_eq!(blocked_order, vec![0, 1]);
 }
 
-fn test_module_diagnostics(
+fn test_prepared_diagnostics(
     _module_path: &str,
     string_table: &mut StringTable,
-) -> ModuleDiagnostics {
+) -> PreparedDiagnosticBatch {
     let name = string_table.intern("missing_name");
-    let diagnostic = CompilerDiagnostic::new(
-        DiagnosticKind::Rule(
-            crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::UnknownName,
-        ),
-        None,
-        DiagnosticPayload::UnknownName {
-            name,
-            namespace: NameNamespace::Value,
-        },
-    );
-    let messages = CompilerMessages::from_diagnostic(diagnostic, string_table.clone());
-    ModuleDiagnostics::from_messages(messages).expect("user diagnostic should classify")
+    let diagnostic = CompilerDiagnostic::unknown_value_name(name, None);
+    let batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, string_table.clone());
+    PreparedDiagnosticBatch::from_premerge(batch)
+        .classify_premerge()
+        .expect("user diagnostic should classify")
 }
 
 #[test]
@@ -1541,7 +1533,7 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
         generated: BoundaryGeneratedFunctionStore::default(),
         diagnosed: vec![DiagnosedModule {
             module_id: ModuleId::from_index(1),
-            diagnostics: test_module_diagnostics("diagnosed.moth", &mut string_table),
+            diagnostics: test_prepared_diagnostics("diagnosed.moth", &mut string_table),
         }],
         blocked: vec![BlockedModule {
             module_id: ModuleId::from_index(2),
@@ -1646,17 +1638,9 @@ fn test_warning_diagnostic(
     string_table: &mut StringTable,
 ) -> CompilerDiagnostic {
     let name = string_table.intern("unused_warning_name");
-    CompilerDiagnostic::with_severity(
-        DiagnosticKind::Rule(
-            crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::UnknownValueName,
-        ),
-        DiagnosticSeverity::Warning,
-        None,
-        DiagnosticPayload::UnknownName {
-            name,
-            namespace: NameNamespace::Value,
-        },
-    )
+    let mut diagnostic = CompilerDiagnostic::unknown_value_name(name, None);
+    diagnostic.severity = DiagnosticSeverity::Warning;
+    diagnostic
 }
 
 fn generated_test_identity(name: &str) -> GeneratedFunctionIdentity {
@@ -1751,7 +1735,7 @@ fn boundary_validation_rejects_diagnosed_lane_mismatch_in_both_directions() {
     );
     boundary.diagnosed = vec![DiagnosedModule {
         module_id: ModuleId::from_index(0),
-        diagnostics: test_module_diagnostics("single.moth", &mut string_table),
+        diagnostics: test_prepared_diagnostics("single.moth", &mut string_table),
     }];
     let error = boundary
         .validate_invariants()
@@ -1858,11 +1842,11 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
         diagnosed: vec![
             DiagnosedModule {
                 module_id: ModuleId::from_index(0),
-                diagnostics: test_module_diagnostics("a.moth", &mut string_table),
+                diagnostics: test_prepared_diagnostics("a.moth", &mut string_table),
             },
             DiagnosedModule {
                 module_id: ModuleId::from_index(0),
-                diagnostics: test_module_diagnostics("duplicate.moth", &mut string_table),
+                diagnostics: test_prepared_diagnostics("duplicate.moth", &mut string_table),
             },
         ],
         blocked: Vec::new(),
@@ -1937,7 +1921,7 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
         generated: BoundaryGeneratedFunctionStore::default(),
         diagnosed: vec![DiagnosedModule {
             module_id: ModuleId::from_index(0),
-            diagnostics: test_module_diagnostics("overlap.moth", &mut string_table),
+            diagnostics: test_prepared_diagnostics("overlap.moth", &mut string_table),
         }],
         blocked: vec![BlockedModule {
             module_id: ModuleId::from_index(0),
