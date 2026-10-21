@@ -35,7 +35,10 @@ fn write_directory_project(root: &Path, page_source: &str) {
     fs::write(source_root.join("@page.moth"), page_source).expect("should write page source");
 }
 
-fn build_result_with_warnings(warnings: Vec<CompilerDiagnostic>) -> BuildResult {
+fn build_result_with_warnings(
+    warnings: Vec<CompilerDiagnostic>,
+    string_table: StringTable,
+) -> BuildResult {
     BuildResult {
         project: Project {
             output_files: vec![OutputFile::new(
@@ -49,10 +52,12 @@ fn build_result_with_warnings(warnings: Vec<CompilerDiagnostic>) -> BuildResult 
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
-        warnings,
-        string_table: StringTable::new(),
+        warning_accumulator: crate::build_system::build::build_warning_accumulator(
+            warnings,
+            string_table,
+            Vec::new(),
+        ),
         source_database: None,
-        warning_source_contexts: Vec::new(),
         output_owner: OutputOwner {
             builder: BuilderKind::Html,
             profile: BuildProfile::Dev,
@@ -96,7 +101,7 @@ fn build_command_writes_the_validated_directory_output_plan() {
 fn successful_build_without_warnings_has_no_warning_messages() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let temp = tempfile::tempdir().expect("should create output directory");
-    let mut build_result = build_result_with_warnings(Vec::new());
+    let mut build_result = build_result_with_warnings(Vec::new(), StringTable::new());
     let outcome = write_build_outputs_with_plan(&mut build_result, |result| {
         Ok(temporary_single_file_output_plan(temp.path(), result))
     });
@@ -115,8 +120,7 @@ fn successful_build_preserves_warning_diagnostics() {
     let warning =
         CompilerDiagnostic::identifier_naming_convention(name, NamingConvention::CamelCase, None);
     let temp = tempfile::tempdir().expect("should create output directory");
-    let mut build_result = build_result_with_warnings(vec![warning]);
-    build_result.string_table = strings;
+    let mut build_result = build_result_with_warnings(vec![warning], strings);
     let outcome = write_build_outputs_with_plan(&mut build_result, |result| {
         Ok(temporary_single_file_output_plan(temp.path(), result))
     });

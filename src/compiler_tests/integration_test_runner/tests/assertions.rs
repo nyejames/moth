@@ -589,8 +589,8 @@ fn warning_build_result(codes: &[&str]) -> BuildResult {
             other => panic!("test warning code is not constructed: {other}"),
         })
         .collect();
-    result.string_table = string_table;
-    result.warnings = warnings;
+    result.warning_accumulator =
+        crate::build_system::build::build_warning_accumulator(warnings, string_table, Vec::new());
     result
 }
 

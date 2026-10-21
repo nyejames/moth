@@ -172,13 +172,9 @@ pub(crate) fn validate_success_result(
     mut build_result: BuildResult,
     expectation: &SuccessExpectation,
 ) -> CaseExecutionResult {
-    if let Some(reason) = warnings::validate_warning_expectation(
-        build_result
-            .warnings
-            .iter()
-            .map(|warning| warning.kind.descriptor().code),
-        &expectation.warnings,
-    ) {
+    if let Some(reason) =
+        warnings::validate_warning_expectation(build_result.warning_codes(), &expectation.warnings)
+    {
         return fail(build_result, reason, FailureKind::ExpectationViolation);
     }
 

@@ -49,10 +49,12 @@ pub(super) fn build_result_with_output_files(files: Vec<(PathBuf, FileKind)>) ->
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
-        warnings: Vec::new(),
-        string_table: StringTable::new(),
+        warning_accumulator: crate::build_system::build::build_warning_accumulator(
+            Vec::new(),
+            StringTable::new(),
+            Vec::new(),
+        ),
         source_database: None,
-        warning_source_contexts: Vec::new(),
         output_owner: OutputOwner {
             builder: BuilderKind::Html,
             profile: BuildProfile::Dev,

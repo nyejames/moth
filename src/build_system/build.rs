@@ -35,7 +35,10 @@ use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{
     BoundaryFailure, CompilerError, CompilerMessages, RenderSourceContext,
 };
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::{
+    BoundaryAccumulator, into_boundary_failure,
+};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ProjectContextEscapeReason};
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::reachability::{
@@ -100,21 +103,29 @@ fn attach_owned_source_database(
     }
 }
 
-fn finalize_backend_failure_messages(
-    backend_messages: CompilerMessages,
+/// Join the successful frontend warning stream to the build's mutable root table.
+pub(crate) fn build_warning_accumulator(
     warnings: Vec<CompilerDiagnostic>,
     string_table: StringTable,
-    warning_source_contexts: Vec<RenderSourceContext>,
-    project_source_database: Option<Arc<SourceDatabase>>,
-) -> CompilerMessages {
+    source_contexts: Vec<RenderSourceContext>,
+) -> BoundaryAccumulator {
     let mut messages = CompilerMessages::from_diagnostics(warnings, string_table);
-    messages.install_source_contexts(warning_source_contexts, 0);
-    messages.append_messages_preserving_context(backend_messages);
+    messages.install_source_contexts(source_contexts, 0);
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append(messages);
+    accumulator
+}
+
+fn finalize_backend_failure_messages(
+    backend_messages: CompilerMessages,
+    mut warnings: BoundaryAccumulator,
+    project_source_database: Option<Arc<SourceDatabase>>,
+) -> BoundaryFailure {
+    warnings.append(backend_messages);
     if let Some(source_database) = project_source_database {
-        messages.set_source_database(source_database);
+        warnings.set_project_source_database(source_database);
     }
-    messages.mark_frozen();
-    messages
+    warnings.finish(InstallMode::Frozen)
 }
 
 // -------------------------
@@ -1613,71 +1624,63 @@ pub struct Project {
 pub struct BuildResult {
     pub project: Project,
     pub config: Config,
-    pub warnings: Vec<CompilerDiagnostic>,
-    pub string_table: StringTable,
-    /// Per-warning source snapshot associations, indexed against `warnings`.
-    ///
-    /// Package ranges are collected before backend warnings are appended, so the final append
-    /// leaves their indexes unchanged. Empty package rows remain available for explicitly owned
-    /// generated spans without widening a diagnostic's default source range.
-    pub(crate) warning_source_contexts: Vec<RenderSourceContext>,
-    /// The retained source snapshots used by this build's diagnostics and warning renderers.
-    ///
-    /// This keeps the build-lifetime source database alive for as long as its result is retained;
-    /// the eventual frozen render context owns that lifetime more narrowly.
+    /// The one unfrozen diagnostic owner shared by the successful-build warning producers.
+    pub(crate) warning_accumulator: BoundaryAccumulator,
+    /// Retained until output succeeds or its final diagnostic producer has appended.
     pub(crate) source_database: Option<Arc<SourceDatabase>>,
     pub output_owner: OutputOwner,
     pub directory_output_plan: Option<ValidatedOutputPlan>,
 }
 
 impl BuildResult {
+    pub(crate) fn warning_count(&self) -> usize {
+        self.warning_accumulator.diagnostic_count()
+    }
+
+    pub(crate) fn warning_titles(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.warning_accumulator.family_titles()
+    }
+
+    pub(crate) fn warning_codes(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.warning_accumulator.family_codes()
+    }
+
     /// Move successful-build warnings into their one final frozen render owner.
     ///
     /// The output writer consumes the mutable build table first; this method is the terminal
-    /// report publication point. Clean builds release the table and source snapshots immediately.
+    /// report publication point. Clean builds drop the empty accumulator and source snapshots.
     pub(crate) fn take_warning_messages(&mut self) -> Option<BoundaryFailure> {
-        if self.warnings.is_empty() {
-            let _ = std::mem::take(&mut self.string_table);
-            self.warning_source_contexts.clear();
-            self.source_database.take();
+        let mut warnings =
+            std::mem::replace(&mut self.warning_accumulator, BoundaryAccumulator::new());
+        let warning_count = warnings.diagnostic_count();
+        let source_database = self.source_database.take();
+        if warning_count == 0 {
+            drop(warnings);
+            drop(source_database);
             return None;
         }
-
-        let warnings = std::mem::take(&mut self.warnings);
-        let string_table = std::mem::take(&mut self.string_table);
-        let source_contexts = std::mem::take(&mut self.warning_source_contexts);
-        let source_database = self.source_database.take();
-        let mut messages = CompilerMessages::from_diagnostics(warnings, string_table);
-        messages.install_source_contexts(source_contexts, 0);
         if let Some(source_database) = source_database {
-            messages.set_source_database(source_database);
+            warnings.set_project_source_database(source_database);
         }
-        messages.mark_frozen();
-        Some(into_boundary_failure(messages))
+        Some(warnings.finish(InstallMode::Frozen))
     }
 
     /// Aggregate a late output-plan/write failure with warnings before freezing one source owner.
     ///
-    /// Clean builds still retain the project source database until output succeeds or fails. A
-    /// late failure therefore receives the same source table/range owner as authored warnings
-    /// instead of falling back to an empty table after clean-success cleanup.
+    /// The project fallback is attached after the late vessel so earlier package and late rows
+    /// keep their existing first-owner precedence.
     pub(crate) fn take_output_failure_messages(
         &mut self,
         late_messages: CompilerMessages,
     ) -> BoundaryFailure {
-        let warnings = std::mem::take(&mut self.warnings);
-        let string_table = std::mem::take(&mut self.string_table);
-        let source_contexts = std::mem::take(&mut self.warning_source_contexts);
-        let source_database = self.source_database.take();
-        let mut messages = CompilerMessages::from_diagnostics(warnings, string_table);
-        messages.install_source_contexts(source_contexts, 0);
-        messages.append_messages_preserving_context(late_messages);
-        if let Some(source_database) = source_database {
-            messages.set_source_database(source_database);
+        let mut warnings =
+            std::mem::replace(&mut self.warning_accumulator, BoundaryAccumulator::new());
+        warnings.append(late_messages);
+        if let Some(source_database) = self.source_database.take() {
+            warnings.set_project_source_database(source_database);
         }
-        messages.extend_project_source_context_to_diagnostics();
-        messages.mark_frozen();
-        into_boundary_failure(messages)
+        warnings.extend_project_source_context_to_diagnostics();
+        warnings.finish(InstallMode::Frozen)
     }
 }
 
@@ -1695,8 +1698,22 @@ pub fn build_project(
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
 ) -> Result<BuildResult, BoundaryFailure> {
-    build_project_with_messages(project_builder, entry_path, flags, build_config_inputs)
-        .map_err(into_boundary_failure)
+    match build_project_with_messages(project_builder, entry_path, flags, build_config_inputs) {
+        Ok(result) => Ok(result),
+        Err(BuildOrchestrationFailure::Legacy(messages)) => Err(into_boundary_failure(messages)),
+        Err(BuildOrchestrationFailure::Boundary(failure)) => Err(failure),
+    }
+}
+
+enum BuildOrchestrationFailure {
+    Legacy(CompilerMessages),
+    Boundary(BoundaryFailure),
+}
+
+impl From<CompilerMessages> for BuildOrchestrationFailure {
+    fn from(messages: CompilerMessages) -> Self {
+        Self::Legacy(messages)
+    }
 }
 
 fn build_project_with_messages(
@@ -1704,12 +1721,12 @@ fn build_project_with_messages(
     entry_path: &str,
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
-) -> Result<BuildResult, CompilerMessages> {
+) -> Result<BuildResult, BuildOrchestrationFailure> {
     let build_profile = BuildProfile::from_flags(flags);
     let valid_path = match check_if_valid_path(entry_path) {
         Ok(path) => path,
         Err(error) => {
-            return Err(CompilerMessages::from_error(error, StringTable::new()));
+            return Err(CompilerMessages::from_error(error, StringTable::new()).into());
         }
     };
 
@@ -1729,7 +1746,7 @@ fn build_project_with_messages(
     } = match bootstrap_project_build(project_builder, valid_path, build_config_inputs) {
         Ok(bootstrap) => bootstrap,
         Err(messages) => {
-            return Err(messages);
+            return Err(messages.into());
         }
     };
 
@@ -1747,7 +1764,7 @@ fn build_project_with_messages(
         Ok(frontend_compilation) => frontend_compilation,
         Err(mut messages) => {
             attach_source_database(&mut messages, project_source_files.as_ref());
-            return Err(messages);
+            return Err(messages.into());
         }
     };
     if frontend_compilation.has_diagnosed_or_blocked() {
@@ -1756,17 +1773,17 @@ fn build_project_with_messages(
             project_source_files.take(),
             None,
         );
-        return Err(messages);
+        return Err(messages.into());
     }
-    let project_compilation = match ProjectCompilation::from_frontend(frontend_compilation) {
+    let mut project_compilation = match ProjectCompilation::from_frontend(frontend_compilation) {
         Ok(project_compilation) => project_compilation,
         Err(error) => {
             let mut messages = error.into_messages(&mut string_table);
             attach_source_database(&mut messages, project_source_files.as_ref());
-            return Err(messages);
+            return Err(messages.into());
         }
     };
-    let (mut warnings, warning_source_contexts) = collect_success_warnings(&project_compilation);
+    let mut warning_accumulator = collect_success_warnings(&mut project_compilation, string_table);
 
     // --------------------------------------------
     // BUILD PROJECT USING THE APPROPRIATE BUILDER
@@ -1779,27 +1796,23 @@ fn build_project_with_messages(
             &config,
             build_profile,
             flags,
-            &mut string_table,
+            warning_accumulator.string_table_mut(),
         )
     );
-    let project = match project_result {
+    let mut project = match project_result {
         Ok(project) => project,
         Err(compiler_messages) => {
-            let messages = finalize_backend_failure_messages(
+            let failure = finalize_backend_failure_messages(
                 compiler_messages,
-                warnings,
-                string_table,
-                warning_source_contexts,
+                warning_accumulator,
                 project_source_files.take(),
             );
-            return Err(messages);
+            return Err(BuildOrchestrationFailure::Boundary(failure));
         }
     };
 
-    // Backend warnings are project-owned and appended after all frontend/package warnings; this
-    // does not shift the already-recorded package ranges.
-    warnings.extend(project.warnings.iter().cloned());
-
+    // Backend warnings are project-owned and appended after all frontend/package warnings.
+    warning_accumulator.append_diagnostics(std::mem::take(&mut project.warnings));
     let output_owner = OutputOwner {
         builder: project_builder.backend.builder_kind(),
         profile: build_profile,
@@ -1809,16 +1822,15 @@ fn build_project_with_messages(
             let error = CompilerError::compiler_error(
                 "Directory output settings were not available after bootstrap validation.",
             );
-            return Err(finalize_backend_failure_messages(
+            let failure = finalize_backend_failure_messages(
                 CompilerMessages::from_error(
                     error,
                     crate::compiler_frontend::symbols::string_interning::StringTable::new(),
                 ),
-                warnings,
-                string_table,
-                warning_source_contexts,
+                warning_accumulator,
                 project_source_files.take(),
-            ));
+            );
+            return Err(BuildOrchestrationFailure::Boundary(failure));
         };
 
         Some(validated_output_settings.select(
@@ -1837,9 +1849,7 @@ fn build_project_with_messages(
     Ok(BuildResult {
         project,
         config,
-        warnings,
-        string_table,
-        warning_source_contexts,
+        warning_accumulator,
         source_database,
         output_owner,
         directory_output_plan,
@@ -1926,43 +1936,16 @@ pub(crate) fn bootstrap_project_build(
     })
 }
 
-fn collect_module_warnings(module: &Module) -> Vec<CompilerDiagnostic> {
-    module.metadata.warnings.clone()
-}
-
 fn collect_success_warnings(
-    project_compilation: &ProjectCompilation,
-) -> (Vec<CompilerDiagnostic>, Vec<RenderSourceContext>) {
-    let mut warnings = project_compilation
-        .project
-        .successful_module_views()
-        .flat_map(collect_module_warnings)
-        .collect::<Vec<_>>();
+    project_compilation: &mut ProjectCompilation,
+    string_table: StringTable,
+) -> BoundaryAccumulator {
+    let mut warnings = project_compilation.project.take_successful_warnings();
     let mut warning_source_contexts = Vec::new();
-
-    for (package_index, package) in project_compilation.source_packages.iter().enumerate() {
-        let warning_start = warnings.len();
-        warnings.extend(
-            package
-                .boundary
-                .successful_module_views()
-                .flat_map(collect_module_warnings),
-        );
-        let warning_end = warnings.len();
-
-        if let Some(source_database) = project_compilation
-            .source_packages
-            .source_database(PackageBoundaryId::from_index(package_index))
-        {
-            warning_source_contexts.push(RenderSourceContext {
-                diagnostic_range: warning_start..warning_end,
-                source_database: Arc::clone(source_database),
-                domain: Some(package.package_identity.clone()),
-            });
-        }
-    }
-
-    (warnings, warning_source_contexts)
+    project_compilation
+        .source_packages
+        .append_successful_warnings(&mut warnings, &mut warning_source_contexts);
+    build_warning_accumulator(warnings, string_table, warning_source_contexts)
 }
 
 #[cfg(test)]

@@ -16,6 +16,7 @@ use crate::compiler_frontend::compiler_errors::{
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::display_messages::print_boundary_messages;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::dev_server::error_page::{
     format_compiler_messages, render_compiler_error_page, render_runtime_error_page,
 };
@@ -138,7 +139,7 @@ impl DevBuildExecutor for ProjectBuildExecutor {
                     output_plan,
                     write_mode: WriteMode::SkipUnchanged,
                 },
-                &mut build_result.string_table,
+                build_result.warning_accumulator.string_table_mut(),
             )
         });
         output_result.map_err(|messages| build_result.take_output_failure_messages(messages))
@@ -418,30 +419,33 @@ fn build_once(
         &output_dir,
     );
 
-    let html_site_config =
-        match parse_html_site_config(&build_result.config, &mut build_result.string_table) {
-            Ok(config) => config,
-            Err(error) => {
-                let messages = error.into_messages(build_result.string_table.clone());
-                let failure = build_result.take_output_failure_messages(messages);
-                return BuildOutcome {
-                    build_succeeded: false,
-                    build_duration,
-                    entry_page_rel: None,
-                    html_site_config: None,
-                    diagnostics_summary: format_compiler_messages(&failure),
-                    success_messages: None,
-                    failed_build: Some(BuildFailure::Diagnostics(failure)),
-                    watch_scope: Some(watch_scope),
-                    output_dir: Some(output_dir),
-                };
-            }
-        };
+    let html_site_config = match parse_html_site_config(
+        &build_result.config,
+        build_result.warning_accumulator.string_table_mut(),
+    ) {
+        Ok(config) => config,
+        Err(error) => {
+            // WHY: the diagnostic's IDs already name the build's root table; merging an empty
+            //       table is the identity remap, so no table clone is needed.
+            let messages = error.into_messages(StringTable::new());
+            let failure = build_result.take_output_failure_messages(messages);
+            return BuildOutcome {
+                build_succeeded: false,
+                build_duration,
+                entry_page_rel: None,
+                html_site_config: None,
+                diagnostics_summary: format_compiler_messages(&failure),
+                success_messages: None,
+                failed_build: Some(BuildFailure::Diagnostics(failure)),
+                watch_scope: Some(watch_scope),
+                output_dir: Some(output_dir),
+            };
+        }
+    };
 
     let warnings_summary = build_result
-        .warnings
-        .iter()
-        .map(|warning| warning.kind.descriptor().title.to_string())
+        .warning_titles()
+        .map(|title| title.to_owned())
         .collect::<Vec<String>>()
         .join("\n");
 

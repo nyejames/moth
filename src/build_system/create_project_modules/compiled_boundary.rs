@@ -682,6 +682,7 @@ impl CompletedSourcePackageRegistry {
         Ok(())
     }
 
+    #[cfg(test)]
     /// Borrow the retained source database for one package boundary.
     ///
     /// Package IDs are dense publication indexes, so this lookup stays aligned with the package
@@ -693,6 +694,34 @@ impl CompletedSourcePackageRegistry {
         self.source_databases
             .get(package_id.index())
             .and_then(Option::as_ref)
+    }
+    /// Move package warning batches and their source owners into the build's warning stream.
+    ///
+    /// Package order is publication order, and each source row starts at the warning vector's
+    /// current length so its range remains aligned after preceding project/package warnings.
+    pub(crate) fn append_successful_warnings(
+        &mut self,
+        warnings: &mut Vec<CompilerDiagnostic>,
+        source_contexts: &mut Vec<RenderSourceContext>,
+    ) {
+        for package_index in 0..self.packages.len() {
+            let package = &mut self.packages[package_index];
+            let warning_start = warnings.len();
+            warnings.extend(package.boundary.take_successful_warnings());
+            let warning_end = warnings.len();
+
+            if let Some(source_database) = self
+                .source_databases
+                .get_mut(package_index)
+                .and_then(Option::take)
+            {
+                source_contexts.push(RenderSourceContext {
+                    diagnostic_range: warning_start..warning_end,
+                    source_database,
+                    domain: Some(package.package_identity.clone()),
+                });
+            }
+        }
     }
 
     pub(crate) fn reserve_commit(&mut self, publication: &SourcePackagePublication) {

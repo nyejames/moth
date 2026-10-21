@@ -10,11 +10,11 @@ use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 #[cfg(feature = "timers")]
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 #[cfg(feature = "timers")]
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
-use crate::compiler_frontend::source::SourceDatabase;
+#[cfg(feature = "timers")]
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_fs::assert_path_missing;
 use crate::compiler_tests::test_support::run_stack_budgeted_child;
@@ -406,45 +406,6 @@ fn write_page_project(_prefix: &str, source: &str) -> (tempfile::TempDir, PathBu
     (temp, root)
 }
 
-/// Collect ordered frontend diagnostic identity rows for parity comparison.
-///
-/// WHAT: maps each diagnostic to its stable code, optional reason key, normalized source file
-/// name, and one-based start line.
-/// WHY: comparing typed identity instead of rendered prose keeps the assertion stable across
-/// wording changes and proves the shared frontend contract is preserved.
-fn diagnostic_identity_sequence<'a>(
-    diagnostics: impl IntoIterator<Item = &'a CompilerDiagnostic>,
-    string_table: &StringTable,
-    source_database: &SourceDatabase,
-    project_root: &std::path::Path,
-) -> Vec<DiagnosticIdentityRow> {
-    let canonical_project_root = project_root
-        .canonicalize()
-        .expect("diagnostic fixture root should canonicalize");
-    let render_context = DiagnosticRenderContext::new(string_table)
-        .with_optional_source_database(Some(source_database));
-
-    diagnostics
-        .into_iter()
-        .map(|diagnostic| {
-            let identity = diagnostic.identity();
-            let position = render_context
-                .primary_position(diagnostic)
-                .expect("frontend diagnostics should retain a resolvable primary source span");
-            let relative_path = position
-                .path
-                .strip_prefix(&canonical_project_root)
-                .unwrap_or(position.path.as_path());
-            let normalized_path = relative_path
-                .to_str()
-                .expect("diagnostic logical path should be valid UTF-8")
-                .replace('\\', "/");
-            let line = position.start.line.saturating_add(1) as i32;
-            (identity.code, identity.reason_key, normalized_path, line)
-        })
-        .collect()
-}
-
 /// Collect ordered identity rows from the frozen boundary reports.
 ///
 /// WHAT: records each report view's stable code and reason key, plus its frozen source path and
@@ -522,7 +483,7 @@ if value is:
         !check_warning_outcome.messages.has_errors(),
         "warning fixture should not produce frontend errors"
     );
-    let build_warning_result = build_project(
+    let mut build_warning_result = build_project(
         &builder,
         warning_root
             .to_str()
@@ -544,18 +505,13 @@ if value is:
             && remaining.iter().any(|name| name == "src"),
         "check should leave the authored config and source tree, got {remaining:?}"
     );
-    let build_warning_source_database = build_warning_result
-        .source_database
-        .as_deref()
-        .expect("build warnings should retain their source database");
+    let build_warning_messages = build_warning_result
+        .take_warning_messages()
+        .expect("build warning fixture should produce a report");
     let check_warning_identity =
         diagnostic_identity_sequence_boundary(&check_warning_outcome.messages, &warning_root);
-    let build_warning_identity = diagnostic_identity_sequence(
-        build_warning_result.warnings.iter(),
-        &build_warning_result.string_table,
-        build_warning_source_database,
-        &warning_root,
-    );
+    let build_warning_identity =
+        diagnostic_identity_sequence_boundary(&build_warning_messages, &warning_root);
 
     let expected_warning_identity = vec![
         ("MOTH-RULE-0022", None, "@page.moth".to_owned(), 6),

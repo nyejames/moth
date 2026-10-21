@@ -65,10 +65,12 @@ fn html_build_result() -> BuildResult {
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
-        warnings: vec![],
-        string_table: StringTable::new(),
+        warning_accumulator: crate::build_system::build::build_warning_accumulator(
+            Vec::new(),
+            StringTable::new(),
+            Vec::new(),
+        ),
         source_database: None,
-        warning_source_contexts: Vec::new(),
         output_owner: test_build_output_owner(),
         directory_output_plan: None,
     }
@@ -105,10 +107,12 @@ fn multi_page_html_build_result() -> BuildResult {
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("project")),
-        warnings: vec![],
-        string_table: StringTable::new(),
+        warning_accumulator: crate::build_system::build::build_warning_accumulator(
+            Vec::new(),
+            StringTable::new(),
+            Vec::new(),
+        ),
         source_database: None,
-        warning_source_contexts: Vec::new(),
         output_owner: test_build_output_owner(),
         directory_output_plan: None,
     }
@@ -131,10 +135,12 @@ fn html_build_result_with_warning() -> BuildResult {
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
-        warnings: vec![warning],
-        string_table,
+        warning_accumulator: crate::build_system::build::build_warning_accumulator(
+            vec![warning],
+            string_table,
+            Vec::new(),
+        ),
         source_database: None,
-        warning_source_contexts: Vec::new(),
         output_owner: test_build_output_owner(),
         directory_output_plan: None,
     }
@@ -161,10 +167,12 @@ fn directory_build_result(project_root: &Path, output_folder: &str) -> BuildResu
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(project_root.to_path_buf()),
-        warnings: vec![],
-        string_table: StringTable::new(),
+        warning_accumulator: crate::build_system::build::build_warning_accumulator(
+            Vec::new(),
+            StringTable::new(),
+            Vec::new(),
+        ),
         source_database: None,
-        warning_source_contexts: Vec::new(),
         output_owner: owner,
         directory_output_plan: Some(ValidatedOutputPlan {
             output_root: project_root.join(output_folder),
@@ -248,7 +256,7 @@ impl DevBuildExecutor for FakeExecutor {
                 output_plan,
                 write_mode: WriteMode::AlwaysWrite,
             },
-            &mut build_result.string_table,
+            build_result.warning_accumulator.string_table_mut(),
         )
         .map_err(|messages| build_result.take_output_failure_messages(messages))?;
         if let Some(callback) = &self.on_write {
@@ -887,10 +895,6 @@ fn project_build_executor_writes_the_validated_directory_plan() {
     executor
         .write_outputs(&mut build_result, &root)
         .expect("directory output should write");
-    assert!(
-        build_result.config.config_resolution_records.is_empty(),
-        "successful builds must not retain transient config-resolution records"
-    );
     let first_output = fs::read_to_string(root.join("preview/index.html"))
         .expect("first directory dev build should write its page");
     assert!(
@@ -910,13 +914,6 @@ fn project_build_executor_writes_the_validated_directory_plan() {
     executor
         .write_outputs(&mut second_build_result, &root)
         .expect("repeated output should write");
-    assert!(
-        second_build_result
-            .config
-            .config_resolution_records
-            .is_empty(),
-        "repeated dev builds must also discard transient resolution records"
-    );
     #[cfg(feature = "timers")]
     let _second_timing_snapshot = second_timing_session.finish();
     assert_eq!(

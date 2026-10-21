@@ -256,6 +256,90 @@ impl BoundaryAccumulator {
         }
         self.state = Some(state);
     }
+    /// Append warnings that already reference this run's root string table.
+    ///
+    /// Unlike a legacy vessel, this batch has no independent table to merge or remap.
+    pub(crate) fn append_diagnostics(&mut self, diagnostics: Vec<CompilerDiagnostic>) {
+        if diagnostics.is_empty() {
+            return;
+        }
+        let messages = CompilerMessages::from_diagnostics(diagnostics, StringTable::new());
+        let mut required_handles = Vec::new();
+        let prepared = (0..messages.diagnostics.len())
+            .map(|index| prepare(&messages, index, &mut required_handles))
+            .collect::<Vec<_>>();
+        let state = self
+            .state
+            .as_mut()
+            .expect("diagnostic batches require an initialized string-table root");
+        state.prepared.extend(prepared);
+        state.required_handles.extend(required_handles);
+    }
+
+    /// The number of drafts currently retained in this run.
+    pub(crate) fn diagnostic_count(&self) -> usize {
+        self.state.as_ref().map_or(0, |state| state.prepared.len())
+    }
+
+    /// The family titles in diagnostic push order, before any capacity replacement at freeze.
+    pub(crate) fn family_titles(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.state.iter().flat_map(|state| {
+            state
+                .prepared
+                .iter()
+                .map(|diagnostic| diagnostic.draft.core.family.descriptor().title)
+        })
+    }
+
+    /// The stable family codes in diagnostic push order.
+    pub(crate) fn family_codes(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.state.iter().flat_map(|state| {
+            state
+                .prepared
+                .iter()
+                .map(|diagnostic| diagnostic.draft.core.family.descriptor().code)
+        })
+    }
+
+    /// The run's mutable root table, used by backend and output producers before the terminal freeze.
+    pub(crate) fn string_table_mut(&mut self) -> &mut StringTable {
+        &mut self
+            .state
+            .as_mut()
+            .expect("the build warning accumulator must own its string-table root")
+            .string_table
+    }
+
+    /// Attach the build's project fallback source owner after all diagnostic producers have appended.
+    pub(crate) fn set_project_source_database(&mut self, source_database: Arc<SourceDatabase>) {
+        let Some(state) = self.state.as_mut() else {
+            return;
+        };
+        if let Some(infrastructure_errors) = state.infrastructure_errors.as_mut() {
+            infrastructure_errors.set_source_database(Arc::clone(&source_database));
+        }
+        let diagnostic_end = state.prepared.len();
+        if diagnostic_end != 0 {
+            state.source_rows.push(RenderSourceContext {
+                diagnostic_range: 0..diagnostic_end,
+                source_database,
+                domain: None,
+            });
+        }
+    }
+
+    /// Keep domain-less project source rows paired through output diagnostics appended later.
+    pub(crate) fn extend_project_source_context_to_diagnostics(&mut self) {
+        let Some(state) = self.state.as_mut() else {
+            return;
+        };
+        let diagnostic_end = state.prepared.len();
+        for row in &mut state.source_rows {
+            if row.domain.is_none() && !row.diagnostic_range.is_empty() {
+                row.diagnostic_range.end = row.diagnostic_range.end.max(diagnostic_end);
+            }
+        }
+    }
 
     /// Resolves the run-wide install policy, merges retained owners, and freezes once.
     pub(crate) fn finish(self, install: InstallMode) -> BoundaryFailure {
@@ -275,6 +359,20 @@ impl BoundaryAccumulator {
             required_handles,
             mut infrastructure_errors,
         } = state;
+
+        // Source/path rows may be appended after a batch was prepared (build fallback owners and
+        // late output diagnostics). Resolve them only after the complete push-ordered run exists.
+        for (index, diagnostic) in prepared.iter_mut().enumerate() {
+            diagnostic.owner = source_rows
+                .iter()
+                .position(|row| row.diagnostic_range.contains(&index));
+            diagnostic.identityless_owner = source_rows
+                .iter()
+                .position(|row| row.domain.is_none() && row.diagnostic_range.contains(&index));
+            diagnostic.explicit_path = path_rows
+                .iter()
+                .position(|row| row.diagnostic_range.contains(&index));
+        }
 
         // Only a frozen run installs identity-named handles and retains their donor rows.
         let mut required = Vec::new();

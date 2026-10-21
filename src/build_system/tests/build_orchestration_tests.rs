@@ -127,9 +127,9 @@ fn build_project_returns_result_without_writing_files() {
         "clean build should publish no warning report"
     );
     assert_eq!(
-        result.string_table.len(),
+        result.warning_count(),
         0,
-        "clean build should release its compiler identity table at the report boundary"
+        "clean build should release its warning state at the report boundary"
     );
     assert!(
         result.source_database.is_none(),
@@ -147,7 +147,7 @@ fn build_project_preserves_builder_warnings_in_build_result() {
     {
         let _cwd_guard = CurrentDirGuard::set_to(&root);
 
-        let result = build_project(
+        let mut result = build_project(
             &ProjectBuilder::new(WarningBuilder),
             "main.moth",
             &[],
@@ -155,9 +155,21 @@ fn build_project_preserves_builder_warnings_in_build_result() {
         )
         .expect("build should succeed");
 
-        assert!(
-            result.warnings.len() == 1,
+        assert_eq!(
+            result.warning_count(),
+            1,
             "build result should include backend warnings"
+        );
+        let warnings = result
+            .take_warning_messages()
+            .expect("backend warning should produce a frozen report");
+        assert_eq!(warnings.warning_count(), 1);
+        assert_eq!(
+            warnings
+                .reports
+                .iter_severity(DiagnosticSeverity::Warning)
+                .count(),
+            1
         );
     }
 }
@@ -237,13 +249,15 @@ fn build_result_warning_handoff_resolves_generated_donor_source_context() {
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(project_temp.path().to_path_buf()),
-        warnings: vec![warning],
-        string_table,
-        warning_source_contexts: vec![RenderSourceContext {
-            diagnostic_range: 0..0,
-            source_database: Arc::clone(&package_database),
-            domain: Some(package_identity),
-        }],
+        warning_accumulator: crate::build_system::build::build_warning_accumulator(
+            vec![warning],
+            string_table,
+            vec![RenderSourceContext {
+                diagnostic_range: 0..0,
+                source_database: Arc::clone(&package_database),
+                domain: Some(package_identity),
+            }],
+        ),
         source_database: Some(Arc::clone(&project_database)),
         output_owner: OutputOwner {
             builder: BuilderKind::Test,
@@ -357,13 +371,15 @@ fn build_result_warning_handoff_keeps_related_package_label_out_of_default_conte
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(project_temp.path().to_path_buf()),
-        warnings: vec![diagnostic],
-        string_table,
-        warning_source_contexts: vec![RenderSourceContext {
-            diagnostic_range: 0..0,
-            source_database: Arc::clone(&package_database),
-            domain: Some(package_identity),
-        }],
+        warning_accumulator: crate::build_system::build::build_warning_accumulator(
+            vec![diagnostic],
+            string_table,
+            vec![RenderSourceContext {
+                diagnostic_range: 0..0,
+                source_database: Arc::clone(&package_database),
+                domain: Some(package_identity),
+            }],
+        ),
         source_database: Some(Arc::clone(&project_database)),
         output_owner: OutputOwner {
             builder: BuilderKind::Test,

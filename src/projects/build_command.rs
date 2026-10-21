@@ -154,7 +154,7 @@ fn write_build_outputs_with_plan(
                     output_plan,
                     write_mode: WriteMode::AlwaysWrite,
                 },
-                &mut build_result.string_table,
+                build_result.warning_accumulator.string_table_mut(),
             )
             .map_err(BuildOutputFailure::Write)
         })()
@@ -163,7 +163,7 @@ fn write_build_outputs_with_plan(
     match output_result {
         Ok(write_summary) => {
             let output_file_count = write_summary.emitted_count();
-            let warning_count = build_result.warnings.len();
+            let warning_count = build_result.warning_count();
             let warnings = match build_result.take_warning_messages() {
                 Some(messages) if messages.has_infrastructure_error() => {
                     return BuildCommandOutcome::Failure {

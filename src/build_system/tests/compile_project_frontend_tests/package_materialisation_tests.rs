@@ -3084,23 +3084,16 @@ fn successful_source_package_warning_uses_package_snapshot_for_colliding_logical
     )
     .expect("successful build should retain the package warning");
 
+    let failure = build_result
+        .take_warning_messages()
+        .expect("successful source-package warning should be reported");
     assert!(
-        build_result
-            .warnings
+        failure
+            .reports
             .iter()
-            .any(|warning| warning.kind.code() == "MOTH-RULE-0022"),
+            .any(|(_, view)| { view.family().descriptor().code == "MOTH-RULE-0022" }),
         "successful build should retain the source-package warning"
     );
-
-    let mut messages = CompilerMessages::from_diagnostics(
-        build_result.warnings.clone(),
-        build_result.string_table.clone(),
-    );
-    messages.install_source_contexts(std::mem::take(&mut build_result.warning_source_contexts), 0);
-    if let Some(source_database) = build_result.source_database.take() {
-        messages.set_source_database(source_database);
-    }
-    let failure = into_boundary_failure(messages);
     let rendered = render_boundary_messages_html(&failure, &project_root);
 
     assert!(

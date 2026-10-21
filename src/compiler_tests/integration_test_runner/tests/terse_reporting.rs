@@ -101,10 +101,12 @@ fn minimal_build_result() -> BuildResult {
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
-        warnings: Vec::new(),
-        string_table,
+        warning_accumulator: crate::build_system::build::build_warning_accumulator(
+            Vec::new(),
+            string_table,
+            Vec::new(),
+        ),
         source_database: None,
-        warning_source_contexts: Vec::new(),
         output_owner: OutputOwner {
             builder: BuilderKind::Html,
             profile: BuildProfile::Dev,
@@ -215,10 +217,12 @@ fn build_result_with_warning(
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
-        warnings: vec![warning],
-        string_table,
+        warning_accumulator: crate::build_system::build::build_warning_accumulator(
+            vec![warning],
+            string_table,
+            Vec::new(),
+        ),
         source_database: None,
-        warning_source_contexts: Vec::new(),
         output_owner: OutputOwner {
             builder: BuilderKind::Html,
             profile: BuildProfile::Dev,
@@ -293,13 +297,15 @@ fn terse_build_result_warning_uses_donor_context_after_terminal_finalization() {
     ));
 
     let mut build_result = minimal_build_result();
-    build_result.warnings = vec![warning];
-    build_result.string_table = string_table;
-    build_result.warning_source_contexts = vec![RenderSourceContext {
-        diagnostic_range: 0..0,
-        source_database: Arc::clone(&package_database),
-        domain: Some(package_identity),
-    }];
+    build_result.warning_accumulator = crate::build_system::build::build_warning_accumulator(
+        vec![warning],
+        string_table,
+        vec![RenderSourceContext {
+            diagnostic_range: 0..0,
+            source_database: Arc::clone(&package_database),
+            domain: Some(package_identity),
+        }],
+    );
     build_result.source_database = Some(Arc::clone(&project_database));
     drop(package_database);
     drop(project_database);
