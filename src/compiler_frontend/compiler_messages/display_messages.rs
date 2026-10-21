@@ -1,13 +1,10 @@
 //! User-facing message display helpers.
 //!
-//! WHAT: renders frozen boundary failures and legacy vessels into human-readable terminal output.
+//! WHAT: renders frozen boundary failures into human-readable terminal output.
 //! WHY: this is the final boundary between internal structured diagnostics and what the user sees.
 
-use crate::compiler_frontend::compiler_errors::{
-    BoundaryFailure, CompilerMessages, InfrastructureErrors,
-};
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::render::infrastructure::{
     ISSUE_URL, InfrastructureClass, format_error_guidance_lines, infrastructure_class,
@@ -46,16 +43,6 @@ pub fn print_terse_boundary_messages(failure: &BoundaryFailure) {
     for line in terse::format_terse_boundary_messages(failure) {
         println!("{line}");
     }
-}
-
-/// Prints a legacy vessel after converting it once to the boundary form.
-pub fn print_compiler_messages(messages: CompilerMessages) {
-    print_boundary_messages(&into_boundary_failure(messages));
-}
-
-/// Prints the terse records of a legacy vessel after converting it once to the boundary form.
-pub fn print_terse_compiler_messages(messages: CompilerMessages) {
-    print_terse_boundary_messages(&into_boundary_failure(messages));
 }
 
 /// Format the complete outer event without cloning errors or synthesising source frames.

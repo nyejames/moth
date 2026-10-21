@@ -13,7 +13,7 @@ use crate::capture_command_duration;
 use crate::command_timing_scope;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError, CompilerMessages};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::finish_command_timing;
 use crate::projects::{ProjectCommandCompletion, ProjectCommandStatus, ProjectDiagnosticCounts};
@@ -32,10 +32,10 @@ pub enum BuildCommandOutcome {
     Success {
         output_file_count: usize,
         warning_count: usize,
-        warnings: Option<CompilerMessages>,
+        warnings: Option<BoundaryFailure>,
     },
     Failure {
-        messages: CompilerMessages,
+        messages: BoundaryFailure,
         diagnostic_counts: Option<ProjectDiagnosticCounts>,
     },
 }
@@ -130,7 +130,7 @@ fn build_command_outcome(
             write_build_outputs_with_plan(&mut build_result, output_plan_builder)
         }
         Err(messages) => {
-            let diagnostic_counts = ProjectDiagnosticCounts::from_messages(&messages);
+            let diagnostic_counts = ProjectDiagnosticCounts::from_failure(&messages);
             BuildCommandOutcome::Failure {
                 messages,
                 diagnostic_counts,
@@ -165,7 +165,7 @@ fn write_build_outputs_with_plan(
             let output_file_count = write_summary.emitted_count();
             let warning_count = build_result.warnings.len();
             let warnings = match build_result.take_warning_messages() {
-                Some(messages) if messages.infrastructure_errors().is_some() => {
+                Some(messages) if messages.has_infrastructure_error() => {
                     return BuildCommandOutcome::Failure {
                         messages,
                         diagnostic_counts: None,

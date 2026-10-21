@@ -7,14 +7,13 @@ use super::run_check_for_tests;
 use super::{CheckCommandReport, CheckOutcome, run_check_command};
 use crate::build_system::build::{ProjectBuilder, build_project};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
+use crate::compiler_frontend::compiler_errors::BoundaryFailure;
+#[cfg(feature = "timers")]
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+#[cfg(feature = "timers")]
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
-#[cfg(unix)]
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidConfigReason, InvalidOutputFolderReason,
-};
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
 use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_fs::assert_path_missing;
@@ -95,16 +94,14 @@ fn check_rejects_config_filename_namesake_source_contract() {
         &test_project_builder(),
     );
 
-    assert!(outcome.messages.has_errors());
-    assert!(outcome.messages.error_diagnostics().any(|diagnostic| {
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::ConfigQualifierInvalidPlacement,
-                ..
-            }
-        )
-    }));
+    assert!(
+        outcome
+            .messages
+            .reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| view.reason_key()
+                == Some("invalid_config.config_qualifier_invalid_placement"))
+    );
 }
 
 #[cfg(unix)]
@@ -133,16 +130,13 @@ fn check_reports_missing_config_input_from_unselected_source() {
         &test_project_builder(),
     );
 
-    assert!(outcome.messages.has_errors());
-    assert!(outcome.messages.error_diagnostics().any(|diagnostic| {
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::MissingConfigInput,
-                ..
-            }
-        )
-    }));
+    assert!(
+        outcome
+            .messages
+            .reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| view.reason_key() == Some("invalid_config.missing_config_input"))
+    );
 }
 
 #[test]
@@ -170,8 +164,9 @@ fn check_rejects_unselected_runtime_template_as_non_root_source() {
     assert!(
         outcome
             .messages
-            .error_diagnostics()
-            .any(|diagnostic| { diagnostic.identity().code == "MOTH-RULE-0023" })
+            .reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| view.descriptor().code == "MOTH-RULE-0023")
     );
 }
 
@@ -340,16 +335,16 @@ fn check_retains_source_package_warning() {
 fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
     use std::os::unix::fs::symlink;
 
-    for (_case_name, target_name, expected_reason) in [
+    for (_case_name, target_name, expected_reason_key) in [
         (
             "sibling",
             "outside",
-            InvalidOutputFolderReason::ResolvesOutsideProjectRoot,
+            "invalid_config.invalid_output_folder.resolves_outside_project_root",
         ),
         (
             "entry",
             "src",
-            InvalidOutputFolderReason::InsideOrEqualToEntryRoot,
+            "invalid_config.invalid_output_folder.inside_or_equal_to_entry_root",
         ),
     ] {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
@@ -379,19 +374,13 @@ fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
             &BuildConfigInputSet::new(),
             &test_project_builder(),
         );
-        assert!(outcome.messages.has_errors());
-        assert!(outcome.messages.error_diagnostics().any(|diagnostic| {
-            matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidConfig {
-                    reason: InvalidConfigReason::InvalidOutputFolder {
-                        reason,
-                        ..
-                    },
-                    ..
-                } if *reason == expected_reason
-            )
-        }));
+        assert!(
+            outcome
+                .messages
+                .reports
+                .iter_severity(DiagnosticSeverity::Error)
+                .any(|(_, view)| view.reason_key() == Some(expected_reason_key))
+        );
         assert_path_missing(&outside.join("index.html"));
         assert_path_missing(&source_root.join("index.html"));
 
@@ -462,11 +451,9 @@ fn diagnostic_identity_sequence<'a>(
 ///       one-based start line.
 /// WHY: check/build parity must exercise the same immutable report data that production renders.
 fn diagnostic_identity_sequence_boundary(
-    mut messages: CompilerMessages,
+    failure: &BoundaryFailure,
     project_root: &std::path::Path,
 ) -> Vec<DiagnosticIdentityRow> {
-    messages.mark_frozen();
-    let failure = into_boundary_failure(messages);
     let canonical_project_root = project_root
         .canonicalize()
         .expect("diagnostic fixture root should canonicalize");
@@ -562,7 +549,7 @@ if value is:
         .as_deref()
         .expect("build warnings should retain their source database");
     let check_warning_identity =
-        diagnostic_identity_sequence_boundary(check_warning_outcome.messages, &warning_root);
+        diagnostic_identity_sequence_boundary(&check_warning_outcome.messages, &warning_root);
     let build_warning_identity = diagnostic_identity_sequence(
         build_warning_result.warnings.iter(),
         &build_warning_result.string_table,
@@ -625,9 +612,9 @@ increment(count)
     };
 
     let check_error_identity =
-        diagnostic_identity_sequence_boundary(check_error_outcome.messages, &error_root);
+        diagnostic_identity_sequence_boundary(&check_error_outcome.messages, &error_root);
     let build_error_identity =
-        diagnostic_identity_sequence_boundary(build_error_messages, &error_root);
+        diagnostic_identity_sequence_boundary(&build_error_messages, &error_root);
 
     let expected_error_identity = vec![(
         "MOTH-RULE-0054",
@@ -694,7 +681,7 @@ fn check_command_total_excludes_renderer_work() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
 
     let outcome = CheckOutcome {
-        messages: CompilerMessages::empty(StringTable::new()),
+        messages: into_boundary_failure(CompilerMessages::empty(StringTable::new())),
         status: crate::projects::ProjectCommandStatus::Success,
     };
     let scripted_duration = Duration::from_millis(37);
@@ -997,8 +984,9 @@ fn check_source_on_budgeted_thread(source: String) -> (Vec<String>, usize) {
             );
             let error_codes: Vec<String> = outcome
                 .messages
-                .error_diagnostics()
-                .map(|diagnostic| diagnostic.identity().code.to_owned())
+                .reports
+                .iter_severity(DiagnosticSeverity::Error)
+                .map(|(_, view)| view.descriptor().code.to_owned())
                 .collect();
             (error_codes, outcome.messages.warning_count())
         })

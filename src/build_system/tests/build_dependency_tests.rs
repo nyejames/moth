@@ -1069,8 +1069,9 @@ fn build_html_normal_sibling_name_is_not_visible_from_child_module() {
         };
         assert!(!errors.has_infrastructure_error());
         let codes = errors
-            .diagnostics()
-            .map(|diagnostic| diagnostic.kind.code())
+            .reports
+            .iter()
+            .map(|(_, view)| view.descriptor().code)
             .collect::<Vec<_>>();
         assert_eq!(codes, vec!["MOTH-IMPORT-0005"]);
         if let Some(baseline) = &baseline {
@@ -1674,17 +1675,29 @@ fn build_project_keeps_one_shared_string_table_for_multi_module_diagnostics() {
         panic!("builder diagnostics should fail the build");
     };
 
-    let errors = messages.error_diagnostics().collect::<Vec<_>>();
+    let errors = messages
+        .reports
+        .iter_severity(crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
     assert_eq!(errors.len(), 1);
-    let warnings = messages.warnings().collect::<Vec<_>>();
+    let warnings = messages
+        .reports
+        .iter_severity(crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Warning)
+        .collect::<Vec<_>>();
     assert_eq!(warnings.len(), 1);
 
-    assert_eq!(
-        errors[0].primary_span, None,
+    assert!(
+        matches!(
+            errors[0].1.primary_site(),
+            crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent
+        ),
         "path-only backend diagnostics are spanless",
     );
-    assert_eq!(
-        warnings[0].primary_span, None,
+    assert!(
+        matches!(
+            warnings[0].1.primary_site(),
+            crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent
+        ),
         "path-only backend warnings are spanless",
     );
 }

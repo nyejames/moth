@@ -11,8 +11,9 @@ use crate::build_system::path_validation::check_if_valid_path;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerErrorMetadataKey, CompilerMessages,
+    BoundaryFailure, CompilerError, CompilerErrorMetadataKey, CompilerMessages,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::dev_server::DevServerOptions;
 use crate::projects::dev_server::build_loop::{ProjectBuildExecutor, dev_server_error_messages};
@@ -33,6 +34,15 @@ pub(crate) struct DevRuntimePaths {
 }
 
 pub fn run_dev_server(
+    builder: ProjectBuilder,
+    entry_path: &str,
+    flags: &[Flag],
+    options: DevServerOptions,
+) -> Result<(), BoundaryFailure> {
+    run_dev_server_with_messages(builder, entry_path, flags, options).map_err(into_boundary_failure)
+}
+
+fn run_dev_server_with_messages(
     builder: ProjectBuilder,
     entry_path: &str,
     flags: &[Flag],

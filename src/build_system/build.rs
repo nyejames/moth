@@ -33,8 +33,9 @@ use crate::build_system::resource_unions::{
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerMessages, RenderSourceContext,
+    BoundaryFailure, CompilerError, CompilerMessages, RenderSourceContext,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ProjectContextEscapeReason};
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::reachability::{
@@ -1630,13 +1631,11 @@ pub struct BuildResult {
 }
 
 impl BuildResult {
-    /// Move successful-build warnings into a mutable report owner without freezing it yet.
-    /// WHAT: transfers warnings, their aggregate string table and all source contexts as one
-    ///       move-only `CompilerMessages` value, retaining empty package rows for explicitly
-    ///       owned generated spans.
-    /// WHY: late build/dev diagnostics may need to be appended before the single final freeze, so
-    ///      shared source databases are deduplicated by that one handoff rather than frozen twice.
-    pub(crate) fn take_warning_messages_before_freeze(&mut self) -> Option<CompilerMessages> {
+    /// Move successful-build warnings into their one final frozen render owner.
+    ///
+    /// The output writer consumes the mutable build table first; this method is the terminal
+    /// report publication point. Clean builds release the table and source snapshots immediately.
+    pub(crate) fn take_warning_messages(&mut self) -> Option<BoundaryFailure> {
         if self.warnings.is_empty() {
             let _ = std::mem::take(&mut self.string_table);
             self.warning_source_contexts.clear();
@@ -1653,18 +1652,10 @@ impl BuildResult {
         if let Some(source_database) = source_database {
             messages.set_source_database(source_database);
         }
-        Some(messages)
+        messages.mark_frozen();
+        Some(into_boundary_failure(messages))
     }
 
-    /// Move successful-build warnings into their one final frozen render owner.
-    ///
-    /// The output writer consumes the mutable build table first; this method is the terminal
-    /// report publication point. Clean builds release the table and source snapshots immediately.
-    pub(crate) fn take_warning_messages(&mut self) -> Option<CompilerMessages> {
-        let mut messages = self.take_warning_messages_before_freeze()?;
-        messages.mark_frozen();
-        Some(messages)
-    }
     /// Aggregate a late output-plan/write failure with warnings before freezing one source owner.
     ///
     /// Clean builds still retain the project source database until output succeeds or fails. A
@@ -1673,7 +1664,7 @@ impl BuildResult {
     pub(crate) fn take_output_failure_messages(
         &mut self,
         late_messages: CompilerMessages,
-    ) -> CompilerMessages {
+    ) -> BoundaryFailure {
         let warnings = std::mem::take(&mut self.warnings);
         let string_table = std::mem::take(&mut self.string_table);
         let source_contexts = std::mem::take(&mut self.warning_source_contexts);
@@ -1686,7 +1677,7 @@ impl BuildResult {
         }
         messages.extend_project_source_context_to_diagnostics();
         messages.mark_frozen();
-        messages
+        into_boundary_failure(messages)
     }
 }
 
@@ -1699,6 +1690,16 @@ impl BuildResult {
 /// This function intentionally does not write output files so callers can decide where artifacts
 /// should be emitted.
 pub fn build_project(
+    project_builder: &ProjectBuilder,
+    entry_path: &str,
+    flags: &[Flag],
+    build_config_inputs: &BuildConfigInputSet,
+) -> Result<BuildResult, BoundaryFailure> {
+    build_project_with_messages(project_builder, entry_path, flags, build_config_inputs)
+        .map_err(into_boundary_failure)
+}
+
+fn build_project_with_messages(
     project_builder: &ProjectBuilder,
     entry_path: &str,
     flags: &[Flag],

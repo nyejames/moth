@@ -18,7 +18,9 @@ use crate::build_system::output::{
 use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{CompilerMessages, RenderSourceContext};
+use crate::compiler_frontend::compiler_errors::{
+    BoundaryFailure, CompilerMessages, RenderSourceContext,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::render::terse;
@@ -30,18 +32,15 @@ use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityHandle, LocalSpan, SourceDatabase, SourceSpan,
 };
-use crate::compiler_tests::test_diagnostics::{
-    assert_no_infrastructure_errors, assert_output_rejection,
-};
+use crate::compiler_tests::test_diagnostics::assert_output_rejection;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::settings::Config;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-fn rendered_error_messages(messages: CompilerMessages) -> Vec<String> {
-    let failure = into_boundary_failure(messages);
-    failure
+fn rendered_error_messages(messages: BoundaryFailure) -> Vec<String> {
+    messages
         .reports
         .iter_severity(DiagnosticSeverity::Error)
         .map(|(report, view)| {
@@ -50,32 +49,51 @@ fn rendered_error_messages(messages: CompilerMessages) -> Vec<String> {
         .collect()
 }
 
-fn assert_has_config_error(messages: &CompilerMessages) {
+fn assert_has_config_error(messages: &BoundaryFailure) {
     assert!(
         messages
-            .error_diagnostics()
-            .any(|diagnostic| diagnostic.kind.category() == DiagnosticCategory::Config),
+            .reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| view.category() == DiagnosticCategory::Config),
         "expected config-classified diagnostic"
     );
 }
 
 fn assert_invalid_project_setting(
-    messages: &CompilerMessages,
+    messages: &BoundaryFailure,
     expected_key: &str,
     expected_value: &str,
 ) {
-    let has_expected_diagnostic = messages.error_diagnostics().any(|diagnostic| {
-        let DiagnosticPayload::InvalidConfig {
-            key: Some(key),
-            reason: InvalidConfigReason::InvalidProjectSettingValue { value, .. },
-        } = &diagnostic.payload
-        else {
-            return false;
-        };
+    let has_expected_diagnostic = messages
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .any(|(report, view)| {
+            if view.category() != DiagnosticCategory::Config
+                || view.reason_key() != Some("invalid_config.invalid_project_setting_value")
+            {
+                return false;
+            }
 
-        messages.string_table.resolve(*key) == expected_key
-            && messages.string_table.resolve(*value) == expected_value
-    });
+            let rendered = terse::format_terse_diagnostic_view(
+                view,
+                DiagnosticRenderContext::for_report(report),
+            );
+            let Some(message) = rendered.split('|').nth(4) else {
+                return false;
+            };
+            let Some(value_fields) = message.strip_prefix("Invalid value '") else {
+                return false;
+            };
+            let Some((actual_value, key_fields)) =
+                value_fields.split_once("' for config setting '")
+            else {
+                return false;
+            };
+            let Some((actual_key, _)) = key_fields.split_once("'. Expected ") else {
+                return false;
+            };
+            actual_key == expected_key && actual_value == expected_value
+        });
 
     assert!(
         has_expected_diagnostic,
@@ -236,10 +254,9 @@ fn build_result_warning_handoff_resolves_generated_donor_source_context() {
     drop(package_database);
     drop(project_database);
 
-    let messages = result
+    let failure = result
         .take_warning_messages()
         .expect("spanful warning should produce a report");
-    let failure = into_boundary_failure(messages);
     assert!(!failure.has_infrastructure_error(), "{failure:?}");
     let (report, view) = failure
         .reports
@@ -357,10 +374,9 @@ fn build_result_warning_handoff_keeps_related_package_label_out_of_default_conte
     drop(package_database);
     drop(project_database);
 
-    let messages = result
+    let failure = result
         .take_warning_messages()
         .expect("spanful warning should produce a report");
-    let failure = into_boundary_failure(messages);
     assert!(!failure.has_infrastructure_error(), "{failure:?}");
     let (report, view) = failure
         .reports
@@ -424,7 +440,6 @@ fn build_project_preserves_package_warnings_on_late_backend_failure() {
         panic!("late backend failure should return compiler messages");
     };
 
-    let messages = into_boundary_failure(messages);
     assert!(messages.has_infrastructure_error());
     assert!(
         messages.warning_count() >= 1,
@@ -535,7 +550,10 @@ fn diagnosed_module_prevents_project_compilation_from_reaching_backend() {
     let Err(messages) = result else {
         panic!("diagnosed module should fail project compilation");
     };
-    assert_no_infrastructure_errors(&messages);
+    assert!(
+        !messages.has_infrastructure_error(),
+        "diagnosed module should not report infrastructure errors: {messages:?}"
+    );
     assert!(validated.load(std::sync::atomic::Ordering::SeqCst));
     assert!(
         !built.load(std::sync::atomic::Ordering::SeqCst),
@@ -1328,11 +1346,10 @@ fn build_project_preserves_frontend_signature_diagnostic_source_position() {
     {
         let _cwd_guard = CurrentDirGuard::set_to(&root);
         let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
-        let Err(messages) = build_project(&builder, "main.moth", &[], &BuildConfigInputSet::new())
+        let Err(failure) = build_project(&builder, "main.moth", &[], &BuildConfigInputSet::new())
         else {
             panic!("build should fail with a frontend signature diagnostic");
         };
-        let failure = into_boundary_failure(messages);
         let (report, view) = failure
             .reports
             .iter()
@@ -2539,7 +2556,7 @@ fn late_output_failure_keeps_authored_setting_source_owner() {
     )
     .expect_err("a foreign output owner should produce a late diagnostic");
 
-    let failure = into_boundary_failure(second_build.take_output_failure_messages(late_messages));
+    let failure = second_build.take_output_failure_messages(late_messages);
     assert!(!failure.has_infrastructure_error(), "{failure:?}");
     let (report, view) = failure
         .reports

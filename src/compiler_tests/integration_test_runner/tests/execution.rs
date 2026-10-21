@@ -23,16 +23,13 @@ use crate::build_system::create_project_modules::{
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::compiler_errors::{
     BoundaryFailure, CompilerMessages,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, dev_server::render_boundary_messages_html, terse,
-};
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, DiagnosticSeverity, InvalidControlFlowStatementReason,
-    UnsupportedBackendFeatureReason,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
@@ -50,8 +47,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
-fn boundary_failure(mut messages: CompilerMessages) -> BoundaryFailure {
-    messages.mark_frozen();
+fn boundary_failure(messages: CompilerMessages) -> BoundaryFailure {
     into_boundary_failure(messages)
 }
 
@@ -186,7 +182,7 @@ impl EntryFixture {
         frontend
     }
 
-    fn build_result(&self, flags: &[Flag]) -> Result<BuildResult, CompilerMessages> {
+    fn build_result(&self, flags: &[Flag]) -> Result<BuildResult, BoundaryFailure> {
         build_project(
             &ProjectBuilder::new(HtmlProjectBuilder::new()),
             self.entry.to_str().expect("fixture entry should be UTF-8"),
@@ -493,17 +489,20 @@ fn assert_ambiguous_package_diagnostic(
         !messages.has_infrastructure_error(),
         "{scenario}: {messages:?}"
     );
-    let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
+    let diagnostics = messages
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
     assert_eq!(diagnostics.len(), 1, "{scenario}: {messages:?}");
+    let (report, view) = diagnostics[0];
     assert_eq!(
-        diagnostics[0].kind.code(),
+        view.descriptor().code,
         "MOTH-IMPORT-0006",
         "{scenario}: {messages:?}"
     );
 
-    let position = messages
-        .diagnostic_render_context(0)
-        .primary_position(diagnostics[0])
+    let position = DiagnosticRenderContext::for_report(report)
+        .site_position(view.primary_site())
         .expect("ambiguous package diagnostic should retain its authored span");
     assert_eq!(position.line, dependency_clause, "{scenario}");
     assert_eq!(
@@ -633,7 +632,7 @@ fn synthetic_single_file_missing_package_keeps_its_authored_diagnostic_span() {
             Err(messages) => messages,
             Ok(_) => panic!("unregistered source package unexpectedly built"),
         };
-        let failure = boundary_failure(messages);
+        let failure = messages;
         assert!(!failure.has_infrastructure_error(), "{failure:?}");
         let diagnostics = failure
             .reports
@@ -846,15 +845,16 @@ fn synthetic_start_authored_return_stays_a_source_diagnostic() {
                 !messages.has_infrastructure_error(),
                 "{source}: {messages:?}"
             );
-            let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
+            let diagnostics = messages
+                .reports
+                .iter_severity(DiagnosticSeverity::Error)
+                .collect::<Vec<_>>();
             assert_eq!(diagnostics.len(), 1, "{source}: {messages:?}");
-            assert_eq!(diagnostics[0].kind.code(), "MOTH-RULE-0042");
-            assert!(matches!(
-                diagnostics[0].payload,
-                DiagnosticPayload::InvalidControlFlowStatement {
-                    reason: InvalidControlFlowStatementReason::ReturnOutsideFunction,
-                }
-            ));
+            assert_eq!(diagnostics[0].1.descriptor().code, "MOTH-RULE-0042");
+            assert_eq!(
+                diagnostics[0].1.reason_key(),
+                Some("invalid_control_flow_statement.return_outside_function")
+            );
         }
     }
 }
@@ -892,15 +892,15 @@ fn synthetic_start_preserves_nested_returns_inside_authored_functions() {
 fn synthetic_start_wasm_rejects_reachable_failure_before_lir() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for directory_entry in [true, false] {
-        for (source, expected_reason) in [
+        for (source, expected_reason_key) in [
             (
                 "load || -> String, Error!:\n    return! Error(\"failed\")\n;\n\
                  value = load()!\n[:[value]]\n",
-                UnsupportedBackendFeatureReason::ErrorValues,
+                "unsupported_backend_feature.error_values",
             ),
             (
                 "left ~= 6\nright ~= 7\nvalue = left * right\n[:[value]]\n",
-                UnsupportedBackendFeatureReason::RecoverableNumericFailure,
+                "unsupported_backend_feature.recoverable_numeric_failure",
             ),
         ] {
             let fixture = EntryFixture::new(source, directory_entry);
@@ -921,14 +921,13 @@ fn synthetic_start_wasm_rejects_reachable_failure_before_lir() {
                 !messages.has_infrastructure_error(),
                 "must diagnose before LIR: {messages:?}"
             );
-            let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
+            let diagnostics = messages
+                .reports
+                .iter_severity(DiagnosticSeverity::Error)
+                .collect::<Vec<_>>();
             assert_eq!(diagnostics.len(), 1);
-            assert_eq!(diagnostics[0].kind.code(), "MOTH-RULE-0064");
-            assert!(matches!(
-                diagnostics[0].payload,
-                DiagnosticPayload::UnsupportedBackendFeature { reason, .. }
-                    if reason == expected_reason
-            ));
+            assert_eq!(diagnostics[0].1.descriptor().code, "MOTH-RULE-0064");
+            assert_eq!(diagnostics[0].1.reason_key(), Some(expected_reason_key));
         }
     }
 }

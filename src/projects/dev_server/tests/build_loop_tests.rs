@@ -18,8 +18,15 @@ use crate::compiler_frontend::build_config::{
     BuildCommandLocation, BuildConfigInputEntry, BuildConfigInputSet, BuildConfigValueLocation,
     BuildInputName, PrimitiveBuildValue,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, NamingConvention};
+use crate::compiler_frontend::compiler_errors::{
+    BoundaryFailure, CompilerError, CompilerMessages, ErrorType,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticSeverity, NamingConvention,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::dev_server::dev_client::tests::run_client_test;
@@ -170,14 +177,14 @@ fn directory_build_result(project_root: &Path, output_folder: &str) -> BuildResu
 }
 
 struct FakeExecutor {
-    responses: Mutex<Vec<Result<BuildResult, CompilerMessages>>>,
+    responses: Mutex<Vec<Result<BuildResult, BoundaryFailure>>>,
     call_count: AtomicUsize,
     on_call: Option<Box<dyn Fn(usize) + Send + Sync>>,
     on_write: Option<Box<dyn Fn() -> Result<(), CompilerMessages> + Send>>,
 }
 
 impl FakeExecutor {
-    fn new(responses: Vec<Result<BuildResult, CompilerMessages>>) -> Self {
+    fn new(responses: Vec<Result<BuildResult, BoundaryFailure>>) -> Self {
         Self {
             responses: Mutex::new(responses),
             call_count: AtomicUsize::new(0),
@@ -187,7 +194,7 @@ impl FakeExecutor {
     }
 
     fn with_on_call(
-        responses: Vec<Result<BuildResult, CompilerMessages>>,
+        responses: Vec<Result<BuildResult, BoundaryFailure>>,
         on_call: Box<dyn Fn(usize) + Send + Sync>,
     ) -> Self {
         Self {
@@ -204,7 +211,7 @@ impl DevBuildExecutor for FakeExecutor {
         &mut self,
         _entry_file: &Path,
         _flags: &[crate::compiler_frontend::Flag],
-    ) -> Result<BuildResult, CompilerMessages> {
+    ) -> Result<BuildResult, BoundaryFailure> {
         let call_index = self.call_count.fetch_add(1, Ordering::SeqCst) + 1;
         if let Some(ref callback) = self.on_call {
             callback(call_index);
@@ -220,7 +227,7 @@ impl DevBuildExecutor for FakeExecutor {
         &mut self,
         build_result: &mut BuildResult,
         entry_file: &Path,
-    ) -> Result<OutputWriteSummary, CompilerMessages> {
+    ) -> Result<OutputWriteSummary, BoundaryFailure> {
         let project_root = entry_file
             .parent()
             .map(Path::to_path_buf)
@@ -242,9 +249,10 @@ impl DevBuildExecutor for FakeExecutor {
                 write_mode: WriteMode::AlwaysWrite,
             },
             &mut build_result.string_table,
-        )?;
+        )
+        .map_err(|messages| build_result.take_output_failure_messages(messages))?;
         if let Some(callback) = &self.on_write {
-            callback()?;
+            callback().map_err(|messages| build_result.take_output_failure_messages(messages))?;
         }
         Ok(summary)
     }
@@ -376,8 +384,10 @@ fn failed_build_marks_state_and_stores_error_page() {
     let root = _temp.path().to_path_buf();
 
     let state = Arc::new(DevServerState::new(root.join("dev")));
-    let messages =
-        CompilerMessages::from_error(CompilerError::compiler_error("boom"), StringTable::new());
+    let messages = into_boundary_failure(CompilerMessages::from_error(
+        CompilerError::compiler_error("boom"),
+        StringTable::new(),
+    ));
     let mut executor = FakeExecutor::new(vec![Err(messages)]);
 
     let report =
@@ -467,6 +477,96 @@ fn invalid_site_config_preserves_interned_diagnostic_values() {
         build_state
             .last_build_messages_summary
             .contains("'trailing_slash', 'no_trailing_slash', or 'ignore'")
+    );
+}
+
+#[test]
+fn invalid_site_config_failure_preserves_warning_after_config_error() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
+    let mut build_result = html_build_result_with_warning();
+    build_result.config.html_section.page_url_style = Some(String::from("bad_style"));
+    let mut executor = FakeExecutor::new(vec![Ok(build_result)]);
+    let state = Arc::new(DevServerState::new(root.join("dev")));
+
+    let entry_file = root.join("main.moth");
+    let report = run_single_build_cycle(&state, &mut executor, &entry_file, &[]);
+    assert!(!report.build_ok);
+    assert!(report.success_messages.is_none());
+    assert!(
+        report.watch_scope.is_some(),
+        "site-config parsing should fail after a successful compile and output write"
+    );
+    assert!(
+        root.join("dev/index.html").exists(),
+        "the build should write outputs before site-config parsing fails"
+    );
+
+    let build_state = state.build_state.lock().expect("build state");
+    assert!(!build_state.last_build_ok);
+    let rows: Vec<_> = build_state.last_build_messages_summary.lines().collect();
+    assert_eq!(
+        rows.len(),
+        2,
+        "one failure should contain exactly two records"
+    );
+    assert_eq!(
+        rows.iter().filter(|row| row.starts_with("E|")).count(),
+        1,
+        "site-config failure should render exactly one error"
+    );
+    assert_eq!(
+        rows.iter().filter(|row| row.starts_with("W|")).count(),
+        1,
+        "the successful build's warning should be retained exactly once"
+    );
+
+    let error_fields: Vec<_> = rows[0].split('|').collect();
+    assert_eq!(error_fields.len(), 5);
+    assert_eq!(error_fields[0], "E");
+    assert_eq!(error_fields[1], "MOTH-CONFIG-0001");
+    assert_eq!(
+        error_fields[4],
+        "Invalid value 'bad_style' for config setting 'page_url_style'. Expected 'trailing_slash', 'no_trailing_slash', or 'ignore'."
+    );
+
+    let warning_fields: Vec<_> = rows[1].split('|').collect();
+    assert_eq!(warning_fields.len(), 5);
+    assert_eq!(warning_fields[0], "W");
+    assert_eq!(warning_fields[1], "MOTH-RULE-0021");
+    assert_eq!(
+        warning_fields[4],
+        "Identifier 'dev_warning' should use CamelCase"
+    );
+    assert!(
+        rows[0].starts_with("E|") && rows[1].starts_with("W|"),
+        "the config error should render before the build warning"
+    );
+
+    let html = build_state
+        .last_error_html
+        .as_ref()
+        .expect("site-config failure should publish an error page");
+    assert_eq!(html.matches("<article class=\"diagnostic\"").count(), 2);
+    assert_eq!(
+        html.matches("data-diagnostic-code=\"MOTH-CONFIG-0001\"")
+            .count(),
+        1
+    );
+    assert_eq!(
+        html.matches("data-diagnostic-code=\"MOTH-RULE-0021\"")
+            .count(),
+        1
+    );
+    assert!(
+        html.find("data-diagnostic-code=\"MOTH-CONFIG-0001\"")
+            .expect("error page should render config error first")
+            < html
+                .find("data-diagnostic-code=\"MOTH-RULE-0021\"")
+                .expect("error page should render warning after config error"),
+        "the config error card should precede the warning card"
     );
 }
 
@@ -670,13 +770,14 @@ fn project_build_executor_preserves_non_utf8_entry_path_as_file_failure() {
         ProjectBuilder::new(HtmlProjectBuilder::new()),
         BuildConfigInputSet::new(),
     );
-    let messages = match executor.build(&entry_file, &[]) {
+    let failure = match executor.build(&entry_file, &[]) {
         Ok(_) => panic!("an unrepresentable entry path must not reach compilation"),
-        Err(messages) => messages,
+        Err(failure) => failure,
     };
-    let error = messages
-        .primary_infrastructure_error()
-        .expect("invalid host encoding must retain its filesystem failure");
+    let error = &failure
+        .infrastructure_errors()
+        .expect("invalid host encoding must retain its filesystem failure")
+        .primary;
     assert_eq!(error.error_type, ErrorType::File);
     assert_eq!(error.host_path.as_deref(), Some(entry_file.as_path()));
 }
@@ -721,11 +822,16 @@ fn project_build_executor_preserves_warnings_when_output_write_fails() {
     );
 
     assert_eq!(messages.error_count(), 1);
-    let warnings: Vec<_> = messages.warnings().collect();
-    assert_eq!(warnings.len(), 1);
-    let error = messages
-        .primary_infrastructure_error()
-        .expect("output write failure should be wrapped for rendering");
+    assert_eq!(messages.warning_count(), 1);
+    let mut warnings = messages.reports.iter_severity(DiagnosticSeverity::Warning);
+    let (warning_report, warning) = warnings
+        .next()
+        .expect("failed output write should preserve its warning");
+    assert!(warnings.next().is_none());
+    let error = &messages
+        .infrastructure_errors()
+        .expect("output write failure should be wrapped for rendering")
+        .primary;
     assert_eq!(
         error.host_path.as_deref(),
         Some(Path::new("../escape.js")),
@@ -736,7 +842,9 @@ fn project_build_executor_preserves_warnings_when_output_write_fails() {
         "path-only output failures must not fabricate a source excerpt"
     );
     assert!(
-        warnings[0].primary_span.is_none(),
+        DiagnosticRenderContext::for_report(warning_report)
+            .site_position(warning.primary_site())
+            .is_none(),
         "synthetic warnings must not fabricate a source span"
     );
 }
@@ -971,9 +1079,8 @@ fn failed_dev_build_still_drains_timing_snapshot() {
     let root = _temp.path().to_path_buf();
 
     let state = Arc::new(DevServerState::new(root.join("dev")));
-    let mut executor = FakeExecutor::new(vec![Err(dev_server_error_messages(
-        &root.join("main.moth"),
-        "synthetic failure",
+    let mut executor = FakeExecutor::new(vec![Err(into_boundary_failure(
+        dev_server_error_messages(&root.join("main.moth"), "synthetic failure"),
     ))]);
 
     let report =
@@ -1392,33 +1499,37 @@ impl DevBuildExecutor for RecordingProjectExecutor {
         &mut self,
         entry_file: &Path,
         flags: &[crate::compiler_frontend::Flag],
-    ) -> Result<BuildResult, CompilerMessages> {
-        use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
-        use crate::compiler_frontend::compiler_messages::{
-            DiagnosticPayload, InvalidFallibleHandlingReason,
-        };
-
+    ) -> Result<BuildResult, BoundaryFailure> {
         let result = self.inner.build(entry_file, flags);
         if let Err(messages) = &result {
-            let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
-            assert_eq!(
-                diagnostics.len(),
-                1,
-                "one invalid export should be diagnosed"
+            let mut diagnostics = messages.reports.iter_severity(DiagnosticSeverity::Error);
+            let (report, diagnostic) = diagnostics
+                .next()
+                .expect("one invalid export should have an error report");
+            assert!(
+                diagnostics.next().is_none(),
+                "one invalid export should produce exactly one diagnostic"
             );
             assert_eq!(
-                diagnostics[0].identity().reason_key,
+                diagnostic.reason_key(),
                 Some("invalid_fallible_handling.unhandled_builtin_failure_in_exported_function"),
             );
-            let DiagnosticPayload::InvalidFallibleHandling {
-                reason:
-                    InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness },
-            } = &diagnostics[0].payload
-            else {
-                panic!("expected structured export failure: {:?}", diagnostics[0]);
-            };
-            assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
-            assert!(witness.origin_span.is_some());
+            let mut origin_labels = diagnostic
+                .durable_labels()
+                .filter(|label| matches!(label.message, DurableLabelMessage::BuiltinFailureOrigin));
+            let origin = origin_labels
+                .next()
+                .expect("invalid export should retain its builtin failure origin label");
+            assert!(
+                origin_labels.next().is_none(),
+                "invalid export should have exactly one builtin failure origin label"
+            );
+            assert!(
+                DiagnosticRenderContext::for_report(report)
+                    .site_position(origin.site)
+                    .is_some(),
+                "the builtin failure origin label should retain a resolvable source site"
+            );
         }
         result
     }
@@ -1427,7 +1538,7 @@ impl DevBuildExecutor for RecordingProjectExecutor {
         &mut self,
         build_result: &mut BuildResult,
         entry_file: &Path,
-    ) -> Result<OutputWriteSummary, CompilerMessages> {
+    ) -> Result<OutputWriteSummary, BoundaryFailure> {
         let summary = self.inner.write_outputs(build_result, entry_file)?;
         self.last_write = Some(summary.clone());
         Ok(summary)

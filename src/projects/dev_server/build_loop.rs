@@ -15,7 +15,7 @@ use crate::compiler_frontend::compiler_errors::{
     BoundaryFailure, CompilerError, CompilerErrorMetadataKey, CompilerMessages, ErrorType,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
-use crate::compiler_frontend::display_messages::print_compiler_messages;
+use crate::compiler_frontend::display_messages::print_boundary_messages;
 use crate::projects::dev_server::error_page::{
     format_compiler_messages, render_compiler_error_page, render_runtime_error_page,
 };
@@ -37,7 +37,7 @@ pub struct BuildCycleReport {
     pub build_duration: Duration,
     pub clients_notified: usize,
     pub watch_scope: Option<watch::WatchScope>,
-    pub success_messages: Option<CompilerMessages>,
+    pub success_messages: Option<BoundaryFailure>,
     /// Drained timing observations for this cycle, rendered by the caller
     /// after its own status line.
     #[cfg(feature = "timers")]
@@ -61,7 +61,7 @@ struct BuildOutcome {
     /// so the dev-server terminal can show complete warnings after a successful rebuild.
     /// WHY: `diagnostics_summary` is intentionally brief for SSE/state consumers; terminal output
     /// needs the full diagnostic cards without rebuilding them from summary titles.
-    success_messages: Option<CompilerMessages>,
+    success_messages: Option<BoundaryFailure>,
     failed_build: Option<BuildFailure>,
     watch_scope: Option<watch::WatchScope>,
     output_dir: Option<PathBuf>,
@@ -76,14 +76,13 @@ enum BuildFailure {
 /// Keeping this contract small makes the watch/build coordination testable while still delegating
 /// real work to the core build APIs.
 pub trait DevBuildExecutor: Send {
-    fn build(&mut self, entry_file: &Path, flags: &[Flag])
-    -> Result<BuildResult, CompilerMessages>;
+    fn build(&mut self, entry_file: &Path, flags: &[Flag]) -> Result<BuildResult, BoundaryFailure>;
 
     fn write_outputs(
         &mut self,
         build_result: &mut BuildResult,
         entry_file: &Path,
-    ) -> Result<OutputWriteSummary, CompilerMessages>;
+    ) -> Result<OutputWriteSummary, BoundaryFailure>;
 }
 pub struct ProjectBuildExecutor {
     builder: ProjectBuilder,
@@ -100,17 +99,13 @@ impl ProjectBuildExecutor {
     }
 }
 impl DevBuildExecutor for ProjectBuildExecutor {
-    fn build(
-        &mut self,
-        entry_file: &Path,
-        flags: &[Flag],
-    ) -> Result<BuildResult, CompilerMessages> {
+    fn build(&mut self, entry_file: &Path, flags: &[Flag]) -> Result<BuildResult, BoundaryFailure> {
         let entry_path = entry_file.to_str().ok_or_else(|| {
             let error = CompilerError::file_error(
                 entry_file,
                 "Dev server entry path contains invalid UTF-8 and cannot be compiled.",
             );
-            CompilerMessages::from_error(error, Default::default())
+            into_boundary_failure(CompilerMessages::from_error(error, Default::default()))
         })?;
 
         build::build_project(&self.builder, entry_path, flags, &self.build_config_inputs)
@@ -120,7 +115,7 @@ impl DevBuildExecutor for ProjectBuildExecutor {
         &mut self,
         build_result: &mut BuildResult,
         entry_file: &Path,
-    ) -> Result<OutputWriteSummary, CompilerMessages> {
+    ) -> Result<OutputWriteSummary, BoundaryFailure> {
         let output_result = crate::timed_stage!(crate::timing::TimingMetric::BuildOutputTotal, {
             let output_plan = if let Some(plan) = build_result.directory_output_plan.as_ref() {
                 OutputPlan::Directory(plan.clone())
@@ -281,9 +276,8 @@ pub fn run_builds_until_stable(
                 Blue report.clients_notified,
                 Reset " clients."
             );
-
             if let Some(messages) = report.success_messages {
-                print_compiler_messages(messages);
+                print_boundary_messages(&messages);
             }
         } else {
             say!(
@@ -379,7 +373,7 @@ pub fn run_watch_build_loop(
 fn build_once(
     executor: &mut dyn DevBuildExecutor,
     entry_file: &Path,
-    compiled: Result<BuildResult, CompilerMessages>,
+    compiled: Result<BuildResult, BoundaryFailure>,
     start: std::time::Instant,
 ) -> BuildOutcome {
     let build_result_outcome = compiled.and_then(|mut build_result| {
@@ -391,8 +385,7 @@ fn build_once(
 
     let mut build_result = match build_result_outcome {
         Ok(build_result) => build_result,
-        Err(messages) => {
-            let failure = into_boundary_failure(messages);
+        Err(failure) => {
             return BuildOutcome {
                 build_succeeded: false,
                 build_duration,
@@ -429,17 +422,8 @@ fn build_once(
         match parse_html_site_config(&build_result.config, &mut build_result.string_table) {
             Ok(config) => config,
             Err(error) => {
-                let config_string_table = build_result.string_table.clone();
-                let config_source_database = build_result.source_database.as_ref().map(Arc::clone);
-                let mut messages = error.into_messages(config_string_table);
-                if let Some(source_database) = config_source_database {
-                    messages.set_source_database(source_database);
-                }
-                if let Some(warnings) = build_result.take_warning_messages_before_freeze() {
-                    messages.append_messages_preserving_context(warnings);
-                }
-                messages.mark_frozen();
-                let failure = into_boundary_failure(messages);
+                let messages = error.into_messages(build_result.string_table.clone());
+                let failure = build_result.take_output_failure_messages(messages);
                 return BuildOutcome {
                     build_succeeded: false,
                     build_duration,
@@ -470,7 +454,7 @@ fn build_once(
 
         let success_messages = match build_result.take_warning_messages() {
             Some(messages) if messages.has_errors() => {
-                let failure = into_boundary_failure(messages);
+                let failure = messages;
                 return BuildOutcome {
                     build_succeeded: false,
                     build_duration,
@@ -505,13 +489,8 @@ fn build_once(
             CompilerErrorMetadataKey::CompilationStage,
             "Dev entry publication".to_string(),
         );
-        let mut messages = CompilerMessages::from_error(error, Default::default());
-        if let Some(mut warnings) = build_result.take_warning_messages_before_freeze() {
-            warnings.append_messages_preserving_context(messages);
-            messages = warnings;
-        }
-        messages.mark_frozen();
-        let failure = into_boundary_failure(messages);
+        let messages = CompilerMessages::from_error(error, Default::default());
+        let failure = build_result.take_output_failure_messages(messages);
         let diagnostics_summary = format_compiler_messages(&failure);
         BuildOutcome {
             build_succeeded: false,

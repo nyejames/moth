@@ -5,7 +5,8 @@
 use super::*;
 use crate::build_system::build::{ProjectBuilder, build_project};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
+use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terse};
+use crate::compiler_frontend::compiler_messages::{DiagnosticCategory, DiagnosticSeverity};
 use std::fs;
 use std::path::PathBuf;
 
@@ -35,17 +36,26 @@ fn html_project_directives_fail_when_builder_does_not_register_them() {
         let Err(messages) = result else {
             panic!("project-owned directives should fail when not registered");
         };
-        assert!(
-            messages.error_diagnostics().any(|diagnostic| matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidStyleDirective { directive_name: name, .. }
-                    if messages.string_table.resolve(*name) == directive_name
-            )),
-            "expected unsupported directive error for '${directive_name}', got: {:?}",
-            messages
-                .error_diagnostics()
-                .map(|diagnostic| &diagnostic.payload)
-                .collect::<Vec<_>>()
+        let (report, view) = messages
+            .reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .next()
+            .expect("unsupported directive should have an error report");
+        assert_eq!(view.category(), DiagnosticCategory::Syntax);
+        assert_eq!(view.descriptor().code, "MOTH-SYNTAX-0010");
+        let rendered =
+            terse::format_terse_diagnostic_view(view, DiagnosticRenderContext::for_report(report));
+        let message = rendered
+            .split('|')
+            .nth(4)
+            .expect("terse diagnostic should include its message field");
+        let (directive_message, _) = message
+            .split_once(" Registered directives are ")
+            .expect("unsupported style directive message should list registered directives");
+        assert_eq!(
+            directive_message,
+            format!("Style directive '${directive_name}' is unsupported here."),
+            "expected unsupported directive error for '${directive_name}', got: {message}"
         );
     }
 }

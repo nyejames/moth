@@ -21,7 +21,7 @@ use moth::projects::{
     BuildCommandLocation, BuildConfigInputDuplicate, BuildConfigInputEntry, BuildConfigInputSet,
     BuildConfigInputValue, BuildConfigValueLocation, BuildInputName, BuildInputValueError, Flag,
     HtmlProjectBuilder, ProjectBuilder, ProjectCommandCompletion, ProjectCommandStatus,
-    print_compiler_messages, print_terse_compiler_messages,
+    print_boundary_messages, print_terse_boundary_messages,
 };
 use saying::say;
 use std::{env, process};
@@ -278,7 +278,7 @@ pub fn start_cli() -> process::ExitCode {
                         CommandStatus::Success
                     }
                     Err(messages) => {
-                        print_compiler_messages(messages);
+                        print_boundary_messages(&messages);
                         CommandStatus::Failure
                     }
                 },
@@ -302,7 +302,7 @@ pub fn start_cli() -> process::ExitCode {
                             ) {
                                 Ok(_) => CommandStatus::Success,
                                 Err(messages) => {
-                                    print_compiler_messages(messages);
+                                    print_boundary_messages(&messages);
                                     CommandStatus::Failure
                                 }
                             }
@@ -373,16 +373,16 @@ fn render_build_outcome(report: BuildCommandReport) {
         } => {
             print_build_success_message(output_file_count, report.duration);
             if let Some(messages) = warnings {
-                print_compiler_messages(messages);
+                print_boundary_messages(&messages);
             }
         }
-        BuildCommandOutcome::Failure { messages, .. } => print_compiler_messages(messages),
+        BuildCommandOutcome::Failure { messages, .. } => print_boundary_messages(&messages),
     }
 }
 
 fn render_check_outcome(report: CheckCommandReport, terse: bool) {
     if terse {
-        print_terse_compiler_messages(report.messages);
+        print_terse_boundary_messages(&report.messages);
         println!(
             "{}",
             format_terse_summary_line(report.duration, report.error_count, report.warning_count)
@@ -392,7 +392,7 @@ fn render_check_outcome(report: CheckCommandReport, terse: bool) {
         say!(success_message(report.duration));
         say!(Bold Green "No errors or warnings");
     } else {
-        print_compiler_messages(report.messages);
+        print_boundary_messages(&report.messages);
     }
 }
 

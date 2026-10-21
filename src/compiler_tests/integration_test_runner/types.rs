@@ -5,7 +5,6 @@
 use crate::build_system::build::BuildResult;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_messages::compiler_errors::BoundaryFailure;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -347,9 +346,7 @@ impl CaseExecutionResult {
             return;
         };
 
-        self.messages = build_result
-            .take_warning_messages()
-            .map(into_boundary_failure);
+        self.messages = build_result.take_warning_messages();
         if self
             .messages
             .as_ref()

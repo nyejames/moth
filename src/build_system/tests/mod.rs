@@ -14,8 +14,7 @@ use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, InvalidConfigReason, NameNamespace,
-    NamingConvention, RuleDiagnosticKind,
+    CompilerDiagnostic, DiagnosticPayload, InvalidConfigReason, NamingConvention,
 };
 use crate::compiler_frontend::module_compilation::ModuleRootActivity;
 use crate::compiler_frontend::source::SourceSpan;
@@ -220,18 +219,6 @@ fn html_project(output_files: Vec<OutputFile>, entry_page_rel: Option<PathBuf>) 
 
 fn naming_convention_warning(name: StringId, span: Option<SourceSpan>) -> CompilerDiagnostic {
     CompilerDiagnostic::identifier_naming_convention(name, NamingConvention::CamelCase, span)
-}
-
-fn unknown_name_error(
-    name: StringId,
-    namespace: NameNamespace,
-    span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::new(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
-        span,
-        DiagnosticPayload::UnknownName { name, namespace },
-    )
 }
 
 struct WarningBuilder;
@@ -512,9 +499,8 @@ impl BackendBuilder for MultiModuleDiagnosticBuilder {
             .expect("directory build should discover docs module");
 
         let warning = naming_convention_warning(string_table.get_or_intern("x".to_string()), None);
-        let error = unknown_name_error(
+        let error = CompilerDiagnostic::unknown_value_name(
             string_table.get_or_intern("homepage diagnostic".to_string()),
-            NameNamespace::Value,
             None,
         );
 

@@ -17,7 +17,8 @@ use crate::build_system::path_validation::check_if_valid_path;
 use crate::capture_command_duration;
 use crate::command_timing_scope;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerMessages};
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::finish_command_timing;
 use crate::projects::{ProjectCommandCompletion, ProjectCommandStatus, ProjectDiagnosticCounts};
@@ -25,7 +26,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 struct CheckOutcome {
-    messages: CompilerMessages,
+    messages: BoundaryFailure,
     status: ProjectCommandStatus,
 }
 
@@ -35,7 +36,7 @@ pub struct CheckCommandReport {
     pub status: ProjectCommandStatus,
     pub error_count: usize,
     pub warning_count: usize,
-    pub messages: CompilerMessages,
+    pub messages: BoundaryFailure,
 }
 
 fn attach_source_database_if_missing(
@@ -126,7 +127,7 @@ fn run_check_for_tests(
 fn check_completion(outcome: &CheckOutcome) -> ProjectCommandCompletion {
     ProjectCommandCompletion {
         status: outcome.status,
-        diagnostic_counts: ProjectDiagnosticCounts::from_messages(&outcome.messages),
+        diagnostic_counts: ProjectDiagnosticCounts::from_failure(&outcome.messages),
     }
 }
 
@@ -135,15 +136,29 @@ fn execute_check(
     build_config_inputs: &BuildConfigInputSet,
     project_builder: &ProjectBuilder,
 ) -> CheckOutcome {
+    let messages = match execute_check_messages(path, build_config_inputs, project_builder) {
+        Ok(messages) | Err(messages) => messages,
+    };
+    let messages = into_boundary_failure(messages);
+    let status = if messages.has_errors() {
+        ProjectCommandStatus::Failure
+    } else {
+        ProjectCommandStatus::Success
+    };
+    CheckOutcome { messages, status }
+}
+
+fn execute_check_messages(
+    path: &str,
+    build_config_inputs: &BuildConfigInputSet,
+    project_builder: &ProjectBuilder,
+) -> Result<CompilerMessages, CompilerMessages> {
     let normalized_path = normalize_entry_path(path);
 
     let valid_path = match check_if_valid_path(normalized_path) {
         Ok(path) => path,
         Err(error) => {
-            return CheckOutcome {
-                messages: CompilerMessages::from_error(error, StringTable::new()),
-                status: ProjectCommandStatus::Failure,
-            };
+            return Err(CompilerMessages::from_error(error, StringTable::new()));
         }
     };
 
@@ -155,17 +170,9 @@ fn execute_check(
         validated_directory_output_settings,
         mut project_source_files,
         build_config_inputs,
-    } = match bootstrap_project_build(project_builder, valid_path, build_config_inputs) {
-        Ok(bootstrap) => bootstrap,
-        Err(messages) => {
-            return CheckOutcome {
-                messages,
-                status: ProjectCommandStatus::Failure,
-            };
-        }
-    };
+    } = bootstrap_project_build(project_builder, valid_path, build_config_inputs)?;
 
-    let messages = match compile_project_frontend_with_inputs(
+    match compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
         validated_directory_output_settings.as_ref(),
@@ -180,24 +187,17 @@ fn execute_check(
             let facade_messages = validate_frontend_facade_boundaries(&frontend)
                 .err()
                 .map(ProjectAssemblyError::into_owned_messages);
-            frontend.into_render_messages(
+            Ok(frontend.into_render_messages(
                 &mut string_table,
                 project_source_files.take(),
                 facade_messages,
-            )
+            ))
         }
         Err(mut messages) => {
             attach_source_database_if_missing(&mut messages, project_source_files.as_ref());
-            messages
+            Err(messages)
         }
-    };
-
-    let status = if messages.error_count() > 0 {
-        ProjectCommandStatus::Failure
-    } else {
-        ProjectCommandStatus::Success
-    };
-    CheckOutcome { messages, status }
+    }
 }
 
 fn normalize_entry_path(path: &str) -> &str {

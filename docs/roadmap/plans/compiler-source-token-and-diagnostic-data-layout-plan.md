@@ -108,13 +108,14 @@ ACTIVE_PLAN:
 - Execution order: Phase 4 runs as the steps in `PHASE_4_EXECUTION_ORDER` below. The slice
   checklists remain the acceptance contract. Only their order and grouping changed, under the
   architecture document's repository-discovered corrections rule.
-- NEXT_SUBSTEP: P4.5 slice S3 of `PHASE_4_5_SEQUENCE`, the boundary cut (4D, 4E, 4F and the 4H
-  boundary items), at sub-slice S3.3; S3.3a–S3.3c and S3.4 land as one checkpoint. S1 is accepted
-  in the checkpoints "Phase 4 P4.5 S1a: frozen diagnostic report types" through "Phase 4 P4.5 S1c:
-  draft string and path ID remaps", S2 in "Phase 4 P4.5 S2: diagnostic freeze side", S3.1 in
-  "Phase 4 P4.5 S3.1: legacy-to-boundary converter" and S3.2 in "Phase 4 P4.5 S3.2: renderers read
-  frozen reports". The CP0 pre-flight re-verified the sequence against the post-P4.4 tree; after
-  S1 the boundary cut moved ahead of owning-site capture (see the sequence note).
+- NEXT_SUBSTEP: P4.5 slice S4 of `PHASE_4_5_SEQUENCE`, the canonical merge, at sub-slice S4a. S1
+  is accepted in the checkpoints "Phase 4 P4.5 S1a: frozen diagnostic report types" through "Phase
+  4 P4.5 S1c: draft string and path ID remaps", S2 in "Phase 4 P4.5 S2: diagnostic freeze side",
+  and S3 (the boundary cut) in "Phase 4 P4.5 S3.1: legacy-to-boundary converter", "Phase 4 P4.5
+  S3.2: renderers read frozen reports" and "Phase 4 P4.5 S3.3: exits return frozen reports" (S3.3a–
+  S3.3c and S3.4 landed together). The CP0 pre-flight re-verified the sequence against the
+  post-P4.4 tree; after S1 the boundary cut moved ahead of owning-site capture (see the sequence
+  note).
   P4.4 (the schema side of 4G1–4G8) is accepted in the checkpoints "Phase 4 P4.4 prep" through
   "Phase 4 P4.4 close: every family on a full row": every family has a full row, a mirror
   constructor, a typed view, a legacy-adapter arm and a view renderer, while producers still build
@@ -158,7 +159,7 @@ while bags still held `CompilerDiagnostic`; the boundary cut therefore moved ahe
 | S1 | additive, unit-tested types: `DiagnosticReport`, `DiagnosticReportSet` with `DiagnosticRun`, `SeverityCounts`, `BoundaryFailure`; `TypeDisplaySnapshot::append` and draft type-display rebasing; draft fact, extra and label ID remaps |
 | S2 | additive, unit-tested freeze side: `PendingDiagnostics` with per-domain accumulators and canonical segments; an infallible `freeze` that compacts one store per domain and records runs; domain owners (owned sources, or a shared path table with no sources); type-display capacity failures reported as `CompilerCapacityExceeded` |
 | S3 [G] | boundary cut in sub-slices S3.1–S3.4: S3.1 adds the one legacy-to-compact converter (`into_boundary_failure`), test-only; S3.2 makes terminal, terse, dev-server, test-runner and benchmark rendering read `DiagnosticView` and deletes every legacy freeze, `RenderFrozenContext` and `diagnostic_display_order` (the vessel records only whether legacy would have frozen it); S3.3a–S3.3c move the exits (the `BuildResult` take functions, `build_project`, check, benchmark, boracle single-file) to `BoundaryFailure`; S3.4 deletes the remaining per-diagnostic legacy accessors |
-| S4 [G] | canonical merge: `PendingDiagnostics` accumulates module batches; freeze at canonical failure aggregation and after the build's last producer; `BoundaryPremergeFailure`, `transient_batches` and `trailing_project_messages` retire |
+| S4 [G] | canonical merge in sub-slices S4a–S4d: S4a adds one run-scoped accumulator that takes each legacy part and freezes once, proven equal to vessel merging; S4b moves the canonical frontend tail and terminal premerge failures to it; S4c moves build warnings, backend failures and late output failures; S4d moves check, benchmark, boracle and the dev server. `PendingDiagnostics` accumulates module batches; freeze at canonical failure aggregation and after the build's last producer; `BoundaryPremergeFailure`, `transient_batches` and `trailing_project_messages` retire |
 | S5 [G] | `ModuleCompilationOutcome::Diagnosed` and `PremergeFailure` carry `PreparedDiagnosticBatch`; `module_diagnostics.rs` and `PremergeDiagnosticBatch` retire; module warnings become drafts beside `ModuleSemanticResult` |
 | S6 [G] | the AST/HIR error channel becomes a draft bag; owning sites capture types before their environment drops; `RenderTypeContext`, environment retention and the type-display fallbacks go |
 | S7 [G] | delete `CompilerMessages`, the remaining `Render*Context` types and boundary types; build-result items; probe and metric re-homing |

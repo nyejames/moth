@@ -77,9 +77,11 @@
 //! CompilerMessages (ordered diagnostics + render contexts + transitional StringTable)
 //! ```
 
+use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+#[cfg(test)]
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
@@ -484,6 +486,7 @@ impl CompilerMessages {
             .map(|errors| &errors.primary)
     }
 
+    #[cfg(test)]
     pub(crate) fn infrastructure_errors(&self) -> Option<&InfrastructureErrors> {
         self.infrastructure_errors.as_deref()
     }
@@ -503,6 +506,7 @@ impl CompilerMessages {
         }
     }
 
+    #[cfg(test)]
     pub fn has_errors(&self) -> bool {
         self.infrastructure_errors.is_some()
             || self
@@ -512,6 +516,7 @@ impl CompilerMessages {
     }
 
     /// Count diagnostics with `Error` severity.
+    #[cfg(test)]
     pub fn error_count(&self) -> usize {
         self.diagnostics
             .iter()
@@ -521,6 +526,7 @@ impl CompilerMessages {
     }
 
     /// Count diagnostics with `Warning` severity.
+    #[cfg(test)]
     pub fn warning_count(&self) -> usize {
         self.diagnostics
             .iter()
@@ -528,6 +534,7 @@ impl CompilerMessages {
             .count()
     }
 
+    #[cfg(test)]
     pub fn has_warnings(&self) -> bool {
         self.diagnostics
             .iter()
@@ -586,14 +593,6 @@ impl CompilerMessages {
     #[cfg(test)]
     pub(crate) fn first_error(&self) -> Option<&CompilerDiagnostic> {
         self.error_diagnostics().next()
-    }
-
-    /// Iterate over diagnostics with `Warning` severity.
-    #[cfg(test)]
-    pub(crate) fn warnings(&self) -> impl Iterator<Item = &CompilerDiagnostic> {
-        self.diagnostics
-            .iter()
-            .filter(|d| d.severity == DiagnosticSeverity::Warning)
     }
 
     /// Wrap a single `CompilerDiagnostic` into a `CompilerMessages` container with no warnings.

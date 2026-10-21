@@ -99,10 +99,8 @@ pub mod projects {
     };
     pub use crate::compiler_frontend::compiler_errors::BoundaryFailure;
     pub use crate::compiler_frontend::compiler_errors::CompilerError;
-    pub use crate::compiler_frontend::compiler_errors::CompilerMessages;
     pub use crate::compiler_frontend::display_messages::{
-        print_boundary_messages, print_compiler_messages, print_terse_boundary_messages,
-        print_terse_compiler_messages,
+        print_boundary_messages, print_terse_boundary_messages,
     };
     pub use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 
@@ -126,16 +124,14 @@ pub mod projects {
     }
 
     impl ProjectDiagnosticCounts {
-        pub(crate) fn from_messages(
-            messages: &CompilerMessages,
-        ) -> Option<ProjectDiagnosticCounts> {
-            if messages.has_infrastructure_error() {
+        pub(crate) fn from_failure(failure: &BoundaryFailure) -> Option<ProjectDiagnosticCounts> {
+            if failure.has_infrastructure_error() {
                 return None;
             }
 
             Some(ProjectDiagnosticCounts {
-                errors: messages.error_count(),
-                warnings: messages.warning_count(),
+                errors: failure.error_count(),
+                warnings: failure.warning_count(),
             })
         }
     }

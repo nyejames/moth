@@ -14,13 +14,22 @@ use crate::compiler_frontend::analysis::borrow_checker::{
 #[cfg(test)]
 use crate::compiler_frontend::analysis::borrow_checker::{BoracleModuleReport, solve_hir_module};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::module_compilation::BoracleModuleInput;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 
 /// Run the feature-gated Boracle source service for one single-file entry.
 pub fn run_boracle(
+    path: &str,
+    dump: BoracleDump,
+    rule_selection: BoracleRuleSelection,
+) -> Result<String, BoundaryFailure> {
+    run_boracle_with_messages(path, dump, rule_selection).map_err(into_boundary_failure)
+}
+
+fn run_boracle_with_messages(
     path: &str,
     dump: BoracleDump,
     rule_selection: BoracleRuleSelection,
