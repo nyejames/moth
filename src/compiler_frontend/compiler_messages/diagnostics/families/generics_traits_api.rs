@@ -7,8 +7,8 @@
 use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayId;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
-    CountFact, FactCapacityError, FactCodec, OptStringFact, OptTokenFact, OptTypeFact, OptUnitFact,
-    StringFact, TypeFact, UnitCode, UnitFact, unit_code,
+    CountFact, FactCapacityError, FactCodec, IdRemap, OptStringFact, OptTokenFact, OptTypeFact,
+    OptUnitFact, StringFact, TypeFact, UnitCode, UnitFact, unit_code,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelMessageCode;
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
@@ -692,6 +692,21 @@ impl FactCodec for GenericInstantiationFact {
             }
         }
     }
+
+    fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        let code = InvalidGenericInstantiationCode::from_code(words[0])
+            .expect("a stored generic instantiation names a valid code");
+        match code {
+            // Two count words precede the type name in a wrong-argument-count shape.
+            InvalidGenericInstantiationCode::WrongArgumentCount => {
+                OptStringFact::remap_ids(&mut words[3..4], remap)
+            }
+            // Inference evidence holds unit and type words only.
+            InvalidGenericInstantiationCode::ConflictingInference => Ok(()),
+            // Every other shape keeps its optional type name in word 1.
+            _ => OptStringFact::remap_ids(&mut words[1..2], remap),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1256,6 +1271,10 @@ impl FactCodec for InvalidTraitConformanceFact {
             },
             Code::InferredFailureInInfallibleCast => Shape::InferredFailureInInfallibleCast,
         })
+    }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
     }
 }
 

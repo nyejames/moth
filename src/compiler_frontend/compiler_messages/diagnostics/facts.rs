@@ -10,8 +10,8 @@ use crate::compiler_frontend::compiler_messages::DiagnosticPlace;
 use crate::compiler_frontend::compiler_messages::DiagnosticToken;
 use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayId;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::symbols::path_interner::PathId;
-use crate::compiler_frontend::symbols::string_interning::StringId;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use std::cell::Cell;
 use std::marker::PhantomData;
 
@@ -47,6 +47,67 @@ pub(crate) trait FactCodec {
 
     fn encode(draft: &Self::Draft, words: &mut [u32]) -> Result<(), FactCapacityError>;
     fn decode(words: &[u32]) -> Option<Self::Durable>;
+
+    /// Rewrites the identity words this codec stores into another string table or path interner.
+    /// A codec with no identity words leaves them unchanged.
+    fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError>;
+}
+
+/// The identity remap one draft's words are rewritten through. A remap owns one kind of word and leaves the
+/// other kind alone: a string remap never touches path words, and a path remap never touches string words.
+#[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+#[derive(Clone, Copy)]
+pub(crate) enum IdRemap<'a> {
+    Strings(&'a StringIdRemap),
+    Paths(&'a PathIdRemap),
+}
+
+impl IdRemap<'_> {
+    /// Rewrites one string word.
+    pub(super) fn rewrite_string(self, word: &mut u32) -> Result<(), FactCapacityError> {
+        if let Self::Strings(remap) = self {
+            *word = string_word(remap.get(StringId::from_index(*word)))?;
+        }
+        Ok(())
+    }
+
+    /// Rewrites one path word.
+    pub(super) fn rewrite_path(self, word: &mut u32) -> Result<(), FactCapacityError> {
+        if let Self::Paths(remap) = self {
+            let old = PathId::try_from_index(*word as usize)
+                .expect("a stored path word names an interned path");
+            *word = path_word(remap.get(old))?;
+        }
+        Ok(())
+    }
+
+    /// Rewrites the string payload of a token's two words.
+    pub(super) fn rewrite_token(self, words: &mut [u32]) {
+        if let Self::Strings(remap) = self {
+            let mut token = DiagnosticToken::from_raw_words([words[0], words[1]])
+                .expect("a stored token decodes to a token");
+            token.remap_string_ids(remap);
+            words.copy_from_slice(&token.raw_words());
+        }
+    }
+
+    /// Rewrites the name or path a place word holds. Unknown and absent places hold no identity.
+    pub(super) fn rewrite_place(self, word: &mut u32) -> Result<(), FactCapacityError> {
+        let value = *word & PLACE_VALUE_MASK;
+        match (*word >> PLACE_TAG_SHIFT, self) {
+            (PLACE_LOCAL_TAG, Self::Strings(remap)) => {
+                let name = remap.get(StringId::from_index(value));
+                *word = place_word(PLACE_LOCAL_TAG, name.index() as usize)?;
+            }
+            (PLACE_PATH_TAG, Self::Paths(remap)) => {
+                let old = PathId::try_from_index(value as usize)
+                    .expect("a stored place path names an interned path");
+                *word = place_word(PLACE_PATH_TAG, remap.get(old).index())?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
 }
 
 /// A unit enum stored as one word. Codes are small non-zero integers chosen by the enum's `unit_code!` table.
@@ -129,6 +190,15 @@ pub(super) fn pending_type_word(id: TypeId) -> Result<u32, FactCapacityError> {
     Ok(id.0)
 }
 
+/// Encodes a path id as its zero-based index. `u32::MAX` is never a valid index, so it stays free as a sentinel.
+pub(super) fn path_word(id: PathId) -> Result<u32, FactCapacityError> {
+    let index = u32::try_from(id.index()).map_err(|_| FactCapacityError)?;
+    if index == u32::MAX {
+        return Err(FactCapacityError);
+    }
+    Ok(index)
+}
+
 fn place_word(tag: u32, value: usize) -> Result<u32, FactCapacityError> {
     let value = u32::try_from(value).map_err(|_| FactCapacityError)?;
     if value > PLACE_VALUE_MASK {
@@ -152,6 +222,11 @@ impl FactCodec for TokenFact {
 
     fn decode(words: &[u32]) -> Option<DiagnosticToken> {
         DiagnosticToken::from_raw_words([words[0], words[1]])
+    }
+
+    fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        remap.rewrite_token(words);
+        Ok(())
     }
 }
 
@@ -180,6 +255,13 @@ impl FactCodec for OptTokenFact {
         }
         DiagnosticToken::from_raw_words([words[0], words[1]]).map(Some)
     }
+
+    fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        if *words == ABSENT_TOKEN_WORDS {
+            return Ok(());
+        }
+        TokenFact::remap_ids(words, remap)
+    }
 }
 
 /// A string id that is always present.
@@ -197,6 +279,10 @@ impl FactCodec for StringFact {
 
     fn decode(words: &[u32]) -> Option<StringId> {
         (words[0] != u32::MAX).then(|| StringId::from_index(words[0]))
+    }
+
+    fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        remap.rewrite_string(&mut words[0])
     }
 }
 
@@ -219,6 +305,13 @@ impl FactCodec for OptStringFact {
     fn decode(words: &[u32]) -> Option<Option<StringId>> {
         Some((words[0] != u32::MAX).then(|| StringId::from_index(words[0])))
     }
+
+    fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        if words[0] == u32::MAX {
+            return Ok(());
+        }
+        remap.rewrite_string(&mut words[0])
+    }
 }
 
 /// An interned path. Zero-based, so `u32::MAX` never decodes.
@@ -230,16 +323,16 @@ impl FactCodec for PathFact {
     const WORDS: usize = 1;
 
     fn encode(draft: &PathId, words: &mut [u32]) -> Result<(), FactCapacityError> {
-        let index = u32::try_from(draft.index()).map_err(|_| FactCapacityError)?;
-        if index == u32::MAX {
-            return Err(FactCapacityError);
-        }
-        words[0] = index;
+        words[0] = path_word(*draft)?;
         Ok(())
     }
 
     fn decode(words: &[u32]) -> Option<PathId> {
         PathId::try_from_index(words[0] as usize)
+    }
+
+    fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        remap.rewrite_path(&mut words[0])
     }
 }
 
@@ -259,6 +352,10 @@ impl FactCodec for CountFact {
     fn decode(words: &[u32]) -> Option<usize> {
         Some(words[0] as usize)
     }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
+    }
 }
 
 /// A character as one word. Decoding rejects words that are not Unicode scalar values.
@@ -276,6 +373,10 @@ impl FactCodec for CharFact {
 
     fn decode(words: &[u32]) -> Option<char> {
         char::from_u32(words[0])
+    }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
     }
 }
 
@@ -298,6 +399,10 @@ impl FactCodec for OptCharFact {
         } else {
             char::from_u32(words[0]).map(Some)
         }
+    }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
     }
 }
 
@@ -329,6 +434,10 @@ impl FactCodec for OptCountFact {
             word => Some(Some(word as usize)),
         }
     }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
+    }
 }
 
 /// A type. The draft holds a raw `TypeId`, which compaction rewrites into a type display word.
@@ -347,6 +456,10 @@ impl FactCodec for TypeFact {
 
     fn decode(words: &[u32]) -> Option<TypeDisplayId> {
         type_display_from_word(words[0])
+    }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
     }
 }
 
@@ -372,6 +485,10 @@ impl FactCodec for OptTypeFact {
             NO_TYPE_WORD => Some(None),
             word => type_display_from_word(word).map(Some),
         }
+    }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
     }
 }
 
@@ -425,6 +542,10 @@ impl FactCodec for PlaceFact {
             _ => None,
         }
     }
+
+    fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        remap.rewrite_place(&mut words[0])
+    }
 }
 /// The tag-0 word with value 1; `PlaceFact` emits only tag-0 value 0 or tag-1/tag-2 words.
 pub(super) const ABSENT_PLACE_WORD: u32 = 1;
@@ -454,6 +575,11 @@ impl FactCodec for OptPlaceFact {
             PlaceFact::decode(words).map(Some)
         }
     }
+
+    fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        // The absent word is tag 0 with value 1, which names no place.
+        remap.rewrite_place(&mut words[0])
+    }
 }
 
 /// A unit enum stored as its one-word code.
@@ -471,6 +597,10 @@ impl<T: UnitCode> FactCodec for UnitFact<T> {
 
     fn decode(words: &[u32]) -> Option<T> {
         T::from_code(words[0])
+    }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
     }
 }
 /// An optional unit enum. Zero is absent; `unit_code!` reserves it for absence.
@@ -495,6 +625,10 @@ impl<T: UnitCode> FactCodec for OptUnitFact<T> {
         } else {
             T::from_code(words[0]).map(Some)
         }
+    }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
     }
 }
 

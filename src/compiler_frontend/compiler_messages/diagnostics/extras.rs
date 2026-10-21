@@ -4,6 +4,7 @@
 //! foreign-site and string-id arenas. The draft types that carry this data before compaction live here too.
 //! WHY: the hot record stays 32 bytes, and diagnostics without extra data pay nothing for these arenas.
 
+use super::facts::{FactCapacityError, IdRemap};
 use super::foreign::ForeignSiteDraft;
 use super::labels::{DraftLabel, DraftSubstitution};
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -99,4 +100,32 @@ pub(super) struct DiagnosticExtraDraft {
     /// Entries of generic substitution labels. Each such label's data names a run of these entries.
     pub(super) substitutions: Vec<DraftSubstitution>,
     pub(super) data: ExtraDataDraft,
+}
+
+impl ExtraDataDraft {
+    /// Rewrites the string IDs of a string-list extra. A path remap leaves them as they are.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+    pub(super) fn remap_ids(&mut self, remap: IdRemap<'_>) {
+        if let (Self::StringIds(ids), IdRemap::Strings(strings)) = (self, remap) {
+            for id in ids {
+                *id = strings.get(*id);
+            }
+        }
+    }
+}
+
+impl DiagnosticExtraDraft {
+    /// Rewrites the identity words of this extra part: label and substitution words, then string IDs.
+    /// Foreign sites are not remapped, since their identity belongs to another context.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+    pub(super) fn remap_ids(&mut self, remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        for label in &mut self.labels {
+            label.remap_ids(remap)?;
+        }
+        for substitution in &mut self.substitutions {
+            substitution.remap_ids(remap)?;
+        }
+        self.data.remap_ids(remap);
+        Ok(())
+    }
 }

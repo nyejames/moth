@@ -6,7 +6,7 @@
 //! draft against its row before it writes anything.
 
 use super::extras::ExtraDataKind;
-use super::facts::FactCodec;
+use super::facts::{FactCapacityError, FactCodec, IdRemap};
 use super::labels::LabelMessageCode;
 use super::record::DiagnosticCode;
 use super::view::DiagnosticView;
@@ -18,13 +18,16 @@ use crate::compiler_frontend::compiler_messages::{
 };
 
 /// One fact's storage shape, read from its codec.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 pub(super) struct FactDescriptor {
     pub(super) words: u8,
     /// Relative words that every value of this codec must leave as raw type ids.
     pub(super) required_pending_mask: u8,
     /// Relative words that some value of this codec may leave as raw type ids.
     pub(super) possible_pending_mask: u8,
+    /// Rewrites this codec's identity words through a remap. Other words are left as they are.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+    pub(super) remap_ids: fn(&mut [u32], IdRemap<'_>) -> Result<(), FactCapacityError>,
 }
 
 impl FactDescriptor {
@@ -33,6 +36,7 @@ impl FactDescriptor {
             words: C::WORDS as u8,
             required_pending_mask: C::REQUIRED_PENDING_MASK,
             possible_pending_mask: C::PENDING_MASK,
+            remap_ids: C::remap_ids,
         }
     }
 }

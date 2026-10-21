@@ -7,7 +7,9 @@
 //! fixed-size words, and substitution entries live in the draft's extra part until compaction moves them into
 //! the store.
 
-use super::facts::{FactCapacityError, pending_type_word, string_word, type_display_from_word};
+use super::facts::{
+    FactCapacityError, IdRemap, pending_type_word, string_word, type_display_from_word,
+};
 use super::foreign::SiteRef;
 use super::store::DiagnosticStore;
 use crate::compiler_frontend::build_config::BuildConfigValueOrigin;
@@ -411,4 +413,26 @@ pub(crate) struct DurableLabel<'a> {
     /// Where the label points: foreign when a foreign-site row names it, otherwise local.
     pub(crate) site: SiteRef<'a>,
     pub(crate) message: DurableLabelMessage<'a>,
+}
+
+impl DraftLabel {
+    /// Rewrites the string word in `data[0]` of a config-origin or rendered-text label.
+    /// Type words stay pending, and substitution indices are not IDs.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+    pub(super) fn remap_ids(&mut self, remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        if self.message == LabelMessageCode::CONFIG_INPUT_ORIGIN
+            || self.message == LabelMessageCode::RENDERED_TEXT
+        {
+            remap.rewrite_string(&mut self.data[0])?;
+        }
+        Ok(())
+    }
+}
+
+impl DraftSubstitution {
+    /// Rewrites the parameter name. The concrete type is a type word and is left as it is.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+    pub(super) fn remap_ids(&mut self, remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        remap.rewrite_string(&mut self.parameter)
+    }
 }

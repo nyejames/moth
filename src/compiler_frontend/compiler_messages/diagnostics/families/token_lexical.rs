@@ -7,8 +7,8 @@
 use super::calls_data::InvalidMultiBindCode;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
-    CharFact, CountFact, FactCapacityError, FactCodec, OptStringFact, OptTokenFact, StringFact,
-    TokenFact, UnitCode, UnitFact, unit_code,
+    CharFact, CountFact, FactCapacityError, FactCodec, IdRemap, OptStringFact, OptTokenFact,
+    StringFact, TokenFact, UnitCode, UnitFact, unit_code,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
     FamilyRow, diagnostic_family,
@@ -101,6 +101,10 @@ impl FactCodec for CapacityResourceFact {
             _ => None,
         }
     }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
+    }
 }
 
 /// WHAT: the payload of an unexpected-token diagnostic: the token it found, or a multi-bind misuse.
@@ -157,6 +161,15 @@ impl FactCodec for UnexpectedTokenFact {
                 expected: CountFact::decode(words.get(2..3)?)?,
                 found: CountFact::decode(words.get(3..4)?)?,
             }),
+        }
+    }
+
+    fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        // Tag 0 is a token shape. Other tags are multi-bind shapes with a target name in word 1.
+        if words[0] == 0 {
+            TokenFact::remap_ids(&mut words[1..3], remap)
+        } else {
+            OptStringFact::remap_ids(&mut words[1..2], remap)
         }
     }
 }
@@ -285,6 +298,10 @@ impl FactCodec for OptFixedScalarFact {
             word => fixed_scalar_from_word(word).map(Some),
         }
     }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
+    }
 }
 
 /// WHAT: stores an optional number scale in one word; `u32::MAX` encodes absence.
@@ -309,6 +326,10 @@ impl FactCodec for OptNumberScaleFact {
             u32::MAX => Some(None),
             word => NumberScale::new(u16::try_from(word).ok()?).map(Some),
         }
+    }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
     }
 }
 
@@ -789,6 +810,10 @@ impl FactCodec for OptSymbolicSpacingErrorFact {
             missing,
         }))
     }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
+    }
 }
 
 /// Stores the exact gap around a qualified choice separator.
@@ -820,6 +845,10 @@ impl FactCodec for OptChoiceVariantSeparatorGapFact {
             3 => Some(Some(ChoiceVariantSeparatorGap::Both)),
             _ => None,
         }
+    }
+
+    fn remap_ids(_words: &mut [u32], _remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        Ok(())
     }
 }
 

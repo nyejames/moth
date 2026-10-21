@@ -9,7 +9,8 @@
 
 use super::extras::{DiagnosticExtraDraft, ExtraDataDraft};
 use super::facts::{
-    ABSENT_TYPE_WORD, FACT_WORDS, FactCapacityError, FactCursor, NO_TYPE_WORD, type_display_word,
+    ABSENT_TYPE_WORD, FACT_WORDS, FactCapacityError, FactCursor, IdRemap, NO_TYPE_WORD,
+    type_display_word,
 };
 use super::families::token_lexical::{COMPILER_CAPACITY_EXCEEDED, CapacityResourceFact};
 use super::foreign::{ForeignSiteDraft, ForeignSlot};
@@ -24,7 +25,8 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::StringId;
+use crate::compiler_frontend::symbols::path_interner::PathIdRemap;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 
 /// A diagnostic under construction. Only `DiagnosticStore::compact` turns it into a stored record.
 #[derive(Debug)]
@@ -363,4 +365,55 @@ fn captured_word(
     }
     let display = rewrite(TypeId(word))?;
     type_display_word(display).map_err(|FactCapacityError| TypeDisplayCapacityError)
+}
+
+impl DiagnosticDraft {
+    /// Rewrites every string ID in this draft through `remap`, which must come from the table the draft was
+    /// built against. An identity remap changes nothing.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+    pub(super) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        if remap.is_identity() {
+            return;
+        }
+        self.remap_draft(IdRemap::Strings(remap));
+    }
+
+    /// Rewrites every path ID in this draft through `remap`, which must come from the interner the draft was
+    /// built against. An identity remap changes nothing.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+    pub(super) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        if remap.is_identity() {
+            return;
+        }
+        self.remap_draft(IdRemap::Paths(remap));
+    }
+
+    /// Applies `remap` to the fact words and the extra part. A value the remap cannot store turns the draft into
+    /// the capacity stand-in at the same local span, as `with_facts` does for an unencodable value. Spans are
+    /// left alone: a `SourceId` names a source record, not a string or a path.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+    fn remap_draft(&mut self, remap: IdRemap<'_>) {
+        if self.rewrite_draft(remap).is_err() {
+            let span = self.capacity_span();
+            *self = Self::capacity_fault(
+                span,
+                CapacityResource::Store(DiagnosticCapacityResource::FactValue),
+            );
+        }
+    }
+
+    /// Walks the family layout, rewriting each fact's words in place, then the extra part.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S5 canonical merge"))]
+    fn rewrite_draft(&mut self, remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
+        let mut offset = 0;
+        for fact in self.core.family.layout {
+            let end = offset + usize::from(fact.words);
+            (fact.remap_ids)(&mut self.core.facts[offset..end], remap)?;
+            offset = end;
+        }
+        if let Some(extra) = self.extra.as_deref_mut() {
+            extra.remap_ids(remap)?;
+        }
+        Ok(())
+    }
 }
