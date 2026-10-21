@@ -208,6 +208,7 @@ fn capacity_resource_fact_round_trips_every_group() {
         CapacityResource::Ast(AstCapacityResource::ExpressionRows),
         CapacityResource::Store(DiagnosticCapacityResource::Records),
         CapacityResource::Store(DiagnosticCapacityResource::FactValue),
+        CapacityResource::Store(DiagnosticCapacityResource::TypeDisplays),
     ];
     for resource in resources {
         let mut word = [0u32; 1];

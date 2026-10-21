@@ -78,6 +78,12 @@ impl DiagnosticStore {
         }
     }
 
+    /// The number of records the store holds.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3 boundary cut"))]
+    pub(super) fn len(&self) -> usize {
+        self.records.len()
+    }
+
     /// The record at `id`, read through the store's arenas.
     pub(super) fn record(&self, id: DiagnosticId) -> RecordRef<'_> {
         RecordRef {

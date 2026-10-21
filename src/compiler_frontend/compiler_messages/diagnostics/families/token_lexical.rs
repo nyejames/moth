@@ -72,6 +72,7 @@ unit_code! {
         ForeignSites = 7,
         IdentityContexts = 8,
         FactValue = 9,
+        TypeDisplays = 10,
     }
 }
 

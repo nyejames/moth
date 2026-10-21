@@ -145,6 +145,16 @@ impl FrozenIdentityContext {
         }
     }
 
+    /// Wraps an already-frozen source database for a domain with no loaded sources, such as a
+    /// path trie. The string table must be the one that issued the trie's `StringId` components.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3 boundary cut"))]
+    pub(crate) fn from_frozen_sources(
+        strings: Arc<FrozenStringTable>,
+        sources: FrozenSourceDatabase,
+    ) -> Self {
+        Self { sources, strings }
+    }
+
     /// Borrow the immutable string table used by compact string IDs.
     #[inline]
     pub(crate) fn strings(&self) -> &FrozenStringTable {

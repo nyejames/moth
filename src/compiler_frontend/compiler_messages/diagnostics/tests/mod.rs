@@ -8,6 +8,7 @@ mod capacity_tests;
 mod codec_tests;
 mod compaction_tests;
 mod family_inventory_tests;
+mod freeze_tests;
 mod label_text_tests;
 mod parity_tests;
 mod remap_tests;

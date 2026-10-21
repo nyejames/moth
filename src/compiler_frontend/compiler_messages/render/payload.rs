@@ -456,6 +456,7 @@ fn store_capacity_message(resource: DiagnosticCapacityResource) -> String {
         DiagnosticCapacityResource::ForeignSites => "foreign diagnostic sites",
         DiagnosticCapacityResource::IdentityContexts => "identity contexts",
         DiagnosticCapacityResource::FactValue => "fact values",
+        DiagnosticCapacityResource::TypeDisplays => "type displays",
     };
     format!("This source exceeds the compiler's capacity for diagnostic {resource_name}.")
 }

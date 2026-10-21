@@ -68,7 +68,7 @@ pub struct SourceDatabase {
 pub struct FrozenSourceDatabase {
     slots: Vec<SourceSlot>,
     loaded: Vec<SourceRecord>,
-    paths: PathTable,
+    paths: Arc<PathTable>,
 }
 #[cfg(feature = "data_layout_memory_probe")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -149,7 +149,7 @@ impl SourceDatabase {
         FrozenSourceDatabase {
             slots,
             loaded,
-            paths: path_interner.freeze(),
+            paths: Arc::new(path_interner.freeze()),
         }
     }
 
@@ -761,6 +761,18 @@ impl SourceDatabase {
     }
 }
 impl FrozenSourceDatabase {
+    /// Builds a frozen database with no sources, so an unowned domain carries only its path trie.
+    ///
+    /// Every span it names misses the slot table and resolves to no position.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S3 boundary cut"))]
+    pub(crate) fn with_paths(paths: Arc<PathTable>) -> Self {
+        Self {
+            slots: Vec::new(),
+            loaded: Vec::new(),
+            paths,
+        }
+    }
+
     /// Resolve one physical source slot by its compact identity.
     ///
     /// The compilation-root identity is intentionally excluded: it owns no physical source

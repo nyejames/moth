@@ -92,6 +92,8 @@ pub enum DiagnosticCapacityResource {
     IdentityContexts,
     /// A fact value that does not fit its compact encoding.
     FactValue,
+    /// A type display id that does not fit its compact encoding.
+    TypeDisplays,
 }
 
 /// The compact buffer that overflowed, tagged with the stage that owns it.
