@@ -1721,6 +1721,72 @@ fn every_preparation_strategy_stamps_the_registered_source_identity() {
 }
 
 #[test]
+fn indexed_file_preparation_moves_warnings_to_the_module_owner() {
+    let mut fixture = frontend_preparation_fixture(&[("main.moth", "Value #= 1\n")]);
+    let input = fixture
+        .input_files
+        .pop()
+        .expect("fixture should contain one source");
+    let source_id = input.source_id();
+    let stable_origin = StableModuleOriginIdentity::from_relative_logical_path(
+        StablePackageIdentity::project_local("preparation-warning-owner"),
+        Path::new(""),
+        ModuleRootRole::Normal,
+    )
+    .expect("test module origin should construct");
+    let source_module_origins = Arc::new(super::SourceModuleOriginTable::from_synthetic_origin(
+        &fixture.frontend.source_files,
+        &stable_origin,
+    ));
+    let preparation_context = super::ModulePreparationContext {
+        source_files: &fixture.frontend.source_files,
+        style_directives: &fixture.frontend.style_directives,
+    };
+    let mut selected_source_texts = super::super::source_loading::SelectedSourceTextMap::default();
+    let mut syntax = preparation_context
+        .begin_syntax_discovery(
+            stable_origin,
+            super::RegisteredModuleSources {
+                candidate_source_ids: vec![source_id],
+                source_module_origins,
+            },
+            &fixture.entry_file_path,
+            None,
+            std::mem::take(&mut fixture.frontend.string_table),
+            std::mem::replace(&mut fixture.frontend.path_fork, PathInternerFork::empty()),
+            &mut selected_source_texts,
+            #[cfg(feature = "timers")]
+            None,
+        )
+        .expect("syntax discovery should start for the fixture source");
+    let (_, mut source_spans) = fixture.span_builders.split();
+    let output = syntax
+        .prepare_source(input, &mut source_spans)
+        .expect("the fixture source should prepare successfully");
+
+    syntax
+        .retain_prepared_output(0, output)
+        .expect("the prepared output should occupy its candidate slot");
+    let prepared = syntax
+        .finish()
+        .expect("successful header preparation should finish");
+    assert_eq!(
+        prepared.semantic.warnings.len(),
+        1,
+        "indexed file preparation should keep the PascalCase value warning exactly once"
+    );
+    assert!(
+        matches!(
+            prepared.semantic.warnings[0].kind,
+            crate::compiler_frontend::compiler_messages::DiagnosticKind::Rule(
+                crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::IdentifierNamingConvention
+            )
+        ),
+        "the retained warning should be the identifier naming convention diagnostic"
+    );
+}
+
+#[test]
 fn chunked_file_preparation_preserves_warning_source_order() {
     let file_sources: Vec<_> = (0..super::FILE_PREPARATION_ALWAYS_PARALLEL_FILE_COUNT)
         .map(|index| {

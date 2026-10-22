@@ -1135,7 +1135,7 @@ impl ModuleSyntaxDiscovery<'_, '_> {
             ),
         );
         source_spans.retain_span_builder(file_id, span_builder);
-        let output = match result {
+        let mut output = match result {
             Ok(delta) => delta,
             Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
                 // Move the discovery table into the batch; this source failed, so the
@@ -1155,7 +1155,7 @@ impl ModuleSyntaxDiscovery<'_, '_> {
         };
 
         self.source_byte_count += source_byte_len;
-        self.warnings.extend(output.warnings.iter().cloned());
+        self.warnings.append(&mut output.warnings);
         Ok(output)
     }
 

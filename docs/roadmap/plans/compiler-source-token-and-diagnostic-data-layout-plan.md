@@ -108,15 +108,11 @@ ACTIVE_PLAN:
 - Execution order: Phase 4 runs as the steps in `PHASE_4_EXECUTION_ORDER` below. The slice
   checklists remain the acceptance contract. Only their order and grouping changed, under the
   architecture document's repository-discovered corrections rule.
-- NEXT_SUBSTEP: P4.5 slice S5 of `PHASE_4_5_SEQUENCE`, prepared carriers, at sub-slice S5d; S5a
-  is accepted in "Phase 4 P4.5 S5a: prepared batch vessel-free append", S5b in "Phase 4 P4.5
-  S5b: diagnosed carriers freeze as prepared batches" and S5c in "Phase 4 P4.5 S5c: module
-  warnings travel beside the semantic result". Successful-module warnings left
-  `ModuleCompilerMetadata`; `DiagnosticBag` still holds `CompilerDiagnostic` until S6 capture.
-  `ModuleDiagnostics` is gone. Pass A still runs after the last path-table attach;
-  `PremergeFailure` stays the pre-Pass-A lane. `TransientPreparedBatch` keeps `PackageBoundaryId`
-  until the tail. `BoundaryPremergeFailure` still pairs a typed failure with its finished package
-  owner. S4
+- NEXT_SUBSTEP: P4.5 slice S6 of `PHASE_4_5_SEQUENCE`, owning-site type capture, at sub-slice
+  S6a. S5 is accepted in "Phase 4 P4.5 S5a: prepared batch vessel-free append" through "Phase 4
+  P4.5 S5d: file-prep warnings have one owner". `PremergeFailure` / `PremergeDiagnosticBatch`
+  stay the pre-Pass-A lane until S6 moves capture into AST/HIR owners. Successful-module warnings
+  sit beside `ModuleSemanticResult` as a `DiagnosticBag` of `CompilerDiagnostic`. S4
   (the canonical merge) is accepted in "Phase 4 P4.5 S4a: run-scoped boundary accumulator",
   "Phase 4 P4.5 S4c: build warnings freeze once", "Phase 4 P4.5 S4b: canonical tail freezes once"
   and "Phase 4 P4.5 S4d: canonical merge census and medians". S4d found no production vessel
