@@ -17,7 +17,7 @@ use crate::compiler_frontend::ast::AstBuildResult;
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,
+    CompilerDiagnostic, DiagnosticBag, PremergeDiagnosticBatch, PremergeFailure,
 };
 #[cfg(feature = "boracle")]
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -179,6 +179,7 @@ pub(crate) fn compile_module(
         Ok(SemanticStageOutput::Complete(output)) => {
             let CompleteSemanticStage {
                 module,
+                warnings,
                 public_interface,
                 generated_delta,
                 resource_source_associations,
@@ -192,6 +193,7 @@ pub(crate) fn compile_module(
                     resource_source_associations,
                     string_table,
                     path_fork,
+                    warnings,
                     public_interface,
                 },
             )))
@@ -345,6 +347,7 @@ enum SemanticStageRequest {
 
 struct CompleteSemanticStage {
     module: Module,
+    warnings: DiagnosticBag,
     public_interface: PublicSemanticInterface,
     generated_delta: GeneratedFunctionDelta,
     resource_source_associations: Vec<ResourceSourceAssociation>,
@@ -694,6 +697,7 @@ fn run_semantic_stages(
             .collect::<Result<Vec<_>, CompilerError>>()?
     };
 
+    let mut warning_bag = DiagnosticBag::from_diagnostics(std::mem::take(&mut warnings));
     // 6. Lower AST to Higher-level Intermediate Representation (HIR).
     let hir_lowering = timed_stage_attributed!(
         crate::timing::TimingMetric::FrontendHir,
@@ -701,7 +705,7 @@ fn run_semantic_stages(
         lower_hir(
             compiler,
             module_ast,
-            &warnings,
+            &mut warning_bag,
             function_origin_lookup,
             Some(Rc::clone(&module_resources)),
             None,
@@ -736,7 +740,7 @@ fn run_semantic_stages(
     let bootstrap_borrow_analysis = timed_stage_attributed!(
         crate::timing::TimingMetric::FrontendBorrowInitial,
         timing_context,
-        check_borrows(compiler, &hir_module, &warnings, None)
+        check_borrows(compiler, &hir_module, &mut warning_bag, None)
     )?;
     let generated_materialisation = timed_stage_attributed!(
         crate::timing::TimingMetric::FrontendGeneratedMaterialise,
@@ -761,7 +765,7 @@ fn run_semantic_stages(
         &mut generated_transaction,
         bootstrap_borrow_analysis,
         &mut type_environment,
-        &warnings,
+        &mut warning_bag,
         #[cfg(feature = "timers")]
         timing_context,
     )?;
@@ -862,13 +866,13 @@ fn run_semantic_stages(
                 },
                 metadata: ModuleCompilerMetadata::from_hir_lowering(
                     entry_file_path.to_path_buf(),
-                    warnings,
                     lowering_metadata,
                     const_top_level_fragments,
                     root_activity,
                     materialisation_context,
                 ),
             },
+            warnings: warning_bag,
             public_interface,
             generated_delta,
             resource_source_associations,
@@ -975,8 +979,8 @@ fn build_ast_with_registered_types(
         #[cfg(feature = "timers")]
         timing_context,
     ) {
-        Ok(build_result) => {
-            warnings.extend(build_result.ast.warnings.clone());
+        Ok(mut build_result) => {
+            warnings.extend(std::mem::take(&mut build_result.ast.warnings));
             Ok(build_result)
         }
         Err(messages) => {

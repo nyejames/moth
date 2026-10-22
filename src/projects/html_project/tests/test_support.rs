@@ -105,7 +105,6 @@ pub(crate) fn create_test_module(entry_point: PathBuf, string_table: &mut String
         },
         metadata: ModuleCompilerMetadata {
             entry_point,
-            warnings: vec![],
             const_top_level_fragments: vec![],
             // Most builder fixtures represent active page roots. API-only modules opt into the
             // explicit default when a test needs to verify artifact filtering.

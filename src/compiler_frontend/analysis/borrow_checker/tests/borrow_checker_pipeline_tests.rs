@@ -251,7 +251,6 @@ fn successful_borrow_report_can_be_stored_on_module() {
         },
         metadata: ModuleCompilerMetadata {
             entry_point: std::path::PathBuf::from("main.moth"),
-            warnings: Vec::new(),
             const_top_level_fragments: Vec::new(),
             root_activity: ModuleRootActivity::default(),
             doc_fragments: Vec::new(),

@@ -68,13 +68,13 @@ fn artifact_with_context(context: ModuleMaterialisationContext) -> CompiledModul
             },
             metadata: ModuleCompilerMetadata {
                 entry_point: PathBuf::new(),
-                warnings: Vec::new(),
                 const_top_level_fragments: Vec::new(),
                 root_activity: ModuleRootActivity::default(),
                 doc_fragments: Vec::new(),
                 materialisation_context: Some(Arc::new(context)),
             },
         },
+        warnings: Default::default(),
         interface: PublicSemanticInterface {
             module_origin: origin,
             export_bindings: Vec::new(),

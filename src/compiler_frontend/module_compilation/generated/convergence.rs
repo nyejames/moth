@@ -24,7 +24,7 @@ use crate::compiler_frontend::ast::generic_functions::{
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::compiler_errors::RenderTypeContext;
 use crate::compiler_frontend::compiler_messages::{
-    BuiltinFailureOriginKind, BuiltinFailureWitness, CompilerDiagnostic,
+    BuiltinFailureOriginKind, BuiltinFailureWitness, CompilerDiagnostic, DiagnosticBag,
     InvalidFallibleHandlingReason, PremergeDiagnosticBatch, PremergeFailure,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -417,7 +417,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
     generated_transaction: &mut GeneratedFunctionTransaction<'_>,
     bootstrap_borrow_analysis: BorrowCheckReport,
     type_environment: &mut TypeEnvironment,
-    warnings: &[CompilerDiagnostic],
+    warnings: &mut DiagnosticBag,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
 ) -> Result<BorrowCheckReport, PremergeFailure> {
     let base_public_origins = hir_module
@@ -540,7 +540,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                             check_borrows(
                                 compiler,
                                 &sidecar.module.executable.hir,
-                                &sidecar.module.metadata.warnings,
+                                &mut sidecar.warnings,
                                 Some(&source_identity_handle),
                             )
                         )?;
@@ -594,8 +594,8 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
             compiler,
             &sidecar.module.executable.hir,
             &sidecar.module.executable.borrow_analysis,
-            &sidecar.module.executable.type_environment,
-            &sidecar.module.metadata.warnings,
+            &mut sidecar.module.executable.type_environment,
+            &mut sidecar.warnings,
             Some(&source_owner),
         )?;
     }
@@ -640,7 +640,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                 &mut sidecar.module.executable.hir,
                 &sidecar.module.executable.borrow_analysis,
                 &mut sidecar.module.executable.type_environment,
-                &sidecar.module.metadata.warnings,
+                &mut sidecar.warnings,
                 Some(&source_owner),
             )
         )?;
@@ -793,7 +793,7 @@ fn refresh_private_failure_lanes(
     hir: &mut HirModule,
     report: &BorrowCheckReport,
     type_environment: &mut TypeEnvironment,
-    warnings: &[CompilerDiagnostic],
+    warnings: &mut DiagnosticBag,
     source_owner: Option<&FrozenIdentityHandle>,
 ) -> Result<Option<BorrowCheckReport>, PremergeFailure> {
     let installation = install_private_failure_lanes(
@@ -807,10 +807,10 @@ fn refresh_private_failure_lanes(
             HirConstructionFailure::Diagnosed(diagnostic) => {
                 CompilerMessages::from_diagnostic_with_warnings(
                     diagnostic,
-                    warnings.to_vec(),
+                    warnings.take_diagnostics(),
                     &compiler.string_table,
                 )
-                .with_type_context_for_all_diagnostics(type_environment.clone())
+                .with_type_context_for_all_diagnostics(std::mem::take(type_environment))
             }
             HirConstructionFailure::Infrastructure(error) => {
                 CompilerMessages::from_error_ref(error, &compiler.string_table)
@@ -1341,8 +1341,8 @@ fn validate_builtin_failure_boundaries(
     compiler: &mut CompilerFrontend<'_>,
     hir: &HirModule,
     report: &BorrowCheckReport,
-    type_environment: &TypeEnvironment,
-    warnings: &[CompilerDiagnostic],
+    type_environment: &mut TypeEnvironment,
+    warnings: &mut DiagnosticBag,
     source_owner: Option<&FrozenIdentityHandle>,
 ) -> Result<(), PremergeFailure> {
     for function in &hir.functions {
@@ -1357,11 +1357,11 @@ fn validate_builtin_failure_boundaries(
             std::mem::take(&mut compiler.string_table),
             vec![RenderTypeContext {
                 diagnostic_range: 0..1,
-                type_environment: type_environment.clone(),
+                type_environment: std::mem::take(type_environment),
             }],
             vec![],
         );
-        batch.prepend_diagnostics(warnings.iter().cloned().map(|mut warning| {
+        batch.prepend_diagnostics(warnings.take_diagnostics().into_iter().map(|mut warning| {
             if let Some(owner) = source_owner {
                 warning.attach_frozen_identity_handle_if_missing(owner.clone());
             }

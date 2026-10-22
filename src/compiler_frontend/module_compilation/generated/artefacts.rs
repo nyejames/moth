@@ -9,6 +9,7 @@
 //!       produces or mutates their semantic content.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironmentRemapCache;
 use crate::compiler_frontend::module_compilation::artefact::Module;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
@@ -17,16 +18,31 @@ use crate::compiler_frontend::symbols::path_interner::PathIdRemap;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 /// One independently lowered concrete generic executable.
 ///
-/// The stable identity is stored beside, rather than rediscovered from, its HIR module. Base
-/// canonical modules and generated sidecars therefore remain distinct project-compilation lanes.
+/// The stable identity is stored beside, rather than rediscovered from, its HIR module. Successful
+/// sidecar warnings remain a sibling bag with the same string/path identity.
 pub(crate) struct GeneratedFunctionSidecar {
     pub(crate) identity: GeneratedFunctionIdentity,
     pub(crate) module: Module,
+    /// Warnings are kept outside the module metadata and remapped with the sidecar at publication.
+    pub(crate) warnings: DiagnosticBag,
 }
 
 impl GeneratedFunctionSidecar {
-    pub(crate) fn new(identity: GeneratedFunctionIdentity, module: Module) -> Self {
-        Self { identity, module }
+    pub(crate) fn new(
+        identity: GeneratedFunctionIdentity,
+        module: Module,
+        warnings: DiagnosticBag,
+    ) -> Self {
+        Self {
+            identity,
+            module,
+            warnings,
+        }
+    }
+
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.module.remap_path_ids(remap);
+        self.warnings.remap_path_ids(remap);
     }
 
     pub(crate) fn remap_string_ids_with_type_environment_cache(
@@ -36,6 +52,7 @@ impl GeneratedFunctionSidecar {
     ) {
         self.module
             .remap_string_ids_with_type_environment_cache(remap, type_environment_cache);
+        self.warnings.remap_string_ids(remap);
     }
 }
 
@@ -91,7 +108,7 @@ impl GeneratedFunctionDelta {
 
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         for record in &mut self.records {
-            record.sidecar.module.remap_path_ids(remap);
+            record.sidecar.remap_path_ids(remap);
         }
     }
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {

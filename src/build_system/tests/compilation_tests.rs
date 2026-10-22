@@ -24,6 +24,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
@@ -143,7 +144,6 @@ fn invalid_artifact() -> CompiledModuleArtifact {
             },
             metadata: ModuleCompilerMetadata {
                 entry_point: PathBuf::new(),
-                warnings: Vec::new(),
                 const_top_level_fragments: Vec::new(),
                 root_activity: ModuleRootActivity::default(),
                 doc_fragments: Vec::new(),
@@ -155,6 +155,7 @@ fn invalid_artifact() -> CompiledModuleArtifact {
                 )),
             },
         },
+        warnings: DiagnosticBag::default(),
         interface: PublicSemanticInterface {
             module_origin: origin,
             export_bindings: Vec::new(),
@@ -221,7 +222,6 @@ fn generated_sidecar(
         },
         metadata: ModuleCompilerMetadata {
             entry_point: PathBuf::new(),
-            warnings: Vec::new(),
             const_top_level_fragments: Vec::new(),
             root_activity: ModuleRootActivity::default(),
             doc_fragments: Vec::new(),
@@ -246,7 +246,7 @@ fn generated_sidecar(
         .analysis
         .public_call_summaries
         .insert(FunctionId(0), summary);
-    GeneratedFunctionSidecar::new(identity, module)
+    GeneratedFunctionSidecar::new(identity, module, DiagnosticBag::default())
 }
 
 fn generated_delta_with_valid_record() -> GeneratedFunctionDelta {
@@ -713,6 +713,7 @@ fn semantic_result_with_local_path()
         resource_source_associations: Vec::new(),
         string_table,
         path_fork,
+        warnings: artifact.warnings,
         public_interface: artifact.interface,
     }
 }
@@ -898,27 +899,24 @@ fn check_only_success_result_with_warnings() -> (
     let warning_path = module_path_fork
         .try_intern_portable_path("sidecar/lib-target.moth", &mut module_string_table)
         .expect("the direct warning path should intern");
-    artifact
-        .module
-        .metadata
-        .warnings
-        .push(CompilerDiagnostic::with_severity(
-            DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget),
-            DiagnosticSeverity::Warning,
-            None,
-            DiagnosticPayload::MissingImportTarget { path: warning_path },
-        ));
+    let mut module_warnings = artifact.warnings;
+    module_warnings.push(CompilerDiagnostic::with_severity(
+        DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget),
+        DiagnosticSeverity::Warning,
+        None,
+        DiagnosticPayload::MissingImportTarget { path: warning_path },
+    ));
     let sidecar_path = module_path_fork
         .try_intern_portable_path("sidecar/generated-target.moth", &mut module_string_table)
         .expect("the sidecar warning path should intern");
-    // The sidecar takes the fixture's empty executable and link lanes; the semantic result
-    // keeps the same lanes rebuilt into its own module value, plus the direct warning.
+    // The sidecar takes the fixture's empty executable and link lanes; the semantic result keeps
+    // the rebuilt base module beside its direct warning and the sidecar's sibling warning bag.
     let Module {
         executable: base_executable,
         link_facts: base_link_facts,
         metadata: base_metadata,
     } = artifact.module;
-    let mut sidecar_module = Module {
+    let sidecar_module = Module {
         executable: ModuleExecutable {
             hir: HirModule::new(),
             resource_table: ModuleResourceTable::new(),
@@ -930,26 +928,23 @@ fn check_only_success_result_with_warnings() -> (
         link_facts: base_link_facts,
         metadata: ModuleCompilerMetadata {
             entry_point: PathBuf::from("@sidecar.moth"),
-            warnings: Vec::new(),
             const_top_level_fragments: Vec::new(),
             root_activity: ModuleRootActivity::default(),
             doc_fragments: Vec::new(),
             materialisation_context: None,
         },
     };
-    sidecar_module
-        .metadata
-        .warnings
-        .push(CompilerDiagnostic::with_severity(
-            DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget),
-            DiagnosticSeverity::Warning,
-            None,
-            DiagnosticPayload::MissingImportTarget { path: sidecar_path },
-        ));
+    let mut sidecar_warnings = DiagnosticBag::new();
+    sidecar_warnings.push(CompilerDiagnostic::with_severity(
+        DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget),
+        DiagnosticSeverity::Warning,
+        None,
+        DiagnosticPayload::MissingImportTarget { path: sidecar_path },
+    ));
 
     let identity = generated_identity("check_only_sidecar");
     let summary = generated_summary();
-    let sidecar = GeneratedFunctionSidecar::new(identity.clone(), sidecar_module);
+    let sidecar = GeneratedFunctionSidecar::new(identity.clone(), sidecar_module, sidecar_warnings);
     (
         crate::compiler_frontend::module_compilation::ModuleSemanticResult {
             module: Module {
@@ -971,6 +966,7 @@ fn check_only_success_result_with_warnings() -> (
             resource_source_associations: Vec::new(),
             string_table: module_string_table,
             path_fork: module_path_fork,
+            warnings: module_warnings,
             public_interface: artifact.interface,
         },
         "sidecar/lib-target.moth".to_owned(),
@@ -1346,16 +1342,12 @@ fn published_warning_paths_remap_to_preserve_original_spelling() {
         .expect("the module-local warning path should intern");
     compiled.string_table = module_string_table;
     compiled.path_fork = module_path_fork;
-    compiled
-        .module
-        .metadata
-        .warnings
-        .push(CompilerDiagnostic::with_severity(
-            DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget),
-            DiagnosticSeverity::Warning,
-            None,
-            DiagnosticPayload::MissingImportTarget { path: local_path },
-        ));
+    compiled.warnings.push(CompilerDiagnostic::with_severity(
+        DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget),
+        DiagnosticSeverity::Warning,
+        None,
+        DiagnosticPayload::MissingImportTarget { path: local_path },
+    ));
     assert_ne!(
         local_path,
         PathId::ROOT,
@@ -1420,9 +1412,8 @@ fn published_warning_paths_remap_to_preserve_original_spelling() {
         .modules
         .artifact(ModuleId::from_index(0))
         .expect("the published slot should resolve")
-        .expect("the published module should be successful")
-        .module;
-    let warning = &published.metadata.warnings[0];
+        .expect("the published module should be successful");
+    let warning = &published.warnings.as_slice()[0];
     let remapped_path = match &warning.payload {
         DiagnosticPayload::MissingImportTarget { path } => *path,
         other => panic!("unexpected published warning payload: {other:?}"),
@@ -1431,7 +1422,7 @@ fn published_warning_paths_remap_to_preserve_original_spelling() {
         remapped_path, local_path,
         "publication must remap the module-local warning path identity"
     );
-    let rendered = published.executable.path_table.render_portable(
+    let rendered = published.module.executable.path_table.render_portable(
         remapped_path,
         &string_table,
         &mut Vec::new(),

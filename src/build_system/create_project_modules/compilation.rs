@@ -172,6 +172,7 @@ pub(super) fn publish_compiled_module(
         })?;
     let ModuleSemanticResult {
         mut module,
+        mut warnings,
         mut generated_delta,
         resource_source_associations,
         string_table: _,
@@ -186,10 +187,12 @@ pub(super) fn publish_compiled_module(
     if !remap.is_identity() {
         module.remap_string_ids(&remap);
         generated_delta.remap_string_ids(&remap);
+        warnings.remap_string_ids(&remap);
     }
     if !path_remap.is_identity() {
         module.remap_path_ids(&path_remap);
         generated_delta.remap_path_ids(&path_remap);
+        warnings.remap_path_ids(&path_remap);
     }
     publish_module_and_generated(ModuleBoundaryPublication {
         modules,
@@ -200,6 +203,7 @@ pub(super) fn publish_compiled_module(
         expected_origin,
         artifact: CompiledModuleArtifact {
             module,
+            warnings,
             interface: public_interface,
         },
         generated_delta,

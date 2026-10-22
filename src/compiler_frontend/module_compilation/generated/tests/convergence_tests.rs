@@ -1501,7 +1501,6 @@ fn counter_test_module() -> crate::compiler_frontend::module_compilation::Module
         },
         metadata: ModuleCompilerMetadata {
             entry_point: PathBuf::new(),
-            warnings: Vec::new(),
             const_top_level_fragments: Vec::new(),
             root_activity: ModuleRootActivity::default(),
             doc_fragments: Vec::new(),
@@ -1529,7 +1528,7 @@ fn unchanged_generated_summary_counts_comparison_without_change() {
     let published = PublishedBoundary::with_sidecar(
         identity.clone(),
         stable.clone(),
-        GeneratedFunctionSidecar::new(identity.clone(), counter_test_module()),
+        GeneratedFunctionSidecar::new(identity.clone(), counter_test_module(), Default::default()),
     );
     let mut transaction = GeneratedFunctionTransaction::new(published.view());
 

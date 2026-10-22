@@ -15,6 +15,7 @@ use crate::compiler_frontend::ast::generic_functions::{
     recursive_generic_function_instantiation,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::{PremergeDiagnosticBatch, PremergeFailure};
 use crate::compiler_frontend::hir::failure_facts::HirBuiltinFailureBoundary;
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
@@ -353,7 +354,7 @@ fn materialise_generated_request_inner<'build>(
         context.project_path_resolver,
         context.source_files,
     );
-    let lowered = (|| -> Result<Module, PremergeFailure> {
+    let lowered = (|| -> Result<(Module, DiagnosticBag), PremergeFailure> {
         if let Some((generated_context, nested_request_ids)) = nested {
             for nested_request_id in &nested_request_ids {
                 let nested_identity = transaction
@@ -383,12 +384,13 @@ fn materialise_generated_request_inner<'build>(
             // before lowering takes sole ownership of the sidecar resources.
             drop(generated_context);
         }
-        let generated_warnings = generated_ast.warnings.clone();
+        let mut generated_warnings =
+            DiagnosticBag::from_diagnostics(std::mem::take(&mut generated_ast.warnings));
 
         let generated_lowering = lower_hir(
             &mut generated_compiler,
             generated_ast,
-            &generated_warnings,
+            &mut generated_warnings,
             HirFunctionOriginLookup::default(),
             Some(Rc::clone(&module_resources)),
             Some(&declaring_source_identity_handle),
@@ -438,7 +440,7 @@ fn materialise_generated_request_inner<'build>(
         let borrow_analysis = check_borrows(
             &mut generated_compiler,
             &hir_module,
-            &generated_warnings,
+            &mut generated_warnings,
             Some(&declaring_source_identity_handle),
         )?;
         let functions =
@@ -460,32 +462,35 @@ fn materialise_generated_request_inner<'build>(
         .map_err(PremergeFailure::from)?;
         // The publication owner in convergence computes the paired table from the final HIR.
         // Nothing reads this empty table before then, and an empty table retains every check.
-        Ok(Module {
-            executable: ModuleExecutable {
-                hir: hir_module,
-                resource_table,
-                type_environment,
-                borrow_analysis,
-                numeric_proofs: NumericProofs::default(),
-                path_table: Arc::new(
-                    crate::compiler_frontend::symbols::path_interner::PathInternerBuilder::new()
+        Ok((
+            Module {
+                executable: ModuleExecutable {
+                    hir: hir_module,
+                    resource_table,
+                    type_environment,
+                    borrow_analysis,
+                    numeric_proofs: NumericProofs::default(),
+                    path_table: Arc::new(
+                        crate::compiler_frontend::symbols::path_interner::PathInternerBuilder::new(
+                        )
                         .freeze(),
-                ),
+                    ),
+                },
+                link_facts: ModuleLinkFacts {
+                    external_package_registry: Arc::clone(&context.external_packages),
+                    external_import_candidates,
+                    functions,
+                },
+                metadata: ModuleCompilerMetadata {
+                    entry_point: entry_file_path.to_path_buf(),
+                    const_top_level_fragments: Vec::new(),
+                    root_activity: ModuleRootActivity::default(),
+                    doc_fragments: lowering_metadata.doc_fragments,
+                    materialisation_context: None,
+                },
             },
-            link_facts: ModuleLinkFacts {
-                external_package_registry: Arc::clone(&context.external_packages),
-                external_import_candidates,
-                functions,
-            },
-            metadata: ModuleCompilerMetadata {
-                entry_point: entry_file_path.to_path_buf(),
-                warnings: generated_warnings,
-                const_top_level_fragments: Vec::new(),
-                root_activity: ModuleRootActivity::default(),
-                doc_fragments: lowering_metadata.doc_fragments,
-                materialisation_context: None,
-            },
-        })
+            generated_warnings,
+        ))
     })();
     let CompilerFrontend {
         string_table: requester_string_table,
@@ -494,7 +499,7 @@ fn materialise_generated_request_inner<'build>(
     } = generated_compiler;
     compiler.string_table = requester_string_table;
     compiler.path_fork = requester_path_fork;
-    let generated_module = lowered?;
+    let (generated_module, generated_warnings) = lowered?;
 
     // The boundary install tail replaces each sidecar placeholder with the one final path table
     // after all publications, so successful materialisation does not snapshot the growing table.
@@ -504,7 +509,11 @@ fn materialise_generated_request_inner<'build>(
         .complete(
             request_id,
             summary,
-            GeneratedFunctionSidecar::new(request.identity.clone(), generated_module),
+            GeneratedFunctionSidecar::new(
+                request.identity.clone(),
+                generated_module,
+                generated_warnings,
+            ),
         )
         .map_err(PremergeFailure::from)
 }

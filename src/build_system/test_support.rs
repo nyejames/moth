@@ -56,6 +56,7 @@ pub(crate) fn project_compilation_from_test_modules_with_resources(
             module_id,
             CompiledModuleArtifact {
                 module,
+                warnings: Default::default(),
                 interface: test_public_interface(index),
             },
         )?;

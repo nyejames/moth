@@ -9,8 +9,8 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::compiler_messages::{
-    CapacityResource, CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
-    HirCapacityResource, PremergeFailure, SyntaxDiagnosticKind,
+    CapacityResource, CompilerDiagnostic, DiagnosticBag, DiagnosticKind, DiagnosticPayload,
+    DiagnosticSeverity, HirCapacityResource, PremergeFailure, SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -76,8 +76,11 @@ fn lower_hir_capacity_failure_keeps_each_warning_and_render_context_once() {
         constants,
         Default::default(),
     );
-    ast.warnings.push(ast_warning.clone());
-    let warnings = [preparation_warning.clone(), ast_warning.clone()];
+    ast.warnings.push(ast_warning);
+    let mut warnings = DiagnosticBag::from_diagnostics(vec![
+        preparation_warning,
+        CompilerDiagnostic::unreachable_match_arm(Some(ast_warning_span)),
+    ]);
 
     let type_environment = ast.type_environment.clone();
     let mut builder = HirBuilder::new(
@@ -97,7 +100,7 @@ fn lower_hir_capacity_failure_keeps_each_warning_and_render_context_once() {
     };
 
     let frozen_identity = FrozenIdentityHandle::new();
-    let failure = super::premerge_hir_failure(hir_messages, &warnings, Some(&frozen_identity));
+    let failure = super::premerge_hir_failure(hir_messages, &mut warnings, Some(&frozen_identity));
     assert!(matches!(failure, PremergeFailure::Diagnosed(_)));
     let messages = failure.into_messages(&string_table);
 

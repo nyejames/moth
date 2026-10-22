@@ -127,7 +127,7 @@ impl BoundaryGeneratedFunctionStore {
     pub(crate) fn take_sidecar_warnings(&mut self) -> Vec<CompilerDiagnostic> {
         let mut warnings = Vec::new();
         for record in &mut self.records {
-            warnings.append(&mut record.sidecar.module.metadata.warnings);
+            warnings.extend(record.sidecar.warnings.take_diagnostics());
         }
         warnings
     }

@@ -71,12 +71,20 @@ impl DiagnosticBag {
         &self.diagnostics
     }
 
+    #[cfg(test)]
+    pub(crate) fn as_slice(&self) -> &[CompilerDiagnostic] {
+        &self.diagnostics
+    }
+
+    pub(crate) fn take_diagnostics(&mut self) -> Vec<CompilerDiagnostic> {
+        std::mem::take(&mut self.diagnostics)
+    }
+
     pub(crate) fn into_diagnostics(self) -> Vec<CompilerDiagnostic> {
         self.diagnostics
     }
 
     /// Remap every interned string owned by the bagged diagnostics into the merged table.
-    #[allow(dead_code)]
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         for diagnostic in &mut self.diagnostics {
             diagnostic.remap_string_ids(remap);
@@ -84,7 +92,6 @@ impl DiagnosticBag {
     }
 
     /// Remap every complete path identity owned by the bag into the merged path table.
-    #[allow(dead_code)]
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         for diagnostic in &mut self.diagnostics {
             diagnostic.remap_path_ids(remap);

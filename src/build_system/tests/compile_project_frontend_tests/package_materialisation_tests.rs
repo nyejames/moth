@@ -2978,22 +2978,16 @@ fn source_package_warning_retained_by_frontend_outcome() {
     )
     .expect("warning source package should compile");
 
-    let warning_codes = frontend
-        .successful_module_views()
-        .flat_map(|module| {
-            module
-                .metadata
-                .warnings
-                .iter()
-                .map(|warning| warning.kind.code().to_owned())
-        })
+    let failure = frontend.into_boundary_failure(&mut string_table, None, None);
+    let warning_codes = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Warning)
+        .map(|(_, view)| view.descriptor().code.to_owned())
         .collect::<Vec<_>>();
     assert!(
         warning_codes.iter().any(|code| code == "MOTH-RULE-0022"),
         "source-package warning should be retained: {warning_codes:?}"
     );
-
-    let failure = frontend.into_boundary_failure(&mut string_table, None, None);
     assert!(
         failure.warning_count() >= 1,
         "render boundary should retain the source-package warning"

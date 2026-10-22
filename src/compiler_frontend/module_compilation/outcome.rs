@@ -6,6 +6,7 @@
 //!       Classifying them once here means graph and render consumers never re-classify a mixed
 //!       message bag.
 
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::module_compilation::artefact::Module;
 use crate::compiler_frontend::module_compilation::generated::GeneratedFunctionDelta;
@@ -28,14 +29,14 @@ pub(crate) enum ModuleCompilationOutcome {
 
 /// Everything one successful module compilation produced, before boundary publication.
 ///
-/// WHAT: the validated base module lanes, the generated delta completed in the same transaction,
-///       the closed public interface, and the module-local string/path deltas carrying every
-///       diagnostic render identity.
-/// WHY: publication is atomic. Keeping the artefact, its generated delta and both identity deltas
-///      in one value means the build boundary merges strings first, then paths, and commits the
-///      whole transaction or none of it. The stable module origin travels through
-///      `public_interface`; no dense `ModuleId` crosses this boundary, because standalone
-///      compilation has no graph-assigned identity.
+/// WHAT: the validated base module lanes, a sibling warning bag, the generated delta completed in
+///       the same transaction, the closed public interface, and the module-local string/path
+///       deltas carrying every diagnostic render identity.
+/// WHY: publication is atomic. Keeping every semantic result and both identity deltas in one value
+///      means the build boundary merges strings first, then paths, and commits the whole
+///      transaction or none of it. The stable module origin travels through `public_interface`;
+///      no dense `ModuleId` crosses this boundary, because standalone compilation has no
+///      graph-assigned identity.
 pub(crate) struct ModuleSemanticResult {
     /// Validated base HIR, paired type environment, borrow facts, link facts and metadata.
     pub(crate) module: Module,
@@ -51,6 +52,10 @@ pub(crate) struct ModuleSemanticResult {
     /// Merged into the boundary path table after the string delta, so source-prefix identities
     /// stay stable and every retained path is remapped before publication.
     pub(crate) path_fork: PathInternerFork,
+    /// Successful warnings stay in a move-only bag until the canonical/build owner consumes them.
+    /// Their interned IDs use the sibling `string_table` and `path_fork`; success capture adds no
+    /// type environment, preserving unresolved `TypeId` spellings.
+    pub(crate) warnings: DiagnosticBag,
     /// The closed and publication-validated semantic interface. Provider-owned re-export facts
     /// have already joined through immutable completed interfaces, so the graph can publish this
     /// value directly after the deterministic string-then-path merge.

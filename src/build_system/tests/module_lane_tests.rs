@@ -1,6 +1,8 @@
 //! Focused invariant tests for the compiled `Module` lane container.
 
-use crate::build_system::build::{ProjectAssemblyError, ProjectCompilation};
+use crate::build_system::build::{
+    ProjectAssemblyError, ProjectCompilation, collect_success_warnings,
+};
 use crate::build_system::create_project_modules::compiled_boundary::{
     BlockedModule, BlockedProvider, CompiledGraphBoundary, CompiledSourcePackage,
     CompletedSourcePackageRegistry, DiagnosedModule, ProjectFrontendCompilation,
@@ -20,7 +22,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticSeverity, PremergeDiagnosticBatch,
+    CompilerDiagnostic, DiagnosticBag, DiagnosticSeverity, PremergeDiagnosticBatch,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids::NONE;
@@ -235,7 +237,6 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
         link_facts,
         metadata: ModuleCompilerMetadata {
             entry_point: entry_point.clone(),
-            warnings: vec![],
             const_top_level_fragments: vec![],
             root_activity: ModuleRootActivity::default(),
             doc_fragments: vec![],
@@ -340,7 +341,6 @@ fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
         },
         metadata: ModuleCompilerMetadata {
             entry_point: PathBuf::from("@page.moth"),
-            warnings: vec![],
             const_top_level_fragments: vec![],
             root_activity: ModuleRootActivity {
                 has_non_trivial_root_body: true,
@@ -542,6 +542,7 @@ fn test_graph_boundary(
                 ModuleId::from_index(index),
                 CompiledModuleArtifact {
                     module,
+                    warnings: Default::default(),
                     interface: empty_test_interface_for_origin(origins[index].clone()),
                 },
             )
@@ -586,6 +587,7 @@ fn dense_lookup_resolves_wave_publication_out_of_module_id_order() {
             ModuleId::from_index(2),
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("high/@mod.moth"), true),
+                warnings: Default::default(),
                 interface: empty_test_interface("high".to_owned()),
             },
         )
@@ -595,6 +597,7 @@ fn dense_lookup_resolves_wave_publication_out_of_module_id_order() {
             ModuleId::from_index(1),
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("low/@mod.moth"), true),
+                warnings: Default::default(),
                 interface: empty_test_interface("low".to_owned()),
             },
         )
@@ -659,6 +662,7 @@ fn duplicate_declaration_inside_one_materialisation_context_fails_publication() 
             ModuleId::from_index(0),
             CompiledModuleArtifact {
                 module,
+                warnings: Default::default(),
                 interface: empty_test_interface("dup".to_owned()),
             },
         )
@@ -698,6 +702,7 @@ fn materialisation_lookup_resolves_the_exact_template_row() {
             ModuleId::from_index(0),
             CompiledModuleArtifact {
                 module,
+                warnings: Default::default(),
                 interface: empty_test_interface("rows".to_owned()),
             },
         )
@@ -930,17 +935,15 @@ fn generated_sidecar_warnings_survive_render_and_success_only_compilation() {
     );
 
     let frontend = frontend_with_sidecar_warnings(&mut string_table);
-    let compilation = ProjectCompilation::from_frontend(frontend)
+    let mut compilation = ProjectCompilation::from_frontend(frontend)
         .expect("generated sidecar boundaries should assemble");
-    let compilation_codes = compilation
-        .modules()
-        .flat_map(|module| {
-            module
-                .metadata
-                .warnings
-                .iter()
-                .map(|warning| warning.kind.code().to_owned())
-        })
+    let warning_messages = collect_success_warnings(&mut compilation, string_table).finish(
+        crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode::Frozen,
+    );
+    let compilation_codes = warning_messages
+        .reports
+        .iter_severity(DiagnosticSeverity::Warning)
+        .map(|(_, view)| view.descriptor().code.to_owned())
         .collect::<Vec<_>>();
     assert_eq!(
         compilation_codes.len(),
@@ -1392,7 +1395,6 @@ fn lane_module_with_generated_and_cross_module_calls(
         },
         metadata: ModuleCompilerMetadata {
             entry_point,
-            warnings: vec![],
             const_top_level_fragments: vec![],
             root_activity: if active_root {
                 ModuleRootActivity {
@@ -1418,7 +1420,7 @@ fn lane_sidecar(
         .hir
         .function_ids_by_generated
         .insert(identity.clone(), FunctionId(0));
-    GeneratedFunctionSidecar::new(identity, module)
+    GeneratedFunctionSidecar::new(identity, module, Default::default())
 }
 
 #[test]
@@ -1451,6 +1453,7 @@ fn frontend_boundary_rejects_unfinished_module_slots() {
             ModuleId::from_index(0),
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("@first.moth"), true),
+                warnings: Default::default(),
                 interface: empty_test_interface("first".to_owned()),
             },
         )
@@ -1514,6 +1517,7 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
             ModuleId::from_index(0),
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("@success.moth"), true),
+                warnings: Default::default(),
                 interface: empty_test_interface("success".to_owned()),
             },
         )
@@ -1564,15 +1568,13 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
 }
 
 fn frontend_with_sidecar_warnings(string_table: &mut StringTable) -> ProjectFrontendCompilation {
-    let mut project_sidecar_module =
+    let project_sidecar_module =
         minimal_lane_module(PathBuf::from("@generated_project.moth"), true);
-    project_sidecar_module
-        .metadata
-        .warnings
-        .push(test_warning_diagnostic(
-            "generated_project.moth",
-            string_table,
-        ));
+    let mut project_sidecar_warnings = DiagnosticBag::new();
+    project_sidecar_warnings.push(test_warning_diagnostic(
+        "generated_project.moth",
+        string_table,
+    ));
     let mut project_generated = BoundaryGeneratedFunctionStore::default();
     project_generated.push_completed_for_test(CompletedGeneratedFunction {
         identity: generated_test_identity("generated_project"),
@@ -1580,6 +1582,7 @@ fn frontend_with_sidecar_warnings(string_table: &mut StringTable) -> ProjectFron
         sidecar: GeneratedFunctionSidecar::new(
             generated_test_identity("generated_project"),
             project_sidecar_module,
+            project_sidecar_warnings,
         ),
     });
     let mut project = test_graph_boundary(
@@ -1589,15 +1592,13 @@ fn frontend_with_sidecar_warnings(string_table: &mut StringTable) -> ProjectFron
     );
     project.generated = project_generated;
 
-    let mut package_sidecar_module =
+    let package_sidecar_module =
         minimal_lane_module(PathBuf::from("@generated_package.moth"), true);
-    package_sidecar_module
-        .metadata
-        .warnings
-        .push(test_warning_diagnostic(
-            "generated_package.moth",
-            string_table,
-        ));
+    let mut package_sidecar_warnings = DiagnosticBag::new();
+    package_sidecar_warnings.push(test_warning_diagnostic(
+        "generated_package.moth",
+        string_table,
+    ));
     let mut package_generated = BoundaryGeneratedFunctionStore::default();
     package_generated.push_completed_for_test(CompletedGeneratedFunction {
         identity: generated_test_identity("generated_package"),
@@ -1605,6 +1606,7 @@ fn frontend_with_sidecar_warnings(string_table: &mut StringTable) -> ProjectFron
         sidecar: GeneratedFunctionSidecar::new(
             generated_test_identity("generated_package"),
             package_sidecar_module,
+            package_sidecar_warnings,
         ),
     });
     let mut package = test_graph_boundary(
@@ -1695,7 +1697,6 @@ fn minimal_lane_module(entry_point: PathBuf, active_root: bool) -> Module {
         },
         metadata: ModuleCompilerMetadata {
             entry_point,
-            warnings: vec![],
             const_top_level_fragments: vec![],
             root_activity: if active_root {
                 ModuleRootActivity {
@@ -1768,6 +1769,7 @@ fn boundary_validation_rejects_blocked_lane_mismatch_in_both_directions() {
             ModuleId::from_index(0),
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("@single.moth"), false),
+                warnings: Default::default(),
                 interface: empty_test_interface("single".to_owned()),
             },
         )
@@ -1994,6 +1996,7 @@ fn materialisation_rows_iterate_in_deterministic_publication_order() {
             ModuleId::from_index(1),
             CompiledModuleArtifact {
                 module: second_module,
+                warnings: Default::default(),
                 interface: empty_test_interface("second".to_owned()),
             },
         )
@@ -2010,6 +2013,7 @@ fn materialisation_rows_iterate_in_deterministic_publication_order() {
             ModuleId::from_index(0),
             CompiledModuleArtifact {
                 module: first_module,
+                warnings: Default::default(),
                 interface: empty_test_interface("first".to_owned()),
             },
         )

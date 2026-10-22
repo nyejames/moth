@@ -1912,6 +1912,8 @@ fn collect_success_warnings(
     project_compilation: &mut ProjectCompilation,
     string_table: StringTable,
 ) -> BoundaryAccumulator {
+    // The boundary stores drain their warning bags by move; this root-table lane remains
+    // type-free so unresolved warning TypeIds keep their legacy spelling.
     let mut warnings = project_compilation.project.take_successful_warnings();
     let mut warning_source_contexts = Vec::new();
     project_compilation

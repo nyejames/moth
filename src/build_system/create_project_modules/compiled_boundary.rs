@@ -407,15 +407,15 @@ impl CompiledGraphBoundary {
     /// Iterate every successful module view including generated sidecars.
     ///
     /// Base artefacts come first in `ModuleId` order, then generated sidecars in deterministic
-    /// publication order. Warnings produced during generic materialisation live in sidecar
-    /// metadata, so boundary consumers must visit both lanes.
+    /// publication order. Warnings produced during generic materialisation live in each
+    /// sidecar's sibling warning bag, so boundary consumers must visit both lanes.
     pub(crate) fn successful_module_views(&self) -> impl Iterator<Item = &Module> + '_ {
         self.successful_artefacts_in_module_id_order()
             .map(|artifact| &artifact.module)
             .chain(self.generated.sidecars().map(|sidecar| &sidecar.module))
     }
 
-    /// Move successful-module warnings from artefact and sidecar owners in view order.
+    /// Move successful-module warnings from artifact and sidecar sibling bags in view order.
     pub(crate) fn take_successful_warnings(&mut self) -> Vec<CompilerDiagnostic> {
         let mut warnings = self.modules.take_successful_warnings();
         warnings.extend(self.generated.take_sidecar_warnings());

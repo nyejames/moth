@@ -230,7 +230,6 @@ fn synthetic_module(
         },
         metadata: ModuleCompilerMetadata {
             entry_point: PathBuf::from(entry_point),
-            warnings: Vec::new(),
             const_top_level_fragments: const_fragments
                 .into_iter()
                 .enumerate()
@@ -271,7 +270,11 @@ fn empty_interface(module_origin: StableModuleOriginIdentity) -> PublicSemanticI
 }
 
 fn artifact(module: Module, interface: PublicSemanticInterface) -> CompiledModuleArtifact {
-    CompiledModuleArtifact { module, interface }
+    CompiledModuleArtifact {
+        module,
+        warnings: Default::default(),
+        interface,
+    }
 }
 
 fn boundary(

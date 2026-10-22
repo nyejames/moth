@@ -1504,6 +1504,7 @@ fn compiled_package(prefix: &str) -> CompiledSourcePackage {
             root_module_id,
             CompiledModuleArtifact {
                 module: empty_module(),
+                warnings: Default::default(),
                 interface: PublicSemanticInterface {
                     module_origin: origin,
                     export_bindings: Vec::new(),
@@ -1547,7 +1548,6 @@ fn empty_module() -> Module {
         },
         metadata: ModuleCompilerMetadata {
             entry_point: PathBuf::new(),
-            warnings: Vec::new(),
             const_top_level_fragments: Vec::new(),
             root_activity:
                 crate::compiler_frontend::module_compilation::ModuleRootActivity::default(),

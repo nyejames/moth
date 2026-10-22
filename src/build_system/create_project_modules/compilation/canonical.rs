@@ -949,19 +949,16 @@ pub(super) fn check_only_success_batch(
     compiled: ModuleSemanticResult,
 ) -> Result<Option<PreparedDiagnosticBatch>, PremergeFailure> {
     let ModuleSemanticResult {
-        module,
+        warnings: module_warnings,
         generated_delta,
         string_table: module_string_table,
         path_fork,
         ..
     } = compiled;
-    let mut warnings = module.metadata.warnings;
-    warnings.extend(
-        generated_delta
-            .records()
-            .iter()
-            .flat_map(|record| record.sidecar.module.metadata.warnings.iter().cloned()),
-    );
+    let mut warnings = module_warnings.into_diagnostics();
+    for record in generated_delta.into_records() {
+        warnings.extend(record.sidecar.warnings.into_diagnostics());
+    }
     if warnings.is_empty() {
         return Ok(None);
     }

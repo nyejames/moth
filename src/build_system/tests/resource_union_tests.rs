@@ -66,7 +66,6 @@ fn module_with_resource_table(resources: ModuleResourceTable) -> Module {
         },
         metadata: ModuleCompilerMetadata {
             entry_point: PathBuf::new(),
-            warnings: Vec::new(),
             const_top_level_fragments: Vec::new(),
             root_activity: Default::default(),
             doc_fragments: Vec::new(),

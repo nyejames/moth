@@ -133,7 +133,6 @@ pub(crate) fn test_module() -> Module {
         },
         metadata: ModuleCompilerMetadata {
             entry_point: PathBuf::new(),
-            warnings: Vec::new(),
             const_top_level_fragments: Vec::new(),
             root_activity: ModuleRootActivity::default(),
             doc_fragments: Vec::new(),
@@ -165,7 +164,7 @@ pub(crate) fn test_sidecar(
         .analysis
         .public_call_summaries
         .insert(FunctionId(0), summary);
-    GeneratedFunctionSidecar::new(identity, module)
+    GeneratedFunctionSidecar::new(identity, module, Default::default())
 }
 
 pub(crate) fn facts(name: &str) -> GeneratedRequestFacts {

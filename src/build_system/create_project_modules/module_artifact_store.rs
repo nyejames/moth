@@ -306,18 +306,13 @@ impl ModuleArtifactStore {
 
     /// Move successful-artefact warnings in deterministic `ModuleId` order.
     pub(crate) fn take_successful_warnings(&mut self) -> Vec<CompilerDiagnostic> {
-        let artifact_ids = self
-            .slots
-            .iter()
-            .filter_map(|slot| match slot {
-                ProviderSlot::Successful(artifact_id) => Some(*artifact_id),
-                ProviderSlot::Unavailable | ProviderSlot::Diagnosed | ProviderSlot::Blocked => None,
-            })
-            .collect::<Vec<_>>();
         let mut warnings = Vec::new();
-        for artifact_id in artifact_ids {
+        for slot in &self.slots {
+            let ProviderSlot::Successful(artifact_id) = slot else {
+                continue;
+            };
             if let Some(artifact) = self.artifacts.get_mut(artifact_id.0) {
-                warnings.append(&mut artifact.module.metadata.warnings);
+                warnings.extend(artifact.warnings.take_diagnostics());
             }
         }
         warnings

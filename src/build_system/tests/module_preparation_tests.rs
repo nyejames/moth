@@ -786,7 +786,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         "semantic compilation should preserve the module entry point"
     );
     assert!(
-        draft.module.metadata.warnings.is_empty(),
+        draft.warnings.as_slice().is_empty(),
         "semantic compilation should not introduce warnings for a clean generic free-function declaration"
     );
     let materialisation_context = draft
