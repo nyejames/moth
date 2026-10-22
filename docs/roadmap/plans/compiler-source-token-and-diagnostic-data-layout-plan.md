@@ -109,10 +109,11 @@ ACTIVE_PLAN:
   checklists remain the acceptance contract. Only their order and grouping changed, under the
   architecture document's repository-discovered corrections rule.
 - NEXT_SUBSTEP: P4.5 slice S6 of `PHASE_4_5_SEQUENCE`, owning-site type capture, at sub-slice
-  S6a. S5 is accepted in "Phase 4 P4.5 S5a: prepared batch vessel-free append" through "Phase 4
-  P4.5 S5d: file-prep warnings have one owner". `PremergeFailure` / `PremergeDiagnosticBatch`
-  stay the pre-Pass-A lane until S6 moves capture into AST/HIR owners. Successful-module warnings
-  sit beside `ModuleSemanticResult` as a `DiagnosticBag` of `CompilerDiagnostic`. S4
+  S6b. S6a is accepted in "Phase 4 P4.5 S6a: owning-site capture from a diagnostic bag". S5 is
+  accepted in "Phase 4 P4.5 S5a: prepared batch vessel-free append" through "Phase 4 P4.5 S5d:
+  file-prep warnings have one owner". `PremergeFailure` / `PremergeDiagnosticBatch` stay the
+  pre-Pass-A lane until S6b–S6c move capture into AST/HIR owners. Successful-module warnings sit
+  beside `ModuleSemanticResult` as a `DiagnosticBag` of `CompilerDiagnostic`. S4
   (the canonical merge) is accepted in "Phase 4 P4.5 S4a: run-scoped boundary accumulator",
   "Phase 4 P4.5 S4c: build warnings freeze once", "Phase 4 P4.5 S4b: canonical tail freezes once"
   and "Phase 4 P4.5 S4d: canonical merge census and medians". S4d found no production vessel

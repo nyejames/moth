@@ -8,11 +8,14 @@
 use super::compiler_errors::{
     CompilerError, CompilerMessages, InfrastructureErrors, RenderPathContext, RenderTypeContext,
 };
-use super::diagnostic_bag::PremergeDiagnosticBatch;
+use super::diagnostic_bag::{DiagnosticBag, PremergeDiagnosticBatch};
 use super::diagnostics::legacy_adapter::{PreparedDiagnostic, prepare_diagnostic};
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
+use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use std::sync::Arc;
 
 /// Batch-local string, path, and frozen-identity ownership.
 pub(super) struct PreparedBatchIdentity {
@@ -63,6 +66,50 @@ impl PreparedDiagnosticBatch {
             item.set_explicit_path(explicit_path);
             prepared.push(item);
         }
+
+        Self {
+            prepared,
+            identity: Box::new(PreparedBatchIdentity {
+                string_table,
+                path_rows,
+                required_handles,
+            }),
+        }
+    }
+    /// Capture an owning site's bag against the environment it supplies.
+    ///
+    /// Unlike `from_premerge`, this site already knows whether its path table was available while
+    /// the environment was live. Capture every diagnostic against that borrowed environment when
+    /// it was available; do not infer availability from a retained path row.
+    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S6b AST owning sites"))]
+    pub(crate) fn capture_from_bag(
+        bag: DiagnosticBag,
+        string_table: StringTable,
+        environment: Option<&TypeEnvironment>,
+        path_table_is_available: bool,
+        path_table: Option<Arc<PathTable>>,
+    ) -> Self {
+        let diagnostics = bag.into_diagnostics();
+        let environment = if path_table_is_available {
+            environment
+        } else {
+            None
+        };
+        let has_path_row = path_table.is_some() && !diagnostics.is_empty();
+        let mut required_handles = Vec::new();
+        let mut prepared = Vec::with_capacity(diagnostics.len());
+        for diagnostic in &diagnostics {
+            let mut item = prepare_diagnostic(diagnostic, environment, &mut required_handles);
+            item.set_explicit_path(has_path_row.then_some(0));
+            prepared.push(item);
+        }
+        let path_rows = match path_table {
+            Some(path_table) if has_path_row => vec![RenderPathContext {
+                diagnostic_range: 0..diagnostics.len(),
+                path_table,
+            }],
+            _ => Vec::new(),
+        };
 
         Self {
             prepared,

@@ -14,6 +14,7 @@ use crate::compiler_frontend::compiler_messages::compiler_errors::{
     BoundaryFailure, CompilerError, CompilerMessages, RenderPathContext, RenderSourceContext,
     RenderTypeContext,
 };
+use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostic_types::type_display_snapshot_builder::ForcedTypeDisplayExhaustionGuard;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::{
@@ -1948,4 +1949,230 @@ fn prepared_batch_path_capacity_fault_matches_the_vessel_code_and_span() {
 
     assert_eq!(prepared.reports.report(0).len(), 1);
     assert_eq!(vessel.reports.report(0).len(), 1);
+}
+
+#[test]
+fn prepared_batch_owning_site_capture_matches_premerge_contexts() {
+    let mut strings = StringTable::new();
+    let name = strings.intern("TOwningSite");
+    let mut paths = PathInternerBuilder::new();
+    let import_path = paths
+        .try_intern_portable_path("pkg/owning-site-only.moth", &mut strings)
+        .expect("path should intern");
+    let path_table = Arc::new(paths.freeze());
+    let mut environment = TypeEnvironment::new();
+    let named_type = environment.register_synthetic_generic_parameter(name);
+    let boolean = environment.builtins().bool;
+    let diagnostics = vec![
+        CompilerDiagnostic::type_mismatch(
+            named_type,
+            boolean,
+            TypeMismatchContext::Assignment,
+            None,
+        ),
+        CompilerDiagnostic::missing_import_target(import_path, None),
+    ];
+    let captured = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from_diagnostics(diagnostics.clone()),
+        strings.clone(),
+        Some(&environment),
+        true,
+        Some(Arc::clone(&path_table)),
+    );
+    let premerge = PremergeDiagnosticBatch::from_parts(
+        diagnostics,
+        strings,
+        vec![RenderTypeContext {
+            diagnostic_range: 0..2,
+            type_environment: environment,
+        }],
+        vec![RenderPathContext {
+            diagnostic_range: 0..2,
+            path_table,
+        }],
+    );
+    let expected = PreparedDiagnosticBatch::from_premerge(premerge);
+
+    let mut captured_run = BoundaryAccumulator::new();
+    captured_run.append_prepared(captured, None);
+    let captured = captured_run.finish(InstallMode::Frozen);
+    let mut expected_run = BoundaryAccumulator::new();
+    expected_run.append_prepared(expected, None);
+    let expected = expected_run.finish(InstallMode::Frozen);
+
+    let expected_render = frozen_render(&expected);
+    let captured_render = frozen_render(&captured);
+    assert_render_parity(&expected_render, &captured_render);
+    assert!(captured_render[0].message.contains("TOwningSite"));
+    assert!(
+        captured_render[1]
+            .message
+            .contains("pkg/owning-site-only.moth")
+    );
+}
+
+#[test]
+fn prepared_batch_owning_site_capture_keeps_separate_environment_snapshots() {
+    let mut run = BoundaryAccumulator::new();
+
+    let mut first_strings = StringTable::new();
+    let first_name = first_strings.intern("TFirstOwner");
+    let mut first_environment = TypeEnvironment::new();
+    let first_type = first_environment.register_synthetic_generic_parameter(first_name);
+    let first_bool = first_environment.builtins().bool;
+    let first_diagnostic = CompilerDiagnostic::type_mismatch(
+        first_type,
+        first_bool,
+        TypeMismatchContext::Assignment,
+        None,
+    );
+    let first_batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(first_diagnostic),
+        first_strings,
+        Some(&first_environment),
+        true,
+        Some(Arc::new(PathInternerBuilder::new().freeze())),
+    );
+    run.append_prepared(first_batch, None);
+
+    let mut second_strings = StringTable::new();
+    let second_name = second_strings.intern("TSecondOwner");
+    let mut second_environment = TypeEnvironment::new();
+    let second_type = second_environment.register_synthetic_generic_parameter(second_name);
+    let second_bool = second_environment.builtins().bool;
+    let second_diagnostic = CompilerDiagnostic::type_mismatch(
+        second_type,
+        second_bool,
+        TypeMismatchContext::Assignment,
+        None,
+    );
+    let second_batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(second_diagnostic),
+        second_strings,
+        Some(&second_environment),
+        true,
+        Some(Arc::new(PathInternerBuilder::new().freeze())),
+    );
+    run.append_prepared(second_batch, None);
+
+    let rendered = frozen_render(&run.finish(InstallMode::Frozen));
+    assert_eq!(rendered.len(), 2);
+    assert!(rendered[0].message.contains("TFirstOwner"));
+    assert!(!rendered[0].message.contains("TSecondOwner"));
+    assert!(rendered[1].message.contains("TSecondOwner"));
+    assert!(!rendered[1].message.contains("TFirstOwner"));
+}
+
+#[test]
+fn prepared_batch_owning_site_capture_preserves_unresolved_type_ids() {
+    let mut run = BoundaryAccumulator::new();
+    let unavailable = CompilerDiagnostic::type_mismatch(
+        TypeId(999),
+        TypeId(1000),
+        TypeMismatchContext::Assignment,
+        None,
+    );
+    let unavailable_batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(unavailable),
+        StringTable::new(),
+        None,
+        true,
+        Some(Arc::new(PathInternerBuilder::new().freeze())),
+    );
+    run.append_prepared(unavailable_batch, None);
+
+    let mut strings = StringTable::new();
+    let name = strings.intern("TUnavailablePathTable");
+    let mut environment = TypeEnvironment::new();
+    let named_type = environment.register_synthetic_generic_parameter(name);
+    let boolean = environment.builtins().bool;
+    let unavailable_path_table = CompilerDiagnostic::type_mismatch(
+        named_type,
+        boolean,
+        TypeMismatchContext::Assignment,
+        None,
+    );
+    let unavailable_path_batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(unavailable_path_table),
+        strings,
+        Some(&environment),
+        false,
+        None,
+    );
+    run.append_prepared(unavailable_path_batch, None);
+
+    let rendered = frozen_render(&run.finish(InstallMode::Frozen));
+    assert_eq!(rendered.len(), 2);
+    assert!(rendered[0].message.contains("TypeId(999)"));
+    assert!(rendered[0].message.contains("TypeId(1000)"));
+    assert!(rendered[1].message.contains("TypeId("));
+    assert!(!rendered[1].message.contains("TUnavailablePathTable"));
+}
+
+#[test]
+fn prepared_batch_owning_site_type_capacity_fault_matches_vessel_span() {
+    let dir = tempfile::tempdir().expect("should create temp dir");
+
+    let mut captured_strings = StringTable::new();
+    let (captured_database, captured_source) =
+        retained_database(dir.path(), "main.moth", "main", &mut captured_strings);
+    let captured_name = captured_strings.intern("TCapturedCapacity");
+    let mut captured_environment = TypeEnvironment::new();
+    let captured_type = captured_environment.register_synthetic_generic_parameter(captured_name);
+    let captured_bool = captured_environment.builtins().bool;
+    let captured_diagnostic = CompilerDiagnostic::type_mismatch(
+        captured_type,
+        captured_bool,
+        TypeMismatchContext::Assignment,
+        Some(inline_span(captured_source, 0, 4)),
+    );
+    let captured_path_table = Arc::new(PathInternerBuilder::new().freeze());
+
+    let mut vessel_strings = StringTable::new();
+    let (vessel_database, vessel_source) =
+        retained_database(dir.path(), "main.moth", "main", &mut vessel_strings);
+    let vessel_name = vessel_strings.intern("TCapturedCapacity");
+    let mut vessel_environment = TypeEnvironment::new();
+    let vessel_type = vessel_environment.register_synthetic_generic_parameter(vessel_name);
+    let vessel_bool = vessel_environment.builtins().bool;
+    let vessel_diagnostic = CompilerDiagnostic::type_mismatch(
+        vessel_type,
+        vessel_bool,
+        TypeMismatchContext::Assignment,
+        Some(inline_span(vessel_source, 0, 4)),
+    );
+    let mut vessel_messages =
+        CompilerMessages::from_diagnostics(vec![vessel_diagnostic], vessel_strings)
+            .with_type_context_for_all_diagnostics(vessel_environment);
+    vessel_messages.set_source_database(Arc::new(vessel_database));
+    vessel_messages
+        .attach_path_table_if_missing(Arc::clone(&captured_path_table))
+        .expect("test type context should pair with the path table");
+    let legacy = legacy_render(&vessel_messages);
+
+    let _exhausted = ForcedTypeDisplayExhaustionGuard::new();
+    let captured = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(captured_diagnostic),
+        captured_strings,
+        Some(&captured_environment),
+        true,
+        Some(captured_path_table),
+    );
+    let mut captured_run = BoundaryAccumulator::new();
+    captured_run.append_prepared(captured, Some((Arc::new(captured_database), None)));
+    let captured = captured_run.finish(InstallMode::Frozen);
+    let vessel = into_frozen_boundary_failure(vessel_messages);
+
+    let captured_render = frozen_render(&captured);
+    let vessel_render = frozen_render(&vessel);
+    assert_render_parity(&vessel_render, &captured_render);
+    assert_eq!(primary(&captured_render[0]), primary(&legacy[0]));
+    let codes = |failure: &BoundaryFailure| {
+        failure
+            .reports
+            .iter()
+            .map(|(_, view)| view.descriptor().code)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(codes(&captured), codes(&vessel));
 }
