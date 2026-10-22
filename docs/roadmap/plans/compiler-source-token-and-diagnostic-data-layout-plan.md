@@ -118,12 +118,14 @@ ACTIVE_PLAN:
   "Phase 4 P4.5 S4c: build warnings freeze once", "Phase 4 P4.5 S4b: canonical tail freezes once"
   and "Phase 4 P4.5 S4d: canonical merge census and medians". S4d found no production vessel
   merge left: `append_messages_preserving_context` and `mark_frozen` are test-only parity
-  oracles, and `into_render_messages` has no caller. Back-to-back dev medians, ten iterations:
-  `data_layout_diagnosed_frontend` 54.05 ms at S4 against 53.96 ms at S3.3, and
-  `data_layout_warning_heavy_frontend` 14.94 ms against 14.02 ms, both inside run noise. The
-  gap against the Phase 4 reactivation baseline (44.77 ms and 11.93 ms at `719d08efe`) predates
-  S4 and stays a P4.7 close item. `transient_batches` and `BoundaryPremergeFailure` retire in
-  S5. S1 is accepted in
+  oracles, and `into_render_messages` has no caller. A same-worktree five-run comparison of
+  S3.3 (`3c4392aa5`) against S4 (`a090eb4d8`), each run with ten measured iterations, records
+  median-of-run-medians of 44.579 → 44.992 ms (+0.93%) for diagnosed frontend and
+  11.490 → 11.586 ms (+0.84%) for warning-heavy frontend. Both satisfy the 5% slice gate.
+  This supersedes the earlier single-run warning comparison (14.02 → 14.94 ms); full Phase 4
+  performance comparison remains a P4.7 close item.
+  `TransientPreparedBatch` and `BoundaryPremergeFailure` retain ordering/source-finalization jobs
+  after S5; retire their obsolete transport during S6–S7. S1 is accepted in
   the checkpoints "Phase 4 P4.5 S1a: frozen diagnostic report types" through "Phase 4 P4.5 S1c:
   draft string and path ID remaps", S2 in "Phase 4 P4.5 S2: diagnostic freeze side", and S3 (the
   boundary cut) in "Phase 4 P4.5 S3.1: legacy-to-boundary converter", "Phase 4 P4.5 S3.2:
