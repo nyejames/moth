@@ -52,9 +52,9 @@ pub(crate) struct ModuleSemanticResult {
     /// Merged into the boundary path table after the string delta, so source-prefix identities
     /// stay stable and every retained path is remapped before publication.
     pub(crate) path_fork: PathInternerFork,
-    /// Successful warnings stay in a move-only bag until the canonical/build owner consumes them.
-    /// Their interned IDs use the sibling `string_table` and `path_fork`; success capture adds no
-    /// type environment, preserving unresolved `TypeId` spellings.
+    /// Successful warnings stay in a move-only bag until publish or check-only ownership captures
+    /// them against the live executable type environment. Capture preserves each lane's legacy
+    /// path-table availability and carries the prepared batches with their local identity tables.
     pub(crate) warnings: DiagnosticBag,
     /// The closed and publication-validated semantic interface. Provider-owned re-export facts
     /// have already joined through immutable completed interfaces, so the graph can publish this

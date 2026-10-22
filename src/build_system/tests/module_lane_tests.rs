@@ -20,7 +20,9 @@ use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationConte
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::UnknownValueNameView;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticBag, DiagnosticSeverity, PremergeDiagnosticBatch,
 };
@@ -543,6 +545,7 @@ fn test_graph_boundary(
                 CompiledModuleArtifact {
                     module,
                     warnings: Default::default(),
+                    sidecar_warnings: Vec::new(),
                     interface: empty_test_interface_for_origin(origins[index].clone()),
                 },
             )
@@ -588,6 +591,7 @@ fn dense_lookup_resolves_wave_publication_out_of_module_id_order() {
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("high/@mod.moth"), true),
                 warnings: Default::default(),
+                sidecar_warnings: Vec::new(),
                 interface: empty_test_interface("high".to_owned()),
             },
         )
@@ -598,6 +602,7 @@ fn dense_lookup_resolves_wave_publication_out_of_module_id_order() {
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("low/@mod.moth"), true),
                 warnings: Default::default(),
+                sidecar_warnings: Vec::new(),
                 interface: empty_test_interface("low".to_owned()),
             },
         )
@@ -663,6 +668,7 @@ fn duplicate_declaration_inside_one_materialisation_context_fails_publication() 
             CompiledModuleArtifact {
                 module,
                 warnings: Default::default(),
+                sidecar_warnings: Vec::new(),
                 interface: empty_test_interface("dup".to_owned()),
             },
         )
@@ -703,6 +709,7 @@ fn materialisation_lookup_resolves_the_exact_template_row() {
             CompiledModuleArtifact {
                 module,
                 warnings: Default::default(),
+                sidecar_warnings: Vec::new(),
                 interface: empty_test_interface("rows".to_owned()),
             },
         )
@@ -919,6 +926,26 @@ fn generated_sidecar_warnings_survive_render_and_success_only_compilation() {
     let _path_fork = PathInternerFork::empty();
     let frontend = frontend_with_sidecar_warnings(&mut string_table);
     let messages = frontend.into_boundary_failure(&mut string_table, None, None);
+    let rendered_names = messages
+        .reports
+        .iter_severity(DiagnosticSeverity::Warning)
+        .map(|(report, view)| {
+            let facts = view
+                .family_view::<UnknownValueNameView>()
+                .expect("generated warning should retain its typed name fact");
+            let context = DiagnosticRenderContext::for_report(report);
+            context.string_table.resolve(facts.name).to_owned()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rendered_names,
+        vec![
+            "generated_project.moth".to_owned(),
+            "generated_package.moth".to_owned(),
+        ],
+        "project and package warning order should remain stable",
+    );
+
     let rendered_codes = messages
         .reports
         .iter_severity(DiagnosticSeverity::Warning)
@@ -940,6 +967,17 @@ fn generated_sidecar_warnings_survive_render_and_success_only_compilation() {
     let warning_messages = collect_success_warnings(&mut compilation, string_table).finish(
         crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode::Frozen,
     );
+    let compilation_names = warning_messages
+        .reports
+        .iter_severity(DiagnosticSeverity::Warning)
+        .map(|(report, view)| {
+            let facts = view
+                .family_view::<UnknownValueNameView>()
+                .expect("compiled warning should retain its typed name fact");
+            let context = DiagnosticRenderContext::for_report(report);
+            context.string_table.resolve(facts.name).to_owned()
+        })
+        .collect::<Vec<_>>();
     let compilation_codes = warning_messages
         .reports
         .iter_severity(DiagnosticSeverity::Warning)
@@ -949,6 +987,10 @@ fn generated_sidecar_warnings_survive_render_and_success_only_compilation() {
         compilation_codes.len(),
         2,
         "success-only compilation should retain project and source-package sidecar warnings"
+    );
+    assert_eq!(
+        compilation_names, rendered_names,
+        "success-only compilation warning order should match frontend rendering"
     );
     assert_eq!(
         compilation_codes, rendered_codes,
@@ -1454,6 +1496,7 @@ fn frontend_boundary_rejects_unfinished_module_slots() {
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("@first.moth"), true),
                 warnings: Default::default(),
+                sidecar_warnings: Vec::new(),
                 interface: empty_test_interface("first".to_owned()),
             },
         )
@@ -1518,6 +1561,7 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("@success.moth"), true),
                 warnings: Default::default(),
+                sidecar_warnings: Vec::new(),
                 interface: empty_test_interface("success".to_owned()),
             },
         )
@@ -1570,11 +1614,12 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
 fn frontend_with_sidecar_warnings(string_table: &mut StringTable) -> ProjectFrontendCompilation {
     let project_sidecar_module =
         minimal_lane_module(PathBuf::from("@generated_project.moth"), true);
-    let mut project_sidecar_warnings = DiagnosticBag::new();
-    project_sidecar_warnings.push(test_warning_diagnostic(
-        "generated_project.moth",
+    let project_warning = test_warning_diagnostic("generated_project.moth", string_table);
+    let project_warning_batch = prepared_success_warning(
+        project_warning,
         string_table,
-    ));
+        &project_sidecar_module.executable.type_environment,
+    );
     let mut project_generated = BoundaryGeneratedFunctionStore::default();
     project_generated.push_completed_for_test(CompletedGeneratedFunction {
         identity: generated_test_identity("generated_project"),
@@ -1582,7 +1627,7 @@ fn frontend_with_sidecar_warnings(string_table: &mut StringTable) -> ProjectFron
         sidecar: GeneratedFunctionSidecar::new(
             generated_test_identity("generated_project"),
             project_sidecar_module,
-            project_sidecar_warnings,
+            DiagnosticBag::new(),
         ),
     });
     let mut project = test_graph_boundary(
@@ -1591,14 +1636,18 @@ fn frontend_with_sidecar_warnings(string_table: &mut StringTable) -> ProjectFron
         "page",
     );
     project.generated = project_generated;
+    project
+        .modules
+        .push_sidecar_warning_batch_for_test(project_warning_batch);
 
     let package_sidecar_module =
         minimal_lane_module(PathBuf::from("@generated_package.moth"), true);
-    let mut package_sidecar_warnings = DiagnosticBag::new();
-    package_sidecar_warnings.push(test_warning_diagnostic(
-        "generated_package.moth",
+    let package_warning = test_warning_diagnostic("generated_package.moth", string_table);
+    let package_warning_batch = prepared_success_warning(
+        package_warning,
         string_table,
-    ));
+        &package_sidecar_module.executable.type_environment,
+    );
     let mut package_generated = BoundaryGeneratedFunctionStore::default();
     package_generated.push_completed_for_test(CompletedGeneratedFunction {
         identity: generated_test_identity("generated_package"),
@@ -1606,7 +1655,7 @@ fn frontend_with_sidecar_warnings(string_table: &mut StringTable) -> ProjectFron
         sidecar: GeneratedFunctionSidecar::new(
             generated_test_identity("generated_package"),
             package_sidecar_module,
-            package_sidecar_warnings,
+            DiagnosticBag::new(),
         ),
     });
     let mut package = test_graph_boundary(
@@ -1618,7 +1667,9 @@ fn frontend_with_sidecar_warnings(string_table: &mut StringTable) -> ProjectFron
         "",
     );
     package.generated = package_generated;
-
+    package
+        .modules
+        .push_sidecar_warning_batch_for_test(package_warning_batch);
     ProjectFrontendCompilation::new(
         project,
         test_package_registry(vec![CompiledSourcePackage {
@@ -1635,11 +1686,25 @@ fn frontend_with_sidecar_warnings(string_table: &mut StringTable) -> ProjectFron
     .expect("warning package frontend should validate")
 }
 
+fn prepared_success_warning(
+    warning: CompilerDiagnostic,
+    string_table: &StringTable,
+    environment: &TypeEnvironment,
+) -> PreparedDiagnosticBatch {
+    PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from_diagnostics(vec![warning]),
+        string_table.clone(),
+        Some(environment),
+        false,
+        None,
+    )
+}
+
 fn test_warning_diagnostic(
-    _module_path: &str,
+    module_path: &str,
     string_table: &mut StringTable,
 ) -> CompilerDiagnostic {
-    let name = string_table.intern("unused_warning_name");
+    let name = string_table.intern(module_path);
     let mut diagnostic = CompilerDiagnostic::unknown_value_name(name, None);
     diagnostic.severity = DiagnosticSeverity::Warning;
     diagnostic
@@ -1770,6 +1835,7 @@ fn boundary_validation_rejects_blocked_lane_mismatch_in_both_directions() {
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("@single.moth"), false),
                 warnings: Default::default(),
+                sidecar_warnings: Vec::new(),
                 interface: empty_test_interface("single".to_owned()),
             },
         )
@@ -1997,6 +2063,7 @@ fn materialisation_rows_iterate_in_deterministic_publication_order() {
             CompiledModuleArtifact {
                 module: second_module,
                 warnings: Default::default(),
+                sidecar_warnings: Vec::new(),
                 interface: empty_test_interface("second".to_owned()),
             },
         )
@@ -2014,6 +2081,7 @@ fn materialisation_rows_iterate_in_deterministic_publication_order() {
             CompiledModuleArtifact {
                 module: first_module,
                 warnings: Default::default(),
+                sidecar_warnings: Vec::new(),
                 interface: empty_test_interface("first".to_owned()),
             },
         )

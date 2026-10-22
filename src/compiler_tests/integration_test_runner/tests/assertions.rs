@@ -590,7 +590,11 @@ fn warning_build_result(codes: &[&str]) -> BuildResult {
         })
         .collect();
     result.warning_accumulator =
-        crate::build_system::build::build_warning_accumulator(warnings, string_table, Vec::new());
+        crate::build_system::build::build_warning_accumulator_from_diagnostics(
+            warnings,
+            string_table,
+            Vec::new(),
+        );
     result
 }
 

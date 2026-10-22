@@ -38,7 +38,7 @@ use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase};
 use crate::compiler_frontend::symbols::path_interner::{
     PathIdRemap, PathInternError, PathInternerBuilder,
 };
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -62,6 +62,11 @@ impl PreparedDiagnostic {
             .core
             .severity
             .resolve(self.draft.core.family.default_severity())
+    }
+
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        self.draft.remap_string_ids(remap);
+        self.types.remap_string_ids(remap);
     }
 
     #[cfg(feature = "data_layout_memory_probe")]

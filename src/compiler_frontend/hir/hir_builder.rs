@@ -21,6 +21,7 @@ use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionStore;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -45,19 +46,45 @@ use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
 };
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::return_hir_transformation_error;
 use rustc_hash::FxHashMap;
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 mod metadata;
 
 // -----------
 // Entry Point
 // -----------
+#[cfg(test)]
 pub(in crate::compiler_frontend) fn lower_module(
+    ast: Ast,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+    function_origin_lookup: HirFunctionOriginLookup,
+    module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
+    capacity_estimate: FrontendArenaCapacityEstimate,
+    external_packages: &ExternalPackageRegistry,
+) -> Result<HirLoweringResult, AstDiagnosticFailure> {
+    lower_module_with_owner(
+        ast,
+        string_table,
+        path_fork,
+        function_origin_lookup,
+        module_resources,
+        capacity_estimate,
+        external_packages,
+        None,
+    )
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "HIR lowering keeps the AST, mutable string and path tables, origin lookup, module resources, arena estimate, external packages and the owner that failures capture against separate"
+)]
+pub(in crate::compiler_frontend) fn lower_module_with_owner(
     mut ast: Ast,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -65,7 +92,8 @@ pub(in crate::compiler_frontend) fn lower_module(
     module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
     capacity_estimate: FrontendArenaCapacityEstimate,
     external_packages: &ExternalPackageRegistry,
-) -> Result<HirLoweringResult, CompilerMessages> {
+    frozen_identity_handle: Option<&FrozenIdentityHandle>,
+) -> Result<HirLoweringResult, AstDiagnosticFailure> {
     // The builder owns the module environment for lowering and publication; `build_hir_module`
     // never reads the AST copy, so take it instead of cloning every module-local type table.
     let type_environment = std::mem::take(&mut ast.type_environment);
@@ -77,6 +105,7 @@ pub(in crate::compiler_frontend) fn lower_module(
         capacity_estimate,
     );
 
+    ctx.set_frozen_identity_handle(frozen_identity_handle.cloned());
     ctx.set_module_resources(module_resources);
     ctx.build_hir_module(ast, external_packages)
 }
@@ -136,6 +165,7 @@ pub struct HirBuilder<'a> {
     /// WHAT: carries the AST-built type environment while lowering one module.
     /// WHY: HIR stores frontend `TypeId`s directly and queries this table for type facts.
     pub(super) type_environment: TypeEnvironment,
+    frozen_identity_handle: Option<FrozenIdentityHandle>,
 
     /// Shared module resource table for re-interning handoff resource origins.
     ///
@@ -301,6 +331,7 @@ impl<'a> HirBuilder<'a> {
             string_table,
             path_fork,
             type_environment,
+            frozen_identity_handle: None,
             module_resources: None,
             function_origin_lookup,
             next_block_id: 0,
@@ -355,8 +386,11 @@ impl<'a> HirBuilder<'a> {
         self.module.expressions = HirExpressionStore::with_test_limits(limits);
     }
 
-    fn lower_error_messages(&self, error: impl Into<HirConstructionFailure>) -> CompilerMessages {
-        let messages = match error.into() {
+    fn lower_error_messages(
+        &self,
+        error: impl Into<HirConstructionFailure>,
+    ) -> AstDiagnosticFailure {
+        let mut messages = match error.into() {
             HirConstructionFailure::Diagnosed(diagnostic) => {
                 CompilerMessages::from_diagnostic_ref(diagnostic, self.string_table)
             }
@@ -364,7 +398,22 @@ impl<'a> HirBuilder<'a> {
                 CompilerMessages::from_error_ref(error, self.string_table)
             }
         };
-        messages.with_type_context_for_all_diagnostics(self.type_environment.clone())
+        if let Some(handle) = &self.frozen_identity_handle {
+            messages.set_frozen_identity_handle_if_missing(handle.clone());
+        }
+        AstDiagnosticFailure::capture_messages(
+            messages,
+            Some(&self.type_environment),
+            true,
+            Some(Arc::new(self.path_fork.snapshot_table())),
+        )
+    }
+
+    pub(in crate::compiler_frontend) fn set_frozen_identity_handle(
+        &mut self,
+        frozen_identity_handle: Option<FrozenIdentityHandle>,
+    ) {
+        self.frozen_identity_handle = frozen_identity_handle;
     }
 
     /// Installs the shared module resource table captured by the lowering entry point.
@@ -448,7 +497,7 @@ impl<'a> HirBuilder<'a> {
         mut self,
         mut ast: Ast,
         external_packages: &ExternalPackageRegistry,
-    ) -> Result<HirLoweringResult, CompilerMessages> {
+    ) -> Result<HirLoweringResult, AstDiagnosticFailure> {
         self.module_const_values = std::mem::take(&mut ast.const_values);
 
         self.module.const_facts = HirConstFacts::from(&ast.const_facts);
@@ -537,7 +586,6 @@ impl<'a> HirBuilder<'a> {
             return Err(self.lower_error_messages(error));
         }
 
-        let string_table = &*self.string_table;
         self.module.side_table = self.side_table;
         // Scalar calls recorded under catch handlers keep their handler routes for the lane
         // installer; block ids are remapped like every other terminator target.
@@ -547,8 +595,7 @@ impl<'a> HirBuilder<'a> {
         self.module.compact_block_ids();
 
         if let Err(error) = self.module.refresh_function_provenance_from_blocks() {
-            return Err(CompilerMessages::from_error_ref(error, string_table)
-                .with_type_context_for_all_diagnostics(self.type_environment.clone()));
+            return Err(error.into());
         }
 
         // 6. Validate the final HIR module. HIR validation checks executable HIR only; non-HIR
@@ -557,8 +604,7 @@ impl<'a> HirBuilder<'a> {
         if let Err(error) =
             validate_hir_module(&self.module, &self.type_environment, external_packages)
         {
-            return Err(CompilerMessages::from_error_ref(error, string_table)
-                .with_type_context_for_all_diagnostics(self.type_environment.clone()));
+            return Err(error.into());
         }
 
         record_hir_counters(&self.module);

@@ -1504,6 +1504,7 @@ fn compiled_package(prefix: &str) -> CompiledSourcePackage {
             CompiledModuleArtifact {
                 module: empty_module(),
                 warnings: Default::default(),
+                sidecar_warnings: Vec::new(),
                 interface: PublicSemanticInterface {
                     module_origin: origin,
                     export_bindings: Vec::new(),

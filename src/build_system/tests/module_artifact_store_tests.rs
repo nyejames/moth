@@ -75,6 +75,7 @@ fn artifact_with_context(context: ModuleMaterialisationContext) -> CompiledModul
             },
         },
         warnings: Default::default(),
+        sidecar_warnings: Vec::new(),
         interface: PublicSemanticInterface {
             module_origin: origin,
             export_bindings: Vec::new(),
@@ -101,6 +102,7 @@ fn boundary_validation_rejects_missing_successful_artefact_row() {
     let store = ModuleArtifactStore {
         slots: vec![ProviderSlot::Successful(CompiledModuleArtifactId(0))],
         artifacts: Vec::new(),
+        sidecar_warning_batches: Vec::new(),
         contexts_by_declaration: rustc_hash::FxHashMap::default(),
         materialisation_rows: Vec::new(),
     };

@@ -109,18 +109,21 @@ ACTIVE_PLAN:
   checklists remain the acceptance contract. Only their order and grouping changed, under the
   architecture document's repository-discovered corrections rule.
 - NEXT_SUBSTEP: P4.5 slice S6 of `PHASE_4_5_SEQUENCE`, owning-site type capture, at sub-slice
-  S6c. S6b is accepted in "Phase 4 P4.5 S6b: AST failures capture at their owning sites": the
-  AST emitter and finalizer return `AstDiagnosticFailure::Prepared`, captured with the live type
-  environment, and `SemanticStageFailure` carries it beside the premerge lane to the module
-  service, generated materialisation, single-source and Boracle exits. Boracle keeps prepared
-  batches typed until its source owner finalizes (`BoundaryFailurePayload::Prepared`). AST tests
-  read frozen facts through the existing `FamilyView` typed views (now `pub(crate)`), ahead of
-  the P4.6 test sweep; render corpus 2982/2982 with 1,656 identical renders. S6a is accepted in
-  "Phase 4 P4.5 S6a: owning-site capture from a diagnostic bag". S5 is
-  accepted in "Phase 4 P4.5 S5a: prepared batch vessel-free append" through "Phase 4 P4.5 S5d:
-  file-prep warnings have one owner". `PremergeFailure` / `PremergeDiagnosticBatch` stay the
-  pre-Pass-A lane until S6c moves capture into HIR owners. Successful-module warnings sit
-  beside `ModuleSemanticResult` as a `DiagnosticBag` of `CompilerDiagnostic`. S4
+  S6f: retype the remaining type-free `PremergeFailure` producers to prepared batches, then
+  delete `PremergeDiagnosticBatch`, `RenderTypeContext` and the unresolved type-display
+  fallbacks. S6c–S6e are accepted in "Phase 4 P4.5 S6c-S6e: HIR, borrow, convergence and
+  success warnings capture at their owners": `HirBuilder`, the borrow checker, private failure
+  lane convergence and builtin-boundary validation capture against their borrowed type
+  environment and return `AstDiagnosticFailure::Prepared`; published successful-module warnings
+  are captured at publication, rebased onto the run root string table and carried as
+  `PreparedDiagnosticBatch` (base modules in `ModuleId` order, then generated sidecars in
+  publication order); check-only warnings retain a path snapshot only for rendered-path payloads.
+  Render corpus 2982/2982 with 1,656 identical renders. S6b is accepted in "Phase 4 P4.5 S6b:
+  AST failures capture at their owning sites": the AST emitter and finalizer return
+  `AstDiagnosticFailure::Prepared`, and Boracle keeps prepared batches typed until its source
+  owner finalizes (`BoundaryFailurePayload::Prepared`). S6a is accepted in "Phase 4 P4.5 S6a:
+  owning-site capture from a diagnostic bag". S5 is accepted in "Phase 4 P4.5 S5a: prepared
+  batch vessel-free append" through "Phase 4 P4.5 S5d: file-prep warnings have one owner". S4
   (the canonical merge) is accepted in "Phase 4 P4.5 S4a: run-scoped boundary accumulator",
   "Phase 4 P4.5 S4c: build warnings freeze once", "Phase 4 P4.5 S4b: canonical tail freezes once"
   and "Phase 4 P4.5 S4d: canonical merge census and medians". S4d found no production vessel

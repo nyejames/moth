@@ -65,7 +65,7 @@ fn html_build_result() -> BuildResult {
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
-        warning_accumulator: crate::build_system::build::build_warning_accumulator(
+        warning_accumulator: crate::build_system::build::build_warning_accumulator_from_diagnostics(
             Vec::new(),
             StringTable::new(),
             Vec::new(),
@@ -107,7 +107,7 @@ fn multi_page_html_build_result() -> BuildResult {
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("project")),
-        warning_accumulator: crate::build_system::build::build_warning_accumulator(
+        warning_accumulator: crate::build_system::build::build_warning_accumulator_from_diagnostics(
             Vec::new(),
             StringTable::new(),
             Vec::new(),
@@ -135,7 +135,7 @@ fn html_build_result_with_warning() -> BuildResult {
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
-        warning_accumulator: crate::build_system::build::build_warning_accumulator(
+        warning_accumulator: crate::build_system::build::build_warning_accumulator_from_diagnostics(
             vec![warning],
             string_table,
             Vec::new(),
@@ -167,7 +167,7 @@ fn directory_build_result(project_root: &Path, output_folder: &str) -> BuildResu
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(project_root.to_path_buf()),
-        warning_accumulator: crate::build_system::build::build_warning_accumulator(
+        warning_accumulator: crate::build_system::build::build_warning_accumulator_from_diagnostics(
             Vec::new(),
             StringTable::new(),
             Vec::new(),

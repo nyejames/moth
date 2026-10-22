@@ -248,7 +248,7 @@ fn build_result_warning_handoff_resolves_generated_donor_source_context() {
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(project_temp.path().to_path_buf()),
-        warning_accumulator: crate::build_system::build::build_warning_accumulator(
+        warning_accumulator: crate::build_system::build::build_warning_accumulator_from_diagnostics(
             vec![warning],
             string_table,
             vec![RenderSourceContext {
@@ -370,7 +370,7 @@ fn build_result_warning_handoff_keeps_related_package_label_out_of_default_conte
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(project_temp.path().to_path_buf()),
-        warning_accumulator: crate::build_system::build::build_warning_accumulator(
+        warning_accumulator: crate::build_system::build::build_warning_accumulator_from_diagnostics(
             vec![diagnostic],
             string_table,
             vec![RenderSourceContext {

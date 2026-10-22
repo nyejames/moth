@@ -14,6 +14,7 @@ use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchArm, MatchPattern, PatternValue, RelationalPatternOp,
 };
 use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
@@ -799,9 +800,12 @@ fn match_guard_rejects_lowering_when_guard_emits_prelude_statements() {
     )
     .expect_err("guard expressions with preludes should fail HIR lowering");
 
-    let error = err
-        .primary_infrastructure_error()
-        .expect("HIR lowering failure should be wrapped for rendering");
+    let error = match err {
+        AstDiagnosticFailure::Infrastructure(errors) => errors.primary,
+        AstDiagnosticFailure::Prepared(_) => {
+            panic!("HIR lowering failure should be infrastructure")
+        }
+    };
     assert_eq!(&error.error_type, &ErrorType::HirTransformation);
     assert!(
         error
@@ -883,9 +887,12 @@ fn match_rejects_non_literal_pattern_expressions() {
         &super::ExternalPackageRegistry::new(),
     )
     .expect_err("non-literal match pattern should fail HIR lowering");
-    let error = err
-        .primary_infrastructure_error()
-        .expect("HIR lowering failure should be wrapped for rendering");
+    let error = match err {
+        AstDiagnosticFailure::Infrastructure(errors) => errors.primary,
+        AstDiagnosticFailure::Prepared(_) => {
+            panic!("HIR lowering failure should be infrastructure")
+        }
+    };
     assert_eq!(&error.error_type, &ErrorType::HirTransformation);
     assert!(
         error
@@ -927,9 +934,12 @@ fn break_outside_loop_reports_hir_transformation_error() {
         &super::ExternalPackageRegistry::new(),
     )
     .expect_err("break outside loop should fail");
-    let error = err
-        .primary_infrastructure_error()
-        .expect("HIR lowering failure should be wrapped for rendering");
+    let error = match err {
+        AstDiagnosticFailure::Infrastructure(errors) => errors.primary,
+        AstDiagnosticFailure::Prepared(_) => {
+            panic!("HIR lowering failure should be infrastructure")
+        }
+    };
     assert_eq!(&error.error_type, &ErrorType::HirTransformation);
     assert!(error.msg.contains("active loop context"));
 }
@@ -965,9 +975,12 @@ fn continue_outside_loop_reports_hir_transformation_error() {
         &super::ExternalPackageRegistry::new(),
     )
     .expect_err("continue outside loop should fail");
-    let error = err
-        .primary_infrastructure_error()
-        .expect("HIR lowering failure should be wrapped for rendering");
+    let error = match err {
+        AstDiagnosticFailure::Infrastructure(errors) => errors.primary,
+        AstDiagnosticFailure::Prepared(_) => {
+            panic!("HIR lowering failure should be infrastructure")
+        }
+    };
     assert_eq!(&error.error_type, &ErrorType::HirTransformation);
     assert!(error.msg.contains("active loop context"));
 }
@@ -1006,9 +1019,12 @@ fn top_level_return_reports_hir_transformation_error() {
     )
     .expect_err("top-level return should fail");
 
-    let error = err
-        .primary_infrastructure_error()
-        .expect("HIR lowering failure should be wrapped for rendering");
+    let error = match err {
+        AstDiagnosticFailure::Infrastructure(errors) => errors.primary,
+        AstDiagnosticFailure::Prepared(_) => {
+            panic!("HIR lowering failure should be infrastructure")
+        }
+    };
     assert_eq!(&error.error_type, &ErrorType::HirTransformation);
     assert!(error.msg.contains("Top-level return"));
 }

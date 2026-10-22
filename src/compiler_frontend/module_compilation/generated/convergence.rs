@@ -22,10 +22,12 @@ use crate::compiler_frontend::ast::generic_functions::{
     ModuleMaterialisationPreparedBuilder, StableFunctionTarget,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::compiler_errors::RenderTypeContext;
+use crate::compiler_frontend::compiler_messages::prepared_batch::{
+    AstDiagnosticFailure, PreparedDiagnosticBatch, SemanticStageFailure,
+};
 use crate::compiler_frontend::compiler_messages::{
     BuiltinFailureOriginKind, BuiltinFailureWitness, CompilerDiagnostic, DiagnosticBag,
-    InvalidFallibleHandlingReason, PremergeDiagnosticBatch, PremergeFailure,
+    InvalidFallibleHandlingReason, PremergeFailure,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::CallTarget;
@@ -60,6 +62,7 @@ use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan};
 use crate::compiler_frontend::hir::ids::FunctionId;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use crate::compiler_frontend::module_compilation::generated::transaction::GeneratedFunctionTransaction;
 use crate::compiler_frontend::module_compilation::stages::check_borrows;
@@ -419,7 +422,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
     type_environment: &mut TypeEnvironment,
     warnings: &mut DiagnosticBag,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<BorrowCheckReport, PremergeFailure> {
+) -> Result<BorrowCheckReport, SemanticStageFailure> {
     let base_public_origins = hir_module
         .function_ids_by_origin
         .keys()
@@ -486,7 +489,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                     borrow_analysis = timed_stage_attributed!(
                         crate::timing::TimingMetric::FrontendBorrowConverge,
                         timing_context,
-                        check_borrows(compiler, hir_module, warnings, None)
+                        check_borrows(compiler, hir_module, type_environment, warnings, None)
                     )?;
                 }
                 // A reused bootstrap report still carries unset failure bits, so inference runs
@@ -540,6 +543,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                             check_borrows(
                                 compiler,
                                 &sidecar.module.executable.hir,
+                                &sidecar.module.executable.type_environment,
                                 &mut sidecar.warnings,
                                 Some(&source_identity_handle),
                             )
@@ -594,7 +598,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
             compiler,
             &sidecar.module.executable.hir,
             &sidecar.module.executable.borrow_analysis,
-            &mut sidecar.module.executable.type_environment,
+            &sidecar.module.executable.type_environment,
             &mut sidecar.warnings,
             Some(&source_owner),
         )?;
@@ -795,37 +799,44 @@ fn refresh_private_failure_lanes(
     type_environment: &mut TypeEnvironment,
     warnings: &mut DiagnosticBag,
     source_owner: Option<&FrozenIdentityHandle>,
-) -> Result<Option<BorrowCheckReport>, PremergeFailure> {
+) -> Result<Option<BorrowCheckReport>, SemanticStageFailure> {
     let installation = install_private_failure_lanes(
         hir,
         report,
         type_environment,
         compiler.external_package_registry.as_ref(),
     )
-    .map_err(|failure| {
-        let messages = match failure {
-            HirConstructionFailure::Diagnosed(diagnostic) => {
-                CompilerMessages::from_diagnostic_with_warnings(
-                    diagnostic,
-                    warnings.take_diagnostics(),
-                    &compiler.string_table,
-                )
-                .with_type_context_for_all_diagnostics(std::mem::take(type_environment))
+    .map_err(|failure| match failure {
+        HirConstructionFailure::Diagnosed(mut diagnostic) => {
+            if let Some(owner) = source_owner {
+                diagnostic.attach_frozen_identity_handle_if_missing(owner.clone());
             }
-            HirConstructionFailure::Infrastructure(error) => {
-                CompilerMessages::from_error_ref(error, &compiler.string_table)
-            }
-        };
-        let mut failure = PremergeFailure::from(messages);
-        if let Some(owner) = source_owner {
-            failure.set_frozen_identity_handle_if_missing(owner.clone());
+            let warnings = warnings.take_diagnostics().into_iter().map(|mut warning| {
+                if let Some(owner) = source_owner {
+                    warning.attach_frozen_identity_handle_if_missing(owner.clone());
+                }
+                warning
+            });
+            let messages = CompilerMessages::from_diagnostic_with_warnings(
+                diagnostic,
+                warnings.collect(),
+                &compiler.string_table,
+            );
+            SemanticStageFailure::from(AstDiagnosticFailure::capture_messages(
+                messages,
+                Some(type_environment),
+                true,
+                Some(Arc::new(compiler.path_fork.snapshot_table())),
+            ))
         }
-        failure
+        HirConstructionFailure::Infrastructure(error) => {
+            SemanticStageFailure::from(AstDiagnosticFailure::from(error))
+        }
     })?;
     if installation == PrivateFailureLaneInstallation::Unchanged {
         return Ok(None);
     }
-    let mut refreshed = check_borrows(compiler, hir, warnings, source_owner)?;
+    let mut refreshed = check_borrows(compiler, hir, type_environment, warnings, source_owner)?;
     infer_builtin_failure_summaries(hir, &mut refreshed)
         .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
     Ok(Some(refreshed))
@@ -1341,10 +1352,10 @@ fn validate_builtin_failure_boundaries(
     compiler: &mut CompilerFrontend<'_>,
     hir: &HirModule,
     report: &BorrowCheckReport,
-    type_environment: &mut TypeEnvironment,
+    type_environment: &TypeEnvironment,
     warnings: &mut DiagnosticBag,
     source_owner: Option<&FrozenIdentityHandle>,
-) -> Result<(), PremergeFailure> {
+) -> Result<(), SemanticStageFailure> {
     for function in &hir.functions {
         let Some(mut diagnostic) = builtin_failure_diagnostic(hir, report, function.id)? else {
             continue;
@@ -1352,14 +1363,12 @@ fn validate_builtin_failure_boundaries(
         if let Some(owner) = source_owner {
             diagnostic.attach_frozen_identity_handle_if_missing(owner.clone());
         }
-        let mut batch = PremergeDiagnosticBatch::from_parts(
-            vec![diagnostic],
+        let mut batch = PreparedDiagnosticBatch::capture_from_bag(
+            DiagnosticBag::from(diagnostic),
             std::mem::take(&mut compiler.string_table),
-            vec![RenderTypeContext {
-                diagnostic_range: 0..1,
-                type_environment: std::mem::take(type_environment),
-            }],
-            vec![],
+            Some(type_environment),
+            true,
+            Some(Arc::new(compiler.path_fork.snapshot_table())),
         );
         batch.prepend_diagnostics(warnings.take_diagnostics().into_iter().map(|mut warning| {
             if let Some(owner) = source_owner {
@@ -1367,7 +1376,7 @@ fn validate_builtin_failure_boundaries(
             }
             warning
         }));
-        return Err(batch.into());
+        return Err(AstDiagnosticFailure::Prepared(batch).into());
     }
     Ok(())
 }

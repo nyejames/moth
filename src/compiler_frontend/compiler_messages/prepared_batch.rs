@@ -14,7 +14,7 @@ use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::path_interner::PathTable;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use std::sync::Arc;
 
 /// Batch-local string, path, and frozen-identity ownership.
@@ -99,6 +99,11 @@ impl From<PremergeFailure> for SemanticStageFailure {
 impl From<CompilerError> for SemanticStageFailure {
     fn from(error: CompilerError) -> Self {
         Self::Premerge(PremergeFailure::from(error))
+    }
+}
+impl From<CompilerMessages> for SemanticStageFailure {
+    fn from(messages: CompilerMessages) -> Self {
+        Self::Premerge(PremergeFailure::from(messages))
     }
 }
 
@@ -195,6 +200,22 @@ impl PreparedDiagnosticBatch {
             }),
         }
     }
+
+    /// Rebase every prepared string ID onto the run root table and release this batch's local
+    /// identity table. After this call, all string IDs belong to the run root table; append the
+    /// batch only to an accumulator initialized with that same table.
+    pub(crate) fn rebase_strings(&mut self, remap: &StringIdRemap) {
+        if !remap.is_identity() {
+            for diagnostic in &mut self.prepared {
+                diagnostic.remap_string_ids(remap);
+            }
+            for row in &mut self.identity.path_rows {
+                Arc::make_mut(&mut row.path_table).remap_string_ids(remap);
+            }
+        }
+        self.identity.string_table = StringTable::empty_unallocated();
+    }
+
     pub(crate) fn prepend_diagnostics(
         &mut self,
         prior_diagnostics: impl IntoIterator<

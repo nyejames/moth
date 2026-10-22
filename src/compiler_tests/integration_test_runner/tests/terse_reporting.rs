@@ -101,7 +101,7 @@ fn minimal_build_result() -> BuildResult {
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
-        warning_accumulator: crate::build_system::build::build_warning_accumulator(
+        warning_accumulator: crate::build_system::build::build_warning_accumulator_from_diagnostics(
             Vec::new(),
             string_table,
             Vec::new(),
@@ -217,7 +217,7 @@ fn build_result_with_warning(
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
-        warning_accumulator: crate::build_system::build::build_warning_accumulator(
+        warning_accumulator: crate::build_system::build::build_warning_accumulator_from_diagnostics(
             vec![warning],
             string_table,
             Vec::new(),
@@ -297,15 +297,16 @@ fn terse_build_result_warning_uses_donor_context_after_terminal_finalization() {
     ));
 
     let mut build_result = minimal_build_result();
-    build_result.warning_accumulator = crate::build_system::build::build_warning_accumulator(
-        vec![warning],
-        string_table,
-        vec![RenderSourceContext {
-            diagnostic_range: 0..0,
-            source_database: Arc::clone(&package_database),
-            domain: Some(package_identity),
-        }],
-    );
+    build_result.warning_accumulator =
+        crate::build_system::build::build_warning_accumulator_from_diagnostics(
+            vec![warning],
+            string_table,
+            vec![RenderSourceContext {
+                diagnostic_range: 0..0,
+                source_database: Arc::clone(&package_database),
+                domain: Some(package_identity),
+            }],
+        );
     build_result.source_database = Some(Arc::clone(&project_database));
     drop(package_database);
     drop(project_database);

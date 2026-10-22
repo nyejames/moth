@@ -16,10 +16,10 @@ use crate::build_system::build::ProjectAssemblyError;
 use crate::compiler_frontend::compiler_errors::{
     BoundaryFailure, CompilerError, CompilerMessages, RenderSourceContext,
 };
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticBag};
 #[cfg(feature = "data_layout_memory_probe")]
 use crate::compiler_frontend::instrumentation::MemoryLedgerSnapshot;
 use crate::compiler_frontend::module_compilation::{CompiledModuleArtifact, Module};
@@ -42,6 +42,11 @@ use super::module_artifact_store::{ModuleArtifactStore, ProviderSlot};
 use super::module_identity::ModuleId;
 use super::project_module_graph::ProjectModuleGraph;
 use super::resource_inputs::ResourceInputRegistry;
+/// One prepared successful-warning batch and its source owner, if the batch came from a package.
+pub(crate) struct SuccessfulWarningBatch {
+    pub(crate) batch: PreparedDiagnosticBatch,
+    pub(crate) source: Option<(Arc<SourceDatabase>, Option<StablePackageIdentity>)>,
+}
 
 fn install_frontend_source_context(
     messages: &mut CompilerMessages,
@@ -404,22 +409,29 @@ impl CompiledGraphBoundary {
         self.modules.successful_artefacts_in_module_id_order()
     }
 
-    /// Iterate every successful module view including generated sidecars.
-    ///
     /// Base artefacts come first in `ModuleId` order, then generated sidecars in deterministic
-    /// publication order. Warnings produced during generic materialisation live in each
-    /// sidecar's sibling warning bag, so boundary consumers must visit both lanes.
+    /// publication order. Their warning batches are retained separately from executable views.
     pub(crate) fn successful_module_views(&self) -> impl Iterator<Item = &Module> + '_ {
         self.successful_artefacts_in_module_id_order()
             .map(|artifact| &artifact.module)
             .chain(self.generated.sidecars().map(|sidecar| &sidecar.module))
     }
 
-    /// Move successful-module warnings from artifact and sidecar sibling bags in view order.
-    pub(crate) fn take_successful_warnings(&mut self) -> Vec<CompilerDiagnostic> {
-        let mut warnings = self.modules.take_successful_warnings();
-        warnings.extend(self.generated.take_sidecar_warnings());
-        warnings
+    /// Move prepared successful-module warnings in module-id then generated-publication order.
+    pub(crate) fn take_successful_warnings(&mut self) -> Vec<SuccessfulWarningBatch> {
+        let batches = self.modules.take_successful_warnings();
+        let uncaptured_sidecar_warnings = self.generated.take_sidecar_warnings();
+        assert!(
+            uncaptured_sidecar_warnings.is_empty(),
+            "generated sidecar warnings must be captured when their module is published",
+        );
+        batches
+            .into_iter()
+            .map(|batch| SuccessfulWarningBatch {
+                batch,
+                source: None,
+            })
+            .collect()
     }
 
     /// Install the single boundary-owned identity pair after all canonical publications.
@@ -797,32 +809,24 @@ impl CompletedSourcePackageRegistry {
             .get(package_id.index())
             .and_then(Option::as_ref)
     }
-    /// Move package warning batches and their source owners into the build's warning stream.
-    ///
-    /// Package order is publication order, and each source row starts at the warning vector's
-    /// current length so its range remains aligned after preceding project/package warnings.
+    /// Move package warning batches with the source owner of their publishing package.
     pub(crate) fn append_successful_warnings(
         &mut self,
-        warnings: &mut Vec<CompilerDiagnostic>,
-        source_contexts: &mut Vec<RenderSourceContext>,
+        warnings: &mut Vec<SuccessfulWarningBatch>,
     ) {
         for package_index in 0..self.packages.len() {
             let package = &mut self.packages[package_index];
-            let warning_start = warnings.len();
-            warnings.extend(package.boundary.take_successful_warnings());
-            let warning_end = warnings.len();
-
-            if let Some(source_database) = self
+            let source = self
                 .source_databases
                 .get_mut(package_index)
                 .and_then(Option::take)
-            {
-                source_contexts.push(RenderSourceContext {
-                    diagnostic_range: warning_start..warning_end,
-                    source_database,
-                    domain: Some(package.package_identity.clone()),
-                });
-            }
+                .map(|database| (database, Some(package.package_identity.clone())));
+            warnings.extend(package.boundary.take_successful_warnings().into_iter().map(
+                |mut batch| {
+                    batch.source = source.clone();
+                    batch
+                },
+            ));
         }
     }
 
@@ -1423,44 +1427,59 @@ impl ProjectFrontendCompilation {
         #[cfg(feature = "data_layout_memory_probe")]
         let (mut diagnostic_records, mut diagnostic_label_slots) = (0, 0);
 
-        // Successful warnings already use the caller-owned root table. Keep project warnings
-        // before package warnings, binding each package row before any project fallback can match.
-        let mut warning_messages = CompilerMessages::empty(std::mem::take(string_table));
-        let project_warning_end = project_warnings.len();
-        warning_messages.extend_diagnostics(project_warnings);
-        install_frontend_source_context(
-            &mut warning_messages,
-            0..project_warning_end,
-            0,
-            project_source.as_ref(),
+        // Keep project warnings before package warnings. Each batch already owns its captured
+        // identity snapshot and is appended directly to the root table.
+        let root_batch = PreparedDiagnosticBatch::capture_from_bag(
+            DiagnosticBag::new(),
+            std::mem::take(string_table),
             None,
-            &mut can_freeze,
+            false,
+            None,
         );
-        for (package_index, package) in source_packages.iter_mut().enumerate() {
-            let warnings = package.boundary.take_successful_warnings();
-            let start = warning_messages.diagnostics.len();
-            warning_messages.extend_diagnostics(warnings);
-            let end = warning_messages.diagnostics.len();
-            install_frontend_source_context(
-                &mut warning_messages,
-                start..end,
-                0,
-                package_source_arcs
-                    .get(package_index)
-                    .and_then(Option::as_ref),
-                Some(package.package_identity.clone()),
+        accumulator.append_prepared(root_batch, None);
+        for warning in project_warnings {
+            let source = warning
+                .source
+                .as_ref()
+                .map(|(source, domain)| (source, domain.clone()))
+                .or_else(|| project_source.as_ref().map(|source| (source, None)));
+            let metrics = append_prepared_frontend_diagnostics(
+                &mut accumulator,
+                warning.batch,
+                source,
+                diagnostic_count,
                 &mut can_freeze,
             );
+            #[cfg(feature = "data_layout_memory_probe")]
+            {
+                diagnostic_records += metrics.diagnostic_count;
+                diagnostic_label_slots += metrics.label_count;
+            }
+            diagnostic_count += metrics.diagnostic_count;
+            saw_infrastructure |= metrics.missing_source_error;
         }
-        #[cfg(feature = "data_layout_memory_probe")]
-        record_frontend_diagnostic_metrics(
-            &warning_messages,
-            &mut diagnostic_records,
-            &mut diagnostic_label_slots,
-        );
-        diagnostic_count += warning_messages.diagnostics.len();
-        saw_infrastructure |= warning_messages.infrastructure_errors.is_some();
-        accumulator.append(warning_messages);
+        for (package_index, package) in source_packages.iter_mut().enumerate() {
+            let source = package_source_arcs
+                .get(package_index)
+                .and_then(Option::as_ref);
+            let domain = Some(package.package_identity.clone());
+            for warning in package.boundary.take_successful_warnings() {
+                let metrics = append_prepared_frontend_diagnostics(
+                    &mut accumulator,
+                    warning.batch,
+                    source.map(|source| (source, domain.clone())),
+                    diagnostic_count,
+                    &mut can_freeze,
+                );
+                #[cfg(feature = "data_layout_memory_probe")]
+                {
+                    diagnostic_records += metrics.diagnostic_count;
+                    diagnostic_label_slots += metrics.label_count;
+                }
+                diagnostic_count += metrics.diagnostic_count;
+                saw_infrastructure |= metrics.missing_source_error;
+            }
+        }
 
         // Diagnosed graph modules are already in canonical ModuleId order.
         for diagnosed in project_diagnosed {

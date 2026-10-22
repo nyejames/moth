@@ -14,7 +14,7 @@ use super::compiler_errors::{
 };
 use super::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
-use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase};
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::symbols::path_interner::{PathIdRemap, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use std::sync::Arc;
@@ -155,35 +155,6 @@ impl From<CompilerError> for PremergeFailure {
 }
 
 impl PremergeFailure {
-    /// Prepend earlier-stage diagnostics to a diagnosed premerge batch.
-    ///
-    /// Infrastructure failures remain typed and untouched. A mixed failure retains its outer
-    /// infrastructure error while shifting the diagnosed batch's render ranges.
-    pub(crate) fn prepend_diagnostics(
-        &mut self,
-        prior_diagnostics: impl IntoIterator<Item = CompilerDiagnostic>,
-    ) {
-        match self {
-            Self::Diagnosed(batch) => batch.prepend_diagnostics(prior_diagnostics),
-            Self::Infrastructure(_) => {}
-            Self::Mixed { batch, .. } => batch.prepend_diagnostics(prior_diagnostics),
-        }
-    }
-    /// Preserve existing mixed-domain owners while filling ownership for an unowned batch.
-    pub(crate) fn set_frozen_identity_handle_if_missing(
-        &mut self,
-        frozen_identity_handle: FrozenIdentityHandle,
-    ) {
-        match self {
-            Self::Diagnosed(batch) => {
-                batch.set_frozen_identity_handle_if_missing(frozen_identity_handle);
-            }
-            Self::Infrastructure(_) => {}
-            Self::Mixed { batch, .. } => {
-                batch.set_frozen_identity_handle_if_missing(frozen_identity_handle);
-            }
-        }
-    }
     /// Attach a path table when a diagnosed batch still has a render-time path consumer.
     ///
     /// Infrastructure failures have no diagnostics or type contexts, so attaching remains a
@@ -302,17 +273,6 @@ impl PremergeDiagnosticBatch {
         Self::new(DiagnosticBag::from_diagnostics(diagnostics), string_table)
     }
 
-    /// Attach the generated-source owner only to spans that do not already have one.
-    /// Existing primary and label owners are authoritative: this bridge supplies ownership for
-    /// legacy AST/HIR diagnostics without replacing mixed-domain provenance.
-    pub(crate) fn set_frozen_identity_handle_if_missing(
-        &mut self,
-        frozen_identity_handle: FrozenIdentityHandle,
-    ) {
-        for diagnostic in &mut self.bag.diagnostics {
-            diagnostic.attach_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
-        }
-    }
     /// Attach one complete path identity snapshot to this batch when a renderer consumes paths.
     ///
     /// A caller-supplied table is retained only for diagnostics with direct rendered path

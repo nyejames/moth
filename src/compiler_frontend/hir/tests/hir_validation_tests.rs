@@ -15,6 +15,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
     StructTypeDefinition,
@@ -5328,9 +5329,7 @@ fn lowering_errors_preserve_string_table_context() {
     )
     .expect_err("unknown function call should fail HIR lowering");
 
-    let _error = messages
-        .primary_infrastructure_error()
-        .expect("expected HIR lowering error");
+    assert!(matches!(messages, AstDiagnosticFailure::Infrastructure(_)));
 }
 // ---------------------------------------------------------------------------
 // VariantConstruct validation

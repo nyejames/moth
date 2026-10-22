@@ -14,7 +14,7 @@ use crate::timing_scope;
 use crate::build_system::BuildProfile;
 use crate::build_system::create_project_modules::compiled_boundary::{
     CompiledGraphBoundary, CompiledModuleRef, CompletedSourcePackageRegistry, PackageBoundaryId,
-    ProjectFrontendCompilation, compilation_module_views,
+    ProjectFrontendCompilation, SuccessfulWarningBatch, compilation_module_views,
 };
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::create_project_modules::{
@@ -34,13 +34,13 @@ use crate::build_system::resource_unions::{
 
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{
-    BoundaryFailure, CompilerError, CompilerMessages, RenderSourceContext,
-};
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::{
     BoundaryAccumulator, into_boundary_failure,
 };
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ProjectContextEscapeReason};
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::reachability::{
@@ -105,11 +105,31 @@ fn attach_owned_source_database(
     }
 }
 
-/// Join the successful frontend warning stream to the build's mutable root table.
+/// Join prepared successful frontend warnings to the build's mutable root table.
 pub(crate) fn build_warning_accumulator(
+    warnings: Vec<SuccessfulWarningBatch>,
+    string_table: StringTable,
+) -> BoundaryAccumulator {
+    let mut accumulator = BoundaryAccumulator::new();
+    let root_batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::new(),
+        string_table,
+        None,
+        false,
+        None,
+    );
+    accumulator.append_prepared(root_batch, None);
+    for warning in warnings {
+        accumulator.append_prepared(warning.batch, warning.source);
+    }
+    accumulator
+}
+
+#[cfg(test)]
+pub(crate) fn build_warning_accumulator_from_diagnostics(
     warnings: Vec<CompilerDiagnostic>,
     string_table: StringTable,
-    source_contexts: Vec<RenderSourceContext>,
+    source_contexts: Vec<crate::compiler_frontend::compiler_errors::RenderSourceContext>,
 ) -> BoundaryAccumulator {
     let mut messages = CompilerMessages::from_diagnostics(warnings, string_table);
     messages.install_source_contexts(source_contexts, 0);
@@ -1939,14 +1959,11 @@ fn collect_success_warnings(
     project_compilation: &mut ProjectCompilation,
     string_table: StringTable,
 ) -> BoundaryAccumulator {
-    // The boundary stores drain their warning bags by move; this root-table lane remains
-    // type-free so unresolved warning TypeIds keep their legacy spelling.
     let mut warnings = project_compilation.project.take_successful_warnings();
-    let mut warning_source_contexts = Vec::new();
     project_compilation
         .source_packages
-        .append_successful_warnings(&mut warnings, &mut warning_source_contexts);
-    build_warning_accumulator(warnings, string_table, warning_source_contexts)
+        .append_successful_warnings(&mut warnings);
+    build_warning_accumulator(warnings, string_table)
 }
 
 #[cfg(test)]

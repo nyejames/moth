@@ -12,7 +12,7 @@ use crate::builder_surface::external_import_providers::provider::{
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
-use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::datatypes::environment::{
     TypeEnvironment, TypeEnvironmentRemapCache,
 };
@@ -71,15 +71,19 @@ impl Module {
 
 /// One successful canonical module artefact.
 ///
-/// WHAT: pairs the backend-neutral executable/link/metadata lanes and separately owned warning
-///       bag with the immutable semantic interface published to later graph waves.
+/// WHAT: pairs the backend-neutral executable/link/metadata lanes and separately owned prepared
+///       warning batches with the immutable semantic interface published to later graph waves.
 /// WHY: provider publication must point at a complete success value. Keeping the module, its
 ///      warnings and interface together prevents the scheduler from publishing a local draft or
 ///      dropping part of the semantic result.
 pub(crate) struct CompiledModuleArtifact {
     pub(crate) module: Module,
-    /// Successful-module warnings remain outside `Module` while they share its published identity.
-    pub(crate) warnings: DiagnosticBag,
+    /// Prepared base-module warnings captured at publish while the executable type environment is
+    /// still available. Empty warning lanes store `None` rather than an empty batch.
+    pub(crate) warnings: Option<PreparedDiagnosticBatch>,
+    /// Generated sidecar warnings captured with the publishing module and retained in publication
+    /// order separately from base-module warnings.
+    pub(crate) sidecar_warnings: Vec<PreparedDiagnosticBatch>,
     pub(crate) interface: PublicSemanticInterface,
 }
 

@@ -551,6 +551,15 @@ impl CompilerMessages {
         &self.diagnostics
     }
 
+    /// Append test-only diagnostics while preserving the existing message sequence.
+    #[cfg(test)]
+    pub(crate) fn extend_diagnostics(
+        &mut self,
+        diagnostics: impl IntoIterator<Item = CompilerDiagnostic>,
+    ) {
+        self.diagnostics.extend(diagnostics);
+    }
+
     /// Record that this vessel's identity rows are final, so the boundary converter installs them.
     ///
     /// WHAT: sets the install mode to `Frozen`. The mode travels with the vessel through merges.
@@ -561,13 +570,6 @@ impl CompilerMessages {
         self.install_mode = InstallMode::Frozen;
     }
 
-    /// Append already-structured diagnostics while preserving current order.
-    pub(crate) fn extend_diagnostics(
-        &mut self,
-        diagnostics: impl IntoIterator<Item = CompilerDiagnostic>,
-    ) {
-        self.diagnostics.extend(diagnostics);
-    }
     /// Fill missing diagnostic span owners without replacing mixed-domain provenance.
     pub(crate) fn set_frozen_identity_handle_if_missing(
         &mut self,

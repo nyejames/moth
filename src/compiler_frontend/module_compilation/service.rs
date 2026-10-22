@@ -174,11 +174,9 @@ pub(crate) fn compile_module(
         timing_context,
     );
 
-    // Normalize the deeper stages' classified premerge lane once at this semantic boundary.
-    // A successful compilation becomes `Success`. A diagnosed batch becomes `Diagnosed`
-    // (user-facing diagnostics the renderer surfaces) or an infrastructure aggregate when the batch
-    // fails diagnosed validation. An infrastructure failure propagates unchanged. This is the
-    // single lossless ownership transfer; graph and render consumers never re-classify.
+    // Normalize premerge and prepared semantic failures once at this boundary. A successful
+    // compilation becomes `Success`; a diagnosed failure becomes `Diagnosed` after boundary
+    // validation, while infrastructure failures propagate unchanged.
     match compile_result {
         Ok(SemanticStageOutput::Complete(output)) => {
             let CompleteSemanticStage {
@@ -375,9 +373,9 @@ struct CompleteSemanticStage {
 /// WHAT: binding -> ordering -> AST -> public-interface projection -> HIR -> borrow validation ->
 ///       generated completion, returning the complete module, public interface, generated delta
 ///       and resource-source associations a success is made of.
-/// WHY: binding/order and HIR stages retain their premerge lane, while AST failures cross in a
-/// prepared or infrastructure lane. The normal module boundary classifies each lane without
-/// reconstructing the legacy vessel, and keeps this sequence readable as one semantic pipeline.
+/// WHY: binding/order retain premerge failures, while AST/HIR/borrow diagnostics cross as captured
+///       prepared batches. The normal module boundary classifies each lane without reconstructing
+///       the legacy vessel and keeps this sequence readable as one semantic pipeline.
 fn run_semantic_stages(
     compiler: &mut CompilerFrontend<'_>,
     context: &ModuleCompilationContext<'_>,
@@ -755,7 +753,13 @@ fn run_semantic_stages(
     let bootstrap_borrow_analysis = timed_stage_attributed!(
         crate::timing::TimingMetric::FrontendBorrowInitial,
         timing_context,
-        check_borrows(compiler, &hir_module, &mut warning_bag, None)
+        check_borrows(
+            compiler,
+            &hir_module,
+            &type_environment,
+            &mut warning_bag,
+            None
+        )
     )?;
     let generated_materialisation = timed_stage_attributed!(
         crate::timing::TimingMetric::FrontendGeneratedMaterialise,

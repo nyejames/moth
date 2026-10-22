@@ -11,7 +11,7 @@
 use super::module_identity::ModuleId;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::module_compilation::CompiledModuleArtifact;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
@@ -54,6 +54,8 @@ pub(crate) struct MaterialisationContextLocation {
 pub(crate) struct ModuleArtifactStore {
     slots: Vec<ProviderSlot>,
     artifacts: Vec<CompiledModuleArtifact>,
+    /// Generated warning batches in the same publication order as their sidecars.
+    sidecar_warning_batches: Vec<PreparedDiagnosticBatch>,
     /// Boundary-owned index of every published materialisation context by its generic
     /// declaration identity.
     ///
@@ -74,6 +76,7 @@ pub(crate) struct ModuleSuccessPublication {
     module_index: usize,
     artifact_id: CompiledModuleArtifactId,
     materialisation_rows: Vec<(GeneratedDeclarationIdentity, MaterialisationContextLocation)>,
+    sidecar_warning_count: usize,
 }
 
 impl ModuleArtifactStore {
@@ -83,6 +86,7 @@ impl ModuleArtifactStore {
             artifacts: Vec::with_capacity(module_count),
             contexts_by_declaration: FxHashMap::default(),
             materialisation_rows: Vec::new(),
+            sidecar_warning_batches: Vec::new(),
         }
     }
 
@@ -145,6 +149,7 @@ impl ModuleArtifactStore {
             module_index: module_id.index(),
             artifact_id,
             materialisation_rows: rows,
+            sidecar_warning_count: artifact.sidecar_warnings.len(),
         })
     }
 
@@ -154,13 +159,17 @@ impl ModuleArtifactStore {
             .reserve(publication.materialisation_rows.len());
         self.materialisation_rows
             .reserve(publication.materialisation_rows.len());
+        self.sidecar_warning_batches
+            .reserve(publication.sidecar_warning_count);
     }
 
     pub(crate) fn commit_success(
         &mut self,
         publication: ModuleSuccessPublication,
-        artifact: CompiledModuleArtifact,
+        mut artifact: CompiledModuleArtifact,
     ) {
+        self.sidecar_warning_batches
+            .append(&mut artifact.sidecar_warnings);
         self.artifacts.push(artifact);
         for (identity, location) in publication.materialisation_rows {
             self.contexts_by_declaration
@@ -304,17 +313,29 @@ impl ModuleArtifactStore {
         })
     }
 
-    /// Move successful-artefact warnings in deterministic `ModuleId` order.
-    pub(crate) fn take_successful_warnings(&mut self) -> Vec<CompilerDiagnostic> {
-        let mut warnings = Vec::new();
+    /// Move prepared warning batches with base modules ordered by `ModuleId`, followed by
+    /// generated sidecars in publication order.
+    pub(crate) fn take_successful_warnings(&mut self) -> Vec<PreparedDiagnosticBatch> {
+        let module_warning_count = self
+            .slots
+            .iter()
+            .filter_map(|slot| match slot {
+                ProviderSlot::Successful(artifact_id) => self.artifacts.get(artifact_id.0),
+                ProviderSlot::Unavailable | ProviderSlot::Diagnosed | ProviderSlot::Blocked => None,
+            })
+            .filter(|artifact| artifact.warnings.is_some())
+            .count();
+        let mut warnings =
+            Vec::with_capacity(module_warning_count + self.sidecar_warning_batches.len());
         for slot in &self.slots {
             let ProviderSlot::Successful(artifact_id) = slot else {
                 continue;
             };
             if let Some(artifact) = self.artifacts.get_mut(artifact_id.0) {
-                warnings.extend(artifact.warnings.take_diagnostics());
+                warnings.extend(artifact.warnings.take());
             }
         }
+        warnings.append(&mut self.sidecar_warning_batches);
         warnings
     }
 
@@ -387,6 +408,11 @@ impl ModuleArtifactStore {
         self.reserve_success_commit(&publication);
         self.commit_success(publication, artifact);
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn push_sidecar_warning_batch_for_test(&mut self, batch: PreparedDiagnosticBatch) {
+        self.sidecar_warning_batches.push(batch);
     }
 
     fn slot_mut(&mut self, module_id: ModuleId) -> Result<&mut ProviderSlot, CompilerError> {

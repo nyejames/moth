@@ -341,6 +341,16 @@ impl StringTable {
         }
     }
 
+    /// Create an empty table without reserving storage for an identity already owned elsewhere.
+    pub(crate) fn empty_unallocated() -> Self {
+        Self {
+            base: None,
+            next_id: 0,
+            strings: Vec::new(),
+            string_to_id: FxHashMap::default(),
+        }
+    }
+
     /// Create a new string table with a specified initial capacity
     pub fn with_capacity(capacity: usize) -> Self {
         Self {

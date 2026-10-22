@@ -49,7 +49,7 @@ pub(super) fn build_result_with_output_files(files: Vec<(PathBuf, FileKind)>) ->
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
-        warning_accumulator: crate::build_system::build::build_warning_accumulator(
+        warning_accumulator: crate::build_system::build::build_warning_accumulator_from_diagnostics(
             Vec::new(),
             StringTable::new(),
             Vec::new(),

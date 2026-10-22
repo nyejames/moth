@@ -506,7 +506,7 @@ impl FrontendProject {
         self.ast_result().expect("AST construction should succeed")
     }
 
-    fn lower_ast_result(&mut self, ast: Ast) -> Result<HirModule, CompilerMessages> {
+    fn lower_ast_result(&mut self, ast: Ast) -> Result<HirModule, AstDiagnosticFailure> {
         self.frontend
             .with_compiler(|compiler| {
                 compiler.generate_hir(
@@ -524,14 +524,17 @@ impl FrontendProject {
         let ast = self
             .ast_result()
             .expect("AST construction should succeed before failure contract checks");
-        let lowered = self.frontend.with_compiler(|compiler| {
-            compiler.generate_hir(
-                ast,
-                HirFunctionOriginLookup::default(),
-                None,
-                Default::default(),
-            )
-        })?;
+        let lowered = self
+            .frontend
+            .with_compiler(|compiler| {
+                compiler.generate_hir(
+                    ast,
+                    HirFunctionOriginLookup::default(),
+                    None,
+                    Default::default(),
+                )
+            })
+            .expect("HIR lowering should succeed before checking its boundary contract");
         let hir = lowered.hir_module;
         let mut report = self
             .frontend
@@ -553,8 +556,7 @@ impl FrontendProject {
                 return Err(CompilerMessages::from_diagnostic_ref(
                     diagnostic,
                     &self.frontend.string_table,
-                )
-                .with_type_context_for_all_diagnostics(lowered.type_environment));
+                ));
             }
         }
         Ok(hir)

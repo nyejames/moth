@@ -273,6 +273,7 @@ fn artifact(module: Module, interface: PublicSemanticInterface) -> CompiledModul
     CompiledModuleArtifact {
         module,
         warnings: Default::default(),
+        sidecar_warnings: Vec::new(),
         interface,
     }
 }

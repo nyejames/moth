@@ -29,7 +29,8 @@ use crate::compiler_frontend::compiler_messages::prepared_batch::{
     AstDiagnosticFailure, SemanticStageFailure,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure, SourceSpanCapacityResource,
+    CompilerDiagnostic, DiagnosticBag, PremergeDiagnosticBatch, PremergeFailure,
+    SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
@@ -185,20 +186,46 @@ pub(super) fn publish_compiled_module(
         path_fork: _,
         public_interface,
     } = compiled;
-    // Path IDs become boundary identities at this merge point. The executable lanes keep their
-    // construction placeholders; the single boundary-owned path table is installed once after
-    // every canonical publication completes, so no module publishes a full table clone.
-    // Published templates retain their issuing identity tables only through the boundary
-    // install tail, which pairs one final table with one frozen requester-domain string table.
-    if !remap.is_identity() {
-        module.remap_string_ids(&remap);
-        generated_delta.remap_string_ids(&remap);
-        warnings.remap_string_ids(&remap);
-    }
     if !path_remap.is_identity() {
         module.remap_path_ids(&path_remap);
         generated_delta.remap_path_ids(&path_remap);
         warnings.remap_path_ids(&path_remap);
+    }
+    let module_warnings = warnings.into_diagnostics();
+    let mut generated_records = generated_delta.into_records();
+    let mut generated_warnings = Vec::new();
+    for record in &mut generated_records {
+        generated_warnings.extend(record.sidecar.warnings.take_diagnostics());
+    }
+    generated_delta = GeneratedFunctionDelta::from_records(generated_records);
+
+    // `merge_delta_from` has already rebased local strings into the caller-owned run root table,
+    // which is the same root the build warning accumulator later receives. Rebase prepared facts
+    // now and leave each batch with an empty table so append does not scan the module prefix.
+    // The legacy success-warning lane had no path row, so it did not apply a type environment.
+    let capture_rebased_warnings = |diagnostics| {
+        let mut batch = PreparedDiagnosticBatch::capture_from_bag(
+            DiagnosticBag::from_diagnostics(diagnostics),
+            StringTable::empty_unallocated(),
+            Some(&module.executable.type_environment),
+            false,
+            None,
+        );
+        batch.rebase_strings(&remap);
+        batch
+    };
+    let warnings = (!module_warnings.is_empty()).then(|| capture_rebased_warnings(module_warnings));
+    let sidecar_warnings = if generated_warnings.is_empty() {
+        Vec::new()
+    } else {
+        vec![capture_rebased_warnings(generated_warnings)]
+    };
+    // The executable lanes keep their construction placeholders; the single boundary-owned path
+    // table is installed once after canonical publication. Prepared warning facts already use
+    // root StringIds and their empty batch tables avoid another merge at the render boundary.
+    if !remap.is_identity() {
+        module.remap_string_ids(&remap);
+        generated_delta.remap_string_ids(&remap);
     }
     publish_module_and_generated(ModuleBoundaryPublication {
         modules,
@@ -210,6 +237,7 @@ pub(super) fn publish_compiled_module(
         artifact: CompiledModuleArtifact {
             module,
             warnings,
+            sidecar_warnings,
             interface: public_interface,
         },
         generated_delta,

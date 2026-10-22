@@ -475,6 +475,7 @@ fn materialise_generated_request_inner<'build>(
         let borrow_analysis = check_borrows(
             &mut generated_compiler,
             &hir_module,
+            &type_environment,
             &mut generated_warnings,
             Some(&declaring_source_identity_handle),
         )?;

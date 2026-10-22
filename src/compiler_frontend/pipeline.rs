@@ -24,11 +24,16 @@ use crate::compiler_frontend::ast::{
     Ast, AstBuildContext, AstBuildInput, AstBuildResult, FileValueResolutionServices,
     Stage0ResolutionFacts,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,
+use crate::compiler_frontend::compiler_errors::CompilerError;
+#[cfg(test)]
+use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::prepared_batch::{
+    AstDiagnosticFailure, PreparedDiagnosticBatch,
 };
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticBag, PremergeFailure,
+};
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::moth_template_prepare::prepare_moth_template_file;
@@ -40,7 +45,7 @@ use crate::compiler_frontend::headers::plain_markdown_prepare::{
     PlainMarkdownPrepareInput, prepare_plain_markdown_file,
 };
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
-use crate::compiler_frontend::hir::hir_builder::lower_module;
+use crate::compiler_frontend::hir::hir_builder::lower_module_with_owner;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_compilation::FrontendOptions;
@@ -580,15 +585,33 @@ impl<'a> CompilerFrontend<'a> {
     // -----------------------------
     //  HIR GENERATION
     // -----------------------------
+    #[cfg(test)]
     pub(in crate::compiler_frontend) fn generate_hir(
         &mut self,
         ast: Ast,
         function_origin_lookup: HirFunctionOriginLookup,
         module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
         capacity_estimate: FrontendArenaCapacityEstimate,
-    ) -> Result<HirLoweringResult, CompilerMessages> {
+    ) -> Result<HirLoweringResult, AstDiagnosticFailure> {
+        self.generate_hir_with_owner(
+            ast,
+            function_origin_lookup,
+            module_resources,
+            capacity_estimate,
+            None,
+        )
+    }
+
+    pub(in crate::compiler_frontend) fn generate_hir_with_owner(
+        &mut self,
+        ast: Ast,
+        function_origin_lookup: HirFunctionOriginLookup,
+        module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
+        capacity_estimate: FrontendArenaCapacityEstimate,
+        frozen_identity_handle: Option<&FrozenIdentityHandle>,
+    ) -> Result<HirLoweringResult, AstDiagnosticFailure> {
         let static_if_function_provenance = ast.static_if_function_provenance.clone();
-        let mut result = lower_module(
+        let mut result = lower_module_with_owner(
             ast,
             &mut self.string_table,
             &mut self.path_fork,
@@ -596,6 +619,7 @@ impl<'a> CompilerFrontend<'a> {
             module_resources,
             capacity_estimate,
             self.external_package_registry.as_ref(),
+            frozen_identity_handle,
         )?;
         for (function_path, provenance) in static_if_function_provenance {
             let Some(function_id) = result.hir_module.functions.iter().find_map(|function| {
@@ -603,24 +627,22 @@ impl<'a> CompilerFrontend<'a> {
                     == Some(function_path))
                 .then_some(function.id)
             }) else {
-                return Err(CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(format!(
+                return Err(AstDiagnosticFailure::from(CompilerError::compiler_error(
+                    format!(
                         "Static configuration provenance has no lowered HIR function for path {:?}",
                         function_path
-                    )),
-                    &self.string_table,
-                ));
+                    ),
+                )));
             };
             let Some(existing_provenance) =
                 result.hir_module.function_provenance.get_mut(&function_id)
             else {
-                return Err(CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(format!(
+                return Err(AstDiagnosticFailure::from(CompilerError::compiler_error(
+                    format!(
                         "HIR function {:?} is missing its provenance fact while applying static configuration provenance",
                         function_id
-                    )),
-                    &self.string_table,
-                ));
+                    ),
+                )));
             };
             existing_provenance.merge(&provenance);
         }
@@ -633,8 +655,10 @@ impl<'a> CompilerFrontend<'a> {
     pub(in crate::compiler_frontend) fn check_borrows_premerge(
         &mut self,
         hir_module: &HirModule,
+        type_environment: &TypeEnvironment,
+        prior_diagnostics_require_path_table: bool,
         frozen_identity_handle: Option<&FrozenIdentityHandle>,
-    ) -> Result<BorrowCheckReport, PremergeFailure> {
+    ) -> Result<BorrowCheckReport, AstDiagnosticFailure> {
         match run_borrow_checker(
             hir_module,
             self.external_package_registry.as_ref(),
@@ -642,17 +666,28 @@ impl<'a> CompilerFrontend<'a> {
             &self.string_table,
         ) {
             Ok(report) => Ok(report),
-            Err(BorrowCheckError::Diagnostic(diagnostic)) => {
-                let mut batch = PremergeFailure::from(PremergeDiagnosticBatch::from_diagnostic(
-                    diagnostic,
-                    std::mem::take(&mut self.string_table),
-                ));
+            Err(BorrowCheckError::Diagnostic(mut diagnostic)) => {
+                let mut required_paths = Vec::new();
+                diagnostic
+                    .payload
+                    .required_path_payload_paths(&mut required_paths);
+                let path_table_is_available =
+                    prior_diagnostics_require_path_table || !required_paths.is_empty();
+                let path_table =
+                    path_table_is_available.then(|| Arc::new(self.path_fork.snapshot_table()));
                 if let Some(handle) = frozen_identity_handle {
-                    batch.set_frozen_identity_handle_if_missing(handle.clone());
+                    diagnostic.attach_frozen_identity_handle_if_missing(handle.clone());
                 }
-                Err(batch)
+                let batch = PreparedDiagnosticBatch::capture_from_bag(
+                    DiagnosticBag::from(diagnostic),
+                    std::mem::take(&mut self.string_table),
+                    Some(type_environment),
+                    path_table_is_available,
+                    path_table,
+                );
+                Err(AstDiagnosticFailure::Prepared(batch))
             }
-            Err(BorrowCheckError::Infrastructure(error)) => Err(PremergeFailure::from(*error)),
+            Err(BorrowCheckError::Infrastructure(error)) => Err(AstDiagnosticFailure::from(*error)),
         }
     }
 

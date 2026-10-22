@@ -57,6 +57,7 @@ pub(crate) fn project_compilation_from_test_modules_with_resources(
             CompiledModuleArtifact {
                 module,
                 warnings: Default::default(),
+                sidecar_warnings: Vec::new(),
                 interface: test_public_interface(index),
             },
         )?;

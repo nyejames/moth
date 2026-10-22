@@ -935,20 +935,16 @@ pub(super) fn compile_check_only_batches(
 
 /// Build the transient warning batch one successful check-only unit contributes.
 ///
-/// WHAT: collects the unit's own warnings plus every generated sidecar warning exactly as the
-///       canonical check-only success arm does, keeps the module-local string table on the
-///       batch, and attaches the issuing path fork's snapshot so warning `PathId`s issued
-///       against the check-only fork keep a table that renders them after the final render
-///       tail's component remap. A table whose components the batch's string table cannot
-///       resolve is a pairing invariant failure and returns an infrastructure error instead of
-///       silently dropping the path context.
-/// WHY: the only crossing state for a check-only unit is its diagnostics; keeping the
-///      construction in one production helper lets the regression test route through the real
-///      branch instead of re-implementing the path-table attachment.
+/// WHAT: collects the unit's own warnings plus every generated sidecar warning, retains the local
+///       string table, and snapshots the issuing path fork only when a warning has a rendered
+///       path payload. The existing premerge attachment validates table/string pairing.
+/// WHY: the only crossing state for a check-only unit is its diagnostics; keeping construction
+///      here lets the regression test exercise the production path.
 pub(super) fn check_only_success_batch(
     compiled: ModuleSemanticResult,
 ) -> Result<Option<PreparedDiagnosticBatch>, PremergeFailure> {
     let ModuleSemanticResult {
+        module,
         warnings: module_warnings,
         generated_delta,
         string_table: module_string_table,
@@ -962,13 +958,28 @@ pub(super) fn check_only_success_batch(
     if warnings.is_empty() {
         return Ok(None);
     }
-    // Retain the module-local table; the canonical boundary tail merges it once through its
-    // run-scoped `BoundaryAccumulator`.
-    let mut batch = PremergeDiagnosticBatch::from_diagnostics(warnings, module_string_table);
-    if let Err(error) = batch.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table())) {
-        return Err(PremergeFailure::from(error));
+    let mut required_paths = Vec::new();
+    for warning in &warnings {
+        warning
+            .payload
+            .required_path_payload_paths(&mut required_paths);
     }
-    Ok(Some(PreparedDiagnosticBatch::from_premerge(batch)))
+    let path_table_is_available = !required_paths.is_empty();
+    let mut premerge_batch =
+        PremergeDiagnosticBatch::from_diagnostics(warnings, module_string_table);
+    let path_table = path_table_is_available.then(|| Arc::new(path_fork.snapshot_table()));
+    if let Some(path_table) = &path_table {
+        premerge_batch.attach_path_table_if_missing(Arc::clone(path_table))?;
+    }
+    let (bag, string_table, _type_contexts, path_contexts) = premerge_batch.into_parts();
+    let path_table = path_contexts.into_iter().next().map(|row| row.path_table);
+    Ok(Some(PreparedDiagnosticBatch::capture_from_bag(
+        bag,
+        string_table,
+        Some(&module.executable.type_environment),
+        path_table_is_available,
+        path_table,
+    )))
 }
 
 #[allow(

@@ -155,7 +155,8 @@ fn invalid_artifact() -> CompiledModuleArtifact {
                 )),
             },
         },
-        warnings: DiagnosticBag::default(),
+        warnings: Default::default(),
+        sidecar_warnings: Vec::new(),
         interface: PublicSemanticInterface {
             module_origin: origin,
             export_bindings: Vec::new(),
@@ -713,7 +714,7 @@ fn semantic_result_with_local_path()
         resource_source_associations: Vec::new(),
         string_table,
         path_fork,
-        warnings: artifact.warnings,
+        warnings: DiagnosticBag::new(),
         public_interface: artifact.interface,
     }
 }
@@ -899,7 +900,7 @@ fn check_only_success_result_with_warnings() -> (
     let warning_path = module_path_fork
         .try_intern_portable_path("sidecar/lib-target.moth", &mut module_string_table)
         .expect("the direct warning path should intern");
-    let mut module_warnings = artifact.warnings;
+    let mut module_warnings = DiagnosticBag::new();
     module_warnings.push(CompilerDiagnostic::with_severity(
         DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget),
         DiagnosticSeverity::Warning,
@@ -1023,6 +1024,17 @@ fn check_only_success_batches_render_local_paths_through_production_construction
         2,
         "both warnings should render: {rendered:?}"
     );
+    assert_eq!(messages.warning_count(), 2);
+    assert_eq!(messages.error_count(), 0);
+    let direct = rendered
+        .iter()
+        .position(|line| line.contains("sidecar/lib-target.moth"))
+        .expect("the direct warning should remain present");
+    let generated = rendered
+        .iter()
+        .position(|line| line.contains("sidecar/generated-target.moth"))
+        .expect("the generated warning should remain present");
+    assert!(direct < generated, "warning order changed: {rendered:?}");
     for spelling in ["sidecar/lib-target.moth", "sidecar/generated-target.moth"] {
         assert!(
             rendered.iter().any(|line| line.contains(spelling)),
@@ -1402,30 +1414,57 @@ fn published_warning_paths_remap_to_preserve_original_spelling() {
         blocked: Vec::new(),
     };
     drop(materialisations);
+    let frozen_string_table = Arc::new(string_table.clone().freeze());
     boundary.install_boundary_identity(
         Arc::new(path_interner.clone().freeze()),
-        Arc::new(string_table.clone().freeze()),
+        Arc::clone(&frozen_string_table),
     );
-    let boundary = boundary.finish().expect("the test boundary should finish");
+    let mut boundary = boundary.finish().expect("the test boundary should finish");
+    let mut warning_accumulator =
+        crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator::new();
+    let root_batch = crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::new(),
+        string_table,
+        None,
+        false,
+        None,
+    );
+    warning_accumulator.append_prepared(root_batch, None);
+    for warning in boundary.take_successful_warnings() {
+        warning_accumulator.append_prepared(warning.batch, warning.source);
+    }
+    let warnings = warning_accumulator.finish(
+        crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode::Frozen,
+    );
+    assert_eq!(warnings.warning_count(), 1);
+    assert_eq!(warnings.error_count(), 0);
+    let (_, warning) = warnings
+        .reports
+        .iter()
+        .next()
+        .expect("the prepared warning should freeze into one report");
+    assert_eq!(
+        warning.severity(),
+        crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Warning
+    );
+    let facts = warning
+        .family_view::<crate::compiler_frontend::compiler_messages::diagnostics::families::imports::MissingImportTargetView>()
+        .expect("frozen warning should retain its typed missing-target path");
+    let remapped_path = facts.path;
 
-    let published = &boundary
-        .modules
-        .artifact(ModuleId::from_index(0))
-        .expect("the published slot should resolve")
-        .expect("the published module should be successful");
-    let warning = &published.warnings.as_slice()[0];
-    let remapped_path = match &warning.payload {
-        DiagnosticPayload::MissingImportTarget { path } => *path,
-        other => panic!("unexpected published warning payload: {other:?}"),
-    };
     assert_ne!(
         remapped_path, local_path,
         "publication must remap the module-local warning path identity"
     );
-    let rendered = published.module.executable.path_table.render_portable(
-        remapped_path,
-        &string_table,
-        &mut Vec::new(),
-    );
+    let published = boundary
+        .modules
+        .artifact(ModuleId::from_index(0))
+        .expect("the published slot should resolve")
+        .expect("the published module should be successful");
+    let rendered = published
+        .module
+        .executable
+        .path_table
+        .render_portable_frozen(remapped_path, &frozen_string_table, &mut Vec::new());
     assert_eq!(rendered, "lib.moth");
 }
