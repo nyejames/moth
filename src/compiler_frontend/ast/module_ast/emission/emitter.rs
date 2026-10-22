@@ -44,11 +44,13 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::ast::templates::top_level_templates::FoldedConstTemplateResult;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
-use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerMessages, InfrastructureErrors,
+use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
+use crate::compiler_frontend::compiler_messages::prepared_batch::{
+    AstDiagnosticFailure, PreparedDiagnosticBatch,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, GenericSubstitutionDiagnostic, InvalidTemplateStructureReason,
+    CompilerDiagnostic, DiagnosticBag, GenericSubstitutionDiagnostic,
+    InvalidTemplateStructureReason,
 };
 use std::sync::Arc;
 
@@ -274,7 +276,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         mut self,
         request: GenericFunctionInstantiationRequest,
         string_table: &mut StringTable,
-    ) -> Result<AstEmission, CompilerMessages> {
+    ) -> Result<AstEmission, AstDiagnosticFailure> {
         self.emit_generic_function_instance(request, &[], string_table)?;
         let deferred_generic_requests = self.take_generic_request_ledger();
 
@@ -389,7 +391,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         mut self,
         sorted_headers: Vec<Header>,
         string_table: &mut StringTable,
-    ) -> Result<AstEmission, CompilerMessages> {
+    ) -> Result<AstEmission, AstDiagnosticFailure> {
         // The environment owns the single resolved declaration table. Body contexts clone only
         // the Rc pointer so declaration metadata is not rebuilt during emission.
         let top_level_declarations = Rc::clone(&self.environment.lookups.declaration_table);
@@ -611,7 +613,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         substitutions: Option<FxHashMap<GenericParameterId, TypeId>>,
         source_parameter_by_rebased_path: FxHashMap<PathId, GenericParameterId>,
         string_table: &StringTable,
-    ) -> Result<ActiveGenericTypeContext, CompilerMessages> {
+    ) -> Result<ActiveGenericTypeContext, AstDiagnosticFailure> {
         let Some(parameter_list) = self
             .environment
             .type_environment
@@ -689,7 +691,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         request: GenericFunctionInstantiationRequest,
         active_stack: &[GenericFunctionInstanceKey],
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), AstDiagnosticFailure> {
         // --------------------------
         //  Deduplication and recursion guard
         // --------------------------
@@ -934,7 +936,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         source_file_scope: PathId,
         scope_frame_capacity: usize,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), AstDiagnosticFailure> {
         // --------------------------
         //  Retrieve resolved signature and template
         // --------------------------
@@ -1043,7 +1045,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         source_file_scope: PathId,
         scope_frame_capacity: usize,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), AstDiagnosticFailure> {
         // --------------------------
         //  Resolve signature
         // --------------------------
@@ -1157,7 +1159,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         source_file_scope: PathId,
         scope_frame_capacity: usize,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), AstDiagnosticFailure> {
         // The synthetic signature owns the same propagation context as an authored
         // function. Keep Module parsing rules for root declarations and fragments.
         let mut context = self.build_base_scope_context(BaseScopeContextInput {
@@ -1255,7 +1257,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         &mut self,
         header: Header,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), AstDiagnosticFailure> {
         let fields = self
             .environment
             .lookups
@@ -1290,7 +1292,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         template_source: &Arc<SourceTokens>,
         context: &ScopeContext,
         string_table: &mut StringTable,
-    ) -> Result<PreparedTemplateConstruction, CompilerMessages> {
+    ) -> Result<PreparedTemplateConstruction, AstDiagnosticFailure> {
         let source_path = context.scope;
         let mut template_cursor = match header.token_sequence {
             Some(sequence) => AstCursor::from_source_sequence(template_source, sequence),
@@ -1324,7 +1326,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         construction: PreparedTemplateConstruction,
         context: &ScopeContext,
         string_table: &mut StringTable,
-    ) -> Result<FoldedConstTemplateResult, CompilerMessages> {
+    ) -> Result<FoldedConstTemplateResult, AstDiagnosticFailure> {
         let PreparedTemplateConstruction {
             template,
             preparation,
@@ -1393,41 +1395,39 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         Ok(result)
     }
 
-    /// Wraps an internal [`CompilerError`] into [`CompilerMessages`], preserving current
-    /// warnings and the module type environment for render-time type-name resolution.
+    /// Routes infrastructure failures through their typed lane.
     fn error_messages(
         &self,
         error: impl Into<Box<InfrastructureErrors>>,
-        string_table: &StringTable,
-    ) -> CompilerMessages {
-        let mut messages =
-            CompilerMessages::from_diagnostics(self.warnings.clone(), string_table.clone());
-        messages.append_infrastructure_errors(error.into());
-        messages.with_type_context_for_all_diagnostics(self.environment.type_environment.clone())
+        _string_table: &StringTable,
+    ) -> AstDiagnosticFailure {
+        AstDiagnosticFailure::Infrastructure(error.into())
     }
 
-    /// Wraps a user-facing [`CompilerDiagnostic`] into [`CompilerMessages`], preserving current
-    /// warnings and the module type environment for render-time type-name resolution.
+    /// Captures a user-facing diagnostic and accumulated warnings before the environment drops.
     fn diagnostic_messages(
         &self,
         diagnostic: CompilerDiagnostic,
         string_table: &StringTable,
-    ) -> CompilerMessages {
-        CompilerMessages::from_diagnostic_with_warnings(
-            diagnostic,
-            self.warnings.clone(),
-            string_table,
-        )
-        .with_type_context_for_all_diagnostics(self.environment.type_environment.clone())
+    ) -> AstDiagnosticFailure {
+        let mut diagnostics = self.warnings.clone();
+        diagnostics.push(diagnostic);
+        AstDiagnosticFailure::Prepared(PreparedDiagnosticBatch::capture_from_bag(
+            DiagnosticBag::from_diagnostics(diagnostics),
+            string_table.clone(),
+            Some(&self.environment.type_environment),
+            true,
+            Some(Arc::new(self.path_fork.snapshot_table())),
+        ))
     }
 
     /// Converts a [`TemplateError`] (which may be user-facing or infrastructure) into the
-    /// appropriate [`CompilerMessages`] wrapper.
+    /// appropriate AST diagnostic failure lane.
     fn template_error_messages(
         &self,
         error: TemplateError,
         string_table: &StringTable,
-    ) -> CompilerMessages {
+    ) -> AstDiagnosticFailure {
         match error {
             TemplateError::Diagnostic(diagnostic) => {
                 self.diagnostic_messages(diagnostic, string_table)
@@ -1444,7 +1444,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         &self,
         error: ExpressionParseError,
         string_table: &StringTable,
-    ) -> CompilerMessages {
+    ) -> AstDiagnosticFailure {
         match error.at_boundary_without_numeric_retention("the module emitter body boundary") {
             Ok(diagnostic) => self.diagnostic_messages(diagnostic, string_table),
             Err(error) => self.error_messages(error, string_table),

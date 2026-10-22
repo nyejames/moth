@@ -68,8 +68,8 @@ use super::super::source_discovery;
 use super::super::source_package_discovery::build_source_package_boundary_indexes;
 use super::super::source_tree_index::SourceTreeIndex;
 use super::{
-    BoundaryPremergeFailure, append_finish_failure, canonical, compile_source_package_inventories,
-    discover_source_package_inventories, premerge_failure_to_boundary,
+    BoundaryPremergeFailure, append_boundary_finish_failure, boundary_failure_to_boundary,
+    canonical, compile_source_package_inventories, discover_source_package_inventories,
     prepare_source_package_check_only_jobs,
 };
 
@@ -102,10 +102,9 @@ pub(crate) fn compile_single_file_frontend_with_inputs(
     ) {
         Ok(result) => result,
         Err(failure) => {
-            return Err(premerge_failure_to_boundary(
-                *failure.failure,
+            return Err(boundary_failure_to_boundary(
+                failure,
                 string_table,
-                failure.package_source,
                 project_source_files.take(),
             ));
         }
@@ -148,10 +147,9 @@ pub(crate) fn compile_single_file_boracle_frontend(
     ) {
         Ok(result) => result,
         Err(failure) => {
-            return Err(premerge_failure_to_boundary(
-                *failure.failure,
+            return Err(boundary_failure_to_boundary(
+                failure,
                 string_table,
-                failure.package_source,
                 project_source_files.take(),
             ));
         }
@@ -673,10 +671,7 @@ fn compile_single_file_frontend_with_target(
             return Err(PremergeFailure::Infrastructure(finish_error.into()).into());
         }
         (Err(failure), Err(finish_error)) => {
-            return Err(BoundaryPremergeFailure {
-                failure: Box::new(append_finish_failure(*failure.failure, finish_error)),
-                package_source: failure.package_source,
-            });
+            return Err(append_boundary_finish_failure(failure, finish_error));
         }
     };
     *project_source_files = Some(finalized);

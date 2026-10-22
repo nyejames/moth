@@ -16,12 +16,18 @@ use crate::compiler_frontend::build_config::{
     BuildConfigContractFact, BuildConfigInputSet, BuildConfigResolutionError,
     ResolvedBuildConfigMap,
 };
+#[cfg(feature = "boracle")]
+use crate::compiler_frontend::compiler_errors::InfrastructureErrors;
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::{
     BoundaryAccumulator, into_boundary_failure,
 };
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+#[cfg(feature = "boracle")]
+use crate::compiler_frontend::compiler_messages::prepared_batch::{
+    AstDiagnosticFailure, SemanticStageFailure,
+};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure, SourceSpanCapacityResource,
 };
@@ -312,27 +318,35 @@ struct SourcePackageCheckOnlyInventory {
 
 /// Typed boundary-orchestration failure retaining its source owner.
 ///
-/// WHAT: pairs a premerge failure with a finished package database until the terminal wrapper can
-///       build the adapter input with the correct owner.
-/// WHY: package failures must render against their own snapshot while project failures render
-///      against the project database finalized by the outer tail; carrying the owner here keeps
-///      every intermediate site typed until that deliberate final conversion.
+/// WHAT: carries a premerge failure or a Boracle AST batch until the terminal source owner is
+///       finalized and the diagnostic adapter can pair it with the correct database.
+/// WHY: intermediate compiler and build stages preserve their typed failure lane; the terminal
+///      boundary performs the one conversion with the source identity that owns each span.
+enum BoundaryFailurePayload {
+    Premerge(PremergeFailure),
+    #[cfg(feature = "boracle")]
+    Prepared {
+        batch: PreparedDiagnosticBatch,
+        infrastructure: Option<Box<InfrastructureErrors>>,
+    },
+}
+
 pub(super) struct BoundaryPremergeFailure {
-    pub(super) failure: Box<PremergeFailure>,
-    pub(super) package_source: Option<Box<SourceDatabase>>,
+    failure: Box<BoundaryFailurePayload>,
+    package_source: Option<Box<SourceDatabase>>,
 }
 
 impl BoundaryPremergeFailure {
     pub(super) fn project(failure: PremergeFailure) -> Self {
         Self {
-            failure: Box::new(failure),
+            failure: Box::new(BoundaryFailurePayload::Premerge(failure)),
             package_source: None,
         }
     }
 
     pub(super) fn package(failure: PremergeFailure, source: SourceDatabase) -> Self {
         Self {
-            failure: Box::new(failure),
+            failure: Box::new(BoundaryFailurePayload::Premerge(failure)),
             package_source: Some(Box::new(source)),
         }
     }
@@ -347,6 +361,30 @@ impl From<PremergeFailure> for BoundaryPremergeFailure {
 impl From<CompilerError> for BoundaryPremergeFailure {
     fn from(error: CompilerError) -> Self {
         Self::project(PremergeFailure::from(error))
+    }
+}
+
+#[cfg(feature = "boracle")]
+impl From<SemanticStageFailure> for BoundaryPremergeFailure {
+    fn from(failure: SemanticStageFailure) -> Self {
+        match failure {
+            SemanticStageFailure::Premerge(failure) => Self::project(failure),
+            SemanticStageFailure::Ast(AstDiagnosticFailure::Infrastructure(errors)) => {
+                Self::project(PremergeFailure::Infrastructure(errors))
+            }
+            SemanticStageFailure::Ast(AstDiagnosticFailure::Prepared(batch)) => {
+                match batch.classify_premerge() {
+                    Ok(batch) => Self {
+                        failure: Box::new(BoundaryFailurePayload::Prepared {
+                            batch,
+                            infrastructure: None,
+                        }),
+                        package_source: None,
+                    },
+                    Err(error) => Self::project(PremergeFailure::from(error)),
+                }
+            }
+        }
     }
 }
 
@@ -399,6 +437,78 @@ pub(super) fn premerge_failure_to_boundary(
             into_boundary_failure(messages)
         }
     }
+}
+
+/// Convert one typed boundary failure after its last source owner has finalized.
+pub(super) fn boundary_failure_to_boundary(
+    failure: BoundaryPremergeFailure,
+    string_table: &StringTable,
+    project_source: Option<Arc<SourceDatabase>>,
+) -> BoundaryFailure {
+    let BoundaryPremergeFailure {
+        failure,
+        package_source,
+    } = failure;
+    let source = package_source
+        .map(|source| Arc::new(*source))
+        .or(project_source);
+
+    match *failure {
+        BoundaryFailurePayload::Premerge(failure) => {
+            premerge_failure_to_boundary(failure, string_table, None, source)
+        }
+        #[cfg(feature = "boracle")]
+        BoundaryFailurePayload::Prepared {
+            batch,
+            infrastructure,
+        } => {
+            let mut accumulator = BoundaryAccumulator::new();
+            match infrastructure {
+                Some(infrastructure) => {
+                    accumulator.append_prepared(batch, source.clone().map(|source| (source, None)));
+                    let failure = PremergeFailure::Infrastructure(infrastructure);
+                    let messages = match source {
+                        Some(source) => failure.into_messages_with_source(string_table, source),
+                        None => failure.into_messages(string_table),
+                    };
+                    accumulator.append(messages);
+                }
+                None => accumulator.append_prepared(batch, source.map(|source| (source, None))),
+            }
+            accumulator.finish(InstallMode::Unfrozen)
+        }
+    }
+}
+
+/// Keep an earlier typed failure beside an error from its last-source finalization.
+pub(super) fn append_boundary_finish_failure(
+    mut failure: BoundaryPremergeFailure,
+    finish_error: CompilerError,
+) -> BoundaryPremergeFailure {
+    let payload = match *failure.failure {
+        BoundaryFailurePayload::Premerge(existing) => {
+            BoundaryFailurePayload::Premerge(append_finish_failure(existing, finish_error))
+        }
+        #[cfg(feature = "boracle")]
+        BoundaryFailurePayload::Prepared {
+            batch,
+            infrastructure,
+        } => {
+            let infrastructure = match infrastructure {
+                Some(mut errors) => {
+                    errors.push(finish_error);
+                    Some(errors)
+                }
+                None => Some(finish_error.into()),
+            };
+            BoundaryFailurePayload::Prepared {
+                batch,
+                infrastructure,
+            }
+        }
+    };
+    failure.failure = Box::new(payload);
+    failure
 }
 
 // Intermediate orchestration stays typed until the terminal wrapper has finalized the relevant
@@ -1135,10 +1245,9 @@ pub(crate) fn compile_directory_frontend(
         mode,
     ) {
         Ok(compilation) => Ok(compilation),
-        Err(directory_failure) => Err(premerge_failure_to_boundary(
-            *directory_failure.failure,
+        Err(directory_failure) => Err(boundary_failure_to_boundary(
+            directory_failure,
             string_table,
-            directory_failure.package_source,
             project_source_files.take(),
         )),
     }
@@ -1493,11 +1602,10 @@ fn compile_directory_frontend_in_premerge_lane(
             )));
         }
         (Err(directory_failure), Err(finish_error)) => {
-            let combined = append_finish_failure(*directory_failure.failure, finish_error);
-            return Err(BoundaryPremergeFailure {
-                failure: Box::new(combined),
-                package_source: directory_failure.package_source,
-            });
+            return Err(append_boundary_finish_failure(
+                directory_failure,
+                finish_error,
+            ));
         }
     };
     *project_source_files = Some(finalized);

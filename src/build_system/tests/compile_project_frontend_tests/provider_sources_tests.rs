@@ -1176,7 +1176,7 @@ fn directory_project_rejects_missing_entry_root() {
         frontend_surface: &frontend_surface,
         build_config_inputs: &build_config_inputs,
     };
-    let mut source_files = crate::compiler_frontend::source::SourceDatabase::empty();
+    let mut source_files = Some(crate::compiler_frontend::source::SourceDatabase::empty());
     let parse_result = crate::build_system::project_config::compile_project_config_file(
         &mut config,
         &config_path,

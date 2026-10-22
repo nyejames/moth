@@ -35,6 +35,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerMessages, InfrastructureErrors,
 };
+use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PublicGenericOwnerKind};
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
@@ -422,7 +423,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         sorted_headers: &[Header],
         input: AstEnvironmentInput,
         string_table: &mut StringTable,
-    ) -> Result<AstModuleEnvironment, CompilerMessages> {
+    ) -> Result<AstModuleEnvironment, AstDiagnosticFailure> {
+        macro_rules! prepare {
+            ($result:expr) => {{
+                let result = $result;
+                result.map_err(|messages| self.capture_failure(messages))
+            }};
+        }
         let AstEnvironmentInput {
             mut module_symbols,
             binding_environment,
@@ -450,15 +457,18 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         self.module_symbols = module_symbols;
         self.binding_environment = binding_environment;
         self.warnings = self.binding_environment.warnings.clone();
-        let declaration_lanes =
+        let declaration_lanes = prepare!(
             DeclarationPassLanes::from_stage3_order(sorted_headers, &ordered_semantic_declarations)
-                .map_err(|error| self.error_messages(error, string_table))?;
-        let declaration_table = TopLevelDeclarationTable::from_stage3_order(
-            ordered_semantic_declarations,
-            compiler_owned_declarations,
-            self.path_fork,
-        )
-        .map_err(|error| self.error_messages(error, string_table))?;
+                .map_err(|error| self.error_messages(error, string_table))
+        )?;
+        let declaration_table = prepare!(
+            TopLevelDeclarationTable::from_stage3_order(
+                ordered_semantic_declarations,
+                compiler_owned_declarations,
+                self.path_fork,
+            )
+            .map_err(|error| self.error_messages(error, string_table))
+        )?;
         self.declaration_table = Rc::new(declaration_table);
         self.builtin_struct_ast_nodes = builtin_struct_ast_nodes;
         self.resolved_struct_fields_by_path = Rc::new(resolved_struct_fields_by_path);
@@ -474,18 +484,24 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // ------------------------------------
         //  Register builtin semantic types
         // ------------------------------------
-        self.register_builtin_structs_in_type_environment(
+        prepare!(self.register_builtin_structs_in_type_environment(
             &folded_defaults_by_field_path,
             string_table,
+        ))?;
+        prepare!(
+            self.project_imported_nominal_declarations(string_table)
+                .map_err(|error| self.error_messages(error, string_table))
         )?;
-        self.project_imported_nominal_declarations(string_table)
-            .map_err(|error| self.error_messages(error, string_table))?;
-        self.project_imported_alias_declarations()
-            .map_err(|error| self.error_messages(error, string_table))?;
-        self.project_imported_constant_declarations(string_table)
-            .map_err(|error| self.error_messages(error, string_table))?;
-        self.project_imported_function_declarations(string_table)?;
-        self.project_imported_receiver_method_declarations(string_table)?;
+        prepare!(
+            self.project_imported_alias_declarations()
+                .map_err(|error| self.error_messages(error, string_table))
+        )?;
+        prepare!(
+            self.project_imported_constant_declarations(string_table)
+                .map_err(|error| self.error_messages(error, string_table))
+        )?;
+        prepare!(self.project_imported_function_declarations(string_table))?;
+        prepare!(self.project_imported_receiver_method_declarations(string_table))?;
 
         // -------------------------------------
         //  Register local nominal identities
@@ -499,7 +515,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // nominal identity -> local aliases may target the nominal
         // resolved aliases -> nominal members may use aliases
         // ```
-        self.register_nominal_identities(&declaration_lanes, sorted_headers, string_table)?;
+        prepare!(self.register_nominal_identities(
+            &declaration_lanes,
+            sorted_headers,
+            string_table
+        ))?;
 
         // ----------------------
         //  Resolve type aliases
@@ -507,19 +527,26 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // Aliases whose targets fold a `#capacity` constant (and aliases naming those) wait for
         // the constant pass, which publishes them at their own Stage 3 position. No consumer ever
         // observes a provisional alias target.
-        let aliases_waiting_for_constants =
-            self.aliases_waiting_for_constants(&declaration_lanes, sorted_headers, string_table)?;
-        self.resolve_type_aliases(
+        let aliases_waiting_for_constants = prepare!(self.aliases_waiting_for_constants(
+            &declaration_lanes,
+            sorted_headers,
+            string_table,
+        ))?;
+        prepare!(self.resolve_type_aliases(
             &declaration_lanes,
             sorted_headers,
             &aliases_waiting_for_constants,
             string_table,
-        )?;
+        ))?;
 
         // -----------------------------------
         //  Prepare nominal member shells
         // -----------------------------------
-        self.prepare_nominal_member_shells(&declaration_lanes, sorted_headers, string_table)?;
+        prepare!(self.prepare_nominal_member_shells(
+            &declaration_lanes,
+            sorted_headers,
+            string_table,
+        ))?;
 
         // ----------------------------------------------
         //  Publish constant-dependent alias targets
@@ -529,23 +556,23 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // main constant pass below continues the same sequence with full trait metadata. Core
         // traits are registered first so member shells reached by this prefix keep rejecting
         // trait names in ordinary type positions.
-        let core_traits = self.register_core_traits(string_table)?;
-        self.resolve_constant_dependent_aliases(
+        let core_traits = prepare!(self.register_core_traits(string_table))?;
+        prepare!(self.resolve_constant_dependent_aliases(
             &declaration_lanes,
             sorted_headers,
             &core_traits,
             &aliases_waiting_for_constants,
             string_table,
-        )?;
+        ))?;
 
         // Every alias-lane declaration now has a published target, either from the alias pass or
         // from the bounded prefix walk above. Establish that here, before trait resolution reads
         // the first alias, so every consumer reads a local alias row as a fact.
-        self.validate_resolved_alias_completeness(
+        prepare!(self.validate_resolved_alias_completeness(
             &declaration_lanes,
             sorted_headers,
             string_table,
-        )?;
+        ))?;
 
         // --------------------------
         //  Resolve trait metadata
@@ -556,14 +583,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // type positions can be rejected with the trait-specific diagnostic.
         // Evidence validation stays after receiver catalog construction because it needs
         // resolved receiver methods.
-        let trait_environment = self.resolve_trait_definitions(
+        let trait_environment = prepare!(self.resolve_trait_definitions(
             &declaration_lanes,
             sorted_headers,
             core_traits,
             string_table,
+        ))?;
+        prepare!(
+            self.resolve_dependencyed_generic_parameter_bounds(&trait_environment)
+                .map_err(|error| self.error_messages(error, string_table))
         )?;
-        self.resolve_dependencyed_generic_parameter_bounds(&trait_environment)
-            .map_err(|error| self.error_messages(error, string_table))?;
 
         // -------------------------------------------
         //  Resolve nominal members and constants
@@ -572,94 +601,96 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // payload types with trait-aware type resolution.
         // WHY: static trait metadata must be available so ordinary type annotations can
         // reject trait names without falling through to an unknown-type diagnostic.
-        self.resolve_nominal_members_and_constants(
+        prepare!(self.resolve_nominal_members_and_constants(
             &declaration_lanes,
             sorted_headers,
             &trait_environment,
             &aliases_waiting_for_constants,
             string_table,
-        )?;
+        ))?;
 
         // --------------------------------------
         //  Resolve nominal generic bound traits
         // --------------------------------------
-        self.resolve_nominal_generic_bounds(
+        prepare!(self.resolve_nominal_generic_bounds(
             &declaration_lanes,
             sorted_headers,
             &trait_environment,
             string_table,
-        )?;
-
-        // -----------------------------
-        //  Resolve function signatures
-        // -----------------------------
-        self.resolve_function_signatures(
+        ))?;
+        prepare!(self.resolve_function_signatures(
             &declaration_lanes,
             sorted_headers,
             &trait_environment,
             string_table,
-        )?;
+        ))?;
 
         // ------------------------
         //  Build receiver catalog
         // ------------------------
-        let receiver_methods = self.build_receiver_catalog(sorted_headers, string_table)?;
-        self.validate_receiver_method_visibility_invariants(&receiver_methods, string_table)?;
+        let receiver_methods = prepare!(self.build_receiver_catalog(sorted_headers, string_table))?;
+        prepare!(
+            self.validate_receiver_method_visibility_invariants(&receiver_methods, string_table,)
+        )?;
 
         // Register compiler-owned builtin evidence rows for the complete cast plan. Must run
         // before `validate_trait_evidence` so user-declared conformances that would override
         // builtin evidence or conflict with incompatible builtin evidence are rejected while
         // trait ids are already stable.
         let mut trait_evidence_environment = TraitEvidenceEnvironment::new();
-        Self::register_builtin_cast_evidence(
+        prepare!(Self::register_builtin_cast_evidence(
             &trait_environment,
             &mut trait_evidence_environment,
             &self.type_environment,
             string_table,
             self.path_fork,
+        ))?;
+        prepare!(
+            self.project_imported_trait_evidence(
+                &trait_environment,
+                &mut trait_evidence_environment,
+                string_table,
+            )
+            .map_err(|error| self.error_messages(error, string_table))
         )?;
-        self.project_imported_trait_evidence(
-            &trait_environment,
-            &mut trait_evidence_environment,
-            string_table,
-        )
-        .map_err(|error| self.error_messages(error, string_table))?;
 
         // ---------------------------
         //  Validate trait evidence
         // ---------------------------
-        validate_trait_evidence(
-            ValidateTraitEvidenceInput {
-                sorted_headers,
-                trait_environment: &trait_environment,
-                receiver_methods: receiver_methods.as_ref(),
-                type_environment: &self.type_environment,
-                binding_environment: &self.binding_environment,
-                nominal_type_ids_by_path: &self.nominal_type_ids_by_path,
-                struct_source_by_path: &self.struct_source_by_path,
-                choice_source_by_path: &self.choice_source_by_path,
-                source_paths_by_source_id: &self.module_symbols.source_paths_by_source_id,
-                string_table,
-            },
-            &mut trait_evidence_environment,
-        )
-        .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
+        prepare!(
+            validate_trait_evidence(
+                ValidateTraitEvidenceInput {
+                    sorted_headers,
+                    trait_environment: &trait_environment,
+                    receiver_methods: receiver_methods.as_ref(),
+                    type_environment: &self.type_environment,
+                    binding_environment: &self.binding_environment,
+                    nominal_type_ids_by_path: &self.nominal_type_ids_by_path,
+                    struct_source_by_path: &self.struct_source_by_path,
+                    choice_source_by_path: &self.choice_source_by_path,
+                    source_paths_by_source_id: &self.module_symbols.source_paths_by_source_id,
+                    string_table,
+                },
+                &mut trait_evidence_environment,
+            )
+            .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))
+        )?;
 
         // -----------------------------------------
         //  Validate bounded nominal instantiations
         // -----------------------------------------
-        self.validate_nominal_generic_bound_surfaces(
+        prepare!(self.validate_nominal_generic_bound_surfaces(
             &declaration_lanes,
             sorted_headers,
             &trait_environment,
             &trait_evidence_environment,
             string_table,
-        )?;
-
-        // --------------------------------
-        //  Validate public export surfaces
-        // --------------------------------
-        self.validate_public_export_surfaces(sorted_headers, &trait_environment, string_table)?;
+        ))?;
+        prepare!(self.validate_public_export_surfaces(
+            sorted_headers,
+            &trait_environment,
+            string_table,
+        ))?;
 
         // ---------------------------------------------
         //  Build resolved public type-root handoff
@@ -676,7 +707,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let reexport_target_paths =
             collect_reexport_target_paths(&self.context.entry_dir, &self.module_symbols);
 
-        let resolved_public_type_roots =
+        let resolved_public_type_roots = prepare!(
             build_resolved_public_type_roots(BuildResolvedPublicTypeRootsInput {
                 sorted_headers,
                 resolved_struct_fields_by_path: &self.resolved_struct_fields_by_path,
@@ -691,17 +722,20 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 string_table,
                 reexport_target_paths: &reexport_target_paths,
             })
-            .map_err(|error| self.error_messages(error, string_table))?;
+            .map_err(|error| self.error_messages(error, string_table))
+        )?;
 
         // Build the transient direct public trait-root vector from the same sorted headers.
         // The type-root table stays type-only; trait-root facts live in their own owner.
-        let resolved_public_trait_roots = build_resolved_public_trait_roots(
-            sorted_headers,
-            &reexport_target_paths,
-            &trait_environment,
-            string_table,
-        )
-        .map_err(|error| self.error_messages(error, string_table))?;
+        let resolved_public_trait_roots = prepare!(
+            build_resolved_public_trait_roots(
+                sorted_headers,
+                &reexport_target_paths,
+                &trait_environment,
+                string_table,
+            )
+            .map_err(|error| self.error_messages(error, string_table))
+        )?;
 
         self.finish_environment(
             receiver_methods,
@@ -728,7 +762,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         trait_evidence_environment: TraitEvidenceEnvironment,
         resolved_public_surface_outputs: ResolvedPublicSurfaceOutputs,
         string_table: &StringTable,
-    ) -> Result<AstModuleEnvironment, CompilerMessages> {
+    ) -> Result<AstModuleEnvironment, AstDiagnosticFailure> {
         let source_nominal_paths = self
             .struct_source_by_path
             .keys()
@@ -752,7 +786,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 self.diagnostic_messages(diagnostic, string_table)
             }
             TemplateError::Infrastructure(error) => self.error_messages(error, string_table),
-        })?;
+        })
+        .map_err(|messages| self.capture_failure(messages))?;
 
         // Reuse the completed public-surface owner, including methods exported with their nominal
         // receiver. Calls need this closed-contract gate before body parsing begins.
@@ -1206,6 +1241,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Ok(())
     }
 
+    fn capture_failure(&self, messages: CompilerMessages) -> AstDiagnosticFailure {
+        let has_infrastructure_error = messages.infrastructure_errors.is_some();
+        AstDiagnosticFailure::capture_messages(
+            messages,
+            (!has_infrastructure_error).then_some(&self.type_environment),
+            !has_infrastructure_error,
+            (!has_infrastructure_error).then(|| Arc::new(self.path_fork.snapshot_table())),
+        )
+    }
+
     pub(crate) fn error_messages(
         &self,
         error: impl Into<Box<InfrastructureErrors>>,
@@ -1214,7 +1259,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let mut messages =
             CompilerMessages::from_diagnostics(self.warnings.clone(), string_table.clone());
         messages.append_infrastructure_errors(error.into());
-        messages.with_type_context_for_all_diagnostics(self.type_environment.clone())
+        messages
     }
 
     pub(crate) fn diagnostic_messages(
@@ -1227,7 +1272,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             self.warnings.clone(),
             string_table,
         )
-        .with_type_context_for_all_diagnostics(self.type_environment.clone())
     }
 
     /// Preserve the internal lane produced by AST parsers that materialise frozen token slices.

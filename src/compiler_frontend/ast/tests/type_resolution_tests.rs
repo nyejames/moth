@@ -24,8 +24,8 @@ use crate::compiler_frontend::ast::type_resolution::{
 };
 use crate::compiler_frontend::ast::{Ast, TopLevelDeclarationTable};
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidCollectionTypeReason, InvalidDeclarationReason, InvalidMapTypeReason,
-    NameNamespace, NamespaceTypeValueMisuseKind,
+    DiagnosticPayload, InvalidCollectionTypeReason, InvalidMapTypeReason, NameNamespace,
+    NamespaceTypeValueMisuseKind,
 };
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
@@ -47,7 +47,8 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
 use crate::compiler_frontend::tests::parse_support::{
-    parse_single_file_ast, parse_single_file_ast_diagnostic, parse_single_file_ast_result,
+    assert_ast_diagnostic, ast_error_label_spans, ast_error_primary_span, parse_single_file_ast,
+    parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
@@ -82,13 +83,14 @@ fn expected_source_span(source: &str, text: &str) -> SourceSpan {
 #[test]
 fn signature_member_ast_diagnostic_retains_exact_member_anchor() {
     let source = "bad |items {F64 = I32}|:\n;\n";
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0016-MAP",
+        Some("invalid_map_type.unsupported_key_type"),
+    );
     assert!(
-        diagnostic
-            .labels
-            .iter()
-            .any(|label| label.span == Some(expected_source_span(source, "items"))),
+        ast_error_label_spans(diagnostic).contains(&Some(expected_source_span(source, "items"))),
         "AST signature diagnostics should retain the authored member anchor"
     );
 }
@@ -96,13 +98,15 @@ fn signature_member_ast_diagnostic_retains_exact_member_anchor() {
 #[test]
 fn choice_variant_ast_diagnostic_retains_exact_variant_anchor() {
     let source = "Status :: WithValue |value {F64 = I32}|;\n";
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0016-MAP",
+        Some("invalid_map_type.unsupported_key_type"),
+    );
     assert!(
-        diagnostic
-            .labels
-            .iter()
-            .any(|label| label.span == Some(expected_source_span(source, "WithValue"))),
+        ast_error_label_spans(diagnostic)
+            .contains(&Some(expected_source_span(source, "WithValue"))),
         "AST choice diagnostics should retain the authored variant anchor"
     );
 }
@@ -119,13 +123,11 @@ Box type Existing = |\n\
 |\n";
     let diagnostic = parse_single_file_ast_diagnostic(source);
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidDeclaration {
-            reason: InvalidDeclarationReason::GenericParameterNameCollision { .. },
-            ..
-        }
-    ));
+    let diagnostic = assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0043",
+        Some("invalid_declaration.generic_parameter_name_collision"),
+    );
 
     let parameter_start = source
         .find("Box type ")
@@ -139,7 +141,7 @@ Box type Existing = |\n\
     )
     .expect("generic parameter span should fit the test span table");
     assert_eq!(
-        diagnostic.primary_span,
+        ast_error_primary_span(diagnostic),
         Some(SourceSpan::new(SourceId::COMPILATION_ROOT, parameter_span)),
         "AST scope diagnostics should retain the colliding parameter's exact byte span"
     );
@@ -984,20 +986,16 @@ fn map_value_type(ast: &Ast, type_id: TypeId) -> TypeId {
 
 fn assert_source_invalid_map_type(
     source: &str,
-    expected_reason: impl FnOnce(&InvalidMapTypeReason) -> bool,
+    expected_reason_key: &str,
     expected_description: &str,
 ) {
-    let diagnostic = match parse_single_file_ast_result(source) {
-        Ok(_) => panic!("{expected_description}: source parsed successfully"),
-        Err(diagnostic) => diagnostic.to_owned(),
-    };
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidMapType { reason } if expected_reason(reason)
-        ),
-        "expected {expected_description}, got {:?}",
-        diagnostic.payload
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic =
+        assert_ast_diagnostic(&failure, "MOTH-SYNTAX-0016-MAP", Some(expected_reason_key));
+    assert_eq!(
+        diagnostic.reason_key(),
+        Some(expected_reason_key),
+        "{expected_description}",
     );
 }
 
@@ -1103,37 +1101,32 @@ use_maps |scores StringScores, direct {Bool = {String = I32}}| -> {Char = String
 fn map_type_syntax_rejects_invalid_source_key_types() {
     assert_source_invalid_map_type(
         "bad |items {F64 = I32}|:\n;\n",
-        |reason| matches!(reason, InvalidMapTypeReason::UnsupportedKeyType { .. }),
+        "invalid_map_type.unsupported_key_type",
         "UnsupportedKeyType for F64 keys",
     );
     assert_source_invalid_map_type(
         "User = |\n    id I32,\n|\n\nbad |items {User = I32}|:\n;\n",
-        |reason| matches!(reason, InvalidMapTypeReason::UnsupportedKeyType { .. }),
+        "invalid_map_type.unsupported_key_type",
         "UnsupportedKeyType for struct keys",
     );
     assert_source_invalid_map_type(
         "bad |items {{String} = I32}|:\n;\n",
-        |reason| matches!(reason, InvalidMapTypeReason::UnsupportedKeyType { .. }),
+        "invalid_map_type.unsupported_key_type",
         "UnsupportedKeyType for collection keys",
     );
     assert_source_invalid_map_type(
         "bad |items {{String = I32} = I32}|:\n;\n",
-        |reason| matches!(reason, InvalidMapTypeReason::UnsupportedKeyType { .. }),
+        "invalid_map_type.unsupported_key_type",
         "UnsupportedKeyType for map keys",
     );
     assert_source_invalid_map_type(
         "bad |items {String = {String = {String = I32}}}|:\n;\n",
-        |reason| {
-            matches!(
-                reason,
-                InvalidMapTypeReason::ExcessiveInlineNesting { depth: 3 }
-            )
-        },
+        "invalid_map_type.excessive_inline_nesting",
         "ExcessiveInlineNesting for depth-three inline maps",
     );
     assert_source_invalid_map_type(
         "Holder type Key = |\n    values {Key = I32},\n|\n",
-        |reason| matches!(reason, InvalidMapTypeReason::UnsupportedKeyType { .. }),
+        "invalid_map_type.unsupported_key_type",
         "UnsupportedKeyType for generic map keys",
     );
 }

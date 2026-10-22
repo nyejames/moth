@@ -8,9 +8,12 @@
 //!       those cannot show is that folding a template is a compiler entry point needing no project
 //!       request, no builder and no filesystem.
 
-use super::{FoldedMothTemplate, MothTemplateCompilationRequest, compile_moth_template_source};
-use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use super::{
+    FoldedMothTemplate, MothTemplateCompilationFailure, MothTemplateCompilationRequest,
+    compile_moth_template_source,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidNumberLiteralView;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_boundary_messages_html;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::headers::parse_file_headers::{
@@ -38,7 +41,6 @@ use crate::compiler_frontend::{
     FrontendFilePrepareSource,
 };
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
-use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -116,7 +118,10 @@ fn standalone_preparation_diagnostic_retains_source_snapshot_context() {
         &mut string_table,
     ) {
         Ok(_) => panic!("an unescaped template close should be diagnosed during preparation"),
-        Err(messages) => messages,
+        Err(MothTemplateCompilationFailure::Messages(messages)) => messages,
+        Err(MothTemplateCompilationFailure::Ast { .. }) => {
+            panic!("preparation diagnostics should remain on the legacy message path")
+        }
     };
 
     let source_database = messages
@@ -170,14 +175,15 @@ fn whole_interpolation_above_the_i32_default_is_diagnosed_not_folded() {
     let source_path = directory.path().join("wide.mtf");
     fs::write(&source_path, "[:[3_000_000_000]]").expect("the direct template should be written");
 
-    let messages = compile_moth_template_source(
+    let mut string_table = StringTable::new();
+    let failure = compile_moth_template_source(
         MothTemplateCompilationRequest {
             source_path: &source_path,
             source_code: Some("[:[3_000_000_000]]".to_owned()),
             style_directives: &style_directives,
             file_value_resolution: None,
         },
-        &mut StringTable::new(),
+        &mut string_table,
     )
     .err()
     .expect("an out-of-range untyped interpolation must not fold");
@@ -185,18 +191,32 @@ fn whole_interpolation_above_the_i32_default_is_diagnosed_not_folded() {
     fs::write(&source_path, "mutated direct template\n")
         .expect("the diagnosed direct source should be replaced");
 
-    assert!(
-        messages.diagnostics().any(|diagnostic| matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidNumberLiteral {
-                reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32),
-                ..
-            }
-        )),
+    let mut accumulator = BoundaryAccumulator::new();
+    let install = failure.append_to_boundary(&mut accumulator, &string_table);
+    let failure = accumulator.finish(install);
+    assert_eq!(
+        failure
+            .reports
+            .iter()
+            .map(|(_, view)| view.reason_key())
+            .collect::<Vec<_>>(),
+        [Some("invalid_number_literal.outside_fixed_scalar_range")],
         "the I32 default must diagnose the out-of-range interpolation literal",
     );
-    let rendered =
-        render_boundary_messages_html(&into_boundary_failure(messages), directory.path());
+    assert_eq!(
+        failure
+            .reports
+            .iter()
+            .map(|(_, view)| {
+                view.family_view::<InvalidNumberLiteralView>()
+                    .expect("number literal diagnostic should retain typed facts")
+                    .scalar
+            })
+            .collect::<Vec<_>>(),
+        [Some(FixedScalar::I32)],
+        "the overflowing default interpolation must target I32",
+    );
+    let rendered = render_boundary_messages_html(&failure, directory.path());
     assert!(rendered.contains(r#"<span class="source-line">[:[3_000_000_000]]</span>"#));
     assert!(!rendered.contains("mutated direct template"));
 }

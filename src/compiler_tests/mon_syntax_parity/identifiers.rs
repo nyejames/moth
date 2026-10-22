@@ -65,7 +65,7 @@ fn identifier_shape_fixtures() -> Vec<ParityFixture> {
         Schema::record(vec![Field::required("e", SchemaType::I32)]),
         SourceExpectation::Reject {
             code: "MOTH-SYNTAX-0007",
-            reason: SourceReason::InvalidCharacter('\u{301}'),
+            reason: SourceReason::InvalidCharacter,
             site: in_literal(&combining_mark, "\u{301}", 1),
         },
         MonExpectation::Reject {

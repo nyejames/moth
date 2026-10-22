@@ -217,8 +217,11 @@ fn resolve_dev_runtime_paths_rejects_symlinked_output_roots() {
         .expect("should write config");
 
         let builder = ProjectBuilder::new(NoopBuilder);
-        let messages = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new())
+        let failure = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new())
             .expect_err("dev startup must reject symlinked output roots");
+        let crate::build_system::build::BootstrapFailure::Legacy(messages) = failure else {
+            panic!("output validation should retain its legacy diagnostic carrier");
+        };
         assert!(messages.error_diagnostics().any(|diagnostic| {
             matches!(
                 &diagnostic.payload,
@@ -264,9 +267,11 @@ fn resolve_dev_runtime_paths_return_config_load_failures() {
     fs::write(root.join(CONFIG_FILE_NAME), "@core/math sin\n").expect("should write bad config");
 
     let builder = ProjectBuilder::new(NoopBuilder);
-    let messages = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new())
+    let failure = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new())
         .expect_err("bad config should fail directory bootstrap");
-
+    let crate::build_system::build::BootstrapFailure::Legacy(messages) = failure else {
+        panic!("header parse failures should retain their legacy diagnostic carrier");
+    };
     let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
     assert_eq!(diagnostics.len(), 1);
     assert!(
@@ -288,9 +293,11 @@ fn resolve_dev_runtime_paths_return_style_directive_merge_failures() {
     let root = _temp.path().to_path_buf();
 
     let builder = ProjectBuilder::new(ConflictingDirectiveBuilder);
-    let messages = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new())
+    let failure = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new())
         .expect_err("conflicting directives should fail bootstrap");
-
+    let crate::build_system::build::BootstrapFailure::Legacy(messages) = failure else {
+        panic!("directive merge failures should retain their legacy diagnostic carrier");
+    };
     assert_eq!(messages.error_count(), 1);
     let error = messages
         .primary_infrastructure_error()

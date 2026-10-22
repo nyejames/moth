@@ -16,6 +16,7 @@ use crate::compiler_frontend::ast::generic_functions::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
 use crate::compiler_frontend::compiler_messages::{PremergeDiagnosticBatch, PremergeFailure};
 use crate::compiler_frontend::hir::failure_facts::HirBuiltinFailureBoundary;
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
@@ -60,6 +61,32 @@ struct MaterialisingRequest {
     timing_context: Option<crate::timing::TimingContext>,
 }
 
+/// Separates prepared generated-AST diagnostics from the older premerge failures.
+#[derive(Debug)]
+pub(in crate::compiler_frontend::module_compilation) enum GeneratedMaterialisationFailure {
+    Ast(AstDiagnosticFailure),
+    Premerge(PremergeFailure),
+}
+
+impl From<PremergeFailure> for GeneratedMaterialisationFailure {
+    fn from(failure: PremergeFailure) -> Self {
+        Self::Premerge(failure)
+    }
+}
+
+impl From<AstDiagnosticFailure> for GeneratedMaterialisationFailure {
+    fn from(failure: AstDiagnosticFailure) -> Self {
+        match failure {
+            AstDiagnosticFailure::Prepared(batch) => {
+                Self::Ast(AstDiagnosticFailure::Prepared(batch))
+            }
+            AstDiagnosticFailure::Infrastructure(errors) => {
+                Self::Premerge(PremergeFailure::Infrastructure(errors))
+            }
+        }
+    }
+}
+
 /// Materialise every request this module emitted from its own AST.
 pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_request_roots<
     'build,
@@ -71,7 +98,7 @@ pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_re
     compiler: &mut CompilerFrontend<'_>,
     entry_file_path: &Path,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<(), PremergeFailure> {
+) -> Result<(), GeneratedMaterialisationFailure> {
     for request_id in request_ids {
         let identity = transaction
             .identity(*request_id)
@@ -109,7 +136,7 @@ fn materialise_generated_request<'build>(
     requester_context: &ModuleMaterialisationPreparation,
     compiler: &mut CompilerFrontend<'_>,
     entry_file_path: &Path,
-) -> Result<(), PremergeFailure> {
+) -> Result<(), GeneratedMaterialisationFailure> {
     let result = materialise_generated_request_inner(
         context,
         request_id,
@@ -121,13 +148,18 @@ fn materialise_generated_request<'build>(
     );
     match result {
         Ok(()) => Ok(()),
-        Err(mut failure) => {
+        Err(GeneratedMaterialisationFailure::Ast(failure)) => {
+            Err(GeneratedMaterialisationFailure::Ast(failure))
+        }
+        Err(GeneratedMaterialisationFailure::Premerge(mut failure)) => {
             if let Err(error) =
                 failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()))
             {
-                return Err(PremergeFailure::from(error));
+                return Err(GeneratedMaterialisationFailure::Premerge(
+                    PremergeFailure::from(error),
+                ));
             }
-            Err(failure)
+            Err(GeneratedMaterialisationFailure::Premerge(failure))
         }
     }
 }
@@ -140,7 +172,7 @@ fn materialise_generated_request_inner<'build>(
     requester_context: &ModuleMaterialisationPreparation,
     compiler: &mut CompilerFrontend<'_>,
     entry_file_path: &Path,
-) -> Result<(), PremergeFailure> {
+) -> Result<(), GeneratedMaterialisationFailure> {
     match transaction
         .enter(request_id)
         .map_err(PremergeFailure::from)?
@@ -157,11 +189,13 @@ fn materialise_generated_request_inner<'build>(
             } else {
                 diagnostic
             };
-            return Err(PremergeDiagnosticBatch::from_diagnostic(
-                diagnostic,
-                std::mem::take(&mut compiler.string_table),
-            )
-            .into());
+            return Err(
+                PremergeFailure::from(PremergeDiagnosticBatch::from_diagnostic(
+                    diagnostic,
+                    std::mem::take(&mut compiler.string_table),
+                ))
+                .into(),
+            );
         }
         GeneratedRequestEntry::Materialise => {}
     }
@@ -335,7 +369,8 @@ fn materialise_generated_request_inner<'build>(
         None => {
             return Err(PremergeFailure::from(CompilerError::compiler_error(
                 "generated AST finalization dropped the requester context of its nested requests",
-            )));
+            ))
+            .into());
         }
     };
 
@@ -354,7 +389,7 @@ fn materialise_generated_request_inner<'build>(
         context.project_path_resolver,
         context.source_files,
     );
-    let lowered = (|| -> Result<(Module, DiagnosticBag), PremergeFailure> {
+    let lowered = (|| -> Result<(Module, DiagnosticBag), GeneratedMaterialisationFailure> {
         if let Some((generated_context, nested_request_ids)) = nested {
             for nested_request_id in &nested_request_ids {
                 let nested_identity = transaction
@@ -515,5 +550,6 @@ fn materialise_generated_request_inner<'build>(
                 generated_warnings,
             ),
         )
-        .map_err(PremergeFailure::from)
+        .map_err(PremergeFailure::from)?;
+    Ok(())
 }

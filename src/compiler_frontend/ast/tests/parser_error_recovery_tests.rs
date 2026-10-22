@@ -3,15 +3,34 @@
 //! WHAT: asserts that common malformed inputs fail with stable typed diagnostic facts.
 //! WHY: parser changes should not silently degrade recovery paths or produce vague errors.
 
+use crate::compiler_frontend::compiler_errors::BoundaryFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::{
+    InvalidMultiBindCode, InvalidMultiBindView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
+    InvalidControlFlowStatementView, InvalidMatchPatternView, InvalidStatementPositionView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
+    InvalidFunctionSignatureCode, InvalidFunctionSignatureView, InvalidThisUsageCode,
+    InvalidThisUsageView, InvalidTraitKeywordUsageView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    UnexpectedTokenShape, UnexpectedTokenView,
+};
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticPayload, InvalidControlFlowStatementReason,
-    InvalidFunctionSignatureReason, InvalidMatchPatternReason, InvalidMultiBindReason,
-    InvalidStatementPositionReason, InvalidThisUsageReason, InvalidTraitKeywordUsageReason,
-    RuleDiagnosticKind, SyntaxDiagnosticKind,
+    InvalidControlFlowStatementReason, InvalidMatchPatternReason, InvalidStatementPositionReason,
+    InvalidTraitKeywordUsageReason,
 };
 use crate::compiler_frontend::tests::parse_support::{
-    parse_single_file_ast, parse_single_file_ast_diagnostic,
+    assert_ast_diagnostic, first_ast_error_view, parse_single_file_ast,
+    parse_single_file_ast_diagnostic,
 };
+
+fn assert_failure(source: &str, code: &str, reason_key: &str) -> BoundaryFailure {
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_ast_diagnostic(&failure, code, Some(reason_key));
+    failure
+}
 
 struct InvalidMatchPatternCase {
     name: &'static str,
@@ -32,33 +51,35 @@ struct ReservedTraitKeywordCase {
 
 #[test]
 fn reports_missing_signature_colon() {
-    let diagnostic = parse_single_file_ast_diagnostic("f|| -> I32\n;\n");
-
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Rule(RuleDiagnosticKind::InvalidFunctionSignature)
+    let failure = assert_failure(
+        "f|| -> I32\n;\n",
+        "MOTH-RULE-0062",
+        "invalid_function_signature.missing_colon_after_returns",
     );
+    let diagnostic = first_ast_error_view(&failure);
+    let facts = diagnostic
+        .family_view::<InvalidFunctionSignatureView>()
+        .expect("missing signature colon should retain typed facts");
     assert_eq!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFunctionSignature {
-            reason: InvalidFunctionSignatureReason::MissingColonAfterReturns
-        }
+        facts.code,
+        InvalidFunctionSignatureCode::MissingColonAfterReturns
     );
 }
 
 #[test]
 fn reports_stray_comma_in_function_body() {
-    let diagnostic = parse_single_file_ast_diagnostic("broken||:\n    value = 1\n    ,\n;\n");
-
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidStatementPosition)
+    let failure = assert_failure(
+        "broken||:\n    value = 1\n    ,\n;\n",
+        "MOTH-SYNTAX-0030",
+        "invalid_statement_position.unexpected_comma",
     );
+    let diagnostic = first_ast_error_view(&failure);
+    let facts = diagnostic
+        .family_view::<InvalidStatementPositionView>()
+        .expect("stray comma should retain typed facts");
     assert_eq!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidStatementPosition {
-            reason: InvalidStatementPositionReason::UnexpectedComma
-        }
+        facts.reason,
+        InvalidStatementPositionReason::UnexpectedComma
     );
 }
 
@@ -78,75 +99,76 @@ fn reports_invalid_match_pattern_forms_as_permanent_rule_errors() {
     ];
 
     for case in cases {
-        let diagnostic = parse_single_file_ast_diagnostic(case.source);
-
-        assert_eq!(
-            diagnostic.kind,
-            DiagnosticKind::Rule(RuleDiagnosticKind::InvalidMatchPattern),
-            "{}",
-            case.name
+        let failure = assert_failure(
+            case.source,
+            "MOTH-RULE-0049",
+            "invalid_match_pattern.wildcard_not_supported",
         );
-        assert_eq!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidMatchPattern {
-                reason: case.expected_reason,
-                variant_name: None,
-                scrutinee_name: None,
-            },
-            "{}",
-            case.name
-        );
+        let diagnostic = first_ast_error_view(&failure);
+        let facts = diagnostic
+            .family_view::<InvalidMatchPatternView>()
+            .expect("invalid match pattern should retain typed facts");
+        assert_eq!(facts.reason, case.expected_reason, "{}", case.name);
+        assert_eq!(facts.variant_name, None, "{}", case.name);
+        assert_eq!(facts.scrutinee_name, None, "{}", case.name);
     }
 }
 
 #[test]
 fn reports_unterminated_match_scope_at_end_of_file() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = assert_failure(
         "value = 1\nif value is:\n    1 => io.line([: [\"one\"]])\n",
+        "MOTH-RULE-0042",
+        "invalid_control_flow_statement.unexpected_end_of_file_in_match",
     );
-
+    let diagnostic = first_ast_error_view(&failure);
+    let facts = diagnostic
+        .family_view::<InvalidControlFlowStatementView>()
+        .expect("unterminated match should retain typed facts");
     assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Rule(RuleDiagnosticKind::InvalidControlFlowStatement)
-    );
-    assert_eq!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidControlFlowStatement {
-            reason: InvalidControlFlowStatementReason::UnexpectedEndOfFileInMatch
-        }
+        facts.reason,
+        InvalidControlFlowStatementReason::UnexpectedEndOfFileInMatch
     );
 }
 
 #[test]
 fn reports_multi_bind_malformed_comma_sequence() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = assert_failure(
         "pair || -> I32, I32:\n    return 1, 2\n;\n\na, , b = pair()\n",
+        "MOTH-SYNTAX-0002",
+        "invalid_multi_bind.missing_target_after_comma",
     );
-
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedToken)
-    );
-    assert_eq!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidMultiBind {
-            reason: InvalidMultiBindReason::MissingTargetAfterComma,
+    let diagnostic = first_ast_error_view(&failure);
+    let facts = diagnostic
+        .family_view::<UnexpectedTokenView>()
+        .expect("malformed multi-bind should retain unexpected-token facts");
+    assert!(matches!(
+        facts.shape,
+        UnexpectedTokenShape::MultiBind {
+            code: InvalidMultiBindCode::MissingTargetAfterComma,
             target_name: None,
+            ..
         }
-    );
+    ));
 }
 
 #[test]
 fn reports_string_literal_as_invalid_multi_bind_target() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = assert_failure(
         "pair || -> I32, I32:\n    return 1, 2\n;\n\na, \"b\" = pair()\n",
+        "MOTH-SYNTAX-0002",
+        "invalid_multi_bind.missing_target_after_comma",
     );
-
+    let diagnostic = first_ast_error_view(&failure);
+    let facts = diagnostic
+        .family_view::<UnexpectedTokenView>()
+        .expect("a string multi-bind target retains unexpected-token facts");
     assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidMultiBind {
-            reason: InvalidMultiBindReason::MissingTargetAfterComma,
+        facts.shape,
+        UnexpectedTokenShape::MultiBind {
+            code: InvalidMultiBindCode::MissingTargetAfterComma,
             target_name: None,
+            ..
         }
     ));
 }
@@ -158,40 +180,41 @@ fn parses_multi_bind_targets_across_comma_continuation_newline() {
 
 #[test]
 fn reports_multi_bind_trailing_comma_at_the_comma() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = assert_failure(
         "pair || -> I32, I32:\n    return 1, 2\n;\n\na,\n    = pair()\n",
+        "MOTH-SYNTAX-0002",
+        "invalid_multi_bind.missing_target_after_comma",
     );
-
-    assert_eq!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidMultiBind {
-            reason: InvalidMultiBindReason::MissingTargetAfterComma,
+    let diagnostic = first_ast_error_view(&failure);
+    let facts = diagnostic
+        .family_view::<UnexpectedTokenView>()
+        .expect("trailing multi-bind comma should retain unexpected-token facts");
+    assert!(matches!(
+        facts.shape,
+        UnexpectedTokenShape::MultiBind {
+            code: InvalidMultiBindCode::MissingTargetAfterComma,
             target_name: None,
+            ..
         }
-    );
+    ));
 }
 
 #[test]
 fn reports_multi_bind_mutable_target_without_explicit_type() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = assert_failure(
         "pair || -> I32, I32:\n    return 1, 2\n;\n\na, b ~= pair()\n",
+        "MOTH-RULE-0045",
+        "invalid_multi_bind.mutable_target_needs_explicit_type",
     );
-
+    let diagnostic = first_ast_error_view(&failure);
+    let facts = diagnostic
+        .family_view::<InvalidMultiBindView>()
+        .expect("invalid multi-bind should retain typed facts");
     assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Rule(RuleDiagnosticKind::InvalidMultiBind)
+        facts.reason,
+        InvalidMultiBindCode::MutableTargetNeedsExplicitType
     );
-    assert!(
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidMultiBind {
-                reason: InvalidMultiBindReason::MutableTargetNeedsExplicitType,
-                target_name: Some(_),
-            }
-        ),
-        "{:?}",
-        diagnostic.payload
-    );
+    assert!(facts.target_name.is_some());
 }
 
 #[test]
@@ -212,23 +235,22 @@ fn reports_multi_bind_with_unsupported_rhs_forms_rejected() {
     ];
 
     for case in cases {
-        let diagnostic = parse_single_file_ast_diagnostic(case.source);
-
+        let failure = assert_failure(
+            case.source,
+            "MOTH-RULE-0045",
+            "invalid_multi_bind.unsupported_rhs",
+        );
+        let diagnostic = first_ast_error_view(&failure);
+        let facts = diagnostic
+            .family_view::<InvalidMultiBindView>()
+            .expect("invalid multi-bind should retain typed facts");
         assert_eq!(
-            diagnostic.kind,
-            DiagnosticKind::Rule(RuleDiagnosticKind::InvalidMultiBind),
+            facts.reason,
+            InvalidMultiBindCode::UnsupportedRhs,
             "{}",
             case.name
         );
-        assert_eq!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidMultiBind {
-                reason: InvalidMultiBindReason::UnsupportedRhs,
-                target_name: None,
-            },
-            "{}",
-            case.name
-        );
+        assert_eq!(facts.target_name, None, "{}", case.name);
     }
 }
 
@@ -273,27 +295,33 @@ fn reports_reserved_trait_keywords_outside_trait_syntax() {
     ];
 
     for case in cases {
-        let diagnostic = parse_single_file_ast_diagnostic(case.source);
-
-        assert_eq!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidTraitKeywordUsage {
-                reason: case.expected_reason,
-            },
-            "{}",
-            case.name
-        );
+        let reason_key = match &case.expected_reason {
+            InvalidTraitKeywordUsageReason::MustOutsideTraitSyntax => {
+                "invalid_trait_keyword_usage.must_outside_trait_syntax"
+            }
+            InvalidTraitKeywordUsageReason::ThisOutsideTraitSyntax => {
+                "invalid_trait_keyword_usage.this_outside_trait_syntax"
+            }
+        };
+        let failure = assert_failure(case.source, "MOTH-RULE-0076", reason_key);
+        let diagnostic = first_ast_error_view(&failure);
+        let facts = diagnostic
+            .family_view::<InvalidTraitKeywordUsageView>()
+            .expect("trait keyword diagnostic should retain typed facts");
+        assert_eq!(facts.reason, case.expected_reason, "{}", case.name);
     }
 }
 
 #[test]
 fn reports_trait_this_keyword_outside_trait_declaration_type_position() {
-    let diagnostic = parse_single_file_ast_diagnostic("value This = 1\n");
-
-    assert_eq!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidThisUsage {
-            reason: InvalidThisUsageReason::OutsideTraitDeclaration
-        }
+    let failure = assert_failure(
+        "value This = 1\n",
+        "MOTH-RULE-0040",
+        "invalid_this_usage.outside_trait_declaration",
     );
+    let diagnostic = first_ast_error_view(&failure);
+    let facts = diagnostic
+        .family_view::<InvalidThisUsageView>()
+        .expect("invalid this usage should retain typed facts");
+    assert_eq!(facts.code, InvalidThisUsageCode::OutsideTraitDeclaration);
 }

@@ -18,12 +18,10 @@ use crate::compiler_frontend::ast::expressions::expression_types::{
 use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidCallShapeReason, InvalidDeclarationReason,
-    InvalidFunctionSignatureReason, InvalidGenericInstantiationReason, InvalidMatchPatternReason,
-    InvalidReceiverCallReason, InvalidReceiverDeclarationReason, InvalidThisUsageReason,
-    NameNamespace, TypeMismatchContext, ValueReceiverContext,
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    calls_data::InvalidValueReceiverView, types_borrows_targets::TypeMismatchView,
 };
+use crate::compiler_frontend::compiler_messages::{TypeMismatchContext, ValueReceiverContext};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
@@ -31,6 +29,7 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
     function_body_by_name, function_signature_by_name, start_function_body,
 };
 use crate::compiler_frontend::tests::parse_support::{
+    assert_ast_diagnostic, ast_error_label_spans, ast_error_primary_span, first_ast_error_view,
     parse_single_file_ast, parse_single_file_ast_build_result, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -62,38 +61,22 @@ fn assert_optional_string_default(
     ));
 }
 
-fn parse_function_diagnostic_payload(source: &str) -> DiagnosticPayload {
-    parse_single_file_ast_diagnostic(source).payload
+fn assert_function_diagnostic(source: &str, code: &str, reason_key: Option<&str>) {
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_ast_diagnostic(&failure, code, reason_key);
 }
 
 fn assert_type_mismatch_context(source: &str, expected_context: TypeMismatchContext) {
-    let payload = parse_function_diagnostic_payload(source);
-
-    assert!(
-        matches!(
-            payload,
-            DiagnosticPayload::TypeMismatch {
-                context,
-                ..
-            } if context == expected_context
-        ),
-        "{payload:?}"
-    );
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-TYPE-0001", None);
+    let facts = diagnostic
+        .family_view::<TypeMismatchView>()
+        .expect("the diagnostic is a type mismatch");
+    assert_eq!(facts.context, expected_context);
 }
 
-fn assert_invalid_receiver_call(source: &str, expected_reason: InvalidReceiverCallReason) {
-    let payload = parse_function_diagnostic_payload(source);
-
-    assert!(
-        matches!(
-            payload,
-            DiagnosticPayload::InvalidReceiverCall {
-                reason,
-                ..
-            } if reason == expected_reason
-        ),
-        "{payload:?}"
-    );
+fn assert_invalid_receiver_call(source: &str, expected_reason_key: &'static str) {
+    assert_function_diagnostic(source, "MOTH-RULE-0047", Some(expected_reason_key));
 }
 
 // --------------------------
@@ -109,18 +92,11 @@ fn generic_declarations_in_executable_bodies_require_module_top_level() {
         "Nested type A as A",
     ] {
         let source = format!("outer ||:\n    {declaration}\n;\n");
-        let diagnostic = parse_single_file_ast_diagnostic(&source);
-        assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0043", "{declaration}");
-        assert!(
-            matches!(
-                diagnostic.payload,
-                DiagnosticPayload::InvalidDeclaration {
-                    reason: InvalidDeclarationReason::DeclarationRequiresModuleTopLevel,
-                    ..
-                }
-            ),
-            "{declaration}: {:?}",
-            diagnostic.payload
+        let failure = parse_single_file_ast_diagnostic(&source);
+        assert_ast_diagnostic(
+            &failure,
+            "MOTH-RULE-0043",
+            Some("invalid_declaration.declaration_requires_module_top_level"),
         );
     }
 }
@@ -130,18 +106,10 @@ fn function_default_path_token_reports_structured_diagnostic_not_panic() {
     // A path token nested in a template default lives in the detached parameter
     // default buffer; the header must own its path row so AST parsing reports the
     // missing target as a structured diagnostic instead of indexing a missing row.
-    let payload = parse_function_diagnostic_payload(
+    assert_function_diagnostic(
         "label |prefix String = [: [@docs/intro.md] ]| -> String:\n    return prefix\n;\n",
-    );
-    assert!(
-        matches!(
-            payload,
-            DiagnosticPayload::InvalidCompileTimePath {
-                reason: crate::compiler_frontend::compiler_messages::InvalidCompileTimePathReason::MissingTarget,
-                ..
-            }
-        ),
-        "expected a structured missing-target diagnostic, got {payload:?}"
+        "MOTH-RULE-0063",
+        Some("invalid_compile_time_path.missing_target"),
     );
 }
 
@@ -158,22 +126,18 @@ fn parameters_cannot_shadow_bound_external_symbols_or_namespaces() {
         ),
         ("@core/io as output\nread |output I32|:\n;\n", "output"),
     ] {
-        let diagnostic = parse_single_file_ast_diagnostic(source);
-        assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0038", "{source}");
-        assert!(matches!(
-            diagnostic.payload,
-            DiagnosticPayload::ShadowedName { .. }
-        ));
+        let failure = parse_single_file_ast_diagnostic(source);
+        let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0038", None);
         let start = source.rfind(name).expect("the parameter name must occur") as u32;
         let mut builder = ExtendedSpanBuilder::new();
         let span = LocalSpan::exact(start, name.len() as u32, &mut builder)
             .expect("the name span must fit");
         assert_eq!(
-            diagnostic.primary_span,
+            ast_error_primary_span(diagnostic),
             Some(SourceSpan::new(SourceId::COMPILATION_ROOT, span)),
             "{source}",
         );
-        assert!(diagnostic.labels.is_empty(), "{source}");
+        assert!(ast_error_label_spans(diagnostic).is_empty(), "{source}");
     }
 }
 
@@ -188,22 +152,14 @@ fn parameters_cannot_shadow_visible_source_declarations() {
             "top_value",
         ),
     ] {
-        let diagnostic = parse_single_file_ast_build_result(source)
-            .err()
-            .unwrap_or_else(|| {
-                panic!("the visible source declaration must reject its parameter: {source}")
-            });
-        assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0038", "{source}");
-        assert!(matches!(
-            diagnostic.payload,
-            DiagnosticPayload::ShadowedName { .. }
-        ));
+        let failure = parse_single_file_ast_diagnostic(source);
+        let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0038", None);
         let start = source.rfind(name).expect("the parameter name must occur") as u32;
         let mut builder = ExtendedSpanBuilder::new();
         let span = LocalSpan::exact(start, name.len() as u32, &mut builder)
             .expect("the name span must fit");
         assert_eq!(
-            diagnostic.primary_span,
+            ast_error_primary_span(diagnostic),
             Some(SourceSpan::new(SourceId::COMPILATION_ROOT, span)),
             "{source}",
         );
@@ -317,28 +273,19 @@ fn parses_optional_final_error_return_slot() {
 
 #[test]
 fn rejects_non_final_error_return_slot() {
-    let payload =
-        parse_function_diagnostic_payload("compute |x I32| -> Error!, I32:\n    return 42\n;\n");
-
-    assert_eq!(
-        payload,
-        DiagnosticPayload::InvalidFunctionSignature {
-            reason: InvalidFunctionSignatureReason::ErrorSlotNotLast
-        }
+    assert_function_diagnostic(
+        "compute |x I32| -> Error!, I32:\n    return 42\n;\n",
+        "MOTH-RULE-0062",
+        Some("invalid_function_signature.error_slot_not_last"),
     );
 }
 
 #[test]
 fn rejects_multiple_error_return_slots() {
-    let payload = parse_function_diagnostic_payload(
+    assert_function_diagnostic(
         "compute |x I32| -> I32, String!, Error!:\n    return 42\n;\n",
-    );
-
-    assert_eq!(
-        payload,
-        DiagnosticPayload::InvalidFunctionSignature {
-            reason: InvalidFunctionSignatureReason::MultipleErrorReturnSlots
-        }
+        "MOTH-RULE-0062",
+        Some("invalid_function_signature.multiple_error_return_slots"),
     );
 }
 
@@ -465,17 +412,12 @@ show type A is DISPLAY_TEXT |this Box of A| -> String:\n\
 box = Box(Plain(\"no evidence\"))\n\
 value = box.show()\n";
 
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-    let DiagnosticPayload::InvalidGenericInstantiation {
-        reason: InvalidGenericInstantiationReason::MissingTraitEvidence { .. },
-        ..
-    } = &diagnostic.payload
-    else {
-        panic!(
-            "expected missing generic receiver trait evidence, got {:?}",
-            diagnostic.payload
-        );
-    };
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0057",
+        Some("invalid_generic_instantiation.missing_trait_evidence"),
+    );
     let member_start = source
         .find("box.show()")
         .expect("the generic receiver call should be present") as u32
@@ -485,7 +427,7 @@ value = box.show()\n";
         .expect("the generic receiver member should fit an inline span");
 
     assert_eq!(
-        diagnostic.primary_span,
+        ast_error_primary_span(diagnostic),
         Some(SourceSpan::new(SourceId::COMPILATION_ROOT, member_span))
     );
 }
@@ -698,22 +640,11 @@ unused type T |value T|:
 
 #[test]
 fn static_true_assertion_still_reports_invalid_generic_message() {
-    let payload = parse_function_diagnostic_payload(
+    assert_type_mismatch_context(
         "identity type T |value T| -> T:\n    return value\n;\n\nassert(true, identity(1))\n",
-    );
-
-    assert!(
-        matches!(
-            payload,
-            DiagnosticPayload::TypeMismatch {
-                context: TypeMismatchContext::AssertionArgument,
-                ..
-            }
-        ),
-        "inactive assertion messages must still report type errors, got {payload:?}"
+        TypeMismatchContext::AssertionArgument,
     );
 }
-
 #[test]
 fn static_false_assertion_retains_active_generic_message_requests() {
     let (build_result, _path_fork, _string_table) = parse_single_file_ast_build_result(
@@ -826,19 +757,10 @@ fn start_function_distinguishes_user_and_host_calls() {
 
 #[test]
 fn rejects_immutable_collection_place_argument_to_mutable_parameter() {
-    let payload = parse_function_diagnostic_payload(
+    assert_function_diagnostic(
         "touch |items ~{I32}| -> I32:\n    return items.length()\n;\n\nvalues = {1, 2, 3}\ncount = touch(values)\n",
-    );
-
-    assert!(
-        matches!(
-            payload,
-            DiagnosticPayload::InvalidCallShape {
-                reason: InvalidCallShapeReason::ImmutablePlaceMutableAccessRequired { .. },
-                ..
-            }
-        ),
-        "{payload:?}"
+        "MOTH-RULE-0054",
+        Some("invalid_call_shape.immutable_place_mutable_access_required"),
     );
 }
 
@@ -857,7 +779,6 @@ fn rejects_struct_constructor_argument_type_with_field_wording() {
         TypeMismatchContext::ConstructorArgument,
     );
 }
-
 // --------------------------
 //  Named types in signatures
 // --------------------------
@@ -895,35 +816,19 @@ fn resolves_named_struct_type_in_function_returns() {
 
 #[test]
 fn rejects_unknown_named_type_in_function_signatures() {
-    let payload =
-        parse_function_diagnostic_payload("use_missing |value Missing|:\n    return value\n;\n");
-
-    assert!(
-        matches!(
-            payload,
-            DiagnosticPayload::UnknownName {
-                namespace: NameNamespace::Type,
-                ..
-            }
-        ),
-        "{payload:?}"
+    assert_function_diagnostic(
+        "use_missing |value Missing|:\n    return value\n;\n",
+        "MOTH-RULE-0035",
+        None,
     );
 }
 
 #[test]
 fn rejects_unknown_named_return_type_in_function_signatures() {
-    let payload =
-        parse_function_diagnostic_payload("clone |value I32| -> Missing:\n    return value\n;\n");
-
-    assert!(
-        matches!(
-            payload,
-            DiagnosticPayload::UnknownName {
-                namespace: NameNamespace::Type,
-                ..
-            }
-        ),
-        "{payload:?}"
+    assert_function_diagnostic(
+        "clone |value I32| -> Missing:\n    return value\n;\n",
+        "MOTH-RULE-0035",
+        None,
     );
 }
 
@@ -933,51 +838,28 @@ fn rejects_unknown_named_return_type_in_function_signatures() {
 
 #[test]
 fn rejects_receiver_parameter_when_not_first() {
-    let payload = parse_function_diagnostic_payload(
+    assert_function_diagnostic(
         "Point = |\n    x I32,\n|\n\nreset |value I32, this Point|:\n    return value\n;\n",
-    );
-
-    assert!(
-        matches!(
-            payload,
-            DiagnosticPayload::InvalidThisUsage {
-                reason: InvalidThisUsageReason::NotFirstParameter { .. }
-            }
-        ),
-        "{payload:?}"
+        "MOTH-RULE-0040",
+        Some("invalid_this_usage.not_first_parameter"),
     );
 }
 
 #[test]
 fn rejects_builtin_scalar_receiver_parameter() {
-    let payload =
-        parse_function_diagnostic_payload("reset |this I32| -> I32:\n    return this\n;\n");
-
-    assert!(
-        matches!(
-            payload,
-            DiagnosticPayload::InvalidReceiverDeclaration {
-                reason: InvalidReceiverDeclarationReason::BuiltinScalarType
-            }
-        ),
-        "{payload:?}"
+    assert_function_diagnostic(
+        "reset |this I32| -> I32:\n    return this\n;\n",
+        "MOTH-RULE-0041",
+        Some("invalid_receiver_declaration.builtin_scalar_type"),
     );
 }
 
 #[test]
 fn rejects_multiple_this_parameters_in_one_signature() {
-    let payload = parse_function_diagnostic_payload(
+    assert_function_diagnostic(
         "Point = |\n    x I32 = 0,\n|\n\nlength |this Point, this Point| -> I32:\n    return this.x\n;\n",
-    );
-
-    assert!(
-        matches!(
-            payload,
-            DiagnosticPayload::InvalidThisUsage {
-                reason: InvalidThisUsageReason::DuplicateThis { .. }
-            }
-        ),
-        "{payload:?}"
+        "MOTH-RULE-0040",
+        Some("invalid_this_usage.duplicate_this"),
     );
 }
 
@@ -987,23 +869,17 @@ fn rejects_multiple_this_parameters_in_one_signature() {
 
 #[test]
 fn rejects_field_method_name_collisions() {
-    let payload = parse_function_diagnostic_payload(
+    assert_function_diagnostic(
         "Point = |\n    reset I32 = 0,\n|\n\nreset |this Point| -> I32:\n    return this.reset\n;\n",
-    );
-
-    assert_eq!(
-        payload,
-        DiagnosticPayload::InvalidReceiverDeclaration {
-            reason: InvalidReceiverDeclarationReason::FieldNameConflict
-        }
+        "MOTH-RULE-0041",
+        Some("invalid_receiver_declaration.field_name_conflict"),
     );
 }
-
 #[test]
 fn rejects_free_function_call_syntax_for_receiver_methods() {
     assert_invalid_receiver_call(
         "Point = |\n    x I32 = 0,\n|\n\nreset |this Point|:\n    return\n;\n\npoint ~= Point()\nreset(point)\n",
-        InvalidReceiverCallReason::CalledAsFreeFunction,
+        "invalid_receiver_call.called_as_free_function",
     );
 }
 
@@ -1011,7 +887,7 @@ fn rejects_free_function_call_syntax_for_receiver_methods() {
 fn rejects_const_record_method_calls() {
     assert_invalid_receiver_call(
         "Point = |\n    x I32 = 0,\n|\n\nlength |this Point| -> I32:\n    return this.x\n;\n\norigin #= Point()\norigin.length()\n",
-        InvalidReceiverCallReason::ConstRecordNoRuntimeCalls,
+        "invalid_receiver_call.const_record_no_runtime_calls",
     );
 }
 
@@ -1048,7 +924,7 @@ fn parses_result_propagation_for_receiver_method_call() {
 fn rejects_mutable_receiver_methods_on_immutable_bindings_without_marker() {
     assert_invalid_receiver_call(
         "Point = |\n    x I32 = 0,\n|\n\nreset |this ~Point|:\n    this.x = 0\n;\n\npoint = Point()\npoint.reset()\n",
-        InvalidReceiverCallReason::ImmutableReceiverMutableMethod,
+        "invalid_receiver_call.immutable_receiver_mutable_method",
     );
 }
 
@@ -1056,7 +932,7 @@ fn rejects_mutable_receiver_methods_on_immutable_bindings_without_marker() {
 fn rejects_explicit_receiver_tilde_for_shared_receiver_methods() {
     assert_invalid_receiver_call(
         "Point = |\n    x I32 = 0,\n|\n\nlength |this Point| -> I32:\n    return this.x\n;\n\npoint ~= Point()\nvalue = ~point.length()\n",
-        InvalidReceiverCallReason::UnneededMutableAccessMarker,
+        "invalid_receiver_call.unneeded_mutable_access_marker",
     );
 }
 
@@ -1094,7 +970,7 @@ fn rejects_result_propagation_when_error_slot_types_do_not_match() {
 }
 
 #[test]
-fn rejects_return_value_type_with_expected_found_and_value_details() {
+fn rejects_return_value_type_mismatch() {
     assert_type_mismatch_context(
         "render || -> String:\n    return 1\n;\n\nrender()\n",
         TypeMismatchContext::ReturnValue,
@@ -1102,13 +978,12 @@ fn rejects_return_value_type_with_expected_found_and_value_details() {
 }
 
 #[test]
-fn return_int_context_reports_targeted_guidance_for_regular_division() {
+fn regular_division_return_type_mismatch_is_reported() {
     assert_type_mismatch_context(
         "render || -> I32:\n    return 5 / 2\n;\n\nrender()\n",
         TypeMismatchContext::ReturnValue,
     );
 }
-
 #[test]
 fn parses_result_fallback_call_in_expression_position() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
@@ -1233,56 +1108,40 @@ fn parses_inline_option_present_capture_receiver_as_value_match() {
 }
 #[test]
 fn rejects_empty_inline_option_present_capture() {
-    let payload = parse_function_diagnostic_payload(
+    assert_function_diagnostic(
         "display |maybe_name String?| -> String:\n\
          name = if maybe_name is || then name else \"guest\"\n\
          return name\n\
      ;\n",
+        "MOTH-RULE-0049",
+        Some("invalid_match_pattern.empty_option_present_capture"),
     );
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidMatchPattern {
-            reason: InvalidMatchPatternReason::EmptyOptionPresentCapture,
-            ..
-        }
-    ));
 }
 
 #[test]
 fn rejects_literal_inline_option_present_capture_binding() {
-    let payload = parse_function_diagnostic_payload(
+    assert_function_diagnostic(
         "display |maybe_name String?| -> String:\n\
          name = if maybe_name is |\"text\"| then name else \"guest\"\n\
          return name\n\
      ;\n",
+        "MOTH-RULE-0049",
+        Some("invalid_match_pattern.expected_binding_in_option_present_capture"),
     );
-
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidMatchPattern {
-            reason: InvalidMatchPatternReason::ExpectedBindingInOptionPresentCapture,
-            ..
-        }
-    ));
 }
-
 #[test]
 fn newline_between_is_and_option_capture_is_not_committed_at_inline_receiver() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "display |maybe_name String?| -> String:\n\
              name = if maybe_name is\n|name| then name else \"guest\"\n\
              return name\n\
          ;\n",
     );
-
-    assert!(
-        !matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidMatchPattern { .. }
-        ),
-        "newline-separated receiver pipes must not commit option capture, got {:?}",
-        diagnostic.payload
+    let diagnostic = first_ast_error_view(&failure);
+    assert_ne!(
+        diagnostic.descriptor().code,
+        "MOTH-RULE-0049",
+        "newline-separated receiver pipes must not commit option capture",
     );
 }
 
@@ -1336,7 +1195,7 @@ fn parses_block_option_present_capture_receiver_as_value_match() {
 
 #[test]
 fn newline_between_is_and_option_capture_is_not_committed_at_block_receiver() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "display |maybe_name String?| -> String:\n\
              name = if maybe_name is\n|name|:\n\
                  then name\n\
@@ -1346,14 +1205,11 @@ fn newline_between_is_and_option_capture_is_not_committed_at_block_receiver() {
              return name\n\
          ;\n",
     );
-
-    assert!(
-        !matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidMatchPattern { .. }
-        ),
-        "newline-separated receiver pipes must not commit option capture, got {:?}",
-        diagnostic.payload
+    let diagnostic = first_ast_error_view(&failure);
+    assert_ne!(
+        diagnostic.descriptor().code,
+        "MOTH-RULE-0049",
+        "newline-separated receiver pipes must not commit option capture",
     );
 }
 
@@ -1593,26 +1449,19 @@ fn parses_standalone_result_propagation_statement() {
 
 #[test]
 fn rejects_trailing_comma_in_single_return() {
-    let payload = parse_function_diagnostic_payload("compute |x I32| -> I32,:\n    return 42\n;\n");
-
-    assert_eq!(
-        payload,
-        DiagnosticPayload::InvalidFunctionSignature {
-            reason: InvalidFunctionSignatureReason::TrailingCommaInReturns
-        }
+    assert_function_diagnostic(
+        "compute |x I32| -> I32,:\n    return 42\n;\n",
+        "MOTH-RULE-0062",
+        Some("invalid_function_signature.trailing_comma_in_returns"),
     );
 }
 
 #[test]
 fn rejects_trailing_comma_in_error_return() {
-    let payload =
-        parse_function_diagnostic_payload("compute |x I32| -> I32, Error!,:\n    return 42\n;\n");
-
-    assert_eq!(
-        payload,
-        DiagnosticPayload::InvalidFunctionSignature {
-            reason: InvalidFunctionSignatureReason::TrailingCommaInReturns
-        }
+    assert_function_diagnostic(
+        "compute |x I32| -> I32, Error!,:\n    return 42\n;\n",
+        "MOTH-RULE-0062",
+        Some("invalid_function_signature.trailing_comma_in_returns"),
     );
 }
 
@@ -1839,25 +1688,14 @@ result = choose(7, required = none)\n";
 fn rejects_implicit_integer_default_for_float_parameter() {
     // D00/D15: fixed integers and binary floats require an explicit conversion, so a typed I32
     // constant is not accepted at an F64 receiving boundary without `cast`.
-    let payload = parse_function_diagnostic_payload(
+    assert_type_mismatch_context(
         "LARGE #I32 = 16_777_217\n\
 as_float |value F64 = LARGE, required F64| -> F64:\n\
     return value\n\
 ;\n",
-    );
-
-    assert!(
-        matches!(
-            payload,
-            DiagnosticPayload::TypeMismatch {
-                context: TypeMismatchContext::Declaration,
-                ..
-            }
-        ),
-        "{payload:?}"
+        TypeMismatchContext::Declaration,
     );
 }
-
 #[test]
 fn mutable_f64_operator_default_keeps_parameter_access_mode() {
     let source = "\
@@ -1922,18 +1760,14 @@ fn single_return_rejects_zero_and_multiple_success_slots() {
         ("produce || -> I32, String:\n    return 1, \"one\"\n;\n", 2),
     ] {
         let source = format!("{producer}\nforward || -> I32:\n    return produce()\n;\n");
-        let diagnostic = parse_single_file_ast_diagnostic(&source);
-        assert!(
-            matches!(
-                diagnostic.payload,
-                DiagnosticPayload::InvalidValueReceiver {
-                    receiver: ValueReceiverContext::Return,
-                    target_count: 1,
-                    produced_count: actual,
-                } if actual == produced_count
-            ),
-            "{diagnostic:?}"
-        );
+        let failure = parse_single_file_ast_diagnostic(&source);
+        let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0087", None);
+        let facts = diagnostic
+            .family_view::<InvalidValueReceiverView>()
+            .expect("the diagnostic is an invalid value receiver");
+        assert_eq!(facts.receiver, ValueReceiverContext::Return, "{source}");
+        assert_eq!(facts.target_count, 1, "{source}");
+        assert_eq!(facts.produced_count, produced_count, "{source}");
     }
 }
 

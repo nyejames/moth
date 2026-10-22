@@ -11,12 +11,15 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionId, ExternalPackageRegistry, ExternalSymbolId,
 };
-use crate::compiler_frontend::source::test_support::TestSourceContext;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result_with_registry;
+use crate::compiler_frontend::tests::parse_support::{
+    assert_ast_diagnostic, ast_error_label_spans, ast_error_primary_span,
+    ast_first_error_rendered_message, freeze_ast_diagnostic_failure,
+    parse_single_file_ast_build_result_with_registry,
+};
 use crate::compiler_frontend::tokenizer::lexer::{LexedSource, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
 
@@ -113,36 +116,25 @@ fn assert_external_binding_collision(source: &str, name: &str) {
             ExternalSymbolId::Function(ExternalFunctionId::IoPrint),
         )
         .unwrap();
-    let diagnostic = parse_single_file_ast_build_result_with_registry(source, registry)
+    let failure = parse_single_file_ast_build_result_with_registry(source, registry)
         .err()
-        .unwrap();
-
-    assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0038", "{source}");
-    let DiagnosticPayload::ShadowedName {
-        name: authored_name,
-    } = diagnostic.payload
-    else {
-        panic!("expected the authored shadowed name: {source}");
-    };
-    let mut authored = TestSourceContext::new("@page.moth");
-    authored
-        .tokenize(
-            source,
-            &mut PathInternerFork::empty(),
-            &StyleDirectiveRegistry::built_ins(),
-            TokenizerEntryMode::SourceFile,
-        )
-        .unwrap();
-    assert_eq!(authored.preparation_parts().0.resolve(authored_name), name);
+        .expect("external binding collision should fail AST construction");
+    let boundary_failure = freeze_ast_diagnostic_failure(failure);
+    let diagnostic = assert_ast_diagnostic(&boundary_failure, "MOTH-RULE-0038", None);
+    assert_eq!(
+        ast_first_error_rendered_message(&boundary_failure),
+        format!("Shadowed name '{name}'"),
+        "{source}",
+    );
 
     let start = source.rfind(name).unwrap() as u32;
     let span = LocalSpan::exact(start, name.len() as u32, &mut ExtendedSpanBuilder::new()).unwrap();
     assert_eq!(
-        diagnostic.primary_span,
+        ast_error_primary_span(diagnostic),
         Some(SourceSpan::new(SourceId::COMPILATION_ROOT, span)),
         "{source}",
     );
-    assert!(diagnostic.labels.is_empty(), "{source}");
+    assert!(ast_error_label_spans(diagnostic).is_empty(), "{source}");
 }
 
 #[test]

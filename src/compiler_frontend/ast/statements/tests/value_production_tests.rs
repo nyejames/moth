@@ -19,15 +19,20 @@ use crate::compiler_frontend::ast::statements::value_production::completeness::v
 use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueBlock, ValueIfBlock,
 };
+use crate::compiler_frontend::compiler_errors::BoundaryFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    calls_data::InvalidValueReceiverView, types_borrows_targets::TypeMismatchView,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticPayload, InvalidControlFlowStatementReason, ValueReceiverContext,
+    DiagnosticPayload, InvalidControlFlowStatementReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     function_body_by_name, node, test_if_branch_metadata,
 };
 use crate::compiler_frontend::tests::parse_support::{
-    parse_single_file_ast, parse_single_file_ast_diagnostic,
+    assert_ast_diagnostic, ast_first_error_type_display, parse_single_file_ast,
+    parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
@@ -454,32 +459,29 @@ fn inferred_then_rejects_zero_and_multiple_success_producers() {
         let source = format!(
             "empty ||:\n;\npair || -> String, I32:\n    return \"name\", 1\n;\nchoose |ready Bool| -> String:\n    label = if ready:\n        then {producer}\n    else\n        then \"fallback\"\n    ;\n    return label\n;\n"
         );
-        let diagnostic = parse_single_file_ast_diagnostic(&source);
-        assert!(matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidValueReceiver {
-                receiver: ValueReceiverContext::Then,
-                target_count: 1,
-                produced_count: count,
-            } if count == produced_count
-        ));
-        assert_eq!(diagnostic.identity().code, "MOTH-RULE-0087");
+        let failure = parse_single_file_ast_diagnostic(&source);
+        let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0087", None);
+        let facts = diagnostic
+            .family_view::<InvalidValueReceiverView>()
+            .expect("the diagnostic is an invalid value receiver");
+        assert_eq!(facts.receiver, ValueReceiverContext::Then, "{source}");
+        assert_eq!(facts.target_count, 1, "{source}");
+        assert_eq!(facts.produced_count, produced_count, "{source}");
     }
 }
 
 #[test]
 fn inferred_nested_then_rejects_multiple_success_producer() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "pair || -> String, I32:\n    return \"name\", 1\n;\nchoose |ready Bool, nested Bool| -> String:\n    label = if ready:\n        if nested:\n            then \"first\"\n        else\n            then pair()\n        ;\n    else\n        then \"fallback\"\n    ;\n    return label\n;\n",
     );
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidValueReceiver {
-            receiver: ValueReceiverContext::Then,
-            target_count: 1,
-            produced_count: 2,
-        }
-    ));
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0087", None);
+    let facts = diagnostic
+        .family_view::<InvalidValueReceiverView>()
+        .expect("the diagnostic is an invalid value receiver");
+    assert_eq!(facts.receiver, ValueReceiverContext::Then);
+    assert_eq!(facts.target_count, 1);
+    assert_eq!(facts.produced_count, 2);
 }
 
 #[test]
@@ -510,47 +512,31 @@ fn shared_validator_rejects_all_terminating_value_if() {
 
 #[test]
 fn inferred_block_value_if_rejects_later_nested_produced_type_conflict() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "choose |ready Bool, use_fallback Bool| -> String:\n    label = if ready:\n        if use_fallback:\n            then \"fallback\"\n        else\n            then 1\n        ;\n    else\n        then \"waiting\"\n    ;\n    return label\n;\n",
     );
 
-    assert_string_then_i32_producer_conflict(&diagnostic, "a later nested ThenValue");
+    assert_type_mismatch_failure(&failure);
 }
 
 #[test]
 fn inferred_multi_bind_rejects_later_nested_produced_type_conflict() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "choose |ready Bool, use_fallback Bool| -> String, I32:\n    first, second I32 = if ready:\n        if use_fallback:\n            then \"fallback\", 1\n        else\n            then 2, 1\n        ;\n    else\n        then \"waiting\", 2\n    ;\n    return first, second\n;\n",
     );
 
-    assert_string_then_i32_producer_conflict(&diagnostic, "a later nested multi-bind ThenValue");
+    assert_type_mismatch_failure(&failure);
 }
 
-/// Asserts that a nested producer conflict is rejected as the stable `String`-then-`I32` mismatch.
-///
-/// WHAT: checks the structured payload (expected `String` from the first produced value, found
-///       `I32` from the later nested producer) and the stable `MOTH-TYPE-0001` code.
-/// WHY: the receiving context is incidental to the rejection, so the contract is the
-///      consumer-visible types and code rather than the context label.
-fn assert_string_then_i32_producer_conflict(diagnostic: &CompilerDiagnostic, site: &str) {
-    let DiagnosticPayload::TypeMismatch {
-        expected, found, ..
-    } = &diagnostic.payload
-    else {
-        panic!(
-            "expected type mismatch from {site}, got {:?}",
-            diagnostic.payload
-        );
-    };
+/// Asserts that a nested producer conflict keeps its stable code and exact expected/found types.
+fn assert_type_mismatch_failure(failure: &BoundaryFailure) {
+    let diagnostic = assert_ast_diagnostic(failure, "MOTH-TYPE-0001", None);
+    let facts = diagnostic
+        .family_view::<TypeMismatchView>()
+        .expect("the diagnostic is a type mismatch");
     assert_eq!(
-        *expected,
-        builtin_type_ids::STRING,
-        "the first produced String fixes the receiving type"
+        ast_first_error_type_display(failure, facts.expected),
+        "String"
     );
-    assert_eq!(
-        *found,
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        "the later nested I32 producer is the conflicting found type"
-    );
-    assert_eq!(diagnostic.identity().code, "MOTH-TYPE-0001");
+    assert_eq!(ast_first_error_type_display(failure, facts.found), "I32");
 }

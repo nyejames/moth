@@ -4,7 +4,7 @@
 //! and serves HTTP/SSE traffic for hot reload.
 
 use crate::build_system::BuildProfile;
-use crate::build_system::build::{ProjectBuilder, bootstrap_project_build};
+use crate::build_system::build::{BootstrapFailure, ProjectBuilder, bootstrap_project_build};
 use crate::build_system::create_project_modules::resolve_project_entry_root;
 use crate::build_system::output::OutputOwner;
 use crate::build_system::path_validation::check_if_valid_path;
@@ -13,7 +13,6 @@ use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{
     BoundaryFailure, CompilerError, CompilerErrorMetadataKey, CompilerMessages,
 };
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::dev_server::DevServerOptions;
 use crate::projects::dev_server::build_loop::{ProjectBuildExecutor, dev_server_error_messages};
@@ -39,7 +38,8 @@ pub fn run_dev_server(
     flags: &[Flag],
     options: DevServerOptions,
 ) -> Result<(), BoundaryFailure> {
-    run_dev_server_with_messages(builder, entry_path, flags, options).map_err(into_boundary_failure)
+    run_dev_server_with_messages(builder, entry_path, flags, options)
+        .map_err(BootstrapFailure::into_boundary_failure)
 }
 
 fn run_dev_server_with_messages(
@@ -47,7 +47,7 @@ fn run_dev_server_with_messages(
     entry_path: &str,
     flags: &[Flag],
     options: DevServerOptions,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), BootstrapFailure> {
     let entry_target = validate_dev_entry_path(entry_path)?;
     let resolved_paths =
         resolve_dev_runtime_paths(&builder, &entry_target, flags, &options.inputs)?;
@@ -160,7 +160,7 @@ pub(crate) fn resolve_dev_runtime_paths(
     entry_target: &Path,
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
-) -> Result<DevRuntimePaths, CompilerMessages> {
+) -> Result<DevRuntimePaths, BootstrapFailure> {
     if !entry_target.is_dir() {
         let output_dir = entry_target
             .parent()
@@ -183,7 +183,7 @@ pub(crate) fn resolve_dev_runtime_paths(
             CompilerErrorMetadataKey::CompilationStage,
             "Dev server bootstrap".to_string(),
         );
-        return Err(CompilerMessages::from_error(error, StringTable::new()));
+        return Err(CompilerMessages::from_error(error, StringTable::new()).into());
     };
     let owner = OutputOwner {
         builder: builder.backend.builder_kind(),

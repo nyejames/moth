@@ -144,7 +144,7 @@ fn execute_check_messages(
     let bootstrap = match bootstrap_project_build(project_builder, valid_path, build_config_inputs)
     {
         Ok(bootstrap) => bootstrap,
-        Err(messages) => return into_boundary_failure(messages),
+        Err(failure) => return failure.into_boundary_failure(),
     };
     let BuildBootstrap {
         mut config,

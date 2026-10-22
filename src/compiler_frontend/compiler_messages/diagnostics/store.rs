@@ -96,7 +96,7 @@ impl DiagnosticStore {
 
 /// A stored record with the store that owns its arenas. Copyable, so views can pass it along freely.
 #[derive(Clone, Copy, Debug)]
-pub(super) struct RecordRef<'a> {
+pub(crate) struct RecordRef<'a> {
     store: &'a DiagnosticStore,
     record: &'a DiagnosticRecord,
 }

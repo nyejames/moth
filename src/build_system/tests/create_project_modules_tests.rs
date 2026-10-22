@@ -18,7 +18,8 @@ use crate::build_system::create_project_modules::resolve_project_entry_root;
 use crate::build_system::create_project_modules::source_package_discovery::build_source_package_boundary_indexes;
 use crate::build_system::create_project_modules::source_tree_index::SourceTreeIndex;
 use crate::build_system::project_config::{
-    ProjectConfigParseServices, compile_project_config_file, load_project_config,
+    ProjectConfigFailure, ProjectConfigParseServices, compile_project_config_file,
+    load_project_config,
 };
 use crate::builder_surface::external_import_providers::provider::{
     ExternalFileExtension, ExternalImportProvider, ExternalImportProviderContext,
@@ -31,10 +32,8 @@ use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DependencyClauseKind, DiagnosticCategory,
-    DiagnosticPayload, InvalidAssignmentTargetReason, InvalidCompileTimePathReason,
-    InvalidConfigReason, InvalidDependencyClauseReason, InvalidOutputFolderReason, PathKind,
-    ValueReceiverContext,
+    CompilerDiagnostic, DependencyClauseKind, DiagnosticCategory, DiagnosticPayload,
+    InvalidCompileTimePathReason, InvalidConfigReason, InvalidDependencyClauseReason, PathKind,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -429,10 +428,10 @@ fn parse_project_config_for_test(
     config: &mut Config,
     config_path: &std::path::Path,
     style_directives: &StyleDirectiveRegistry,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), ProjectConfigFailure> {
     let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
     let mut string_table = StringTable::new();
-    let mut source_files = SourceDatabase::empty();
+    let mut source_files = Some(SourceDatabase::empty());
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
         style_directives,
@@ -453,12 +452,12 @@ fn parse_project_config_for_test_with_html_keys(
     config: &mut Config,
     config_path: &std::path::Path,
     style_directives: &StyleDirectiveRegistry,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), ProjectConfigFailure> {
     let frontend_surface =
         crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new()
             .frontend_surface();
     let mut string_table = StringTable::new();
-    let mut source_files = SourceDatabase::empty();
+    let mut source_files = Some(SourceDatabase::empty());
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
         style_directives,
@@ -480,9 +479,9 @@ fn parse_project_config_for_test_with_packages(
     config_path: &std::path::Path,
     style_directives: &StyleDirectiveRegistry,
     frontend_surface: &crate::builder_surface::BuilderSurface,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), ProjectConfigFailure> {
     let mut string_table = StringTable::new();
-    let mut source_files = SourceDatabase::empty();
+    let mut source_files = Some(SourceDatabase::empty());
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
         style_directives,

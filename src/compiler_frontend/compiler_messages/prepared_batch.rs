@@ -8,7 +8,7 @@
 use super::compiler_errors::{
     CompilerError, CompilerMessages, InfrastructureErrors, RenderPathContext, RenderTypeContext,
 };
-use super::diagnostic_bag::{DiagnosticBag, PremergeDiagnosticBatch};
+use super::diagnostic_bag::{DiagnosticBag, PremergeDiagnosticBatch, PremergeFailure};
 use super::diagnostics::legacy_adapter::{PreparedDiagnostic, prepare_diagnostic};
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -32,6 +32,82 @@ pub(crate) struct PreparedDiagnosticBatch {
     pub(super) prepared: Vec<PreparedDiagnostic>,
     pub(super) identity: Box<PreparedBatchIdentity>,
 }
+
+#[derive(Debug)]
+pub(crate) enum AstDiagnosticFailure {
+    Prepared(PreparedDiagnosticBatch),
+    Infrastructure(Box<InfrastructureErrors>),
+}
+
+impl AstDiagnosticFailure {
+    pub(crate) fn capture_messages(
+        messages: CompilerMessages,
+        environment: Option<&TypeEnvironment>,
+        path_table_is_available: bool,
+        path_table: Option<Arc<PathTable>>,
+    ) -> Self {
+        let CompilerMessages {
+            diagnostics,
+            infrastructure_errors,
+            string_table,
+            ..
+        } = messages;
+        if let Some(errors) = infrastructure_errors {
+            return Self::Infrastructure(errors);
+        }
+
+        Self::Prepared(PreparedDiagnosticBatch::capture_from_bag(
+            DiagnosticBag::from_diagnostics(diagnostics),
+            *string_table,
+            environment,
+            path_table_is_available,
+            path_table,
+        ))
+    }
+
+    pub(crate) fn prepend_diagnostics(
+        &mut self,
+        prior_diagnostics: impl IntoIterator<
+            Item = crate::compiler_frontend::compiler_messages::CompilerDiagnostic,
+        >,
+    ) {
+        if let Self::Prepared(batch) = self {
+            batch.prepend_diagnostics(prior_diagnostics);
+        }
+    }
+}
+
+impl From<CompilerError> for AstDiagnosticFailure {
+    fn from(error: CompilerError) -> Self {
+        Self::Infrastructure(error.into())
+    }
+}
+
+/// Typed failures from the semantic pipeline before its owning boundary finalizes sources.
+#[derive(Debug)]
+pub(crate) enum SemanticStageFailure {
+    Premerge(PremergeFailure),
+    Ast(AstDiagnosticFailure),
+}
+
+impl From<PremergeFailure> for SemanticStageFailure {
+    fn from(failure: PremergeFailure) -> Self {
+        Self::Premerge(failure)
+    }
+}
+
+impl From<CompilerError> for SemanticStageFailure {
+    fn from(error: CompilerError) -> Self {
+        Self::Premerge(PremergeFailure::from(error))
+    }
+}
+
+impl From<AstDiagnosticFailure> for SemanticStageFailure {
+    fn from(failure: AstDiagnosticFailure) -> Self {
+        Self::Ast(failure)
+    }
+}
+
 impl std::fmt::Debug for PreparedDiagnosticBatch {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -81,7 +157,6 @@ impl PreparedDiagnosticBatch {
     /// Unlike `from_premerge`, this site already knows whether its path table was available while
     /// the environment was live. Capture every diagnostic against that borrowed environment when
     /// it was available; do not infer availability from a retained path row.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.5 S6b AST owning sites"))]
     pub(crate) fn capture_from_bag(
         bag: DiagnosticBag,
         string_table: StringTable,
@@ -118,6 +193,43 @@ impl PreparedDiagnosticBatch {
                 path_rows,
                 required_handles,
             }),
+        }
+    }
+    pub(crate) fn prepend_diagnostics(
+        &mut self,
+        prior_diagnostics: impl IntoIterator<
+            Item = crate::compiler_frontend::compiler_messages::CompilerDiagnostic,
+        >,
+    ) {
+        let prior_diagnostics = prior_diagnostics.into_iter().collect::<Vec<_>>();
+        let shift = prior_diagnostics.len();
+        if shift == 0 {
+            return;
+        }
+
+        let leading_path = self
+            .identity
+            .path_rows
+            .iter()
+            .position(|row| row.diagnostic_range.start == 0);
+        let mut prepared = Vec::with_capacity(self.prepared.len() + shift);
+        for diagnostic in &prior_diagnostics {
+            let mut item =
+                prepare_diagnostic(diagnostic, None, &mut self.identity.required_handles);
+            item.set_explicit_path(leading_path);
+            prepared.push(item);
+        }
+        prepared.append(&mut self.prepared);
+        self.prepared = prepared;
+
+        for (index, row) in self.identity.path_rows.iter_mut().enumerate() {
+            if Some(index) == leading_path {
+                row.diagnostic_range.start = 0;
+                row.diagnostic_range.end += shift;
+            } else {
+                row.diagnostic_range.start += shift;
+                row.diagnostic_range.end += shift;
+            }
         }
     }
 

@@ -30,13 +30,14 @@ mod config;
 mod moth_template;
 
 pub(crate) use config::{
-    CompiledConfigSource, ConfigCompilationOutcome, ConfigCompilationRequest,
-    FoldedConfigDeclaration, compile_config_source,
+    CompiledConfigSource, ConfigCompilationFailure, ConfigCompilationOutcome,
+    ConfigCompilationRequest, FoldedConfigDeclaration, compile_config_source,
 };
 // WHY: The direct Moth template service is accepted design but has no production consumer today.
 // Real `.mtf` files use the integrated Stage 0 `module_preparation`/`canonical` dependency path,
 // so this re-export compiles only for its own tests until a consumer lands.
 #[cfg(test)]
 pub(crate) use moth_template::{
-    MothTemplateCompilationRequest, MothTemplateFileValueBundle, compile_moth_template_source,
+    MothTemplateCompilationFailure, MothTemplateCompilationRequest, MothTemplateFileValueBundle,
+    compile_moth_template_source,
 };

@@ -6,25 +6,20 @@
 //!      the retained compiler-generated lexical-scope node remains unreachable from source.
 
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::compiler_messages::{
-    DeferredFeatureReason, DiagnosticPayload, InvalidStatementPositionReason,
-};
 use crate::compiler_frontend::tests::ast_fixture_support::{
     function_body_by_name, start_function_body,
 };
 use crate::compiler_frontend::tests::parse_support::{
-    parse_single_file_ast, parse_single_file_ast_diagnostic,
+    assert_ast_diagnostic, parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 
 fn assert_declared_region_is_deferred(source: &str) {
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::DeferredFeature {
-            reason: DeferredFeatureReason::DeclaredRegion
-        }
-    ));
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-DEFERRED-0001",
+        Some("deferred_feature.declared_region"),
+    );
 }
 
 #[test]
@@ -56,14 +51,12 @@ fn colon_type_shape_still_uses_the_declared_region_path() {
 
 #[test]
 fn rejects_exact_anonymous_declared_region_spelling() {
-    let diagnostic = parse_single_file_ast_diagnostic("_:\n    value = 1\n;\n");
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidStatementPosition {
-            reason: InvalidStatementPositionReason::AnonymousDeclaredRegion
-        }
-    ));
+    let failure = parse_single_file_ast_diagnostic("_:\n    value = 1\n;\n");
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0030",
+        Some("invalid_statement_position.anonymous_declared_region"),
+    );
 }
 
 #[test]

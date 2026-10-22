@@ -20,8 +20,10 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     ExpressionOperationView, OwnedExpr,
 };
 use crate::compiler_frontend::ast::statements::functions::ParameterContract;
-use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
+use crate::compiler_frontend::ast::{
+    AstTypeInterner, ContextKind, ScopeContext, TopLevelDeclarationTable,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::TypeMismatchView;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticKind, DiagnosticPayload,
     DiagnosticToken, InvalidCallShapeReason, RuleDiagnosticKind, SyntaxDiagnosticKind,
@@ -34,7 +36,8 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId,
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::{
-    parse_single_file_ast, parse_single_file_ast_diagnostic,
+    assert_ast_diagnostic, ast_error_primary_span, first_ast_error_view, parse_single_file_ast,
+    parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{TokenTag, TokenizerEntryMode};
@@ -661,17 +664,14 @@ fn optional_call_context_is_limited_to_bare_none_arguments() {
         "consume |first String?, second String?|:\n    io.line(\"ok\")\n;\n\nconsume(\n    none\n    ,\n    none\n)\n",
     );
 
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "consume |message String?|:\n    io.line(\"ok\")\n;\n\nmaybe Bool? = none\nconsume(none is maybe)\n",
     );
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::TypeMismatch {
-            context: TypeMismatchContext::FunctionArgument,
-            ..
-        }
-    ));
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-TYPE-0001", None);
+    let facts = diagnostic
+        .family_view::<TypeMismatchView>()
+        .expect("function-argument type mismatch should retain typed facts");
+    assert_eq!(facts.context, TypeMismatchContext::FunctionArgument);
 }
 
 #[test]
@@ -721,7 +721,7 @@ fn generic_call_diagnostic_retains_exact_multibyte_callee_span() {
     let source = format!(
         "{function_name} type T || -> {{T}}:\n    return {{}}\n;\n\nprefix = \"é\"\nvalue = {function_name}()\n"
     );
-    let diagnostic = parse_single_file_ast_diagnostic(&source);
+    let failure = parse_single_file_ast_diagnostic(&source);
     let call_start = source
         .rfind(&format!("{function_name}()"))
         .expect("the generic call should be present") as u32;
@@ -734,14 +734,14 @@ fn generic_call_diagnostic_retains_exact_multibyte_callee_span() {
 
     assert_eq!(span_builder.len(), 2);
     assert_eq!(
-        diagnostic.primary_span,
+        ast_error_primary_span(first_ast_error_view(&failure)),
         Some(SourceSpan::new(SourceId::COMPILATION_ROOT, call_span))
     );
 }
 
 #[test]
 fn rejects_mutable_marker_on_named_argument_target() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         r#"
 take |value ~I32|:
 ;
@@ -750,11 +750,7 @@ value ~= 1
 take(~value = value)
 "#,
     );
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnexpectedToken { .. }
-    ));
+    assert_ast_diagnostic(&failure, "MOTH-SYNTAX-0002", None);
 }
 
 #[test]
@@ -778,7 +774,7 @@ fn rejects_tilde_on_left_side_of_named_arg() {
 
 #[test]
 fn mutable_marker_on_immutable_argument_uses_authored_marker_span() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         r#"
 mutate |value ~I32|:
     value = 5
@@ -788,26 +784,17 @@ x = 1
 mutate(~x)
 "#,
     );
-
-    let DiagnosticPayload::InvalidCallShape { reason, .. } = &diagnostic.payload else {
-        panic!(
-            "expected InvalidCallShape diagnostic, got {:?}",
-            diagnostic.payload
-        )
-    };
-    assert!(
-        matches!(
-            reason,
-            InvalidCallShapeReason::MutableAccessOnImmutablePlace { .. }
-        ),
-        "expected MutableAccessOnImmutablePlace, got {reason:?}"
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0054",
+        Some("invalid_call_shape.mutable_access_on_immutable_place"),
     );
-    assert!(diagnostic.primary_span.is_some());
+    assert!(ast_error_primary_span(diagnostic).is_some());
 }
 
 #[test]
 fn mutable_marker_on_fresh_value_uses_authored_marker_span() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         r#"
 mutate |value ~I32|:
     value = 5
@@ -816,26 +803,17 @@ mutate |value ~I32|:
 mutate(~12)
 "#,
     );
-
-    let DiagnosticPayload::InvalidCallShape { reason, .. } = &diagnostic.payload else {
-        panic!(
-            "expected InvalidCallShape diagnostic, got {:?}",
-            diagnostic.payload
-        )
-    };
-    assert!(
-        matches!(
-            reason,
-            InvalidCallShapeReason::MutableAccessOnNonPlace { .. }
-        ),
-        "expected MutableAccessOnNonPlace, got {reason:?}"
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0054",
+        Some("invalid_call_shape.mutable_access_on_non_place"),
     );
-    assert!(diagnostic.primary_span.is_some());
+    assert!(ast_error_primary_span(diagnostic).is_some());
 }
 
 #[test]
 fn unmarked_immutable_argument_uses_value_expression_span() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         r#"
 mutate |value ~I32|:
     value = 5
@@ -845,19 +823,10 @@ x = 1
 mutate(x)
 "#,
     );
-
-    let DiagnosticPayload::InvalidCallShape { reason, .. } = &diagnostic.payload else {
-        panic!(
-            "expected InvalidCallShape diagnostic, got {:?}",
-            diagnostic.payload
-        )
-    };
-    assert!(
-        matches!(
-            reason,
-            InvalidCallShapeReason::ImmutablePlaceMutableAccessRequired { .. }
-        ),
-        "expected ImmutablePlaceMutableAccessRequired, got {reason:?}"
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0054",
+        Some("invalid_call_shape.immutable_place_mutable_access_required"),
     );
-    assert!(diagnostic.primary_span.is_some());
+    assert!(ast_error_primary_span(diagnostic).is_some());
 }

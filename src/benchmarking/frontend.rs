@@ -468,8 +468,8 @@ fn run_frontend_benchmark_with_owner_internal(
         build_config_inputs,
     } = match bootstrap_project_build(&project_builder, valid_path, &requested_inputs) {
         Ok(bootstrap) => bootstrap,
-        Err(messages) => {
-            let messages = into_boundary_failure(messages);
+        Err(failure) => {
+            let messages = failure.into_boundary_failure();
             let diagnostic_codes = collect_diagnostic_codes(&messages);
             return Err(frontend_benchmark_error(
                 FrontendBenchmarkFailureKind::Bootstrap,

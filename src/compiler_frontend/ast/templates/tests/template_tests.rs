@@ -18,9 +18,6 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplateTirReference, TemplateViewContext, format_tir_template,
 };
 use crate::compiler_frontend::ast::templates::top_level_templates::FoldedConstTemplateResult;
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidTemplateStructureReason,
-};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
@@ -109,14 +106,12 @@ fn standalone_insert_helper_value_is_rejected_after_composition() {
 value = [$insert("style"): color: red;]
 "#;
 
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidTemplateStructure {
-            reason: InvalidTemplateStructureReason::HelperOutsideWrapperSlot,
-        }
-    ));
+    let failure = parse_single_file_ast_diagnostic(source);
+    crate::compiler_frontend::tests::parse_support::assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0022",
+        Some("invalid_template_structure.helper_outside_wrapper_slot"),
+    );
 }
 
 #[test]

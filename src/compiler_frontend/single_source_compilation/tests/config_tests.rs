@@ -8,12 +8,24 @@
 //!       state and no filesystem access to produce the values Stage 0 applies, and that its
 //!       dialect rejections happen inside the service before any declaration is handed back.
 
-use super::{CompiledConfigSource, ConfigCompilationRequest, compile_config_source};
-use crate::builder_surface::{BuilderSurface, SourceFileKind};
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, DiagnosticPayload, InvalidConfigReason, TypeAnnotationContext,
+use super::{
+    CompiledConfigSource, ConfigCompilationFailure, ConfigCompilationRequest, compile_config_source,
 };
+use crate::builder_surface::{BuilderSurface, SourceFileKind};
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerMessages};
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+use crate::compiler_frontend::compiler_messages::TypeAnnotationContext;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
+    InvalidTypeAnnotationView, UnknownValueNameView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidConfigCode, InvalidConfigView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    InvalidNumberLiteralView, NumberLiteralCode,
+};
+use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
 use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceKind};
@@ -30,7 +42,7 @@ fn compile_project_source(
     source_code: &str,
     inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet,
     globals: &crate::compiler_frontend::build_config::BuilderConfigGlobalSet,
-) -> Result<(CompiledConfigSource, StringTable), CompilerMessages> {
+) -> Result<(CompiledConfigSource, StringTable), ConfigCompilationFailure> {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let surface = BuilderSurface::with_mandatory_core();
@@ -52,6 +64,56 @@ fn compile_project_source(
         &mut string_table,
     );
     Ok((outcome.result?, string_table))
+}
+
+fn config_failure_boundary(failure: ConfigCompilationFailure) -> BoundaryFailure {
+    match failure {
+        ConfigCompilationFailure::Legacy(messages) => {
+            crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure(
+                messages,
+            )
+        }
+        ConfigCompilationFailure::Ast(AstDiagnosticFailure::Prepared(batch)) => {
+            let mut accumulator =
+                crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator::new();
+            accumulator.append_prepared(batch, None);
+            accumulator.finish(
+                crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode::Unfrozen,
+            )
+        }
+        ConfigCompilationFailure::Ast(AstDiagnosticFailure::Infrastructure(errors)) => {
+            let mut messages = CompilerMessages::empty(StringTable::new());
+            messages.append_infrastructure_errors(errors);
+            crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure(
+                messages,
+            )
+        }
+    }
+}
+
+fn assert_config_failure_identity(
+    failure: ConfigCompilationFailure,
+    expected_code: &str,
+    expected_reason_key: Option<&str>,
+) {
+    let boundary = config_failure_boundary(failure);
+    assert_config_failure_identity_in_boundary(&boundary, expected_code, expected_reason_key);
+}
+
+fn assert_config_failure_identity_in_boundary(
+    boundary: &BoundaryFailure,
+    expected_code: &str,
+    expected_reason_key: Option<&str>,
+) {
+    assert!(
+        boundary
+            .reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| {
+                view.descriptor().code == expected_code && view.reason_key() == expected_reason_key
+            }),
+        "expected {expected_code} ({expected_reason_key:?}), got {boundary:?}",
+    );
 }
 
 #[test]
@@ -203,16 +265,26 @@ fn config_constant_above_the_i32_width_reports_out_of_range() {
     let messages = compile_project_source(source, &inputs, &globals)
         .err()
         .expect("a config constant above the I32 width must not fold");
-    assert!(
-        messages.diagnostics().any(|diagnostic| matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidNumberLiteral {
-                reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32),
-                ..
-            }
-        )),
-        "the I32 boundary must report the out-of-range config literal",
+    let boundary = config_failure_boundary(messages);
+    assert_config_failure_identity_in_boundary(
+        &boundary,
+        "MOTH-SYNTAX-0008",
+        Some("invalid_number_literal.outside_fixed_scalar_range"),
     );
+    let (_, diagnostic) = boundary
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("config overflow should produce an error diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidNumberLiteralView>()
+        .expect("number-literal diagnostic should retain typed facts");
+    let expected_reason = NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32);
+    let (expected_code, expected_scalar, expected_scale) =
+        NumberLiteralCode::split(&expected_reason);
+    assert_eq!(facts.code, expected_code);
+    assert_eq!(facts.scalar, expected_scalar);
+    assert_eq!(facts.scale, expected_scale);
 }
 
 #[test]
@@ -301,20 +373,16 @@ fn diagnosed_late_config_stage_retains_tokenizer_span_builder() {
         },
         &mut string_table,
     );
-
-    let messages = outcome
+    let failure = outcome
         .result
         .err()
         .expect("a later config dialect rejection should produce diagnostics");
-    assert!(messages.diagnostics().any(|diagnostic| {
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::PlainBindingUnsupported,
-                ..
-            }
-        )
-    }));
+    assert_config_failure_identity(
+        failure,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.plain_binding_unsupported"),
+    );
+
     assert_eq!(outcome.file_id, file_id);
     let builder = &outcome.span_builder;
     let literal_range = literal_span.resolve_with(builder.resolver());
@@ -351,16 +419,11 @@ fn rejects_config_local_nominal_values_with_structured_diagnostics() {
     .err()
     .expect("config-local nominal values should not become CompilerError");
 
-    let CompilerMessages { diagnostics, .. } = &messages;
-    assert!(diagnostics.iter().any(|diagnostic| {
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::NamedTypeUnsupported,
-                ..
-            }
-        )
-    }));
+    assert_config_failure_identity(
+        messages,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.named_type_unsupported"),
+    );
 }
 
 #[test]
@@ -394,16 +457,11 @@ fn rejects_authored_plain_bindings_inside_the_service() {
     .err()
     .expect("a plain config binding should be rejected by the compiler service");
 
-    let CompilerMessages { diagnostics, .. } = &messages;
-    assert!(diagnostics.iter().any(|diagnostic| {
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::PlainBindingUnsupported,
-                ..
-            }
-        )
-    }));
+    assert_config_failure_identity(
+        messages,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.plain_binding_unsupported"),
+    );
 }
 
 #[test]
@@ -437,13 +495,22 @@ fn rejects_implicit_sibling_field_reference_inside_a_grouped_project_record() {
     .err()
     .expect("an implicit sibling field reference should be rejected by the compiler service");
 
-    let CompilerMessages { diagnostics, .. } = &messages;
-    assert!(diagnostics.iter().any(|diagnostic| {
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::UnknownName { name, .. } if string_table.resolve(*name) == "name"
-        )
-    }));
+    let boundary = config_failure_boundary(messages);
+    assert_config_failure_identity_in_boundary(&boundary, "MOTH-RULE-0034", None);
+    let (report, diagnostic) = boundary
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .find(|(_, view)| view.descriptor().code == "MOTH-RULE-0034")
+        .expect("unknown sibling field should produce an unknown-value diagnostic");
+    let facts = diagnostic
+        .family_view::<UnknownValueNameView>()
+        .expect("unknown-value diagnostic should retain its authored name");
+    assert_eq!(
+        DiagnosticRenderContext::for_report(report)
+            .string_table
+            .resolve(facts.name),
+        "name"
+    );
 }
 
 #[test]
@@ -574,15 +641,11 @@ fn declaration_config_bootstrap_validates_default_before_explicit_provider() {
     ) else {
         panic!("an invalid authored fallback must fail before an explicit provider is applied");
     };
-    assert!(messages.diagnostics().any(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::ConfigInputTypeMismatch { .. },
-                ..
-            }
-        )
-    }));
+    assert_config_failure_identity(
+        messages,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.config_input_type_mismatch"),
+    );
 }
 
 #[test]
@@ -632,15 +695,11 @@ fn declaration_config_bootstrap_uses_builder_global_and_validates_default() {
     ) else {
         panic!("an invalid authored fallback must fail even when a builder global exists");
     };
-    assert!(messages.diagnostics().any(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::ConfigInputTypeMismatch { .. },
-                ..
-            }
-        )
-    }));
+    assert_config_failure_identity(
+        messages,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.config_input_type_mismatch"),
+    );
 }
 
 #[test]
@@ -729,15 +788,11 @@ fn declaration_config_bootstrap_resolves_required_omission_and_rejects_missing_i
     ) else {
         panic!("an omitted required declaration must reject a missing input");
     };
-    assert!(messages.diagnostics().any(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::MissingConfigInput,
-                ..
-            }
-        )
-    }));
+    assert_config_failure_identity(
+        messages,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.missing_config_input"),
+    );
 }
 
 #[test]
@@ -822,15 +877,11 @@ fn declaration_config_bootstrap_rejects_fixed_project_dependence_through_multipl
     ) else {
         panic!("fixed-only project fields must reject multiple input dependence");
     };
-    assert!(messages.diagnostics().any(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::ConfigQualifierFixedField,
-                ..
-            }
-        )
-    }));
+    assert_config_failure_identity(
+        messages,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.config_qualifier_fixed_field"),
+    );
 }
 
 #[test]
@@ -848,7 +899,14 @@ fn declaration_config_bootstrap_rejects_forward_references_in_same_file() {
     ) else {
         panic!("same-file forward references must remain invalid");
     };
-    assert!(messages.diagnostics().next().is_some());
+    let boundary = config_failure_boundary(messages);
+    assert!(
+        boundary
+            .reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .next()
+            .is_some()
+    );
 }
 
 #[test]
@@ -873,15 +931,11 @@ fn declaration_config_bootstrap_rejects_fixed_project_dependence_through_nested_
             );
         }
     };
-    assert!(messages.diagnostics().any(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::ConfigQualifierFixedField,
-                ..
-            }
-        )
-    }));
+    assert_config_failure_identity(
+        messages,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.config_qualifier_fixed_field"),
+    );
 }
 
 #[test]
@@ -1154,15 +1208,11 @@ fn declaration_config_required_reports_missing_input() {
     ) else {
         panic!("a required config contract without input or default must fail");
     };
-    assert!(messages.diagnostics().any(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::MissingConfigInput,
-                ..
-            }
-        )
-    }));
+    assert_config_failure_identity(
+        messages,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.missing_config_input"),
+    );
 }
 
 #[test]
@@ -1179,15 +1229,11 @@ fn declaration_config_rejects_fixed_fields() {
     ) else {
         panic!("project identity fields must remain fixed-only");
     };
-    assert!(messages.diagnostics().any(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::ConfigQualifierFixedField,
-                ..
-            }
-        )
-    }));
+    assert_config_failure_identity(
+        messages,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.config_qualifier_fixed_field"),
+    );
 }
 #[test]
 fn declaration_config_rejects_fixed_entry_root_field() {
@@ -1205,35 +1251,36 @@ fn declaration_config_rejects_fixed_entry_root_field() {
         panic!("project entry_root must remain fixed-only");
     };
 
-    let diagnostic = messages
-        .diagnostics()
-        .find(|diagnostic| {
-            matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidConfig {
-                    key: Some(key),
-                    reason: InvalidConfigReason::ConfigQualifierFixedField,
-                } if messages.string_table.resolve(*key) == "entry_root"
-            )
+    let boundary = config_failure_boundary(messages);
+    let (report, diagnostic) = boundary
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .find(|(_, view)| {
+            view.descriptor().code == "MOTH-CONFIG-0001"
+                && view.reason_key() == Some("invalid_config.config_qualifier_fixed_field")
         })
         .expect("entry_root should produce a typed fixed-field diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("fixed-field config diagnostic should retain its typed reason");
+    assert_eq!(facts.reason, InvalidConfigCode::ConfigQualifierFixedField);
+    let key = *diagnostic
+        .string_ids()
+        .last()
+        .expect("fixed-field config diagnostic should retain its authored key");
     assert_eq!(
-        diagnostic.identity().reason_key,
-        Some("invalid_config.config_qualifier_fixed_field")
+        DiagnosticRenderContext::for_report(report)
+            .string_table
+            .resolve(key),
+        "entry_root"
     );
     assert!(
-        diagnostic.primary_span.is_some(),
+        matches!(
+            diagnostic.primary_site(),
+            crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(_)
+        ),
         "fixed-field diagnostics should retain their authored source span"
     );
-
-    let DiagnosticPayload::InvalidConfig {
-        key: Some(key),
-        reason: InvalidConfigReason::ConfigQualifierFixedField,
-    } = &diagnostic.payload
-    else {
-        unreachable!("the diagnostic was filtered to the fixed entry_root payload");
-    };
-    assert_eq!(messages.string_table.resolve(*key), "entry_root");
 }
 
 #[test]
@@ -1251,15 +1298,11 @@ fn declaration_config_rejects_nominal_contract_types() {
     ) else {
         panic!("nominal contract types must not enter config resolution");
     };
-    assert!(messages.diagnostics().any(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::ConfigQualifierUnsupportedType,
-                ..
-            }
-        )
-    }));
+    assert_config_failure_identity(
+        messages,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.config_qualifier_unsupported_type"),
+    );
 }
 
 #[test]
@@ -1291,30 +1334,25 @@ fn declaration_config_rejects_mismatched_typed_input() {
     ) else {
         panic!("an I32 input must not satisfy a String contract");
     };
-    let diagnostic = messages
-        .diagnostics()
-        .find(|diagnostic| {
-            matches!(
-                diagnostic.payload,
-                DiagnosticPayload::InvalidConfig {
-                    reason: InvalidConfigReason::ConfigInputTypeMismatch { .. },
-                    ..
-                }
-            )
+    let boundary = config_failure_boundary(messages);
+    assert_config_failure_identity_in_boundary(
+        &boundary,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.config_input_type_mismatch"),
+    );
+    let (_, diagnostic) = boundary
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .find(|(_, view)| {
+            view.descriptor().code == "MOTH-CONFIG-0001"
+                && view.reason_key() == Some("invalid_config.config_input_type_mismatch")
         })
         .expect("an input type mismatch diagnostic should be present");
-    let DiagnosticPayload::InvalidConfig { reason, .. } = &diagnostic.payload else {
-        unreachable!("the diagnostic was filtered to InvalidConfig");
-    };
-    assert!(matches!(
-        reason,
-        InvalidConfigReason::ConfigInputTypeMismatch {
-            provided_argument_index: Some(0),
-            ..
-        }
-    ));
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("config input mismatch should retain typed facts");
+    assert_eq!(facts.provided_argument_index, Some(0));
 }
-
 #[test]
 fn declaration_config_validates_authored_default_before_provider() {
     let mut inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
@@ -1344,15 +1382,11 @@ fn declaration_config_validates_authored_default_before_provider() {
     ) else {
         panic!("an invalid authored default must not be masked by a compatible input");
     };
-    assert!(messages.diagnostics().any(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::ConfigInputTypeMismatch { .. },
-                ..
-            }
-        )
-    }));
+    assert_config_failure_identity(
+        messages,
+        "MOTH-CONFIG-0001",
+        Some("invalid_config.config_input_type_mismatch"),
+    );
 }
 
 #[test]
@@ -1394,23 +1428,26 @@ fn config_qualifier_requires_adjacent_hash_and_config_tokens() {
     ) else {
         panic!("whitespace between # and Config must be rejected");
     };
-    assert!(!messages.diagnostics().any(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::ConfigInputTypeMismatch { .. },
-                ..
-            }
-        )
-    }));
-    assert!(messages.diagnostics().any(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::CommonSyntaxMistake {
-                reason: CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing
-            }
-        )
-    }));
+    let boundary = config_failure_boundary(messages);
+    assert!(
+        !boundary
+            .reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| {
+                view.descriptor().code == "MOTH-CONFIG-0001"
+                    && view.reason_key() == Some("invalid_config.config_input_type_mismatch")
+            })
+    );
+    assert!(
+        boundary
+            .reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| {
+                view.descriptor().code == "MOTH-SYNTAX-0031"
+                    && view.reason_key()
+                        == Some("common_syntax_mistake.invalid_config_qualifier_spacing")
+            })
+    );
 }
 
 #[test]
@@ -1429,15 +1466,24 @@ fn config_qualifier_requires_a_contract_type() {
         panic!("a config qualifier must provide an explicit contract type");
     };
 
-    assert!(messages.diagnostics().any(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidTypeAnnotation {
-                context: TypeAnnotationContext::BuildConfigContract,
-                ..
-            }
-        )
-    }));
+    let boundary = config_failure_boundary(messages);
+    assert_config_failure_identity_in_boundary(
+        &boundary,
+        "MOTH-SYNTAX-0014",
+        Some("invalid_type_annotation.expected_type_annotation"),
+    );
+    let (_, diagnostic) = boundary
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .find(|(_, view)| {
+            view.descriptor().code == "MOTH-SYNTAX-0014"
+                && view.reason_key() == Some("invalid_type_annotation.expected_type_annotation")
+        })
+        .expect("missing config contract type should retain an annotation diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidTypeAnnotationView>()
+        .expect("type-annotation diagnostic should retain its context");
+    assert_eq!(facts.context, TypeAnnotationContext::BuildConfigContract);
 }
 
 #[test]
@@ -1554,17 +1600,24 @@ fn preparation_config_diagnostics_retain_their_original_source_spans() {
             .result
             .err()
             .expect("preparation must reject this config surface");
-        let diagnostics = messages.diagnostics().collect::<Vec<_>>();
+        let boundary = config_failure_boundary(messages);
+        let diagnostics = boundary
+            .reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .collect::<Vec<_>>();
         assert_eq!(diagnostics.len(), 1, "fixture {suffix:?}");
-        let diagnostic = diagnostics[0];
+        let (_, diagnostic) = diagnostics[0];
         assert_eq!(
-            diagnostic.identity().reason_key,
+            diagnostic.reason_key(),
             Some(expected_reason),
             "fixture {suffix:?}"
         );
-        let span = diagnostic
-            .primary_span
-            .expect("preparation must retain the primary source span");
+        let span = match diagnostic.primary_site() {
+            crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(
+                span,
+            ) => span,
+            _ => panic!("preparation must retain the primary source span"),
+        };
         assert_eq!(span.source(), file_id);
         let range = span.resolve_with(outcome.span_builder.resolver_for(file_id));
         let expected_start = source.rfind(expected_text).unwrap() as u32;
@@ -1574,7 +1627,7 @@ fn preparation_config_diagnostics_retain_their_original_source_spans() {
             "fixture {suffix:?}"
         );
         assert!(
-            diagnostic.labels.is_empty(),
+            diagnostic.durable_labels().next().is_none(),
             "config retains its labelless primary presentation"
         );
         assert!(

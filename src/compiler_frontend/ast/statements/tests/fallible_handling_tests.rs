@@ -10,13 +10,17 @@ use crate::compiler_frontend::ast::expressions::expression::{
 };
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    calls_data::InvalidReturnShapeView, choices_control_flow::InvalidFallibleHandlingView,
+    types_borrows_targets::TypeMismatchView,
+};
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidAssignmentTargetReason, InvalidFallibleHandlingReason,
-    InvalidReturnShapeReason, TypeMismatchContext,
+    InvalidAssignmentTargetReason, InvalidFallibleHandlingReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::tests::ast_fixture_support::function_body_by_name;
 use crate::compiler_frontend::tests::parse_support::{
+    assert_ast_diagnostic, ast_error_primary_span, ast_first_error_type_display,
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
@@ -90,71 +94,80 @@ fn optional_propagation_context_reasons_retain_authored_operator_span() {
         ),
     ];
     for (source, expected_reason) in cases {
-        let diagnostic = parse_single_file_ast_diagnostic(source);
-        assert!(matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidFallibleHandling { reason } if reason == expected_reason
-        ));
-        assert_postfix_span(source, '?', diagnostic.primary_span);
+        let failure = parse_single_file_ast_diagnostic(source);
+        let diagnostic = assert_ast_diagnostic(
+            &failure,
+            "MOTH-RULE-0051",
+            Some(invalid_fallible_reason_key(&expected_reason)),
+        );
+        if let InvalidFallibleHandlingReason::FunctionHasMultipleSuccessReturns { count } =
+            expected_reason
+        {
+            let handling = diagnostic
+                .family_view::<InvalidFallibleHandlingView>()
+                .expect("optional propagation retains its typed failure facts");
+            assert_eq!(handling.count, Some(count));
+        }
+        assert_postfix_span(source, '?', ast_error_primary_span(diagnostic));
     }
 }
 
 #[test]
 fn error_propagation_without_error_slot_retains_authored_operator_span() {
     let source = "produce || -> I32, Error!:\n    return! Error(\"failed\")\n;\nreceive || -> I32:\n    return produce()!\n;\n";
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason: InvalidFallibleHandlingReason::FunctionHasNoErrorSlot,
-        }
-    ));
-    assert_postfix_span(source, '!', diagnostic.primary_span);
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0051",
+        Some("invalid_fallible_handling.function_has_no_error_slot"),
+    );
+    assert_postfix_span(source, '!', ast_error_primary_span(diagnostic));
 }
 
 #[test]
 fn error_propagation_incompatible_entry_retains_error_types_and_operator_span() {
     let source = "produce || -> I32, String!:\n    return! \"failed\"\n;\nvalue = produce()!\n";
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-    let expected_error = parsed_builtin_error_type();
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason: InvalidFallibleHandlingReason::EntryHasIncompatibleError {
-                produced_error_type: builtin_type_ids::STRING,
-                entry_error_type,
-            },
-        } if entry_error_type == expected_error
-    ));
-    assert_postfix_span(source, '!', diagnostic.primary_span);
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0051",
+        Some("invalid_fallible_handling.entry_has_incompatible_error"),
+    );
+    let handling = diagnostic
+        .family_view::<InvalidFallibleHandlingView>()
+        .expect("the first error is invalid fallible handling");
+    let produced_type = handling
+        .first_error_type
+        .expect("the produced error type is retained");
+    let entry_type = handling
+        .second_error_type
+        .expect("the entry error type is retained");
+    assert_eq!(
+        ast_first_error_type_display(&failure, produced_type),
+        "String"
+    );
+    assert_eq!(ast_first_error_type_display(&failure, entry_type), "Error");
+    assert_postfix_span(source, '!', ast_error_primary_span(diagnostic));
 }
 
 #[test]
 fn error_propagation_return_mismatch_retains_error_types_and_operator_span() {
     let source = "produce || -> I32, String!:\n    return! \"failed\"\n;\nreceive || -> I32, Error!:\n    return produce()!\n;\n";
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-    let expected_error = parsed_builtin_error_type();
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::TypeMismatch {
-            expected,
-            found: builtin_type_ids::STRING,
-            context: TypeMismatchContext::ErrorReturn,
-        } if expected == expected_error
-    ));
-    assert_postfix_span(source, '!', diagnostic.primary_span);
-}
-
-fn parsed_builtin_error_type() -> crate::compiler_frontend::datatypes::ids::TypeId {
-    use crate::compiler_frontend::canonical_type_identity::{
-        CanonicalBuiltinType, CanonicalTypeIdentity,
-    };
-    let (ast, _, _) = parse_single_file_ast("");
-    ast.type_environment
-        .type_id_for_canonical_identity(&CanonicalTypeIdentity::Builtin(
-            CanonicalBuiltinType::Error,
-        ))
-        .expect("entry Error contract")
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-TYPE-0001", None);
+    let mismatch = diagnostic
+        .family_view::<TypeMismatchView>()
+        .expect("the first error is a type mismatch");
+    assert_eq!(mismatch.context, TypeMismatchContext::ErrorReturn);
+    assert_eq!(
+        ast_first_error_type_display(&failure, mismatch.expected),
+        "Error"
+    );
+    assert_eq!(
+        ast_first_error_type_display(&failure, mismatch.found),
+        "String"
+    );
+    assert_postfix_span(source, '!', ast_error_primary_span(diagnostic));
 }
 
 fn assert_postfix_span(
@@ -655,11 +668,11 @@ fn rejects_unbound_inline_catch_then_at_eof() {
     let source = "can_error || -> I32, Error!:\n    return 1\n;\n\nvalue = can_error() catch then";
     let diagnostic = parse_single_file_ast_diagnostic(source);
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling { reason }
-            if reason == InvalidFallibleHandlingReason::ThenRequiresValues
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0051",
+        Some("invalid_fallible_handling.then_requires_values"),
+    );
 }
 
 #[test]
@@ -671,11 +684,11 @@ fn rejects_bound_inline_catch_then_at_eof() {
         "can_error || -> I32, Error!:\n    return 1\n;\n\nvalue = can_error() catch |err| then";
     let diagnostic = parse_single_file_ast_diagnostic(source);
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling { reason }
-            if reason == InvalidFallibleHandlingReason::ThenRequiresValues
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0051",
+        Some("invalid_fallible_handling.then_requires_values"),
+    );
 }
 
 #[test]
@@ -696,58 +709,56 @@ fn rejects_fallback_arity_mismatch_for_multi_value_success_returns() {
         "pair_error |value String| -> String, I32, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String| -> String, I32:\n    first, count = pair_error(value) catch:\n        then \"fallback\", 0, 1\n    ;\n    return first, count\n;\n",
     );
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidReturnShape {
-            reason: InvalidReturnShapeReason::TooManyReturnValues { .. }
-        }
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0055",
+        Some("invalid_return_shape.too_many_return_values"),
+    );
 }
 
 #[test]
 fn rejects_fallback_type_mismatch_before_hir_lowering() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    return can_error() catch:\n        then \"fallback\"\n    ;\n;\n",
     );
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::TypeMismatch {
-            context: TypeMismatchContext::General,
-            ..
-        }
-    ));
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-TYPE-0001", None);
+    let mismatch = diagnostic
+        .family_view::<TypeMismatchView>()
+        .expect("the first error is a type mismatch");
+    assert_eq!(mismatch.context, TypeMismatchContext::General);
 }
 
 #[test]
 fn rejects_fallback_too_few_values_for_multi_success() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "pair_error |value String| -> String, I32, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String| -> String, I32:\n    first, count = pair_error(value) catch:\n        then \"fallback\"\n    ;\n    return first, count\n;\n",
     );
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidReturnShape {
-            reason: InvalidReturnShapeReason::TooFewReturnValues {
-                expected_count: 2,
-                provided_count: 1
-            },
-        }
-    ));
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0055",
+        Some("invalid_return_shape.too_few_return_values"),
+    );
+    let shape = diagnostic
+        .family_view::<InvalidReturnShapeView>()
+        .expect("the first error is an invalid return shape");
+    assert_eq!(shape.expected_count, Some(2));
+    assert_eq!(shape.provided_count, Some(1));
 }
 
 #[test]
 fn rejects_fallback_too_many_values_for_single_success() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    return can_error() catch:\n        then 0, 1\n    ;\n;\n",
     );
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidReturnShape {
-            reason: InvalidReturnShapeReason::TooManyReturnValues { expected_count: 1 },
-        }
-    ));
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0055",
+        Some("invalid_return_shape.too_many_return_values"),
+    );
+    let shape = diagnostic
+        .family_view::<InvalidReturnShapeView>()
+        .expect("the first error is an invalid return shape");
+    assert_eq!(shape.expected_count, Some(1));
 }
 
 #[test]
@@ -758,10 +769,7 @@ fn rejects_fallback_statement_after_then_multiline() {
         "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    return can_error() catch:\n        then 0\n        1\n    ;\n;\n",
     );
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnexpectedToken { .. }
-    ));
+    assert_ast_diagnostic(&diagnostic, "MOTH-SYNTAX-0002", None);
 }
 
 #[test]
@@ -957,21 +965,65 @@ fn rejects_catch_inside_template_interpolation() {
 }
 
 fn assert_invalid_fallible_handling(source: &str, expected_reason: InvalidFallibleHandlingReason) {
-    let diagnostic = parse_single_file_ast_diagnostic(source);
+    let expected_count = match &expected_reason {
+        InvalidFallibleHandlingReason::FunctionHasMultipleSuccessReturns { count } => Some(*count),
+        _ => None,
+    };
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0051",
+        Some(invalid_fallible_reason_key(&expected_reason)),
+    );
+    if let Some(expected_count) = expected_count {
+        let handling = diagnostic
+            .family_view::<InvalidFallibleHandlingView>()
+            .expect("the first error is invalid fallible handling");
+        assert_eq!(handling.count, Some(expected_count));
+    }
+}
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling { reason } if reason == expected_reason
-    ));
+fn invalid_fallible_reason_key(reason: &InvalidFallibleHandlingReason) -> &'static str {
+    match reason {
+        InvalidFallibleHandlingReason::NotOptionExpression => {
+            "invalid_fallible_handling.not_option_expression"
+        }
+        InvalidFallibleHandlingReason::FunctionHasNoOptionalReturn => {
+            "invalid_fallible_handling.function_has_no_optional_return"
+        }
+        InvalidFallibleHandlingReason::FunctionHasMultipleSuccessReturns { .. } => {
+            "invalid_fallible_handling.function_has_multiple_success_returns"
+        }
+        InvalidFallibleHandlingReason::OptionPropagationReturnTypeMismatch => {
+            "invalid_fallible_handling.option_propagation_return_type_mismatch"
+        }
+        InvalidFallibleHandlingReason::CatchHandlerCanFallThrough => {
+            "invalid_fallible_handling.catch_handler_can_fall_through"
+        }
+        InvalidFallibleHandlingReason::InlineCatchMultiline => {
+            "invalid_fallible_handling.inline_catch_multiline"
+        }
+        InvalidFallibleHandlingReason::ExpectedCatchHandlerIdentifier => {
+            "invalid_fallible_handling.expected_catch_handler_identifier"
+        }
+        InvalidFallibleHandlingReason::CatchOutsideBoundary => {
+            "invalid_fallible_handling.catch_outside_boundary"
+        }
+        _ => panic!("unsupported test reason key: {reason:?}"),
+    }
 }
 
 fn assert_invalid_assignment_target(source: &str, expected_reason: InvalidAssignmentTargetReason) {
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidAssignmentTarget { reason, .. } if reason == expected_reason
-    ));
+    match expected_reason {
+        InvalidAssignmentTargetReason::UnavailableInCatchRecovery => {}
+        _ => panic!("unsupported assignment target reason: {expected_reason:?}"),
+    }
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0044",
+        Some("invalid_assignment_target.unavailable_in_catch_recovery"),
+    );
 }
 
 #[test]

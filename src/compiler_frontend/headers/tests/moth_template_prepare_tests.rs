@@ -12,9 +12,15 @@ use crate::compiler_frontend::ast::{Ast, AstBuildContext, AstBuildInput};
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
+use crate::compiler_frontend::compiler_errors::BoundaryFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
+use crate::compiler_frontend::compiler_messages::prepared_batch::{
+    AstDiagnosticFailure, PreparedDiagnosticBatch,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticBag, DiagnosticKind,
-    DiagnosticLabelStyle, DiagnosticPayload, SyntaxDiagnosticKind,
+    CompilerDiagnostic, DiagnosticBag, DiagnosticKind, DiagnosticPayload, SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
@@ -55,6 +61,9 @@ use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageR
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::parse_support::{
+    assert_ast_diagnostic, ast_error_label_spans, ast_error_primary_span,
+};
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{
     TokenCursor, TokenRef, TokenTag, TokenizerEntryMode,
@@ -352,7 +361,7 @@ struct MothTemplateScopeFixture {
     html_root_file: PathBuf,
     entry_file_path: PathBuf,
     project_path_resolver: ProjectPathResolver,
-    source_files: SourceDatabase,
+    source_files: Arc<SourceDatabase>,
     base_string_table: StringTable,
 }
 
@@ -440,7 +449,7 @@ impl MothTemplateScopeFixture {
             html_root_file,
             entry_file_path,
             project_path_resolver,
-            source_files,
+            source_files: Arc::new(source_files),
             base_string_table: string_table,
         }
     }
@@ -449,7 +458,7 @@ impl MothTemplateScopeFixture {
         &self,
         moth_template_relative_path: &str,
         prepared_relative_paths: &[&str],
-    ) -> Result<(Ast, StringTable, PathInternerFork), CompilerDiagnostic> {
+    ) -> Result<(Ast, StringTable, PathInternerFork), AstDiagnosticFailure> {
         let (ast, string_table, path_fork) = self.compile_module_ast(prepared_relative_paths)?;
 
         self.assert_ast_contains_moth_template_content(
@@ -465,7 +474,7 @@ impl MothTemplateScopeFixture {
         moth_template_relative_path: &str,
         prepared_relative_paths: &[&str],
         source_provider_dependencies: &crate::compiler_frontend::public_interface::SourceProviderDependencySet<'_>,
-    ) -> Result<(Ast, StringTable, PathInternerFork), CompilerDiagnostic> {
+    ) -> Result<(Ast, StringTable, PathInternerFork), AstDiagnosticFailure> {
         let (ast, string_table, path_fork) = self.compile_module_ast_with_providers(
             prepared_relative_paths,
             source_provider_dependencies,
@@ -482,7 +491,7 @@ impl MothTemplateScopeFixture {
     fn compile_module_ast(
         &self,
         prepared_relative_paths: &[&str],
-    ) -> Result<(Ast, StringTable, PathInternerFork), CompilerDiagnostic> {
+    ) -> Result<(Ast, StringTable, PathInternerFork), AstDiagnosticFailure> {
         let html_interface = empty_provider_interface("html");
         let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
             kind:
@@ -499,28 +508,35 @@ impl MothTemplateScopeFixture {
         &self,
         prepared_relative_paths: &[&str],
         source_provider_dependencies: &crate::compiler_frontend::public_interface::SourceProviderDependencySet<'_>,
-    ) -> Result<(Ast, StringTable, PathInternerFork), CompilerDiagnostic> {
+    ) -> Result<(Ast, StringTable, PathInternerFork), AstDiagnosticFailure> {
         let mut path_fork = self.source_files.fork_path_interner();
-        let (headers, mut string_table) = self.prepare_and_bind_headers_with_providers(
-            prepared_relative_paths,
-            source_provider_dependencies,
-            &mut path_fork,
-        )?;
+        let (headers, mut string_table) = self
+            .prepare_and_bind_headers_with_providers_with_table(
+                prepared_relative_paths,
+                source_provider_dependencies,
+                &mut path_fork,
+            )
+            .map_err(|(diagnostic, string_table)| {
+                Self::capture_ast_diagnostic(diagnostic, string_table, &path_fork)
+            })?;
         let sorted_headers = resolve_module_dependencies(
             headers,
             &ContentSourceTargets::empty(),
             &mut string_table,
             &mut path_fork,
         )
-        .map_err(|failure| {
-            let messages = failure.into_messages(&string_table);
-            if let Some(diagnostic) = messages.first_error() {
-                return diagnostic.clone();
+        .map_err(|failure| match failure {
+            crate::compiler_frontend::compiler_messages::PremergeFailure::Diagnosed(batch) => {
+                AstDiagnosticFailure::Prepared(PreparedDiagnosticBatch::from_premerge(batch))
             }
-            if let Some(error) = messages.primary_infrastructure_error() {
-                panic!("dependency sorting infrastructure failure: {}", error.msg)
+            crate::compiler_frontend::compiler_messages::PremergeFailure::Infrastructure(error) => {
+                panic!("dependency sorting infrastructure failure: {error:?}")
             }
-            panic!("dependency sorting failed without a diagnostic")
+            crate::compiler_frontend::compiler_messages::PremergeFailure::Mixed {
+                error, ..
+            } => {
+                panic!("dependency sorting infrastructure failure alongside diagnostics: {error:?}")
+            }
         })?;
         let entry_dir = path_fork
             .try_intern_filesystem_path(&self.entry_file_path, &mut string_table)
@@ -557,15 +573,6 @@ impl MothTemplateScopeFixture {
                     crate::compiler_frontend::ast::AstTimingMetricFamily::Frontend,
             },
         )
-        .map_err(|messages| {
-            if let Some(diagnostic) = messages.first_error() {
-                return diagnostic.clone();
-            }
-            if let Some(error) = messages.primary_infrastructure_error() {
-                panic!("AST failed with infrastructure error: {}", error.msg)
-            }
-            panic!("AST failed without a diagnostic")
-        })
         .map(|build_result| (build_result.ast, string_table, path_fork))
     }
 
@@ -793,13 +800,46 @@ impl MothTemplateScopeFixture {
     }
 
     fn compile_moth_template_diagnostic(
-        &self,
+        self,
         moth_template_relative_path: &str,
         prepared_relative_paths: &[&str],
-    ) -> CompilerDiagnostic {
-        match self.compile_moth_template_ast(moth_template_relative_path, prepared_relative_paths) {
+    ) -> BoundaryFailure {
+        let result =
+            self.compile_moth_template_ast(moth_template_relative_path, prepared_relative_paths);
+        let source_files = self.source_files;
+        match result {
             Ok(_) => panic!("Moth template fixture should fail"),
-            Err(diagnostic) => diagnostic,
+            Err(failure) => Self::freeze_ast_failure(failure, source_files),
+        }
+    }
+
+    fn capture_ast_diagnostic(
+        diagnostic: CompilerDiagnostic,
+        string_table: StringTable,
+        path_fork: &PathInternerFork,
+    ) -> AstDiagnosticFailure {
+        AstDiagnosticFailure::Prepared(PreparedDiagnosticBatch::capture_from_bag(
+            DiagnosticBag::from(diagnostic),
+            string_table,
+            None,
+            true,
+            Some(Arc::new(path_fork.snapshot_table())),
+        ))
+    }
+
+    fn freeze_ast_failure(
+        failure: AstDiagnosticFailure,
+        source_files: Arc<SourceDatabase>,
+    ) -> BoundaryFailure {
+        match failure {
+            AstDiagnosticFailure::Prepared(batch) => {
+                let mut accumulator = BoundaryAccumulator::new();
+                accumulator.append_prepared(batch, Some((source_files, None)));
+                accumulator.finish(InstallMode::Frozen)
+            }
+            AstDiagnosticFailure::Infrastructure(error) => {
+                panic!("Moth template AST infrastructure failure: {error:?}")
+            }
         }
     }
 
@@ -853,6 +893,14 @@ fn first_diagnostic_from_bag(bag: DiagnosticBag) -> CompilerDiagnostic {
         .into_iter()
         .next()
         .expect("diagnostic bag should contain an error")
+}
+
+fn assert_ast_failure_diagnostic<'a>(
+    failure: &'a BoundaryFailure,
+    expected_code: &str,
+    expected_reason_key: Option<&str>,
+) -> DiagnosticView<'a> {
+    assert_ast_diagnostic(failure, expected_code, expected_reason_key)
 }
 
 fn prepare_moth_source(
@@ -1365,26 +1413,15 @@ fn same_directory_root_constants_collide_with_html_constants() {
         ],
     );
 
-    assert!(matches!(
-        diagnostic.kind,
-        DiagnosticKind::Import(
-            crate::compiler_frontend::compiler_messages::ImportDiagnosticKind::ImportNameCollision
-        )
-    ));
+    let diagnostic = assert_ast_failure_diagnostic(&diagnostic, "MOTH-IMPORT-0009", None);
     assert!(
-        diagnostic.primary_span.is_some(),
+        ast_error_primary_span(diagnostic).is_some(),
         "collision primary span should remain separate from secondary labels"
     );
-    assert_eq!(diagnostic.labels.len(), 1);
+    let label_spans = ast_error_label_spans(diagnostic);
+    assert_eq!(label_spans.len(), 1);
     assert!(
-        diagnostic
-            .labels
-            .iter()
-            .any(|label| label.style == DiagnosticLabelStyle::Secondary)
-    );
-
-    assert!(
-        diagnostic.labels.iter().all(|label| label.span.is_some()),
+        label_spans.iter().all(|span| span.is_some()),
         "collision labels should retain exact source spans"
     );
 }
@@ -1394,14 +1431,7 @@ fn exported_html_functions_are_not_visible_to_moth_template_body() {
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[render_html]")]);
     let diagnostic = fixture
         .compile_moth_template_diagnostic("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
-
-    assert!(
-        !matches!(
-            diagnostic.kind,
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnescapedImplicitTemplateClose)
-        ),
-        "non-constant filtering should fail during semantic lookup, got {diagnostic:?}"
-    );
+    assert_ast_failure_diagnostic(&diagnostic, "MOTH-RULE-0034", None);
 }
 
 #[test]
@@ -1529,14 +1559,7 @@ fn moth_template_runtime_function_call_is_rejected_by_const_template_folding() {
             "src/docs/intro.mtf",
         ],
     );
-
-    assert!(
-        !matches!(
-            diagnostic.kind,
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnescapedImplicitTemplateClose)
-        ),
-        "runtime function calls should fail through semantic const-template rules, got {diagnostic:?}"
-    );
+    assert_ast_failure_diagnostic(&diagnostic, "MOTH-RULE-0034", None);
 }
 
 #[test]
@@ -1544,11 +1567,7 @@ fn moth_template_unknown_template_condition_is_rejected_by_const_template_foldin
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[if show: visible]")]);
     let diagnostic = fixture
         .compile_moth_template_diagnostic("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
-
-    assert!(
-        matches!(diagnostic.kind, DiagnosticKind::Rule(_)),
-        "unknown Moth template conditions should use normal const diagnostics, got {diagnostic:?}"
-    );
+    assert_ast_failure_diagnostic(&diagnostic, "MOTH-RULE-0034", None);
 }
 
 #[test]
@@ -1574,14 +1593,7 @@ fn exported_same_directory_functions_and_types_are_not_visible_to_moth_template_
             "src/docs/intro.mtf",
         ],
     );
-
-    assert!(
-        !matches!(
-            diagnostic.kind,
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnescapedImplicitTemplateClose)
-        ),
-        "non-constant root exports should fail during semantic lookup, got {diagnostic:?}"
-    );
+    assert_ast_failure_diagnostic(&diagnostic, "MOTH-RULE-0034", None);
 }
 
 #[test]
@@ -1615,20 +1627,14 @@ fn root_supplied_content_constant_can_be_referenced_normally() {
 #[test]
 fn generated_self_content_is_not_visible_to_moth_template_body() {
     let fixture = MothTemplateScopeFixture::new(&[("src/docs/intro.mtf", "[content]")]);
-    let diagnostic = fixture.compile_moth_template_diagnostic(
+    let failure = fixture.compile_moth_template_diagnostic(
         "src/docs/intro.mtf",
         &["@html/@mod.moth", "src/docs/intro.mtf"],
     );
-
-    assert!(
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::CompileTimeEvaluationError {
-                reason: CompileTimeEvaluationErrorReason::ConstantNotVisible,
-                ..
-            }
-        ),
-        "expected generated self content to be absent from body visibility, got {diagnostic:?}"
+    assert_ast_failure_diagnostic(
+        &failure,
+        "MOTH-RULE-0053",
+        Some("compile_time_evaluation_error.constant_not_visible"),
     );
 }
 
@@ -1638,7 +1644,7 @@ fn self_originating_content_reexport_is_excluded_from_moth_template_body_scope()
         ("src/docs/@mod.moth", "export:\n    @intro content\n;\n"),
         ("src/docs/intro.mtf", "[content]"),
     ]);
-    let diagnostic = fixture.compile_moth_template_diagnostic(
+    let failure = fixture.compile_moth_template_diagnostic(
         "src/docs/intro.mtf",
         &[
             "@html/@mod.moth",
@@ -1646,16 +1652,10 @@ fn self_originating_content_reexport_is_excluded_from_moth_template_body_scope()
             "src/docs/intro.mtf",
         ],
     );
-
-    assert!(
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::CompileTimeEvaluationError {
-                reason: CompileTimeEvaluationErrorReason::ConstantNotVisible,
-                ..
-            }
-        ),
-        "expected self content to be absent from dependency visibility, got {diagnostic:?}"
+    assert_ast_failure_diagnostic(
+        &failure,
+        "MOTH-RULE-0053",
+        Some("compile_time_evaluation_error.constant_not_visible"),
     );
 }
 
@@ -1803,26 +1803,17 @@ fn moth_template_dynamic_loop_condition_rejected_by_const_folding() {
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[loop show: visible]")]);
     let diagnostic = fixture
         .compile_moth_template_diagnostic("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
-
-    assert!(
-        matches!(diagnostic.kind, DiagnosticKind::Rule(_)),
-        "dynamic Moth template loop conditions should use normal const diagnostics, got {diagnostic:?}"
-    );
+    assert_ast_failure_diagnostic(&diagnostic, "MOTH-RULE-0034", None);
 }
 
 #[test]
-fn moth_template_external_prelude_call_rejected_by_const_folding() {
+fn moth_template_external_prelude_call_reports_invalid_value_receiver_first() {
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[io.line([: [\"test\"]])]")]);
     let diagnostic = fixture
         .compile_moth_template_diagnostic("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
-
-    assert!(
-        !matches!(
-            diagnostic.kind,
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnescapedImplicitTemplateClose)
-        ),
-        "external prelude calls should fail through semantic const-template rules, got {diagnostic:?}"
-    );
+    // This helper checks the first AST error; do not skip the receiver diagnostic to search for a
+    // later constant-folding family.
+    assert_ast_failure_diagnostic(&diagnostic, "MOTH-RULE-0087", None);
 }
 
 // -----------------------------------------------------------------------------

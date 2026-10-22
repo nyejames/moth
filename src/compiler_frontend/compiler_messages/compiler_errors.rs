@@ -474,11 +474,6 @@ impl CompilerMessages {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(crate) fn has_infrastructure_error(&self) -> bool {
-        self.infrastructure_errors.is_some()
-    }
-
     /// Explicit first-cause access for consumers whose contract concerns only the primary failure.
     #[cfg(test)]
     pub(crate) fn primary_infrastructure_error(&self) -> Option<&CompilerError> {

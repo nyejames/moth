@@ -24,7 +24,9 @@ use crate::build_system::output::{
     BuilderKind, CleanupPolicy, OutputOwner, ValidatedDirectoryOutputSettings, ValidatedOutputPlan,
 };
 use crate::build_system::path_validation::check_if_valid_path;
-use crate::build_system::project_config::{ProjectConfigParseServices, load_project_config};
+use crate::build_system::project_config::{
+    ProjectConfigFailure, ProjectConfigParseServices, load_project_config,
+};
 use crate::build_system::resource_unions::{
     ResourceOriginUnion, append_entry_module_resources, append_exported_interface_resources,
     append_reachable_resource_uses,
@@ -1534,12 +1536,34 @@ impl ProjectBuilder {
     }
 }
 
+#[derive(Debug)]
+pub(crate) enum BootstrapFailure {
+    Legacy(CompilerMessages),
+    Boundary(BoundaryFailure),
+}
+
+impl BootstrapFailure {
+    pub(crate) fn into_boundary_failure(self) -> BoundaryFailure {
+        match self {
+            Self::Legacy(messages) => into_boundary_failure(messages),
+            Self::Boundary(failure) => failure,
+        }
+    }
+}
+
+impl From<CompilerMessages> for BootstrapFailure {
+    fn from(messages: CompilerMessages) -> Self {
+        Self::Legacy(messages)
+    }
+}
+
 pub(crate) struct BuildBootstrap {
     pub(crate) config: Config,
     pub(crate) style_directives: StyleDirectiveRegistry,
     pub(crate) string_table: StringTable,
     pub(crate) frontend_surface: BuilderSurface,
     pub(crate) validated_directory_output_settings: Option<ValidatedDirectoryOutputSettings>,
+
     /// The project boundary's source identities, with config registered before Stage 0 discovery.
     ///
     /// Single-file and config-free callers leave this absent so their own frontend database stays
@@ -1724,7 +1748,7 @@ pub fn build_project(
         build_config_inputs,
     } = match bootstrap_project_build(project_builder, valid_path, build_config_inputs) {
         Ok(bootstrap) => bootstrap,
-        Err(messages) => return Err(into_boundary_failure(messages)),
+        Err(failure) => return Err(failure.into_boundary_failure()),
     };
 
     let frontend_compilation = compile_project_frontend_with_inputs(
@@ -1840,7 +1864,7 @@ pub(crate) fn bootstrap_project_build(
     project_builder: &ProjectBuilder,
     entry_path: PathBuf,
     build_config_inputs: &BuildConfigInputSet,
-) -> Result<BuildBootstrap, CompilerMessages> {
+) -> Result<BuildBootstrap, BootstrapFailure> {
     timing_scope!(
         timing_guard_build_bootstrap_total,
         crate::timing::TimingMetric::BuildBootstrapTotal
@@ -1864,7 +1888,7 @@ pub(crate) fn bootstrap_project_build(
         Err(error) => {
             let mut messages = CompilerMessages::from_error(error, string_table.clone());
             attach_owned_source_database(&mut messages, &mut project_source_files);
-            return Err(messages);
+            return Err(BootstrapFailure::Legacy(messages));
         }
     };
     // WHAT: Load and validate project config before compilation begins (Stage 0).
@@ -1878,12 +1902,15 @@ pub(crate) fn bootstrap_project_build(
         &mut config,
         &config_services,
         &mut string_table,
-        project_source_files.as_mut(),
+        &mut project_source_files,
     ) {
         Ok(settings) => settings,
-        Err(mut messages) => {
+        Err(ProjectConfigFailure::Legacy(mut messages)) => {
             attach_owned_source_database(&mut messages, &mut project_source_files);
-            return Err(messages);
+            return Err(BootstrapFailure::Legacy(messages));
+        }
+        Err(ProjectConfigFailure::Boundary(failure)) => {
+            return Err(BootstrapFailure::Boundary(failure));
         }
     };
     // WHAT: Validate backend-specific config requirements before compilation.
@@ -1894,7 +1921,7 @@ pub(crate) fn bootstrap_project_build(
     {
         let mut messages = error.into_messages(string_table.clone());
         attach_owned_source_database(&mut messages, &mut project_source_files);
-        return Err(messages);
+        return Err(BootstrapFailure::Legacy(messages));
     }
 
     Ok(BuildBootstrap {

@@ -16,10 +16,11 @@ use crate::compiler_frontend::ast::statements::value_production::types::ValueBlo
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    calls_data::InvalidValueReceiverView, types_borrows_targets::TypeMismatchView,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, DiagnosticPayload, InvalidAssignmentTargetReason,
-    InvalidBuiltinCallReason, InvalidFallibleHandlingReason, InvalidFieldAccessReason,
-    InvalidMapLiteralReason, InvalidReceiverCallReason, TypeMismatchContext,
+    DiagnosticPayload, InvalidBuiltinCallReason, TypeMismatchContext, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::display::display_type_with_resolver;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -28,7 +29,7 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
     function_body_by_name, start_function_body,
 };
 use crate::compiler_frontend::tests::parse_support::{
-    parse_single_file_ast, parse_single_file_ast_diagnostic,
+    assert_ast_diagnostic, parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
@@ -43,24 +44,35 @@ fn i32_value(value: i64) -> FixedScalarValue {
 #[test]
 fn rejects_non_single_collection_and_map_entries() {
     let producers = "pair || -> I32, I32:\nreturn 1, 2\n;\nempty ||:\nreturn\n;\n";
-    for (entry, produced_count) in [
-        ("values = {pair()}\n", 2),
-        ("values = {empty()}\n", 0),
-        ("values = {pair() = 1}\n", 2),
-        ("values = {empty() = 1}\n", 0),
-        ("values = {1 = pair()}\n", 2),
-        ("values = {1 = empty()}\n", 0),
+    for (entry, receiver, produced_count) in [
+        (
+            "values = {pair()}\n",
+            ValueReceiverContext::CollectionElement,
+            2,
+        ),
+        (
+            "values = {empty()}\n",
+            ValueReceiverContext::CollectionElement,
+            0,
+        ),
+        ("values = {pair() = 1}\n", ValueReceiverContext::MapKey, 2),
+        ("values = {empty() = 1}\n", ValueReceiverContext::MapKey, 0),
+        ("values = {1 = pair()}\n", ValueReceiverContext::MapValue, 2),
+        (
+            "values = {1 = empty()}\n",
+            ValueReceiverContext::MapValue,
+            0,
+        ),
     ] {
         let source = format!("{producers}{entry}");
-        let diagnostic = parse_single_file_ast_diagnostic(&source);
-        assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidValueReceiver {
-                target_count: 1,
-                produced_count: actual,
-                ..
-            } if *actual == produced_count
-        ));
+        let failure = parse_single_file_ast_diagnostic(&source);
+        let diagnostic = assert_ast_diagnostic(&failure, "MOTH-RULE-0087", None);
+        let facts = diagnostic
+            .family_view::<InvalidValueReceiverView>()
+            .expect("the diagnostic is an invalid value receiver");
+        assert_eq!(facts.receiver, receiver, "{source}");
+        assert_eq!(facts.target_count, 1, "{source}");
+        assert_eq!(facts.produced_count, produced_count, "{source}");
     }
 }
 
@@ -235,28 +247,22 @@ fn parses_empty_collection_with_explicit_element_type() {
 
 #[test]
 fn rejects_mixed_item_types_in_inferred_collection() {
-    let diagnostic = parse_single_file_ast_diagnostic("values ~= {1, \"bad\"}\n");
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::TypeMismatch {
-            context: TypeMismatchContext::CollectionElement,
-            ..
-        }
-    ));
+    let failure = parse_single_file_ast_diagnostic("values ~= {1, \"bad\"}\n");
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-TYPE-0001", None);
+    let facts = diagnostic
+        .family_view::<TypeMismatchView>()
+        .expect("the diagnostic is a type mismatch");
+    assert_eq!(facts.context, TypeMismatchContext::CollectionElement);
 }
 
 #[test]
 fn rejects_item_that_does_not_match_explicit_collection_type() {
-    let diagnostic = parse_single_file_ast_diagnostic("values ~{I32} = {1, \"bad\"}\n");
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::TypeMismatch {
-            context: TypeMismatchContext::CollectionElement,
-            ..
-        }
-    ));
+    let failure = parse_single_file_ast_diagnostic("values ~{I32} = {1, \"bad\"}\n");
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-TYPE-0001", None);
+    let facts = diagnostic
+        .family_view::<TypeMismatchView>()
+        .expect("the diagnostic is a type mismatch");
+    assert_eq!(facts.context, TypeMismatchContext::CollectionElement);
 }
 
 #[test]
@@ -279,20 +285,14 @@ fn parses_growable_push_after_explicit_empty_collection() {
 fn rejects_empty_collection_even_when_later_push_would_reveal_type() {
     let diagnostic = parse_single_file_ast_diagnostic("values ~= {}\n~values.push(1)\n");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::EmptyCollectionTypeAmbiguity
-    ));
+    assert_ast_diagnostic(&diagnostic, "MOTH-TYPE-0002", None);
 }
 
 #[test]
 fn rejects_missing_collection_item_after_comma() {
     let diagnostic = parse_single_file_ast_diagnostic("values ~= {1, , 2}\n");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::MissingCollectionItem
-    ));
+    assert_ast_diagnostic(&diagnostic, "MOTH-SYNTAX-0027", None);
 }
 
 // --------------------------
@@ -455,13 +455,11 @@ fn accepts_unhandled_growable_collection_push() {
 fn rejects_unhandled_fixed_collection_push_result() {
     let diagnostic = parse_single_file_ast_diagnostic("items ~{2 I32} = {1, 2}\n~items.push(3)\n");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidBuiltinCall {
-            reason: InvalidBuiltinCallReason::UnhandledFallibleCall,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0046",
+        Some("invalid_builtin_call.unhandled_fallible_call"),
+    );
 }
 
 #[test]
@@ -469,13 +467,11 @@ fn rejects_catch_handler_on_growable_collection_push() {
     let diagnostic =
         parse_single_file_ast_diagnostic("values ~= {1, 2, 3}\n~values.push(4) catch:\n;\n");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason: InvalidFallibleHandlingReason::CatchOnNonFallible,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0051",
+        Some("invalid_fallible_handling.catch_on_non_fallible"),
+    );
 }
 
 #[test]
@@ -488,13 +484,11 @@ fn rejects_propagation_on_growable_collection_push() {
 ",
     );
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason: InvalidFallibleHandlingReason::BangOnNonFallible,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0051",
+        Some("invalid_fallible_handling.bang_on_non_fallible"),
+    );
 }
 
 #[test]
@@ -544,37 +538,31 @@ fn rejects_fixed_collection_push_fallback_value() {
 ",
     );
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason: InvalidFallibleHandlingReason::FallbackValuesForErrorOnlyResult,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0051",
+        Some("invalid_fallible_handling.fallback_values_for_error_only_result"),
+    );
 }
 
 #[test]
 fn rejects_mutating_collection_method_without_explicit_receiver_tilde() {
     let diagnostic = parse_single_file_ast_diagnostic("values ~= {1, 2, 3}\nvalues.push(4)\n");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidReceiverCall {
-            reason: InvalidReceiverCallReason::MutableReceiverMissingMarker,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0047",
+        Some("invalid_receiver_call.mutable_receiver_missing_marker"),
+    );
 
     let fixed_diagnostic =
         parse_single_file_ast_diagnostic("items ~{2 I32} = {1, 2}\nitems.push(3)\n");
 
-    assert!(matches!(
-        fixed_diagnostic.payload,
-        DiagnosticPayload::InvalidReceiverCall {
-            reason: InvalidReceiverCallReason::MutableReceiverMissingMarker,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &fixed_diagnostic,
+        "MOTH-RULE-0047",
+        Some("invalid_receiver_call.mutable_receiver_missing_marker"),
+    );
 }
 
 #[test]
@@ -582,23 +570,19 @@ fn rejects_explicit_receiver_tilde_for_collection_get_and_length() {
     let get_diagnostic = parse_single_file_ast_diagnostic(
         "values ~= {1, 2, 3}\nvalue = ~values.get(0) catch:\n    then 0\n;\n",
     );
-    assert!(matches!(
-        get_diagnostic.payload,
-        DiagnosticPayload::InvalidReceiverCall {
-            reason: InvalidReceiverCallReason::UnneededMutableAccessMarker,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &get_diagnostic,
+        "MOTH-RULE-0047",
+        Some("invalid_receiver_call.unneeded_mutable_access_marker"),
+    );
 
     let length_diagnostic =
         parse_single_file_ast_diagnostic("values ~= {1, 2, 3}\nvalue = ~values.length()\n");
-    assert!(matches!(
-        length_diagnostic.payload,
-        DiagnosticPayload::InvalidReceiverCall {
-            reason: InvalidReceiverCallReason::UnneededMutableAccessMarker,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &length_diagnostic,
+        "MOTH-RULE-0047",
+        Some("invalid_receiver_call.unneeded_mutable_access_marker"),
+    );
 }
 
 #[test]
@@ -612,39 +596,33 @@ fn parses_multiline_zero_argument_collection_and_map_builtins() {
 fn preserves_zero_argument_builtin_extra_argument_diagnostic() {
     let diagnostic = parse_single_file_ast_diagnostic("values = {1, 2}\nvalues.length(1)\n");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidBuiltinCall {
-            reason: InvalidBuiltinCallReason::TakesNoArguments,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0046",
+        Some("invalid_builtin_call.takes_no_arguments"),
+    );
 }
 
 #[test]
 fn rejects_pull_method_as_unknown_collection_member() {
     let diagnostic = parse_single_file_ast_diagnostic("values ~= {1, 2, 3}\nvalues.pull(1)\n");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFieldAccess {
-            reason: InvalidFieldAccessReason::UnknownMember,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0048",
+        Some("invalid_field_access.unknown_member"),
+    );
 }
 
 #[test]
 fn rejects_get_index_assignment_as_removed_syntax() {
     let diagnostic = parse_single_file_ast_diagnostic("values = {1, 2, 3}\nvalues.get(0) = 9\n");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidAssignmentTarget {
-            reason: InvalidAssignmentTargetReason::CollectionGetTargetNotWritable,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0044",
+        Some("invalid_assignment_target.collection_get_target_not_writable"),
+    );
 }
 
 #[test]
@@ -652,13 +630,11 @@ fn rejects_unhandled_collection_get_result() {
     let diagnostic =
         parse_single_file_ast_diagnostic("values ~= {1, 2, 3}\nvalue = values.get(0)\n");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidBuiltinCall {
-            reason: InvalidBuiltinCallReason::UnhandledFallibleCall,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0046",
+        Some("invalid_builtin_call.unhandled_fallible_call"),
+    );
 }
 
 #[test]
@@ -730,13 +706,11 @@ fn preserves_nested_builtin_diagnostic_origin_under_whole_expression_catch() {
 fn rejects_unhandled_collection_set_result() {
     let diagnostic = parse_single_file_ast_diagnostic("values ~= {1, 2, 3}\n~values.set(0, 9)\n");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidBuiltinCall {
-            reason: InvalidBuiltinCallReason::UnhandledFallibleCall,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0046",
+        Some("invalid_builtin_call.unhandled_fallible_call"),
+    );
 }
 
 #[test]
@@ -745,13 +719,11 @@ fn rejects_collection_set_fallback_value() {
         "values ~= {1, 2, 3}\n~values.set(0, 9) catch:\n    then 0\n;\n",
     );
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason: InvalidFallibleHandlingReason::FallbackValuesForErrorOnlyResult,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0051",
+        Some("invalid_fallible_handling.fallback_values_for_error_only_result"),
+    );
 }
 
 #[test]
@@ -760,13 +732,11 @@ fn rejects_discarded_collection_remove_success() {
         "drop_removed || -> Error!:\n    values ~= {1, 2, 3}\n    ~values.remove(0)!\n;\n",
     );
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason: InvalidFallibleHandlingReason::SuccessValueDiscarded,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0051",
+        Some("invalid_fallible_handling.success_value_discarded"),
+    );
 }
 
 // --------------------------
@@ -778,13 +748,11 @@ fn rejects_removed_builtin_error_helper_methods() {
     let diagnostic =
         parse_single_file_ast_diagnostic("err = Error(\"bad\")\nvalue = err.bubble()\n");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFieldAccess {
-            reason: InvalidFieldAccessReason::UnknownMember,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0048",
+        Some("invalid_field_access.unknown_member"),
+    );
 }
 
 // --------------------------
@@ -1053,26 +1021,22 @@ fn parses_map_type_alias_literal() {
 fn rejects_collection_first_mixed_collection_map_entries() {
     let diagnostic = parse_single_file_ast_diagnostic("scores ~= {\"a\", \"b\" = 2}\n");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidMapLiteral {
-            reason: InvalidMapLiteralReason::MixedCollectionMapEntries,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-SYNTAX-0033",
+        Some("invalid_map_literal.mixed_collection_map_entries"),
+    );
 }
 
 #[test]
 fn rejects_map_entry_in_explicit_collection_context() {
     let diagnostic = parse_single_file_ast_diagnostic("values {String} = {\"a\" = 1}\n");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidMapLiteral {
-            reason: InvalidMapLiteralReason::MixedCollectionMapEntries,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-SYNTAX-0033",
+        Some("invalid_map_literal.mixed_collection_map_entries"),
+    );
 }
 
 #[test]
@@ -1080,12 +1044,11 @@ fn rejects_double_equal_inside_collection_as_common_syntax_mistake() {
     let diagnostic =
         parse_single_file_ast_diagnostic("left = true\nright = false\nvalues ~= {left == right}\n");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::CommonSyntaxMistake {
-            reason: CommonSyntaxMistakeReason::EqualityOperator
-        }
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-SYNTAX-0031",
+        Some("common_syntax_mistake.equality_operator"),
+    );
 }
 
 #[test]
@@ -1093,10 +1056,7 @@ fn rejects_unknown_bare_identifier_key() {
     let diagnostic =
         parse_single_file_ast_diagnostic("scores ~{String = I32} = {unknown_key = 10}\n");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnknownName { .. }
-    ));
+    assert_ast_diagnostic(&diagnostic, "MOTH-RULE-0034", None);
 }
 
 // --------------------------
@@ -1248,13 +1208,11 @@ fn rejects_map_get_index_assignment() {
         "scores ~{String = I32} = {\"Ada\" = 10}\nscores.get(\"Ada\") = 5\n",
     );
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidAssignmentTarget {
-            reason: InvalidAssignmentTargetReason::MapGetTargetNotWritable,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0044",
+        Some("invalid_assignment_target.map_get_target_not_writable"),
+    );
 }
 
 #[test]
@@ -1263,13 +1221,11 @@ fn rejects_map_mutation_on_immutable_binding() {
         "scores {String = I32} = {\"Ada\" = 10}\n~scores.set(\"Linus\", 7)!\n",
     );
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidReceiverCall {
-            reason: InvalidReceiverCallReason::MutableMarkerOnImmutableReceiver,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0047",
+        Some("invalid_receiver_call.mutable_marker_on_immutable_receiver"),
+    );
 }
 
 #[test]
@@ -1278,13 +1234,11 @@ fn rejects_map_contains_with_fallible_suffix() {
         "scores ~{String = I32} = {\"Ada\" = 10}\nvalue = scores.contains(\"Ada\")!\n",
     );
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason: InvalidFallibleHandlingReason::BangOnNonFallible,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0051",
+        Some("invalid_fallible_handling.bang_on_non_fallible"),
+    );
 }
 
 #[test]
@@ -1293,13 +1247,11 @@ fn rejects_map_clear_with_fallible_suffix() {
         "scores ~{String = I32} = {\"Ada\" = 10}\n~scores.clear()!\n",
     );
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason: InvalidFallibleHandlingReason::BangOnNonFallible,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0051",
+        Some("invalid_fallible_handling.bang_on_non_fallible"),
+    );
 }
 
 #[test]
@@ -1308,13 +1260,11 @@ fn rejects_map_length_with_fallible_suffix() {
         "scores ~{String = I32} = {\"Ada\" = 10}\ncount = scores.length!\n",
     );
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason: InvalidFallibleHandlingReason::BangOnNonFallible,
-            ..
-        }
-    ));
+    assert_ast_diagnostic(
+        &diagnostic,
+        "MOTH-RULE-0051",
+        Some("invalid_fallible_handling.bang_on_non_fallible"),
+    );
 }
 
 #[test]
@@ -1323,10 +1273,7 @@ fn rejects_map_builtin_as_free_function() {
         "scores ~{String = I32} = {\"Ada\" = 10}\nvalue = get(scores, \"Ada\")!\n",
     );
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnknownName { .. }
-    ));
+    assert_ast_diagnostic(&diagnostic, "MOTH-RULE-0034", None);
 }
 
 #[test]

@@ -3,9 +3,7 @@
 //! WHAT: owns qualified choice values, payload routing and checked receiver identity.
 //! WHY: source and MON share explicit variant construction while MON also validates a schema.
 
-use crate::compiler_frontend::compiler_messages::{
-    InvalidChoiceVariantReason, TypeMismatchContext,
-};
+use crate::compiler_frontend::compiler_messages::InvalidChoiceVariantReason;
 use crate::compiler_frontend::instrumentation::lock_counter_test;
 use crate::mon::{Field, MonErrorCode, PathSegment, Schema, SchemaType, Value, Variant};
 
@@ -204,7 +202,7 @@ fn choice_fixtures() -> Vec<ParityFixture> {
             theme_schema(),
             SourceExpectation::Reject {
                 code: "MOTH-TYPE-0001",
-                reason: SourceReason::TypeMismatch(TypeMismatchContext::ConstructorArgument),
+                reason: SourceReason::TypeMismatch,
                 site: in_declarations(&typed_source, "Ready", 3),
             },
             MonExpectation::Reject {

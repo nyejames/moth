@@ -25,6 +25,7 @@ use crate::compiler_frontend::ast::{
     Stage0ResolutionFacts,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,
 };
@@ -502,7 +503,7 @@ impl<'a> CompilerFrontend<'a> {
         &mut self,
         request: AstBuildRequest<'_>,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-    ) -> Result<AstBuildResult, CompilerMessages> {
+    ) -> Result<AstBuildResult, AstDiagnosticFailure> {
         let AstBuildRequest {
             sorted,
             entry_file_path,
@@ -520,7 +521,7 @@ impl<'a> CompilerFrontend<'a> {
                 let error = CompilerError::compiler_error(format!(
                     "entry file {entry_file_path:?} was not registered before AST construction"
                 ));
-                return Err(CompilerMessages::from_error_ref(error, &self.string_table));
+                return Err(AstDiagnosticFailure::Infrastructure(error.into()));
             }
         };
 

@@ -31,6 +31,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeIdentity, CanonicalTypeProjectionContext, NominalOriginResolver,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticBag, DiagnosticKind,
     InvalidConfigReason, RuleDiagnosticKind, SourceSpanCapacityResource,
@@ -102,12 +103,30 @@ pub(crate) struct CompiledConfigSource {
     pub(crate) project_field_dependencies: Vec<FoldedConfigProjectFieldDependency>,
 }
 
+/// A config failure may still be owned by the legacy boundary, or may carry AST's prepared lane.
+#[derive(Debug)]
+pub(crate) enum ConfigCompilationFailure {
+    Legacy(CompilerMessages),
+    Ast(AstDiagnosticFailure),
+}
+
+impl From<CompilerMessages> for ConfigCompilationFailure {
+    fn from(messages: CompilerMessages) -> Self {
+        Self::Legacy(messages)
+    }
+}
+
+impl From<AstDiagnosticFailure> for ConfigCompilationFailure {
+    fn from(failure: AstDiagnosticFailure) -> Self {
+        Self::Ast(failure)
+    }
+}
 /// The semantic config result plus the source-local span owner produced while compiling it.
 ///
 /// The build caller retains the original builder through config validation and installs its
 /// frozen table only after the last producer, including diagnosed and infrastructure outcomes.
 pub(crate) struct ConfigCompilationOutcome {
-    pub(crate) result: Result<CompiledConfigSource, CompilerMessages>,
+    pub(crate) result: Result<CompiledConfigSource, ConfigCompilationFailure>,
     pub(crate) file_id: SourceId,
     pub(crate) span_builder: ExtendedSpanBuilder,
 }
@@ -146,16 +165,19 @@ pub(crate) fn compile_config_source(
         Ok(scope) => scope,
         Err(PathInternError::NonUtf8(non_utf8)) => {
             return ConfigCompilationOutcome {
-                result: Err(CompilerMessages::from_error(
-                    CompilerError::file_error(
-                        &non_utf8.path,
-                        format!(
-                            "Config path {:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths.",
-                            non_utf8.path
+                result: Err(
+                    CompilerMessages::from_error(
+                        CompilerError::file_error(
+                            &non_utf8.path,
+                            format!(
+                                "Config path {:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths.",
+                                non_utf8.path
+                            ),
                         ),
-                    ),
-                    string_table.clone(),
-                )),
+                        string_table.clone(),
+                    )
+                    .into(),
+                ),
                 file_id,
                 span_builder: ExtendedSpanBuilder::new(),
             };
@@ -167,19 +189,23 @@ pub(crate) fn compile_config_source(
                         SourceSpanCapacityResource::LogicalPath,
                     ),
                     string_table.clone(),
-                )),
+                )
+                .into()),
                 file_id,
                 span_builder: ExtendedSpanBuilder::new(),
             };
         }
         Err(PathInternError::BaseMismatch { .. }) => {
             return ConfigCompilationOutcome {
-                result: Err(CompilerMessages::from_error(
-                    CompilerError::compiler_error(
-                        "logical path merge base is not a structural prefix of the destination table",
-                    ),
-                    string_table.clone(),
-                )),
+                result: Err(
+                    CompilerMessages::from_error(
+                        CompilerError::compiler_error(
+                            "logical path merge base is not a structural prefix of the destination table",
+                        ),
+                        string_table.clone(),
+                    )
+                    .into(),
+                ),
                 file_id,
                 span_builder: ExtendedSpanBuilder::new(),
             };
@@ -209,15 +235,14 @@ pub(crate) fn compile_config_source(
             }
         }
         Err(ConfigPreparationFailure::Diagnosed(diagnostics)) => ConfigCompilationOutcome {
-            result: Err(CompilerMessages::from_diagnostics(
-                diagnostics,
-                string_table.clone(),
-            )),
+            result: Err(
+                CompilerMessages::from_diagnostics(diagnostics, string_table.clone()).into(),
+            ),
             file_id,
             span_builder,
         },
         Err(ConfigPreparationFailure::Infrastructure(error)) => ConfigCompilationOutcome {
-            result: Err(CompilerMessages::from_error_ref(error, string_table)),
+            result: Err(CompilerMessages::from_error_ref(error, string_table).into()),
             file_id,
             span_builder,
         },
@@ -233,7 +258,7 @@ fn compile_prepared_config_source(
     prepared_file: &mut FileFrontendPrepareOutput,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<CompiledConfigSource, CompilerMessages> {
+) -> Result<CompiledConfigSource, ConfigCompilationFailure> {
     let prepared = prepare_header_syntax(
         std::slice::from_mut(prepared_file),
         string_table,
@@ -339,10 +364,9 @@ fn compile_prepared_config_source(
     let config_rejections =
         reject_authored_config_dialect(&ast, authored_scope, path_fork, string_table);
     if !config_rejections.is_empty() {
-        return Err(CompilerMessages::from_diagnostics(
-            config_rejections,
-            string_table.clone(),
-        ));
+        return Err(
+            CompilerMessages::from_diagnostics(config_rejections, string_table.clone()).into(),
+        );
     }
 
     let declarations = project_authored_config_declarations(

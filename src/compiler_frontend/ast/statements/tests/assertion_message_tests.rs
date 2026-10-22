@@ -32,7 +32,7 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplateTirPhase, TemplateTirReference, TemplateViewContext,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidControlFlowStatementReason, InvalidFallibleHandlingReason,
+    DiagnosticPayload, InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::source::SourceSpan;
@@ -383,27 +383,24 @@ check || -> String:
     return "done"
 ;
 "#;
-    let payload =
-        crate::compiler_frontend::tests::parse_support::parse_single_file_ast_diagnostic(source)
-            .payload;
-    assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidControlFlowStatement {
-            reason: InvalidControlFlowStatementReason::ValueBlockOutsideReceiver,
-        }
-    ));
+    let failure =
+        crate::compiler_frontend::tests::parse_support::parse_single_file_ast_diagnostic(source);
+    crate::compiler_frontend::tests::parse_support::assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0042",
+        Some("invalid_control_flow_statement.value_block_outside_receiver"),
+    );
 }
 
 #[test]
 fn static_true_assertion_still_validates_invalid_template_message_source() {
-    let diagnostic =
-        crate::compiler_frontend::tests::parse_support::parse_single_file_ast_diagnostic(
-            "assert(true, [: before [break] after])\n",
-        );
+    let failure = crate::compiler_frontend::tests::parse_support::parse_single_file_ast_diagnostic(
+        "assert(true, [: before [break] after])\n",
+    );
 
-    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0002");
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnexpectedToken { .. }
-    ));
+    crate::compiler_frontend::tests::parse_support::assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0002",
+        None,
+    );
 }

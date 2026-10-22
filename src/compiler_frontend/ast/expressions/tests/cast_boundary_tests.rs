@@ -19,9 +19,7 @@ use crate::compiler_frontend::ast::expressions::failure_facts::ImplicitFailureSo
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastPolicyId,
 };
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidBuiltinCallReason, InvalidCallShapeReason, InvalidCastReason,
-};
+use crate::compiler_frontend::compiler_messages::InvalidCastReason;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -30,40 +28,41 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
     function_body_by_name, function_signature_by_name, start_function_body,
 };
 use crate::compiler_frontend::tests::parse_support::{
-    parse_single_file_ast, parse_single_file_ast_diagnostic,
+    assert_ast_diagnostic, ast_error_primary_span, parse_single_file_ast,
+    parse_single_file_ast_diagnostic,
 };
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 fn assert_invalid_cast(source: &str, expected_reason: InvalidCastReason) {
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-
-    let DiagnosticPayload::InvalidCast { reason, .. } = &diagnostic.payload else {
-        panic!(
-            "expected InvalidCast diagnostic, got {:?}",
-            diagnostic.payload
-        );
+    let reason_key = match expected_reason {
+        InvalidCastReason::MissingExplicitTarget => "invalid_cast.missing_explicit_target",
+        InvalidCastReason::TargetNotBuiltin => "invalid_cast.target_not_builtin",
+        InvalidCastReason::TargetIsGenericParameter => "invalid_cast.target_is_generic_parameter",
+        InvalidCastReason::SameSourceAndTarget => "invalid_cast.same_source_and_target",
+        InvalidCastReason::SourceIsOptional => "invalid_cast.source_is_optional",
+        InvalidCastReason::OperandArityMismatch => "invalid_cast.operand_arity_mismatch",
+        InvalidCastReason::TargetArityMismatch => "invalid_cast.target_arity_mismatch",
+        InvalidCastReason::CastPropagationRemoved => "invalid_cast.cast_propagation_removed",
+        InvalidCastReason::ScalarConstructorRemoved => "invalid_cast.scalar_constructor_removed",
+        InvalidCastReason::NoEvidence => "invalid_cast.no_evidence",
+        InvalidCastReason::BuiltinEvidenceNotConstFoldable => {
+            "invalid_cast.builtin_evidence_not_const_foldable"
+        }
+        InvalidCastReason::UserDefinedEvidenceNotConstFoldable => {
+            "invalid_cast.user_defined_evidence_not_const_foldable"
+        }
+        InvalidCastReason::GenericBoundEvidenceNotConstFoldable => {
+            "invalid_cast.generic_bound_evidence_not_const_foldable"
+        }
+        InvalidCastReason::BuiltinCastFailedInConst => "invalid_cast.builtin_cast_failed_in_const",
     };
-
-    assert_eq!(
-        *reason, expected_reason,
-        "unexpected InvalidCast reason for source:\n{source}"
-    );
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_ast_diagnostic(&failure, "MOTH-RULE-0083", Some(reason_key));
 }
 
-fn assert_invalid_call_shape(
-    source: &str,
-    reason_matches: impl FnOnce(&InvalidCallShapeReason) -> bool,
-) {
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-
-    let DiagnosticPayload::InvalidCallShape { reason, .. } = &diagnostic.payload else {
-        panic!(
-            "expected InvalidCallShape diagnostic, got {:?}",
-            diagnostic.payload
-        );
-    };
-
-    assert!(reason_matches(reason));
+fn assert_invalid_call_shape(source: &str, expected_reason_key: &'static str) {
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_ast_diagnostic(&failure, "MOTH-RULE-0054", Some(expected_reason_key));
 }
 
 fn returned_expression<'a>(
@@ -106,7 +105,7 @@ draw |x I32, y I32| -> I32:
 
 value = draw(x = 0, missing = cast "2")
 "#,
-        |reason| matches!(reason, InvalidCallShapeReason::NamedArgumentNotFound { .. }),
+        "invalid_call_shape.named_argument_not_found",
     );
 }
 
@@ -120,7 +119,7 @@ draw |x I32, y I32| -> I32:
 
 value = draw(x = 0, x = cast "2")
 "#,
-        |reason| matches!(reason, InvalidCallShapeReason::DuplicateArgument { .. }),
+        "invalid_call_shape.duplicate_argument",
     );
 }
 
@@ -133,18 +132,12 @@ draw |x I32, y I32| -> I32:
 
 value = draw(x = 0, x = cast "2")
 "#;
-    let diagnostic = parse_single_file_ast_diagnostic(source);
-
-    let DiagnosticPayload::InvalidCallShape { reason, .. } = &diagnostic.payload else {
-        panic!(
-            "expected InvalidCallShape diagnostic, got {:?}",
-            diagnostic.payload
-        );
-    };
-    assert!(matches!(
-        reason,
-        InvalidCallShapeReason::DuplicateArgument { .. }
-    ));
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0054",
+        Some("invalid_call_shape.duplicate_argument"),
+    );
 
     let target_start = source
         .rfind("x = cast \"2\"")
@@ -153,7 +146,7 @@ value = draw(x = 0, x = cast "2")
     let target_span = LocalSpan::exact(target_start, 1, &mut span_builder)
         .expect("the duplicate target span should fit inline");
     assert_eq!(
-        diagnostic.primary_span,
+        ast_error_primary_span(diagnostic),
         Some(SourceSpan::new(SourceId::COMPILATION_ROOT, target_span))
     );
 }
@@ -168,7 +161,7 @@ draw |x I32, y I32| -> I32:
 
 value = draw(x = 0, cast "2")
 "#,
-        |reason| matches!(reason, InvalidCallShapeReason::PositionalAfterNamed),
+        "invalid_call_shape.positional_after_named",
     );
 }
 
@@ -182,12 +175,7 @@ draw |x I32| -> I32:
 
 value = draw(0, cast "2")
 "#,
-        |reason| {
-            matches!(
-                reason,
-                InvalidCallShapeReason::ExtraPositionalArgument { .. }
-            )
-        },
+        "invalid_call_shape.extra_positional_argument",
     );
 }
 
@@ -411,22 +399,15 @@ parse_count |text String| -> I32, Error!:
 
 #[test]
 fn builtin_named_parameter_with_cast_reports_builtin_call_shape() {
-    let diagnostic = parse_single_file_ast_diagnostic(
+    let failure = parse_single_file_ast_diagnostic(
         r#"
 values ~= {1}
 ~values.push(value = cast "2")
 "#,
     );
-
-    let DiagnosticPayload::InvalidBuiltinCall { reason, .. } = &diagnostic.payload else {
-        panic!(
-            "expected InvalidBuiltinCall diagnostic, got {:?}",
-            diagnostic.payload
-        );
-    };
-
-    assert_eq!(
-        *reason,
-        InvalidBuiltinCallReason::NamedArgumentsNotSupported
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0046",
+        Some("invalid_builtin_call.named_arguments_not_supported"),
     );
 }

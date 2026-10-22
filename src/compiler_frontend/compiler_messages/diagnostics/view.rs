@@ -22,7 +22,7 @@ use crate::compiler_frontend::symbols::string_interning::StringId;
 /// belongs to a different family.
 /// WHY: render functions receive named, decoded fields, and a wrong-family read fails loudly at the
 /// dispatch boundary rather than producing a silently wrong message.
-pub(super) trait FamilyView: Sized {
+pub(crate) trait FamilyView: Sized {
     fn from_record(record: RecordRef<'_>) -> Option<Self>;
 
     /// The stable reason key of the decoded record; families without a reason fact report `None`.
@@ -83,7 +83,7 @@ impl<'a> DiagnosticView<'a> {
         self.record.durable_labels()
     }
 
-    pub(super) fn family_view<View: FamilyView>(&self) -> Option<View> {
+    pub(crate) fn family_view<View: FamilyView>(&self) -> Option<View> {
         View::from_record(self.record)
     }
 

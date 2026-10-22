@@ -22,15 +22,35 @@
 //! constants and typed start-body expressions where source-only forms such as maps are not
 //! retained in the folded-value store.
 
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+use crate::compiler_frontend::compiler_messages::diagnostic_payload::reason_keys::StableReasonKey;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::{
+    InvalidCallShapeCode, InvalidCallShapeView, InvalidMapLiteralView, InvalidMapTypeCode,
+    InvalidMapTypeView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
+    CompileTimeEvaluationErrorView, InvalidChoiceVariantView, InvalidControlFlowStatementView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
+    DuplicateDeclarationView, ReservedNameCollisionView, UnknownTypeNameView, UnknownValueNameView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    CommonSyntaxMistakeCode, CommonSyntaxMistakeView, ExpectedTokenView, InvalidCharLiteralView,
+    InvalidCharacterView, InvalidExpressionView, InvalidNumberLiteralView, InvalidStringEscapeCode,
+    InvalidStringEscapeView, NumberLiteralCode, UnexpectedTokenView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::TypeMismatchView;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, CompileTimeEvaluationErrorReason, DiagnosticPayload,
-    DiagnosticToken, InvalidCallShapeReason, InvalidChoiceVariantReason,
-    InvalidControlFlowStatementReason, InvalidExpressionReason, InvalidMapLiteralReason,
-    InvalidMapTypeReason, InvalidStringEscapeReason, NameNamespace, ReservedNameOwner,
-    TypeMismatchContext,
+    CommonSyntaxMistakeReason, CompileTimeEvaluationErrorReason, DiagnosticToken,
+    InvalidChoiceVariantReason, InvalidControlFlowStatementReason, InvalidExpressionReason,
+    InvalidMapLiteralReason, InvalidStringEscapeReason, ReservedNameOwner, TypeMismatchContext,
 };
 use crate::compiler_frontend::source::ExtendedSpanBuilder;
-use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result;
+use crate::compiler_frontend::tests::parse_support::{
+    assert_ast_diagnostic, ast_error_primary_span, freeze_ast_diagnostic_failure,
+    parse_single_file_ast_build_result,
+};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::mon::{MonErrorCode, PathSegment, Schema, Span, Value, decode_document};
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
@@ -82,7 +102,7 @@ pub(super) struct SourceSite {
 }
 
 pub(super) enum SourceReason {
-    ReservedName(ReservedNameOwner),
+    ReservedName,
     UnknownName,
     UnknownTypeName,
     UnknownVariant,
@@ -92,8 +112,8 @@ pub(super) enum SourceReason {
     CommonSyntaxMistake(CommonSyntaxMistakeReason),
     CompileTimeEvaluation(CompileTimeEvaluationErrorReason),
     InvalidExpression(InvalidExpressionReason),
-    ExpectedToken(TokenTag),
-    InvalidCharacter(char),
+    ExpectedToken,
+    InvalidCharacter,
     InvalidCharLiteral,
     InvalidStringEscape(InvalidStringEscapeReason),
     InvalidMapLiteral(InvalidMapLiteralReason),
@@ -102,8 +122,48 @@ pub(super) enum SourceReason {
     InvalidMapKeyType,
     CallShape(CallShapeExpectation),
     NumberLiteral(NumberLiteralErrorReason),
-    TypeMismatch(TypeMismatchContext),
+    TypeMismatch,
     UnexpectedToken,
+}
+impl SourceReason {
+    fn stable_reason_key(&self) -> Option<&'static str> {
+        match self {
+            Self::ReservedName
+            | Self::UnknownName
+            | Self::UnknownTypeName
+            | Self::ExpectedToken
+            | Self::InvalidCharacter
+            | Self::InvalidCharLiteral
+            | Self::DuplicateDeclaration
+            | Self::TypeMismatch
+            | Self::UnexpectedToken => None,
+            Self::UnknownVariant => Some("invalid_choice_variant.unknown_variant"),
+            Self::InvalidChoiceVariant(reason) => Some(reason.stable_reason_key()),
+            Self::NamedArgumentNotFound => Some("invalid_call_shape.named_argument_not_found"),
+            Self::ValueBlockOutsideReceiver => {
+                Some("invalid_control_flow_statement.value_block_outside_receiver")
+            }
+            Self::CommonSyntaxMistake(reason) => Some(reason.stable_reason_key()),
+            Self::CompileTimeEvaluation(reason) => Some(reason.stable_reason_key()),
+            Self::InvalidExpression(reason) => Some(reason.stable_reason_key()),
+            Self::InvalidStringEscape(reason) => Some(reason.stable_reason_key()),
+            Self::InvalidMapLiteral(reason) => Some(reason.stable_reason_key()),
+            Self::DuplicateMapKey => Some("invalid_map_literal.duplicate_known_key"),
+            Self::InvalidMapKeyType => Some("invalid_map_type.unsupported_key_type"),
+            Self::CallShape(expectation) => Some(match expectation {
+                CallShapeExpectation::ExtraPositional { .. } => {
+                    "invalid_call_shape.extra_positional_argument"
+                }
+                CallShapeExpectation::DuplicateArgument { .. } => {
+                    "invalid_call_shape.duplicate_argument"
+                }
+                CallShapeExpectation::MissingArgument { .. } => {
+                    "invalid_call_shape.missing_argument"
+                }
+            }),
+            Self::NumberLiteral(reason) => Some(reason.stable_reason_key()),
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum CallShapeExpectation {
@@ -245,7 +305,7 @@ pub(super) fn in_declarations(declarations: &str, token: &str, nth: usize) -> So
 pub(super) fn source_reserved_keyword(site: SourceSite) -> SourceExpectation {
     SourceExpectation::Reject {
         code: "MOTH-RULE-0039",
-        reason: SourceReason::ReservedName(ReservedNameOwner::Keyword),
+        reason: SourceReason::ReservedName,
         site,
     }
 }
@@ -277,13 +337,10 @@ pub(super) fn source_invalid_number(
     }
 }
 
-pub(super) fn source_type_mismatch(
-    context: TypeMismatchContext,
-    site: SourceSite,
-) -> SourceExpectation {
+pub(super) fn source_type_mismatch(site: SourceSite) -> SourceExpectation {
     SourceExpectation::Reject {
         code: "MOTH-TYPE-0001",
-        reason: SourceReason::TypeMismatch(context),
+        reason: SourceReason::TypeMismatch,
         site,
     }
 }
@@ -576,18 +633,17 @@ pub(super) fn assert_fixture(fixture: ParityFixture) {
             );
             true
         }
-        Err(diagnostic) => match fixture.expected_source {
+        Err(failure) => match fixture.expected_source {
             SourceExpectation::Accept | SourceExpectation::AcceptObserved(_) => {
                 panic!(
-                    "source rejected fixture '{}' with {} {:?}:\n{source}",
-                    fixture.name,
-                    diagnostic.identity().code,
-                    diagnostic.payload
+                    "source rejected fixture '{}' with prepared diagnostics {:?}:\n{source}",
+                    fixture.name, failure
                 )
             }
             SourceExpectation::Reject { code, reason, site } => {
+                let failure = freeze_ast_diagnostic_failure(failure);
                 assert_source_rejection(
-                    &diagnostic,
+                    &failure,
                     code,
                     reason,
                     site,
@@ -680,8 +736,221 @@ pub(super) fn assert_fixture(fixture: ParityFixture) {
     }
 }
 
+fn assert_source_payload_facts(
+    failure: &crate::compiler_frontend::compiler_errors::BoundaryFailure,
+    reason: &SourceReason,
+    site: &SourceSite,
+    fixture_name: &str,
+) {
+    let (report, diagnostic) = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("source failure should contain an error diagnostic");
+    let render_context = DiagnosticRenderContext::for_report(report);
+
+    match reason {
+        SourceReason::ReservedName => {
+            let facts = diagnostic
+                .family_view::<ReservedNameCollisionView>()
+                .expect("reserved-name diagnostic should retain typed facts");
+            assert_eq!(facts.reserved_by, ReservedNameOwner::Keyword);
+        }
+        SourceReason::UnknownName => {
+            diagnostic
+                .family_view::<UnknownValueNameView>()
+                .expect("unknown-value diagnostic should retain its value namespace");
+        }
+        SourceReason::UnknownTypeName => {
+            diagnostic
+                .family_view::<UnknownTypeNameView>()
+                .expect("unknown-type diagnostic should retain its type namespace");
+        }
+        SourceReason::InvalidChoiceVariant(expected) => {
+            let facts = diagnostic
+                .family_view::<InvalidChoiceVariantView>()
+                .expect("invalid-choice-variant diagnostic should retain typed facts");
+            assert_eq!(facts.reason, *expected);
+        }
+        SourceReason::UnknownVariant => {
+            let facts = diagnostic
+                .family_view::<InvalidChoiceVariantView>()
+                .expect("unknown-variant diagnostic should retain typed facts");
+            assert_eq!(facts.reason, InvalidChoiceVariantReason::UnknownVariant);
+        }
+        SourceReason::NamedArgumentNotFound => {
+            let facts = diagnostic
+                .family_view::<InvalidCallShapeView>()
+                .expect("named-argument diagnostic should retain typed facts");
+            assert_eq!(facts.reason, InvalidCallShapeCode::NamedArgumentNotFound);
+        }
+        SourceReason::ValueBlockOutsideReceiver => {
+            let facts = diagnostic
+                .family_view::<InvalidControlFlowStatementView>()
+                .expect("control-flow diagnostic should retain typed facts");
+            assert_eq!(
+                facts.reason,
+                InvalidControlFlowStatementReason::ValueBlockOutsideReceiver
+            );
+        }
+        SourceReason::CommonSyntaxMistake(expected) => {
+            let facts = diagnostic
+                .family_view::<CommonSyntaxMistakeView>()
+                .expect("common-syntax diagnostic should retain typed facts");
+            let (expected_reason, expected_keyword, expected_spacing_error, expected_choice_gap) =
+                CommonSyntaxMistakeCode::split(expected);
+            assert_eq!(facts.reason, expected_reason);
+            assert_eq!(facts.spacing_error, expected_spacing_error);
+            assert_eq!(facts.choice_gap, expected_choice_gap);
+            match (facts.keyword, expected_keyword) {
+                (None, None) => {}
+                (Some(keyword), Some(_)) => {
+                    assert_eq!(
+                        render_context.string_table.resolve(keyword),
+                        site.text.as_str(),
+                        "source diagnostic for '{fixture_name}' lost its exact syntax keyword"
+                    );
+                }
+                _ => panic!("source diagnostic for '{fixture_name}' lost its syntax-keyword fact"),
+            }
+        }
+        SourceReason::CompileTimeEvaluation(expected) => {
+            let facts = diagnostic
+                .family_view::<CompileTimeEvaluationErrorView>()
+                .expect("compile-time diagnostic should retain typed facts");
+            assert_eq!(facts.reason, *expected);
+        }
+        SourceReason::InvalidExpression(expected) => {
+            let facts = diagnostic
+                .family_view::<InvalidExpressionView>()
+                .expect("invalid-expression diagnostic should retain typed facts");
+            assert_eq!(facts.reason, *expected);
+        }
+        SourceReason::ExpectedToken => {
+            let facts = diagnostic
+                .family_view::<ExpectedTokenView>()
+                .expect("expected-token diagnostic should retain typed facts");
+            assert_eq!(
+                facts.expected,
+                DiagnosticToken::from_static_tag(TokenTag::COMMA)
+            );
+        }
+        SourceReason::InvalidStringEscape(expected) => {
+            let facts = diagnostic
+                .family_view::<InvalidStringEscapeView>()
+                .expect("string-escape diagnostic should retain typed facts");
+            let (expected_reason, expected_escaped) = InvalidStringEscapeCode::split(expected);
+            assert_eq!(facts.reason, expected_reason);
+            assert_eq!(facts.escaped, expected_escaped);
+        }
+        SourceReason::InvalidMapLiteral(expected) => {
+            let facts = diagnostic
+                .family_view::<InvalidMapLiteralView>()
+                .expect("map-literal diagnostic should retain typed facts");
+            assert_eq!(facts.reason, *expected);
+        }
+        SourceReason::InvalidCharacter => {
+            let facts = diagnostic
+                .family_view::<InvalidCharacterView>()
+                .expect("invalid-character diagnostic should retain typed facts");
+            let mut expected_characters = site.text.chars();
+            assert_eq!(
+                facts.character,
+                expected_characters
+                    .next()
+                    .expect("invalid-character source site should contain a character")
+            );
+            assert!(
+                expected_characters.next().is_none(),
+                "invalid-character source site should contain one character"
+            );
+        }
+        SourceReason::DuplicateDeclaration => {
+            diagnostic
+                .family_view::<DuplicateDeclarationView>()
+                .expect("duplicate-declaration diagnostic should retain its family");
+        }
+        SourceReason::InvalidCharLiteral => {
+            diagnostic
+                .family_view::<InvalidCharLiteralView>()
+                .expect("invalid-char-literal diagnostic should retain its family");
+        }
+        SourceReason::DuplicateMapKey => {
+            let facts = diagnostic
+                .family_view::<InvalidMapLiteralView>()
+                .expect("duplicate-map-key diagnostic should retain typed facts");
+            assert_eq!(facts.reason, InvalidMapLiteralReason::DuplicateKnownKey);
+        }
+        SourceReason::InvalidMapKeyType => {
+            let facts = diagnostic
+                .family_view::<InvalidMapTypeView>()
+                .expect("invalid-map-type diagnostic should retain typed facts");
+            assert_eq!(facts.reason, InvalidMapTypeCode::UnsupportedKeyType);
+        }
+        SourceReason::CallShape(expectation) => {
+            let facts = diagnostic
+                .family_view::<InvalidCallShapeView>()
+                .expect("call-shape diagnostic should retain typed facts");
+            let (expected_code, expected_count) = match expectation {
+                CallShapeExpectation::ExtraPositional { expected_count } => (
+                    InvalidCallShapeCode::ExtraPositionalArgument,
+                    *expected_count,
+                ),
+                CallShapeExpectation::DuplicateArgument { parameter_index } => {
+                    (InvalidCallShapeCode::DuplicateArgument, *parameter_index)
+                }
+                CallShapeExpectation::MissingArgument { parameter_index } => {
+                    (InvalidCallShapeCode::MissingArgument, *parameter_index)
+                }
+            };
+            assert_eq!(facts.reason, expected_code);
+            assert_eq!(
+                facts.count,
+                Some(expected_count),
+                "source diagnostic for '{fixture_name}' lost its call-shape count/index"
+            );
+            let expected_parameter_name = match expectation {
+                CallShapeExpectation::ExtraPositional { .. } => None,
+                CallShapeExpectation::DuplicateArgument { .. } => Some(site.text.as_str()),
+                CallShapeExpectation::MissingArgument { .. } => Some("nickname"),
+            };
+            if let Some(expected_parameter_name) = expected_parameter_name {
+                let parameter_name = facts
+                    .parameter_name
+                    .expect("call-shape diagnostic should retain its parameter name");
+                assert_eq!(
+                    render_context.string_table.resolve(parameter_name),
+                    expected_parameter_name,
+                    "source diagnostic for '{fixture_name}' lost its parameter identity"
+                );
+            }
+        }
+        SourceReason::NumberLiteral(expected) => {
+            let facts = diagnostic
+                .family_view::<InvalidNumberLiteralView>()
+                .expect("number-literal diagnostic should retain typed facts");
+            let (expected_code, expected_scalar, expected_scale) =
+                NumberLiteralCode::split(expected);
+            assert_eq!(facts.code, expected_code);
+            assert_eq!(facts.scalar, expected_scalar);
+            assert_eq!(facts.scale, expected_scale);
+        }
+        SourceReason::TypeMismatch => {
+            let facts = diagnostic
+                .family_view::<TypeMismatchView>()
+                .expect("type-mismatch diagnostic should retain typed facts");
+            assert_eq!(facts.context, TypeMismatchContext::ConstructorArgument);
+        }
+        SourceReason::UnexpectedToken => {
+            diagnostic
+                .family_view::<UnexpectedTokenView>()
+                .expect("unexpected-token diagnostic should retain its family");
+        }
+    }
+}
+
 fn assert_source_rejection(
-    diagnostic: &crate::compiler_frontend::compiler_messages::CompilerDiagnostic,
+    failure: &crate::compiler_frontend::compiler_errors::BoundaryFailure,
     expected_code: &str,
     reason: SourceReason,
     site: SourceSite,
@@ -689,167 +958,12 @@ fn assert_source_rejection(
     moth_declarations: &str,
     source: &str,
 ) {
-    assert_eq!(
-        diagnostic.identity().code,
-        expected_code,
-        "source diagnostic for '{}' had the wrong category: {:?}",
-        fixture_name,
-        diagnostic.payload
-    );
-    match reason {
-        SourceReason::ReservedName(expected_owner) => assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::ReservedNameCollision { reserved_by, .. }
-                if *reserved_by == expected_owner
-        )),
-        SourceReason::UnknownName => assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::UnknownName {
-                namespace: NameNamespace::Value,
-                ..
-            }
-        )),
-        SourceReason::UnknownTypeName => assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::UnknownName {
-                namespace: NameNamespace::Type,
-                ..
-            }
-        )),
-        SourceReason::InvalidChoiceVariant(expected) => assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidChoiceVariant { reason, .. } if *reason == expected
-        )),
-        SourceReason::UnknownVariant => assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidChoiceVariant {
-                reason: InvalidChoiceVariantReason::UnknownVariant,
-                ..
-            }
-        )),
-        SourceReason::NamedArgumentNotFound => assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidCallShape {
-                reason: InvalidCallShapeReason::NamedArgumentNotFound { .. },
-                ..
-            }
-        )),
-        SourceReason::ValueBlockOutsideReceiver => assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidControlFlowStatement {
-                reason: InvalidControlFlowStatementReason::ValueBlockOutsideReceiver
-            }
-        )),
-        SourceReason::CommonSyntaxMistake(expected) => assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::CommonSyntaxMistake { reason } if reason == &expected
-        )),
-        SourceReason::CompileTimeEvaluation(expected) => assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::CompileTimeEvaluationError { reason, .. }
-                if reason == &expected
-        )),
-        SourceReason::InvalidExpression(expected) => assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidExpression { reason } if reason == &expected
-        )),
-        SourceReason::ExpectedToken(expected) => assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::ExpectedToken {
-                expected: actual, ..
-            } if *actual == DiagnosticToken::from_static_tag(expected)
-        )),
-        SourceReason::InvalidStringEscape(expected) => assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidStringEscape { reason } if reason == &expected
-        )),
-        SourceReason::InvalidMapLiteral(expected) => assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidMapLiteral { reason, .. } if *reason == expected
-        )),
-        SourceReason::InvalidCharacter(expected) => assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidCharacter { character } if *character == expected
-        )),
-        SourceReason::DuplicateDeclaration => {
-            assert!(matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::DuplicateDeclaration { .. }
-            ))
-        }
-        SourceReason::InvalidCharLiteral => {
-            assert!(matches!(&diagnostic.payload, DiagnosticPayload::None))
-        }
-        SourceReason::DuplicateMapKey => assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidMapLiteral {
-                reason: InvalidMapLiteralReason::DuplicateKnownKey,
-                ..
-            }
-        )),
-        SourceReason::InvalidMapKeyType => assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidMapType {
-                reason: InvalidMapTypeReason::UnsupportedKeyType { .. },
-                ..
-            }
-        )),
-        SourceReason::CallShape(expected) => match (&diagnostic.payload, expected) {
-            (
-                DiagnosticPayload::InvalidCallShape {
-                    reason: InvalidCallShapeReason::ExtraPositionalArgument { expected_count },
-                    ..
-                },
-                CallShapeExpectation::ExtraPositional {
-                    expected_count: expected,
-                },
-            ) => assert_eq!(expected_count, &expected),
-            (
-                DiagnosticPayload::InvalidCallShape {
-                    reason:
-                        InvalidCallShapeReason::DuplicateArgument {
-                            parameter_index, ..
-                        },
-                    ..
-                },
-                CallShapeExpectation::DuplicateArgument {
-                    parameter_index: expected,
-                },
-            ) => assert_eq!(parameter_index, &expected),
-            (
-                DiagnosticPayload::InvalidCallShape {
-                    reason:
-                        InvalidCallShapeReason::MissingArgument {
-                            parameter_index, ..
-                        },
-                    ..
-                },
-                CallShapeExpectation::MissingArgument {
-                    parameter_index: expected,
-                },
-            ) => assert_eq!(parameter_index, &expected),
-            (payload, expectation) => {
-                panic!("source diagnostic did not match {expectation:?}: {payload:?}")
-            }
-        },
-        SourceReason::NumberLiteral(expected) => assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidNumberLiteral { reason, .. } if *reason == expected
-        )),
-        SourceReason::TypeMismatch(expected) => assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::TypeMismatch { context, .. } if *context == expected
-        )),
-        SourceReason::UnexpectedToken => assert!(matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::UnexpectedToken { .. }
-        )),
-    }
-
-    let primary_span = diagnostic.primary_span.unwrap_or_else(|| {
+    let diagnostic = assert_ast_diagnostic(failure, expected_code, reason.stable_reason_key());
+    assert_source_payload_facts(failure, &reason, &site, fixture_name);
+    let primary_span = ast_error_primary_span(diagnostic).unwrap_or_else(|| {
         panic!(
-            "source diagnostic for '{}' had no primary source location: {:?}",
-            fixture_name, diagnostic.payload
+            "source diagnostic for '{}' had no primary source location",
+            fixture_name
         )
     });
     let range = primary_span

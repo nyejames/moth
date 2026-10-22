@@ -15,10 +15,14 @@ use crate::build_system::create_project_modules::extract_source_code;
 use crate::build_system::output::ValidatedDirectoryOutputSettings;
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
 use crate::compiler_frontend::single_source_compilation::{
-    CompiledConfigSource, ConfigCompilationOutcome, ConfigCompilationRequest, compile_config_source,
+    CompiledConfigSource, ConfigCompilationFailure, ConfigCompilationOutcome,
+    ConfigCompilationRequest, compile_config_source,
 };
 use crate::compiler_frontend::source::{SourceDatabase, SourceDatabaseError, SourceKind};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -26,6 +30,19 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::Config;
 
 use std::path::Path;
+use std::sync::Arc;
+
+#[derive(Debug)]
+pub(crate) enum ProjectConfigFailure {
+    Legacy(CompilerMessages),
+    Boundary(BoundaryFailure),
+}
+
+impl From<CompilerMessages> for ProjectConfigFailure {
+    fn from(messages: CompilerMessages) -> Self {
+        Self::Legacy(messages)
+    }
+}
 
 // -------------------------
 //  Config Parse Services
@@ -58,8 +75,8 @@ pub fn load_project_config(
     config: &mut Config,
     services: &ProjectConfigParseServices<'_>,
     string_table: &mut StringTable,
-    project_source_files: Option<&mut SourceDatabase>,
-) -> Result<Option<ValidatedDirectoryOutputSettings>, CompilerMessages> {
+    project_source_files: &mut Option<SourceDatabase>,
+) -> Result<Option<ValidatedDirectoryOutputSettings>, ProjectConfigFailure> {
     let config_path = config.config_file_path();
 
     if !config_path.exists() {
@@ -77,19 +94,22 @@ pub fn load_project_config(
                     None,
                 ),
                 string_table.clone(),
-            ));
+            )
+            .into());
         }
 
-        return validate_directory_output_settings_if_needed(config, string_table);
+        return validate_directory_output_settings_if_needed(config, string_table)
+            .map_err(Into::into);
     }
-    let Some(project_source_files) = project_source_files else {
+    if project_source_files.is_none() {
         return Err(CompilerMessages::from_error(
             CompilerError::compiler_error(
                 "config.moth exists but the project source database is absent",
             ),
             string_table.clone(),
-        ));
-    };
+        )
+        .into());
+    }
 
     compile_project_config_file(
         config,
@@ -113,15 +133,21 @@ pub(crate) fn compile_project_config_file(
     config: &mut Config,
     config_path: &Path,
     services: &ProjectConfigParseServices<'_>,
-    project_source_files: &mut SourceDatabase,
+    project_source_files: &mut Option<SourceDatabase>,
     string_table: &mut StringTable,
-) -> Result<Option<ValidatedDirectoryOutputSettings>, CompilerMessages> {
+) -> Result<Option<ValidatedDirectoryOutputSettings>, ProjectConfigFailure> {
     config.project_config_loaded = false;
     config.config_resolution_records.clear();
     config.project_field_config_dependencies.clear();
     config.extra_project_fields.clear();
     config.setting_spans.clear();
     config.html_section = crate::projects::settings::HtmlSectionConfig::default();
+    let source_database = project_source_files.as_mut().ok_or_else(|| {
+        CompilerMessages::from_error(
+            CompilerError::compiler_error("project config source database is absent"),
+            string_table.clone(),
+        )
+    })?;
     let canonical_config_path = std::fs::canonicalize(config_path).map_err(|error| {
         CompilerMessages::from_error(
             CompilerError::file_error(
@@ -135,7 +161,7 @@ pub(crate) fn compile_project_config_file(
     // Register config before tokenization so its retained syntax and diagnostics share the
     // project identity context with every source discovered later. Config sits outside the entry
     // root, so its own directory roots the logical path and yields a bare `config.moth`.
-    let config_file_id = project_source_files
+    let config_file_id = source_database
         .insert(
             canonical_config_path.clone(),
             SourceKind::Compiler(SourceFileKind::Moth),
@@ -156,18 +182,18 @@ pub(crate) fn compile_project_config_file(
     let source_code = match extract_source_code(&canonical_config_path, string_table) {
         Ok(source_code) => source_code,
         Err(error) => {
-            project_source_files
+            source_database
                 .record_source_load_error(config_file_id, error.clone())
                 .map_err(|slot_error| {
                     CompilerMessages::from_error(slot_error, string_table.clone())
                 })?;
-            return Err(CompilerMessages::from_error(error, string_table.clone()));
+            return Err(CompilerMessages::from_error(error, string_table.clone()).into());
         }
     };
-    project_source_files
+    source_database
         .retain_text(config_file_id, source_code)
         .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
-    let source_code = project_source_files
+    let source_code = source_database
         .retained_text(config_file_id)
         .ok_or_else(|| {
             CompilerMessages::from_error(
@@ -198,19 +224,38 @@ pub(crate) fn compile_project_config_file(
         },
         string_table,
     );
+    let mut ast_failure = None;
     let validated_config = match result {
-        Ok(compiled_config) => {
+        Ok(compiled_config) => Some(
             validate_and_apply_compiled_config(config, &compiled_config, services, string_table)
                 .map(|settings| (compiled_config, settings))
+                .map_err(ProjectConfigFailure::Legacy),
+        ),
+        Err(ConfigCompilationFailure::Legacy(messages)) => {
+            Some(Err(ProjectConfigFailure::Legacy(messages)))
         }
-        Err(messages) => Err(messages),
+        Err(ConfigCompilationFailure::Ast(failure)) => {
+            ast_failure = Some(failure);
+            None
+        }
     };
 
     // Both compiler and build-owned diagnostics are complete before the source becomes immutable.
-    project_source_files
+    source_database
         .install_extended_spans(outcome_file_id, span_builder.freeze())
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
+    if let Some(failure) = ast_failure {
+        let source_database = project_source_files
+            .take()
+            .expect("the config source owner remains available through span finalization");
+        return Err(ProjectConfigFailure::Boundary(
+            finalize_ast_diagnostic_failure(failure, source_database),
+        ));
+    }
+
+    let validated_config =
+        validated_config.expect("a non-AST config result has a validation outcome");
     let (compiled_config, validated_output_settings) = validated_config?;
 
     // Retain compiler-owned provenance until the build boundary projects source providers,
@@ -219,6 +264,28 @@ pub(crate) fn compile_project_config_file(
     config.project_field_config_dependencies = compiled_config.project_field_dependencies;
     config.project_config_loaded = true;
     Ok(validated_output_settings)
+}
+
+fn finalize_ast_diagnostic_failure(
+    failure: AstDiagnosticFailure,
+    source_database: SourceDatabase,
+) -> BoundaryFailure {
+    let source_database = Arc::new(source_database);
+    match failure {
+        AstDiagnosticFailure::Prepared(batch) => {
+            let mut accumulator = BoundaryAccumulator::new();
+            accumulator.append_prepared(batch, Some((source_database, None)));
+            accumulator.finish(InstallMode::Frozen)
+        }
+        AstDiagnosticFailure::Infrastructure(mut errors) => {
+            errors.set_source_database(source_database);
+            let mut messages = CompilerMessages::empty(StringTable::new());
+            messages.append_infrastructure_errors(errors);
+            let mut accumulator = BoundaryAccumulator::new();
+            accumulator.append(messages);
+            accumulator.finish(InstallMode::Frozen)
+        }
+    }
 }
 
 fn validate_and_apply_compiled_config(

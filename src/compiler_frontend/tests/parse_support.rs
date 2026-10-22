@@ -11,8 +11,18 @@ use crate::compiler_frontend::ast::{
     Ast, AstBuildContext, AstBuildInput, AstBuildResult, FileValueResolutionServices,
     Stage0ResolutionFacts,
 };
+use crate::compiler_frontend::compiler_errors::BoundaryFailure;
+use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayId;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
+use crate::compiler_frontend::compiler_messages::prepared_batch::{
+    AstDiagnosticFailure, PreparedDiagnosticBatch,
+};
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidCompileTimePathReason,
+    CompilerDiagnostic, DiagnosticBag, DiagnosticSeverity, InvalidCompileTimePathReason,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SourceTokenOwner;
@@ -35,7 +45,7 @@ use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::test_support::TestSourceContext;
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceId,
+    ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceId, SourceSpan,
 };
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -116,16 +126,50 @@ fn test_file_value_resolution_services(
     })
 }
 
+fn capture_diagnostic_failure(
+    diagnostic: CompilerDiagnostic,
+    string_table: &StringTable,
+    path_fork: &PathInternerFork,
+) -> AstDiagnosticFailure {
+    capture_diagnostic_bag_failure(diagnostic.into(), string_table, path_fork)
+}
+
+fn capture_diagnostic_bag_failure(
+    bag: DiagnosticBag,
+    string_table: &StringTable,
+    path_fork: &PathInternerFork,
+) -> AstDiagnosticFailure {
+    AstDiagnosticFailure::Prepared(PreparedDiagnosticBatch::capture_from_bag(
+        bag,
+        string_table.clone(),
+        None,
+        true,
+        Some(Arc::new(path_fork.snapshot_table())),
+    ))
+}
+
+pub(crate) fn freeze_ast_diagnostic_failure(failure: AstDiagnosticFailure) -> BoundaryFailure {
+    match failure {
+        AstDiagnosticFailure::Prepared(batch) => {
+            let mut accumulator = BoundaryAccumulator::new();
+            accumulator.append_prepared(batch, None);
+            accumulator.finish(InstallMode::Frozen)
+        }
+        AstDiagnosticFailure::Infrastructure(error) => {
+            panic!("single-file AST construction infrastructure failure: {error:?}")
+        }
+    }
+}
 pub(crate) fn parse_single_file_ast_build_result(
     source: &str,
-) -> Result<(AstBuildResult, PathInternerFork, StringTable), CompilerDiagnostic> {
+) -> Result<(AstBuildResult, PathInternerFork, StringTable), AstDiagnosticFailure> {
     parse_single_file_ast_build_result_with_registry(source, ExternalPackageRegistry::new())
 }
 
 pub(crate) fn parse_single_file_ast_build_result_with_registry(
     source: &str,
     registry: ExternalPackageRegistry,
-) -> Result<(AstBuildResult, PathInternerFork, StringTable), CompilerDiagnostic> {
+) -> Result<(AstBuildResult, PathInternerFork, StringTable), AstDiagnosticFailure> {
     let mut source_context = TestSourceContext::new("@page.moth");
 
     let mut path_fork = PathInternerFork::empty();
@@ -140,24 +184,30 @@ pub(crate) fn parse_single_file_ast_build_result_with_registry(
         active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
     };
 
-    let lexed = source_context
-        .tokenize(
-            source,
-            &mut path_fork,
-            &style_directives,
-            TokenizerEntryMode::SourceFile,
-        )
-        .map_err(|failure| match failure {
-            TokenizeFailure::Diagnosed(diagnostic) => diagnostic,
-            TokenizeFailure::Infrastructure(error) => {
-                panic!("parse fixture tokenization encountered infrastructure failure: {error:?}")
-            }
-        })?;
+    let lexed = match source_context.tokenize(
+        source,
+        &mut path_fork,
+        &style_directives,
+        TokenizerEntryMode::SourceFile,
+    ) {
+        Ok(lexed) => lexed,
+        Err(TokenizeFailure::Diagnosed(diagnostic)) => {
+            let (string_table, _) = source_context.preparation_parts();
+            return Err(capture_diagnostic_failure(
+                diagnostic,
+                string_table,
+                &path_fork,
+            ));
+        }
+        Err(TokenizeFailure::Infrastructure(error)) => {
+            panic!("parse fixture tokenization encountered infrastructure failure: {error:?}")
+        }
+    };
     let owner = SourceTokenOwner::new(lexed.tokens);
     let path_syntax = lexed.path_syntax;
     let (string_table, span_builder) = source_context.preparation_parts();
 
-    let output = prepare_file_from_tokens(
+    let output = match prepare_file_from_tokens(
         owner,
         lexed.logical_path,
         path_syntax,
@@ -168,17 +218,17 @@ pub(crate) fn parse_single_file_ast_build_result_with_registry(
         0,
         span_builder,
         &mut path_fork,
-    )
-    .map_err(|error| match error {
-        crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Diagnosed(
+    ) {
+        Ok(output) => output,
+        Err(crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Diagnosed(
             crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareError {
                 diagnostic, ..
             },
-        ) => diagnostic,
-        crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Infrastructure(
+        )) => return Err(capture_diagnostic_failure(diagnostic, string_table, &path_fork)),
+        Err(crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Infrastructure(
             error,
-        ) => panic!("single-file test preparation hit infrastructure failure: {error:?}"),
-    })?;
+        )) => panic!("single-file test preparation hit infrastructure failure: {error:?}"),
+    };
     let source_file_id = output.file_id;
     let file_value_resolution = test_file_value_resolution_services(
         source_file_id,
@@ -202,10 +252,7 @@ pub(crate) fn parse_single_file_ast_build_result_with_registry(
                 panic!("single-file test aggregation hit infrastructure failure: {error:?}")
             }
         };
-        bag.into_diagnostics()
-            .into_iter()
-            .next()
-            .expect("header syntax preparation failed without a diagnostic")
+        capture_diagnostic_bag_failure(bag, string_table, &path_fork)
     })?;
 
     let headers = bind_module_headers(
@@ -225,10 +272,7 @@ pub(crate) fn parse_single_file_ast_build_result_with_registry(
                 panic!("single-file test binding hit infrastructure failure: {error:?}")
             }
         };
-        bag.into_diagnostics()
-            .into_iter()
-            .next()
-            .expect("header binding failed without a diagnostic")
+        capture_diagnostic_bag_failure(bag, string_table, &path_fork)
     })?;
 
     let sorted = resolve_module_dependencies(
@@ -237,13 +281,16 @@ pub(crate) fn parse_single_file_ast_build_result_with_registry(
         string_table,
         &mut path_fork,
     )
-    .map_err(|failure| {
-        failure
-            .into_messages(string_table)
-            .diagnostics
-            .into_iter()
-            .next()
-            .expect("dependency sorting failed without a diagnostic")
+    .map_err(|failure| match failure {
+        crate::compiler_frontend::compiler_messages::PremergeFailure::Diagnosed(batch) => {
+            AstDiagnosticFailure::Prepared(PreparedDiagnosticBatch::from_premerge(batch))
+        }
+        crate::compiler_frontend::compiler_messages::PremergeFailure::Infrastructure(error) => {
+            panic!("dependency sorting infrastructure failure: {error:?}")
+        }
+        crate::compiler_frontend::compiler_messages::PremergeFailure::Mixed { error, .. } => {
+            panic!("dependency sorting infrastructure failure alongside diagnostics: {error:?}")
+        }
     })?;
 
     let entry_path = path_fork
@@ -276,26 +323,14 @@ pub(crate) fn parse_single_file_ast_build_result_with_registry(
             #[cfg(feature = "timers")]
             timing_metric_family: crate::compiler_frontend::ast::AstTimingMetricFamily::Frontend,
         },
-    )
-    .map_err(|messages| {
-        if let Some(diagnostic) = messages.first_error() {
-            diagnostic.clone()
-        } else if let Some(error) = messages.primary_infrastructure_error() {
-            panic!(
-                "frontend parsing failed with infrastructure error: {}",
-                error.msg
-            )
-        } else {
-            panic!("frontend parsing failed without an error diagnostic")
-        }
-    })?;
+    )?;
 
     Ok((build_result, path_fork, std::mem::take(string_table)))
 }
 
 pub(crate) fn parse_single_file_ast_result(
     source: &str,
-) -> Result<(Ast, PathInternerFork, StringTable), CompilerDiagnostic> {
+) -> Result<(Ast, PathInternerFork, StringTable), AstDiagnosticFailure> {
     parse_single_file_ast_build_result(source)
         .map(|(build_result, path_fork, string_table)| (build_result.ast, path_fork, string_table))
 }
@@ -304,11 +339,78 @@ pub(crate) fn parse_single_file_ast(source: &str) -> (Ast, PathInternerFork, Str
     parse_single_file_ast_result(source).expect("source should parse into AST")
 }
 
-pub(crate) fn parse_single_file_ast_diagnostic(source: &str) -> CompilerDiagnostic {
+pub(crate) fn parse_single_file_ast_diagnostic(source: &str) -> BoundaryFailure {
     match parse_single_file_ast_result(source) {
         Ok(_) => panic!("source should fail during frontend parsing"),
-        Err(diagnostic) => diagnostic,
+        Err(failure) => freeze_ast_diagnostic_failure(failure),
     }
+}
+
+pub(crate) fn first_ast_error_view(failure: &BoundaryFailure) -> DiagnosticView<'_> {
+    let (_, diagnostic) = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("AST failure should contain an error diagnostic");
+    diagnostic
+}
+
+pub(crate) fn ast_first_error_type_display(failure: &BoundaryFailure, id: TypeDisplayId) -> String {
+    let (report, diagnostic) = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("AST failure should contain an error diagnostic");
+    let context = DiagnosticRenderContext::for_report(report);
+    diagnostic
+        .types()
+        .display_for_render(id, context.string_table, context.path_table())
+}
+
+pub(crate) fn ast_first_error_rendered_message(failure: &BoundaryFailure) -> String {
+    let (report, diagnostic) = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("AST failure should contain an error diagnostic");
+    let render = diagnostic
+        .family()
+        .render
+        .expect("a produced AST diagnostic has a family renderer");
+    render(&diagnostic, DiagnosticRenderContext::for_report(report)).message
+}
+
+#[track_caller]
+pub(crate) fn assert_ast_diagnostic<'a>(
+    failure: &'a BoundaryFailure,
+    expected_code: &str,
+    expected_reason_key: Option<&str>,
+) -> DiagnosticView<'a> {
+    let diagnostic = first_ast_error_view(failure);
+    assert_eq!(
+        diagnostic.descriptor().code,
+        expected_code,
+        "AST failure's first error should be {expected_code}"
+    );
+    assert_eq!(diagnostic.reason_key(), expected_reason_key);
+    diagnostic
+}
+
+pub(crate) fn ast_error_primary_span(diagnostic: DiagnosticView<'_>) -> Option<SourceSpan> {
+    match diagnostic.primary_site() {
+        SiteRef::Absent => None,
+        SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
+    }
+}
+
+pub(crate) fn ast_error_label_spans(diagnostic: DiagnosticView<'_>) -> Vec<Option<SourceSpan>> {
+    diagnostic
+        .durable_labels()
+        .map(|label| match label.site {
+            SiteRef::Absent => None,
+            SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
+        })
+        .collect()
 }
 
 /// Tokenizes one source file through a [`CompilerFrontend`] instance for test suites.

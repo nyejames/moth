@@ -23,7 +23,12 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueVisit;
 use crate::compiler_frontend::ast::{
     Ast, AstBuildContext, AstBuildInput, FileValueResolutionServices, Stage0ResolutionFacts,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{
+    CompilerError, CompilerMessages, InfrastructureErrors,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,
 };
@@ -117,6 +122,94 @@ pub(crate) struct FoldedMothTemplate {
     pub(crate) source_database: Arc<SourceDatabase>,
 }
 
+/// A template failure that keeps AST-prepared diagnostics out of the legacy vessel.
+#[derive(Debug)]
+pub(crate) enum MothTemplateCompilationFailure {
+    Messages(CompilerMessages),
+    Ast {
+        failure: AstDiagnosticFailure,
+        source_database: Option<Arc<SourceDatabase>>,
+        source_finalization_error: Option<Box<InfrastructureErrors>>,
+        prior_diagnostics: Vec<CompilerDiagnostic>,
+    },
+}
+
+impl From<CompilerMessages> for MothTemplateCompilationFailure {
+    fn from(messages: CompilerMessages) -> Self {
+        Self::Messages(messages)
+    }
+}
+
+impl MothTemplateCompilationFailure {
+    pub(crate) fn append_to_boundary(
+        self,
+        accumulator: &mut BoundaryAccumulator,
+        string_table: &StringTable,
+    ) -> InstallMode {
+        match self {
+            Self::Messages(messages) => {
+                let install = messages.install_mode;
+                accumulator.append(messages);
+                install
+            }
+            Self::Ast {
+                failure,
+                source_database,
+                source_finalization_error,
+                prior_diagnostics,
+            } => {
+                if !prior_diagnostics.is_empty() {
+                    let mut messages =
+                        CompilerMessages::from_diagnostics(prior_diagnostics, string_table.clone());
+                    if let Some(source_database) = source_database.as_ref() {
+                        messages.set_source_database(Arc::clone(source_database));
+                    }
+                    accumulator.append(messages);
+                }
+
+                match failure {
+                    AstDiagnosticFailure::Prepared(batch) => {
+                        accumulator.append_prepared(
+                            batch,
+                            source_database.map(|source_database| (source_database, None)),
+                        );
+                    }
+                    AstDiagnosticFailure::Infrastructure(errors) => {
+                        append_infrastructure_failure(
+                            accumulator,
+                            errors,
+                            source_database,
+                            string_table,
+                        );
+                    }
+                }
+                if let Some(errors) = source_finalization_error {
+                    append_infrastructure_failure(accumulator, errors, None, string_table);
+                }
+                InstallMode::Unfrozen
+            }
+        }
+    }
+}
+
+fn append_infrastructure_failure(
+    accumulator: &mut BoundaryAccumulator,
+    errors: Box<InfrastructureErrors>,
+    source_database: Option<Arc<SourceDatabase>>,
+    string_table: &StringTable,
+) {
+    let message_strings = if source_database.is_some() {
+        string_table.clone()
+    } else {
+        StringTable::new()
+    };
+    let mut messages = CompilerMessages::empty(message_strings);
+    messages.append_infrastructure_errors(errors);
+    if let Some(source_database) = source_database {
+        messages.set_source_database(source_database);
+    }
+    accumulator.append(messages);
+}
 /// Compile one Moth template source to its folded `content` value.
 ///
 /// The service stops at folded AST data, so the projection side results of AST construction are
@@ -124,7 +217,7 @@ pub(crate) struct FoldedMothTemplate {
 pub(crate) fn compile_moth_template_source(
     request: MothTemplateCompilationRequest<'_>,
     string_table: &mut StringTable,
-) -> Result<FoldedMothTemplate, CompilerMessages> {
+) -> Result<FoldedMothTemplate, MothTemplateCompilationFailure> {
     // This service has one source, so its own directory is both project and entry root and no
     // source package is reachable from it.
     let source_root = request
@@ -215,7 +308,7 @@ pub(crate) fn compile_moth_template_source(
             preparation_warnings,
             string_table,
         );
-        return Err(attach_finalized_source_database(messages, source_builder));
+        return Err(attach_finalized_source_database(messages, source_builder).into());
     }
 
     let entry_file_id = match source_builder
@@ -231,7 +324,7 @@ pub(crate) fn compile_moth_template_source(
                 preparation_warnings,
                 string_table,
             );
-            return Err(attach_finalized_source_database(messages, source_builder));
+            return Err(attach_finalized_source_database(messages, source_builder).into());
         }
     };
     if all_prepared
@@ -245,7 +338,7 @@ pub(crate) fn compile_moth_template_source(
             preparation_warnings,
             string_table,
         );
-        return Err(attach_finalized_source_database(messages, source_builder));
+        return Err(attach_finalized_source_database(messages, source_builder).into());
     }
     if !bundle_input {
         let Some(source_code) = direct_source_code.take() else {
@@ -254,7 +347,7 @@ pub(crate) fn compile_moth_template_source(
                 preparation_warnings,
                 string_table,
             );
-            return Err(attach_finalized_source_database(messages, source_builder));
+            return Err(attach_finalized_source_database(messages, source_builder).into());
         };
         source_builder
             .sources_mut()
@@ -270,7 +363,7 @@ pub(crate) fn compile_moth_template_source(
             preparation_warnings,
             string_table,
         );
-        return Err(attach_finalized_source_database(messages, source_builder));
+        return Err(attach_finalized_source_database(messages, source_builder).into());
     }
     let entry_scope = source_builder
         .sources()
@@ -310,11 +403,11 @@ pub(crate) fn compile_moth_template_source(
                     warnings,
                     string_table,
                 );
-                return Err(attach_finalized_source_database(messages, source_builder));
+                return Err(attach_finalized_source_database(messages, source_builder).into());
             }
             Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
                 let messages = CompilerMessages::from_error(error, string_table.clone());
-                return Err(attach_finalized_source_database(messages, source_builder));
+                return Err(attach_finalized_source_database(messages, source_builder).into());
             }
         };
         let freeze_result = prepared.freeze_path_syntax(string_table, &mut path_fork);
@@ -326,7 +419,7 @@ pub(crate) fn compile_moth_template_source(
                 preparation_warnings,
                 string_table,
             );
-            return Err(attach_finalized_source_database(messages, source_builder));
+            return Err(attach_finalized_source_database(messages, source_builder).into());
         }
     }
 
@@ -338,7 +431,7 @@ pub(crate) fn compile_moth_template_source(
     {
         let messages =
             CompilerMessages::from_error_with_warnings(error, preparation_warnings, string_table);
-        return Err(attach_finalized_source_database(messages, source_builder));
+        return Err(attach_finalized_source_database(messages, source_builder).into());
     }
 
     let sorted = match order_template_headers(
@@ -353,7 +446,7 @@ pub(crate) fn compile_moth_template_source(
         Err(failure) => {
             let mut messages = failure.into_messages(string_table);
             messages.prepend_diagnostics_preserving_context(preparation_warnings);
-            return Err(attach_finalized_source_database(messages, source_builder));
+            return Err(attach_finalized_source_database(messages, source_builder).into());
         }
     };
 
@@ -385,7 +478,8 @@ pub(crate) fn compile_moth_template_source(
                         error,
                         source_database_warnings,
                         string_table,
-                    ));
+                    )
+                    .into());
                 }
             };
             Ok(FoldedMothTemplate {
@@ -401,7 +495,22 @@ pub(crate) fn compile_moth_template_source(
             source_builder,
         } => {
             messages.prepend_diagnostics_preserving_context(preparation_warnings);
-            Err(attach_finalized_source_database(messages, source_builder))
+            Err(attach_finalized_source_database(messages, source_builder).into())
+        }
+        TemplateSemanticOutcome::AstFailure {
+            failure,
+            source_builder,
+        } => {
+            let (source_database, source_finalization_error) = match source_builder.finish() {
+                Ok(source_database) => (Some(Arc::new(source_database)), None),
+                Err(error) => (None, Some(error.into())),
+            };
+            Err(MothTemplateCompilationFailure::Ast {
+                failure,
+                source_database,
+                source_finalization_error,
+                prior_diagnostics: preparation_warnings,
+            })
         }
     }
 }
@@ -415,6 +524,10 @@ enum TemplateSemanticOutcome {
     },
     Diagnosed {
         messages: CompilerMessages,
+        source_builder: SourceDatabaseBuilder,
+    },
+    AstFailure {
+        failure: AstDiagnosticFailure,
         source_builder: SourceDatabaseBuilder,
     },
 }
@@ -524,9 +637,9 @@ fn fold_template_semantics(
 
     let mut ast = match ast_result {
         Ok(ast) => ast,
-        Err(messages) => {
-            return TemplateSemanticOutcome::Diagnosed {
-                messages,
+        Err(failure) => {
+            return TemplateSemanticOutcome::AstFailure {
+                failure,
                 source_builder,
             };
         }
@@ -632,7 +745,7 @@ fn fold_template_ast(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     file_value_resolution: Option<Rc<FileValueResolutionServices>>,
-) -> Result<Ast, CompilerMessages> {
+) -> Result<Ast, AstDiagnosticFailure> {
     Ok(Ast::new(
         AstBuildInput {
             headers: sorted.headers,

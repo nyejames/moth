@@ -15,7 +15,9 @@ use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::AstBuildResult;
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
-use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::prepared_batch::{
+    AstDiagnosticFailure, PreparedDiagnosticBatch, SemanticStageFailure,
+};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticBag, PremergeDiagnosticBatch, PremergeFailure,
 };
@@ -46,7 +48,9 @@ use crate::compiler_frontend::module_compilation::generated::convergence::{
     install_exact_concrete_call_summaries, run_generated_summary_convergence,
 };
 use crate::compiler_frontend::module_compilation::generated::known::KnownGeneratedFunctions;
-use crate::compiler_frontend::module_compilation::generated::materialisation::materialise_generated_request_roots;
+use crate::compiler_frontend::module_compilation::generated::materialisation::{
+    GeneratedMaterialisationFailure, materialise_generated_request_roots,
+};
 use crate::compiler_frontend::module_compilation::generated::requests::install_generated_request_contracts;
 use crate::compiler_frontend::module_compilation::generated::transaction::{
     GeneratedFunctionTransaction, GeneratedRequestFacts,
@@ -203,7 +207,7 @@ pub(crate) fn compile_module(
             "normal module compilation unexpectedly stopped at the Boracle prefix",
         )
         .into()),
-        Err(mut failure) => {
+        Err(SemanticStageFailure::Premerge(mut failure)) => {
             failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()))?;
             match failure {
                 PremergeFailure::Diagnosed(batch) => {
@@ -216,6 +220,13 @@ pub(crate) fn compile_module(
                 // Mixed double-failures only arise at source-finalization tails and never reach
                 // module compilation; abort through the typed lane if one ever does.
                 PremergeFailure::Mixed { error, .. } => Err(error),
+            }
+        }
+        Err(SemanticStageFailure::Ast(AstDiagnosticFailure::Infrastructure(error))) => Err(error),
+        Err(SemanticStageFailure::Ast(AstDiagnosticFailure::Prepared(batch))) => {
+            match batch.classify_premerge() {
+                Ok(prepared) => Ok(ModuleCompilationOutcome::Diagnosed(prepared)),
+                Err(error) => Err(error.into()),
             }
         }
     }
@@ -232,10 +243,10 @@ pub(crate) fn compile_module_for_boracle(
     prepared: PreparedModuleInput,
     known_generated: KnownGeneratedFunctions<'_>,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<BoracleModuleInput, PremergeFailure> {
-    // Intermediate failures stay in the premerge lane; the final build boundary owns the
-    // single vessel conversion. Infrastructure errors propagate typed without building a
-    // second vessel or cloning the local table.
+) -> Result<BoracleModuleInput, SemanticStageFailure> {
+    // Both typed lanes stay intact until the final build boundary performs the one vessel
+    // conversion. Infrastructure errors propagate without building a second vessel or cloning
+    // the local table.
     let entry_file_path = prepared
         .entry_file_path(context.source_files)?
         .to_path_buf();
@@ -293,18 +304,15 @@ pub(crate) fn compile_module_for_boracle(
     ) {
         Ok(SemanticStageOutput::Boracle(input)) => Ok(*input),
         Ok(SemanticStageOutput::Complete(_)) => {
-            Err(PremergeFailure::from(CompilerError::compiler_error(
+            Err(SemanticStageFailure::from(CompilerError::compiler_error(
                 "Boracle compiler service unexpectedly completed the normal semantic pipeline",
             )))
         }
-        Err(mut failure) => {
-            if let Err(error) =
-                failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()))
-            {
-                return Err(PremergeFailure::from(error));
-            }
-            Err(failure)
+        Err(SemanticStageFailure::Premerge(mut failure)) => {
+            failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()))?;
+            Err(SemanticStageFailure::Premerge(failure))
         }
+        Err(failure @ SemanticStageFailure::Ast(_)) => Err(failure),
     }
 }
 
@@ -337,6 +345,15 @@ enum SemanticStageOutput {
     Boracle(Box<BoracleModuleInput>),
 }
 
+impl From<GeneratedMaterialisationFailure> for SemanticStageFailure {
+    fn from(failure: GeneratedMaterialisationFailure) -> Self {
+        match failure {
+            GeneratedMaterialisationFailure::Ast(failure) => Self::Ast(failure),
+            GeneratedMaterialisationFailure::Premerge(failure) => Self::Premerge(failure),
+        }
+    }
+}
+
 /// Private request used by the two named compiler services to share the validated-HIR prefix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SemanticStageRequest {
@@ -358,11 +375,9 @@ struct CompleteSemanticStage {
 /// WHAT: binding -> ordering -> AST -> public-interface projection -> HIR -> borrow validation ->
 ///       generated completion, returning the complete module, public interface, generated delta
 ///       and resource-source associations a success is made of.
-/// WHY: every stage in here fails with a classified [`PremergeFailure`]: binding/order stages
-///      move the local table into a diagnosed batch, while deeper AST/HIR vessels classify
-///      through the single premerge conversion at each `?` boundary. Infrastructure failures
-///      propagate directly without building a second vessel. Keeping the sequence in its own
-///      means `compile_module` reads as three steps rather than wrapping four hundred lines.
+/// WHY: binding/order and HIR stages retain their premerge lane, while AST failures cross in a
+/// prepared or infrastructure lane. The normal module boundary classifies each lane without
+/// reconstructing the legacy vessel, and keeps this sequence readable as one semantic pipeline.
 fn run_semantic_stages(
     compiler: &mut CompilerFrontend<'_>,
     context: &ModuleCompilationContext<'_>,
@@ -371,7 +386,7 @@ fn run_semantic_stages(
     inputs: SemanticStageInputs<'_>,
     request: SemanticStageRequest,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<SemanticStageOutput, PremergeFailure> {
+) -> Result<SemanticStageOutput, SemanticStageFailure> {
     #[cfg(not(feature = "boracle"))]
     let _ = request;
     let SemanticStageInputs {
@@ -964,7 +979,7 @@ fn build_ast_with_registered_types(
     resolved_file_references: ResolvedFileReferenceTable,
     module_origin: Option<StableModuleOriginIdentity>,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<AstBuildResult, PremergeFailure> {
+) -> Result<AstBuildResult, AstDiagnosticFailure> {
     match compiler.headers_to_ast(
         AstBuildRequest {
             sorted,
@@ -983,14 +998,8 @@ fn build_ast_with_registered_types(
             warnings.extend(std::mem::take(&mut build_result.ast.warnings));
             Ok(build_result)
         }
-        Err(messages) => {
-            // Classify the mixed vessel once into the premerge lane, then prepend prior
-            // warnings to the diagnosed batch. Infrastructure failures propagate typed and
-            // drop their warning companions, matching the diagnosed-failure contract.
-            let mut failure = PremergeFailure::from(messages);
-            if let PremergeFailure::Diagnosed(batch) = &mut failure {
-                batch.prepend_diagnostics(std::mem::take(warnings));
-            }
+        Err(mut failure) => {
+            failure.prepend_diagnostics(std::mem::take(warnings));
             Err(failure)
         }
     }
