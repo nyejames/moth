@@ -16,11 +16,11 @@ use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::{
+    boundary_accumulator::BoundaryAccumulator,
     families::project_config::{InvalidConfigCode, InvalidConfigView},
     foreign::SiteRef,
     freeze::InstallMode,
     labels::DurableLabelMessage,
-    legacy_adapter::BoundaryAccumulator,
     report::DiagnosticReport,
     view::DiagnosticView,
 };

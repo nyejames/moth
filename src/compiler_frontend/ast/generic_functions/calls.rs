@@ -57,7 +57,7 @@ use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, Pa
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidCallShapeReason, ValueReceiverContext,
+    CompilerDiagnostic, DiagnosticBag, InvalidCallShapeReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_bindings::{BindingConflict, GenericTypeBindings};
@@ -81,7 +81,7 @@ pub(crate) struct GenericFunctionCallParseInput<'a, 'b, 'tokens> {
     pub(crate) value_required: bool,
     pub(crate) allow_boundary_catch: bool,
     pub(crate) call_span: Option<SourceSpan>,
-    pub(crate) warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
+    pub(crate) warnings: Option<&'a mut DiagnosticBag>,
     pub(crate) type_interner: &'a mut AstTypeInterner<'b>,
     pub(crate) expression_builder: &'a mut AstExpressionBuilder,
     pub(crate) const_values: &'a mut ConstValueStore,
@@ -110,7 +110,7 @@ struct GenericFunctionCallFinishInput<'a, 'b, 'tokens> {
     error_return_type_id: Option<TypeId>,
     value_required: bool,
     allow_boundary_catch: bool,
-    warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
+    warnings: Option<&'a mut DiagnosticBag>,
     type_interner: &'a mut AstTypeInterner<'b>,
     expression_builder: &'a mut AstExpressionBuilder,
     const_values: &'a mut ConstValueStore,

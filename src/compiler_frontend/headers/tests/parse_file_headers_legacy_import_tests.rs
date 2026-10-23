@@ -25,24 +25,22 @@ fn legacy_import_clause_reports_dedicated_migration_with_flat_replacements() {
         let result =
             parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
         let errors = expect_header_error(result, "legacy import syntax should be diagnosed");
-        let diagnostic = &errors.diagnostics[0];
-        assert_eq!(
-            diagnostic.kind,
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::LegacyDependencyClause)
-        );
-        let DiagnosticPayload::LegacyDependencyClause {
-            replacement: Some(replacement),
-            ..
-        } = diagnostic.payload
-        else {
-            panic!("expected a semantics-preserving migration replacement");
-        };
+        let diagnostic = errors
+            .diagnostics
+            .first()
+            .expect("expected legacy dependency diagnostic");
+        assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0035");
+        let replacement = diagnostic
+            .family_view::<project_config::LegacyDependencyClauseView>()
+            .expect("expected a legacy dependency-clause view")
+            .replacement
+            .expect("expected a semantics-preserving migration replacement");
         assert_eq!(
             errors.string_table.resolve(replacement),
             expected_replacement
         );
         assert_eq!(
-            diagnostic.primary_span,
+            diagnostic_primary_span(diagnostic),
             Some(source_span_for(source, expected_clause, 0)),
             "legacy dependency diagnostic should cover the authored clause",
         );
@@ -59,13 +57,15 @@ fn legacy_filtered_or_nested_import_has_no_automatic_replacement() {
             parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth"),
             "ambiguous legacy import syntax should be diagnosed",
         );
-        assert!(matches!(
-            errors.diagnostics[0].payload,
-            DiagnosticPayload::LegacyDependencyClause {
-                replacement: None,
-                ..
-            }
-        ));
+        assert!(
+            errors
+                .diagnostics
+                .first()
+                .and_then(|diagnostic| {
+                    diagnostic.family_view::<project_config::LegacyDependencyClauseView>()
+                })
+                .is_some_and(|facts| facts.replacement.is_none())
+        );
     }
 }
 
@@ -82,13 +82,15 @@ fn legacy_quoted_path_and_config_import_have_no_automatic_replacement() {
             parse_single_file_headers_with_entry(source, file_path, file_path),
             "legacy syntax without a safe current clause should still be diagnosed",
         );
-        assert!(matches!(
-            errors.diagnostics[0].payload,
-            DiagnosticPayload::LegacyDependencyClause {
-                replacement: None,
-                ..
-            }
-        ));
+        assert!(
+            errors
+                .diagnostics
+                .first()
+                .and_then(|diagnostic| {
+                    diagnostic.family_view::<project_config::LegacyDependencyClauseView>()
+                })
+                .is_some_and(|facts| facts.replacement.is_none())
+        );
     }
 }
 
@@ -112,18 +114,16 @@ fn legacy_multiline_import_clause_reports_migration_with_flat_replacement() {
             parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
         let errors =
             expect_header_error(result, "legacy multiline import syntax should be diagnosed");
-        let diagnostic = &errors.diagnostics[0];
-        assert_eq!(
-            diagnostic.kind,
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::LegacyDependencyClause)
-        );
-        let DiagnosticPayload::LegacyDependencyClause {
-            replacement: Some(replacement),
-            ..
-        } = diagnostic.payload
-        else {
-            panic!("expected a semantics-preserving migration replacement for: {source}");
-        };
+        let diagnostic = errors
+            .diagnostics
+            .first()
+            .expect("expected legacy dependency diagnostic");
+        assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0035");
+        let replacement = diagnostic
+            .family_view::<project_config::LegacyDependencyClauseView>()
+            .expect("expected a legacy dependency-clause view")
+            .replacement
+            .expect("expected a semantics-preserving migration replacement");
         assert_eq!(
             errors.string_table.resolve(replacement),
             expected_replacement
@@ -138,16 +138,18 @@ fn legacy_dependency_comment_between_keyword_and_path_reports_migration() {
         parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth"),
         "a comment between import and the path must still be a legacy clause",
     );
-    let DiagnosticPayload::LegacyDependencyClause {
-        replacement: Some(replacement),
-        ..
-    } = errors.diagnostics[0].payload
-    else {
-        panic!("expected a replacement after comment trivia");
-    };
+    let diagnostic = errors
+        .diagnostics
+        .first()
+        .expect("expected legacy dependency diagnostic");
+    let replacement = diagnostic
+        .family_view::<project_config::LegacyDependencyClauseView>()
+        .expect("expected a legacy dependency-clause view")
+        .replacement
+        .expect("expected a replacement after comment trivia");
     assert_eq!(errors.string_table.resolve(replacement), "@core/math sin");
     assert_eq!(
-        errors.diagnostics[0].primary_span,
+        diagnostic_primary_span(diagnostic),
         Some(source_span_for(source, source.trim_end(), 0)),
         "comment-separated legacy clause should cover the authored clause",
     );
@@ -170,7 +172,12 @@ fn legacy_dependency_span_covers_import_through_closing_brace() {
             .expect("legacy clause span should fit"),
     );
     assert_eq!(
-        errors.diagnostics[0].primary_span,
+        diagnostic_primary_span(
+            errors
+                .diagnostics
+                .first()
+                .expect("expected legacy dependency diagnostic")
+        ),
         Some(expected_span),
         "the primary span must end at the closing brace"
     );
@@ -246,10 +253,12 @@ fn legacy_joined_clause_span_keeps_full_multibyte_extended_range() {
     let FileFrontendPrepareFailure::Diagnosed(error) = failure else {
         panic!("expected source diagnostic");
     };
-    let span = error
-        .diagnostic
-        .primary_span
-        .expect("per-file producer captures joined clause");
+    let span = diagnostic_primary_span(
+        diagnostic_view_for_test(error.diagnostic)
+            .first()
+            .expect("per-file legacy diagnostic should compact"),
+    )
+    .expect("per-file producer captures joined clause");
     let range = span.resolve_with(spans.resolver_for(span.source()));
     assert_eq!(span.source(), SourceId::from_index(3));
     assert_eq!(range.start() as usize, source.find("import").unwrap());

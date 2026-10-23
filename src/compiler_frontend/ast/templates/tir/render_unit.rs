@@ -28,7 +28,6 @@ use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 // ------------------------------
 //  Aggregate-wrapper candidates
@@ -151,9 +150,9 @@ fn conditional_body_candidate_span(
 /// Runs the TIR formatter and forwards any warnings to the active diagnostic
 /// context.
 ///
-/// WHAT: thin wrapper around `format_tir_template` that returns formatter
-///       warnings with the formatted TIR result.
-/// WHY: warnings are user-visible formatter behavior and must reach the caller.
+/// WHAT: thin wrapper around `format_tir_template` that moves formatter warnings
+///       into the active scope context and returns only the formatted root.
+/// WHY: warnings belong to the scope context and must be recorded exactly once.
 #[allow(
     clippy::too_many_arguments,
     reason = "the scope context receives formatter warnings, so it stays a separate input"
@@ -168,8 +167,8 @@ pub(in crate::compiler_frontend::ast::templates) fn run_tir_formatter_with_warni
     style: &Style,
     scope_context: &ScopeContext,
     string_table: &mut StringTable,
-) -> Result<TirFormatterResult, TemplateError> {
-    let result = format_tir_template(
+) -> Result<TemplateIrNodeId, TemplateError> {
+    let TirFormatterResult { root, warnings } = format_tir_template(
         store,
         expression_builder,
         const_values,
@@ -180,16 +179,11 @@ pub(in crate::compiler_frontend::ast::templates) fn run_tir_formatter_with_warni
         string_table,
     )?;
 
-    let TirFormatterResult { root, warnings } = result;
-    let warnings = warnings.into_diagnostics();
-    for warning in &warnings {
-        scope_context.emit_warning(warning.clone());
+    for warning in warnings.into_diagnostics() {
+        scope_context.emit_warning(warning);
     }
 
-    Ok(TirFormatterResult {
-        root,
-        warnings: DiagnosticBag::from_diagnostics(warnings),
-    })
+    Ok(root)
 }
 
 /// Formats a control-flow body TIR root using the template's style formatter.

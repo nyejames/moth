@@ -48,7 +48,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidControlFlowStatementReason, InvalidMatchArmReason,
+    CompilerDiagnostic, DiagnosticBag, InvalidControlFlowStatementReason, InvalidMatchArmReason,
     ValueReceiverContext,
 };
 #[cfg(feature = "benchmark_counters")]
@@ -287,7 +287,7 @@ pub fn create_branch(
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     draft: &mut BodyDraft,
@@ -473,7 +473,7 @@ fn create_option_present_capture_branch(
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     draft: &mut BodyDraft,
@@ -628,7 +628,7 @@ fn create_match_node(
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     draft: &mut BodyDraft,
@@ -689,7 +689,7 @@ pub(crate) fn parse_match_block(
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     active_value_target: Option<ActiveValueProductionTarget>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -1131,7 +1131,7 @@ fn parse_else_arm(
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> BranchingResult<MatchBody> {
@@ -1199,7 +1199,7 @@ fn parse_match_arm(
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> BranchingResult<ParsedMatchArm> {

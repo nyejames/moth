@@ -288,7 +288,7 @@ pub(crate) struct FileVisibility {
 /// WHAT: collects one `FileVisibility` per parsed source file.
 /// WHY: dependency sorting and AST need stable per-file visibility without rebuilding binding
 /// semantics in later stages.
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 pub(crate) struct HeaderBindingEnvironment {
     /// One shared visibility package per source file.
     ///

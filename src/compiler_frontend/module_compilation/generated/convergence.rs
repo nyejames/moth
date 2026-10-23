@@ -795,19 +795,13 @@ fn refresh_private_failure_lanes(
     )
     .map_err(|failure| match failure {
         HirConstructionFailure::Diagnosed(mut diagnostic) => {
-            let warning_diagnostics = warnings
-                .take_diagnostics()
-                .into_iter()
-                .map(|mut warning| {
-                    if let Some(owner) = source_owner {
-                        warning.attach_frozen_identity_handle_if_missing(owner.clone());
-                    }
-                    warning
-                })
-                .collect();
             if let Some(owner) = source_owner {
+                for warning in warnings.iter_mut() {
+                    warning.attach_frozen_identity_handle_if_missing(owner.clone());
+                }
                 diagnostic.attach_frozen_identity_handle_if_missing(owner.clone());
             }
+            let warning_diagnostics = warnings.take_diagnostics();
             PreparedFailure::with_diagnostic_and_warnings(
                 diagnostic,
                 warning_diagnostics,
@@ -1345,21 +1339,14 @@ fn validate_builtin_failure_boundaries(
             continue;
         };
         if let Some(owner) = source_owner {
+            for warning in warnings.iter_mut() {
+                warning.attach_frozen_identity_handle_if_missing(owner.clone());
+            }
             diagnostic.attach_frozen_identity_handle_if_missing(owner.clone());
         }
-        let mut diagnostics = warnings
-            .take_diagnostics()
-            .into_iter()
-            .map(|mut warning| {
-                if let Some(owner) = source_owner {
-                    warning.attach_frozen_identity_handle_if_missing(owner.clone());
-                }
-                warning
-            })
-            .collect::<Vec<_>>();
-        diagnostics.push(diagnostic);
+        warnings.push(diagnostic);
         let batch = PreparedDiagnosticBatch::capture_with_required_paths_and_types(
-            DiagnosticBag::from_diagnostics(diagnostics),
+            std::mem::take(warnings),
             std::mem::take(&mut compiler.string_table),
             Some(type_environment),
             || Some(Arc::new(compiler.path_fork.snapshot_table())),

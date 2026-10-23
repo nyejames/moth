@@ -39,7 +39,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidFallibleHandlingReason, PreparedFailure,
+    CompilerDiagnostic, DiagnosticDraft, InvalidFallibleHandlingReason, PreparedFailure,
 };
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
@@ -152,7 +152,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         )
         .map_err(TemplateNormalizationError::from)
         .map_err(|error| {
-            self.template_normalization_error_messages(error, &emitted.warnings, string_table)
+            self.template_normalization_error_messages(error, &mut emitted.warnings, string_table)
         })?;
 
         // ----------------------------
@@ -162,7 +162,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             top_level_const_fragments,
             &emitted.const_templates_by_path,
         )
-        .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
+        .map_err(|error| self.error_messages(error, &mut emitted.warnings, string_table))?;
 
         // ----------------------------
         //  Normalize module constants
@@ -177,7 +177,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 .map_err(|error| {
                     self.template_normalization_error_messages(
                         error,
-                        &emitted.warnings,
+                        &mut emitted.warnings,
                         string_table,
                     )
                 })?;
@@ -190,7 +190,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 &self.environment.lookups.resolved_module_constants,
             )
             .map_err(|error| {
-                self.const_value_store_error_messages(error, &emitted.warnings, string_table)
+                self.const_value_store_error_messages(error, &mut emitted.warnings, string_table)
             })?;
         self.context.const_values = const_values;
 
@@ -210,7 +210,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             Some(self.context.external_package_registry.as_ref()),
         )
         .map_err(|error| {
-            self.template_normalization_error_messages(error, &emitted.warnings, string_table)
+            self.template_normalization_error_messages(error, &mut emitted.warnings, string_table)
         })?;
 
         if static_candidate.has_selections() {
@@ -220,12 +220,12 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 .map_err(|error| {
                     self.template_normalization_error_messages(
                         error,
-                        &emitted.warnings,
+                        &mut emitted.warnings,
                         string_table,
                     )
                 })?;
             self.validate_no_unresolved_executable_types(&emitted.ast, &self.context.const_values)
-                .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
+                .map_err(|error| self.error_messages(error, &mut emitted.warnings, string_table))?;
 
             // The candidate owns its exact annotated TIR contexts. Normalize those active views,
             // validate the completed HIR-boundary shape and publish the candidate atomically.
@@ -233,7 +233,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 .map_err(|error| {
                     self.template_normalization_error_messages(
                         error,
-                        &emitted.warnings,
+                        &mut emitted.warnings,
                         string_table,
                     )
                 })?;
@@ -241,7 +241,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 static_candidate.ast(),
                 &self.context.const_values,
             )
-            .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
+            .map_err(|error| self.error_messages(error, &mut emitted.warnings, string_table))?;
         } else {
             // The common runtime-only path retains the existing single normalization owner. The
             // unchanged projection is discarded without allocating normalization overlays.
@@ -249,12 +249,12 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 .map_err(|error| {
                     self.template_normalization_error_messages(
                         error,
-                        &emitted.warnings,
+                        &mut emitted.warnings,
                         string_table,
                     )
                 })?;
             self.validate_no_unresolved_executable_types(&emitted.ast, &self.context.const_values)
-                .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
+                .map_err(|error| self.error_messages(error, &mut emitted.warnings, string_table))?;
         }
 
         let mut specialization = static_candidate.publish(&mut emitted.ast);
@@ -269,7 +269,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             &mut self.context.const_values,
         )
         .map_err(|error| {
-            self.template_normalization_error_messages(error, &emitted.warnings, string_table)
+            self.template_normalization_error_messages(error, &mut emitted.warnings, string_table)
         })?;
 
         let start_function_path = self.context.root_role.has_implicit_start().then(|| {
@@ -294,24 +294,24 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             Some(self.context.external_package_registry.as_ref()),
         )
         .map_err(|error| {
-            self.template_normalization_error_messages(error, &emitted.warnings, string_table)
+            self.template_normalization_error_messages(error, &mut emitted.warnings, string_table)
         })?;
         specialization.merge(template_specialization);
         self.validate_specialized_function_terminality(
             &emitted.ast,
             start_function_path,
-            &emitted.warnings,
+            &mut emitted.warnings,
             string_table,
         )?;
         self.validate_specialized_function_terminality(
             &emitted.validated_generic_template_bodies,
             None,
-            &emitted.warnings,
+            &mut emitted.warnings,
             string_table,
         )?;
         let infallible_cast_evidence = self
             .collect_infallible_cast_evidence(&emitted.ast)
-            .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
+            .map_err(|error| self.error_messages(error, &mut emitted.warnings, string_table))?;
         let has_assertion_validation_candidates = emitted
             .deferred_generic_requests
             .iter()
@@ -321,7 +321,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             &emitted.ast,
             &infallible_cast_evidence,
             has_assertion_validation_candidates,
-            &emitted.warnings,
+            &mut emitted.warnings,
             string_table,
         )?;
         let committed_generic_requests = specialization
@@ -329,7 +329,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 std::mem::take(&mut emitted.deferred_generic_requests),
                 &assertion_validation_paths,
             )
-            .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
+            .map_err(|error| self.error_messages(error, &mut emitted.warnings, string_table))?;
 
         // ----------------------------
         //  Synchronize finalized public defaults
@@ -338,7 +338,11 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         // those canonical handles into public and receiver contracts, without folding again.
         self.synchronize_normalized_public_defaults(&emitted.ast)
             .map_err(|error| {
-                self.template_normalization_error_messages(error, &emitted.warnings, string_table)
+                self.template_normalization_error_messages(
+                    error,
+                    &mut emitted.warnings,
+                    string_table,
+                )
             })?;
 
         // ----------------------------
@@ -356,7 +360,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         )
         .collect(&emitted.ast, start_function_path.as_ref())
         .map_err(|error| {
-            self.template_normalization_error_messages(error, &emitted.warnings, string_table)
+            self.template_normalization_error_messages(error, &mut emitted.warnings, string_table)
         })?;
 
         let mut choice_definitions = self.collect_choice_definitions();
@@ -530,13 +534,13 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
     fn diagnostic_failure(
         &self,
         diagnostic: CompilerDiagnostic,
-        warnings: &[CompilerDiagnostic],
+        warnings: &mut Vec<DiagnosticDraft>,
         string_table: &StringTable,
         capture_types: bool,
     ) -> PreparedFailure {
         PreparedFailure::with_diagnostic_and_warnings(
             diagnostic,
-            warnings.to_vec(),
+            std::mem::take(warnings),
             string_table,
             capture_types.then_some(&self.environment.type_environment),
             || Some(Arc::new(self.path_fork.snapshot_table())),
@@ -547,7 +551,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
     pub(in crate::compiler_frontend::ast) fn error_messages(
         &self,
         error: impl Into<Box<InfrastructureErrors>>,
-        _warnings: &[CompilerDiagnostic],
+        _warnings: &mut Vec<DiagnosticDraft>,
         _string_table: &StringTable,
     ) -> PreparedFailure {
         PreparedFailure::Infrastructure(error.into())
@@ -557,7 +561,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
     fn template_normalization_error_messages(
         &self,
         error: TemplateNormalizationError,
-        warnings: &[CompilerDiagnostic],
+        warnings: &mut Vec<DiagnosticDraft>,
         string_table: &StringTable,
     ) -> PreparedFailure {
         match error {
@@ -573,7 +577,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
     fn const_value_store_error_messages(
         &self,
         error: ConstValueStoreError,
-        warnings: &[CompilerDiagnostic],
+        warnings: &mut Vec<DiagnosticDraft>,
         string_table: &StringTable,
     ) -> PreparedFailure {
         match error {
@@ -670,7 +674,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         concrete_nodes: &[crate::compiler_frontend::ast::ast_nodes::AstNode],
         infallible_cast_evidence: &FxHashMap<PathId, InfallibleCastEvidenceContract>,
         has_assertion_validation_candidates: bool,
-        warnings: &[CompilerDiagnostic],
+        warnings: &mut Vec<DiagnosticDraft>,
         string_table: &StringTable,
     ) -> Result<FxHashSet<PathId>, PreparedFailure> {
         if nodes.is_empty() && !has_assertion_validation_candidates {
@@ -822,7 +826,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         &self,
         ast_nodes: &[crate::compiler_frontend::ast::ast_nodes::AstNode],
         start_function_path: Option<PathId>,
-        warnings: &[CompilerDiagnostic],
+        warnings: &mut Vec<DiagnosticDraft>,
         string_table: &StringTable,
     ) -> Result<(), PreparedFailure> {
         for node in ast_nodes {

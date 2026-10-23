@@ -2,9 +2,9 @@ use crate::compiler_frontend::compiler_errors::{
     BoundaryFailure, CompilerError, InfrastructureErrors,
 };
 use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::UnknownValueNameView;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
 use crate::compiler_frontend::symbols::string_interning::StringTable;

@@ -9,13 +9,11 @@ use super::*;
 use crate::builder_surface::SourceFileKind;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
-use crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason;
-use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::CircularDependencyView;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::module_symbols::{PublicExportEntry, PublicExportTarget};
@@ -543,14 +541,13 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
         panic!("same-file forward capacity reference should be a diagnosed failure: {failure:?}");
     };
 
-    let found = bag.diagnostics().iter().any(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::CompileTimeEvaluationError {
-                reason: CompileTimeEvaluationErrorReason::SameFileForwardConstantReference,
-                ..
-            }
-        )
+    let compact =
+        crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test(
+            bag, None,
+        );
+    let found = compact.views().any(|diagnostic| {
+        diagnostic.reason_key()
+            == Some("compile_time_evaluation_error.same_file_forward_constant_reference")
     });
 
     assert!(

@@ -13,12 +13,14 @@ use crate::compiler_frontend::ast::templates::template_head_parser::directive_ar
     reject_unexpected_directive_arguments,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::MalformedCssTemplateView;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticToken, InvalidCallShapeReason,
-    SyntaxDiagnosticKind,
+    CompilerDiagnostic, DiagnosticBag, DiagnosticPayload, DiagnosticToken, InvalidCallShapeReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
@@ -1523,18 +1525,19 @@ fn const_css_template_emits_malformed_css_warnings() {
         false,
         &style_directives,
     );
+    let warnings = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
 
     assert!(!warnings.is_empty());
-    assert!(warnings.iter().all(|warning| {
-        matches!(
-            warning.kind,
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedCssTemplate)
-        )
-    }));
-    assert!(warnings.iter().any(|warning| matches!(
-        warning.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedCssTemplate)
-    )));
+    assert!(
+        warnings
+            .views()
+            .all(|warning| { warning.family_view::<MalformedCssTemplateView>().is_some() })
+    );
+    assert!(
+        warnings
+            .views()
+            .any(|warning| { warning.family_view::<MalformedCssTemplateView>().is_some() })
+    );
 }
 
 #[test]
@@ -1545,13 +1548,24 @@ fn css_validation_warnings_keep_authored_spans() {
         false,
         &style_directives,
     );
+    let warnings = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
+    let expected_span = SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::exact(6, 47, &mut ExtendedSpanBuilder::new())
+            .expect("CSS body literal span should fit"),
+    );
 
     assert!(!warnings.is_empty());
     assert!(
+        warnings.views().all(|warning| {
+            warning.family_view::<MalformedCssTemplateView>().is_some()
+                && matches!(warning.primary_site(), SiteRef::Local(span) if span == expected_span)
+        }),
+        "css warnings should keep their exact authored source span: {:?}",
         warnings
-            .iter()
-            .all(|warning| warning.primary_span.is_some()),
-        "css warnings should keep authored source spans"
+            .views()
+            .map(|warning| warning.primary_site())
+            .collect::<Vec<_>>(),
     );
 }
 
@@ -1563,11 +1577,13 @@ fn inline_css_warns_when_blocks_are_used() {
         false,
         &style_directives,
     );
+    let warnings = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
 
-    assert!(warnings.iter().any(|warning| matches!(
-        warning.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedCssTemplate)
-    )));
+    assert!(
+        warnings
+            .views()
+            .any(|warning| { warning.family_view::<MalformedCssTemplateView>().is_some() })
+    );
 }
 
 #[test]
@@ -1578,11 +1594,13 @@ fn runtime_css_templates_emit_warnings_for_static_body_segments() {
         true,
         &style_directives,
     );
+    let warnings = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
     assert!(!warnings.is_empty());
-    assert!(warnings.iter().all(|warning| matches!(
-        warning.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedCssTemplate)
-    )));
+    assert!(
+        warnings
+            .views()
+            .all(|warning| { warning.family_view::<MalformedCssTemplateView>().is_some() })
+    );
 }
 
 #[test]

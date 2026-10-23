@@ -10,9 +10,9 @@ use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 #[cfg(feature = "timers")]
-use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 #[cfg(feature = "timers")]
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_tests::test_fs::assert_path_missing;
 use crate::compiler_tests::test_support::run_stack_budgeted_child;

@@ -10,8 +10,8 @@
 
 use super::{FoldedMothTemplate, MothTemplateCompilationRequest, compile_moth_template_source};
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidNumberLiteralView;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_boundary_messages_html;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::headers::parse_file_headers::{

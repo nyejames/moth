@@ -1,22 +1,24 @@
 //! Snapshot-backed label text for each durable label kind.
 //!
-//! WHAT: one table pairs each `DiagnosticLabelMessage` kind with its exact text, then captures
+//! WHAT: one table pairs each `LabelDraftMessage` kind with its exact text, then captures
 //! the referenced types into a display snapshot before decoding the compact labels.
 //! WHY: the snapshot is the sole source of type spelling after the producer's environment drops.
 
 use crate::compiler_frontend::build_config::BuildConfigValueOrigin;
-use crate::compiler_frontend::compiler_messages::diagnostic_label::GenericSubstitutionDiagnostic;
+use crate::compiler_frontend::compiler_messages::DiagnosticCategory;
 use crate::compiler_frontend::compiler_messages::diagnostic_types::type_display_snapshot_builder::TypeDisplaySnapshotBuilder;
 use crate::compiler_frontend::compiler_messages::diagnostics::compaction::CompactOutcome;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::extras::ExtraDataKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelMessageCode;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::{
+    GenericSubstitutionDiagnostic, LabelDraftMessage,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::record::DiagnosticCode;
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::FamilyRow;
 use crate::compiler_frontend::compiler_messages::diagnostics::store::DiagnosticStore;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::render::context::compact_label_message_text;
-use crate::compiler_frontend::compiler_messages::{DiagnosticCategory, DiagnosticLabelMessage};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -58,7 +60,7 @@ static ALL_LABEL_ROLES_FAMILY: FamilyRow = FamilyRow {
 fn label_cases(
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
-) -> Vec<(DiagnosticLabelMessage, String)> {
+) -> Vec<(LabelDraftMessage, String)> {
     let input_name = string_table.intern("max_length");
     let rendered_text = string_table.intern("Consider a smaller range.");
     let parameter = string_table.intern("T");
@@ -68,38 +70,38 @@ fn label_cases(
 
     vec![
         (
-            DiagnosticLabelMessage::PreviousDeclaration,
+            LabelDraftMessage::PreviousDeclaration,
             "previous declaration here".to_owned(),
         ),
         (
-            DiagnosticLabelMessage::ConflictingAccess,
+            LabelDraftMessage::ConflictingAccess,
             "earlier conflicting access here".to_owned(),
         ),
         (
-            DiagnosticLabelMessage::ValueMovedHere,
+            LabelDraftMessage::ValueMovedHere,
             "value moved here".to_owned(),
         ),
         (
-            DiagnosticLabelMessage::ConfigInputOrigin {
+            LabelDraftMessage::ConfigInputOrigin {
                 input_name,
                 origin: BuildConfigValueOrigin::BuilderGlobal,
             },
             "configuration input `max_length` resolved from a builder-provided global".to_owned(),
         ),
         (
-            DiagnosticLabelMessage::RenderedText(rendered_text),
+            LabelDraftMessage::RenderedText(rendered_text),
             "Consider a smaller range.".to_owned(),
         ),
         (
-            DiagnosticLabelMessage::GenericInstantiationBodySite,
+            LabelDraftMessage::GenericInstantiationBodySite,
             "generic body operation failed here".to_owned(),
         ),
         (
-            DiagnosticLabelMessage::GenericInstantiationDeclarationSite,
+            LabelDraftMessage::GenericInstantiationDeclarationSite,
             "generic function declared here".to_owned(),
         ),
         (
-            DiagnosticLabelMessage::GenericInstantiationSubstitutions {
+            LabelDraftMessage::GenericInstantiationSubstitutions {
                 substitutions: vec![
                     GenericSubstitutionDiagnostic {
                         parameter_name: parameter,
@@ -114,33 +116,33 @@ fn label_cases(
             "generic substitution: T = I32, U = String".to_owned(),
         ),
         (
-            DiagnosticLabelMessage::GenericInferencePreviousEvidence,
+            LabelDraftMessage::GenericInferencePreviousEvidence,
             "previous generic inference evidence here".to_owned(),
         ),
         (
-            DiagnosticLabelMessage::ImmutableBindingDeclaration,
+            LabelDraftMessage::ImmutableBindingDeclaration,
             "immutable binding declared here".to_owned(),
         ),
         (
-            DiagnosticLabelMessage::TypedFailureProducer {
+            LabelDraftMessage::TypedFailureProducer {
                 error_type_id: i32_type,
             },
             "`I32!` failure produced here".to_owned(),
         ),
         (
-            DiagnosticLabelMessage::ImplicitFailureProducer,
+            LabelDraftMessage::ImplicitFailureProducer,
             "implicit built-in failure may escape here".to_owned(),
         ),
         (
-            DiagnosticLabelMessage::BuiltinFailureCall,
+            LabelDraftMessage::BuiltinFailureCall,
             "implicit built-in failure propagates through this call".to_owned(),
         ),
         (
-            DiagnosticLabelMessage::BuiltinFailureOrigin,
+            LabelDraftMessage::BuiltinFailureOrigin,
             "original failing numeric or range operation here".to_owned(),
         ),
         (
-            DiagnosticLabelMessage::BuiltinWriteBackOrigin {
+            LabelDraftMessage::BuiltinWriteBackOrigin {
                 target_type_id: string_type,
             },
             "write-back into `String` here after the compound update".to_owned(),

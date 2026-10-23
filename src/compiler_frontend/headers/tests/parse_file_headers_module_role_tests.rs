@@ -40,21 +40,24 @@ fn imported_module_root_discards_root_body_but_keeps_exportable_headers() {
                 1,
                 "expected one delimiter diagnostic for {file_path}: {source:?}"
             );
-            let diagnostic = &errors.diagnostics[0];
+            let diagnostic = errors
+                .diagnostics
+                .first()
+                .expect("expected one delimiter diagnostic");
             assert_eq!(
-                diagnostic.kind,
-                DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedEndOfFile)
+                diagnostic.descriptor().code,
+                "MOTH-SYNTAX-0017",
+                "the missing template delimiter keeps its stable diagnostic code"
             );
-            assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0017");
-            let DiagnosticPayload::UnexpectedEndOfFile {
-                expected_delimiter: Some(expected_delimiter),
-            } = &diagnostic.payload
-            else {
-                panic!("expected a typed EOF diagnostic naming the missing template delimiter");
-            };
-            assert_eq!(errors.string_table.resolve(*expected_delimiter), "]");
+            let facts = diagnostic
+                .family_view::<token_lexical::UnexpectedEndOfFileView>()
+                .expect("expected a typed EOF diagnostic naming the missing template delimiter");
+            let expected_delimiter = facts
+                .expected_delimiter
+                .expect("the diagnostic should name the expected delimiter");
+            assert_eq!(errors.string_table.resolve(expected_delimiter), "]");
             assert_eq!(
-                diagnostic.primary_span,
+                diagnostic_primary_span(diagnostic),
                 Some(source_span_for(source, "", source.len())),
                 "the missing template delimiter must point at EOF for {file_path}: {source:?}"
             );

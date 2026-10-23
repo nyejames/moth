@@ -12,11 +12,11 @@ use crate::compiler_frontend::compiler_errors::{
 };
 use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostic_types::type_display_snapshot_builder::ForcedTypeDisplayExhaustionGuard;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
     CompilerCapacityExceededView, SourceSpanCapacityView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticPrimaryPosition, DiagnosticRenderContext, compact_label_message_text,

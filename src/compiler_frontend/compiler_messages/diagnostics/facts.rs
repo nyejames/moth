@@ -51,6 +51,9 @@ pub(crate) trait FactCodec {
     /// Rewrites the identity words this codec stores into another string table or path interner.
     /// A codec with no identity words leaves them unchanged.
     fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError>;
+
+    /// Appends any path IDs encoded in this fact to `paths`.
+    fn append_path_ids(_words: &[u32], _paths: &mut Vec<PathId>) {}
 }
 
 /// The identity remap one draft's words are rewritten through. A remap owns one kind of word and leaves the
@@ -333,6 +336,13 @@ impl FactCodec for PathFact {
     fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
         remap.rewrite_path(&mut words[0])
     }
+
+    fn append_path_ids(words: &[u32], paths: &mut Vec<PathId>) {
+        paths.push(
+            PathId::try_from_index(words[0] as usize)
+                .expect("a draft path fact always names an interned path"),
+        );
+    }
 }
 
 /// A count stored as one word.
@@ -545,6 +555,17 @@ impl FactCodec for PlaceFact {
     fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
         remap.rewrite_place(&mut words[0])
     }
+
+    fn append_path_ids(words: &[u32], paths: &mut Vec<PathId>) {
+        let word = words[0];
+        if word >> PLACE_TAG_SHIFT == PLACE_PATH_TAG {
+            let value = word & PLACE_VALUE_MASK;
+            paths.push(
+                PathId::try_from_index(value as usize)
+                    .expect("a draft path place always names an interned path"),
+            );
+        }
+    }
 }
 /// The tag-0 word with value 1; `PlaceFact` emits only tag-0 value 0 or tag-1/tag-2 words.
 pub(super) const ABSENT_PLACE_WORD: u32 = 1;
@@ -578,6 +599,9 @@ impl FactCodec for OptPlaceFact {
     fn remap_ids(words: &mut [u32], remap: IdRemap<'_>) -> Result<(), FactCapacityError> {
         // The absent word is tag 0 with value 1, which names no place.
         remap.rewrite_place(&mut words[0])
+    }
+    fn append_path_ids(words: &[u32], paths: &mut Vec<PathId>) {
+        PlaceFact::append_path_ids(words, paths);
     }
 }
 

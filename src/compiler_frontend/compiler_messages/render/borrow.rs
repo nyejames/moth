@@ -32,21 +32,6 @@ pub(crate) fn borrow_access_name(access: BorrowAccessKind) -> &'static str {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn borrow_conflict_message(
-    place: &DiagnosticPlace,
-    existing_access: BorrowAccessKind,
-    requested_access: BorrowAccessKind,
-    context: DiagnosticRenderContext<'_>,
-) -> String {
-    format!(
-        "Cannot access {}: existing {} access conflicts with requested {} access.",
-        diagnostic_place_name(place, context),
-        borrow_access_name(existing_access),
-        borrow_access_name(requested_access)
-    )
-}
-
 pub(crate) fn multiple_mutable_borrows_message(
     place: &DiagnosticPlace,
     conflicting_place: Option<&DiagnosticPlace>,

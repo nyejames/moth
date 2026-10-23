@@ -17,7 +17,7 @@ use crate::compiler_frontend::ast::AstBuildResult;
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, PreparedFailure,
+    DiagnosticBag, DiagnosticDraft, PreparedFailure,
 };
 #[cfg(feature = "boracle")]
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -349,7 +349,7 @@ fn run_semantic_stages(
     compiler: &mut CompilerFrontend<'_>,
     context: &ModuleCompilationContext<'_>,
     known_generated: KnownGeneratedFunctions<'_>,
-    mut warnings: Vec<CompilerDiagnostic>,
+    mut warnings: Vec<DiagnosticDraft>,
     inputs: SemanticStageInputs<'_>,
     request: SemanticStageRequest,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
@@ -880,7 +880,7 @@ fn bind_retained_headers(
     prepared_header_syntax: PreparedHeaderSyntax,
     external_dependency_resolution_table: &ExternalImportResolutionTable,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut Vec<DiagnosticDraft>,
 ) -> Result<BoundModuleHeaders, PreparedFailure> {
     let headers = bind_module_headers(
         prepared_header_syntax,
@@ -925,7 +925,7 @@ fn sort_headers(
     compiler: &mut CompilerFrontend<'_>,
     module_headers: BoundModuleHeaders,
     resolved_file_references: &ResolvedFileReferenceTable,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut Vec<DiagnosticDraft>,
 ) -> Result<SortedHeaders, PreparedFailure> {
     compiler
         .sort_headers(module_headers, resolved_file_references)
@@ -934,7 +934,7 @@ fn sort_headers(
 
 fn prepend_prior_warnings(
     mut failure: PreparedFailure,
-    warnings: Vec<CompilerDiagnostic>,
+    warnings: Vec<DiagnosticDraft>,
     compiler: &CompilerFrontend<'_>,
 ) -> PreparedFailure {
     match failure.prepend_diagnostics_with_required_paths(warnings, || {
@@ -958,7 +958,7 @@ fn build_ast_with_registered_types(
     entry_file_path: &Path,
     root_role: ModuleRootRole,
     capacity_estimate: FrontendArenaCapacityEstimate,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut Vec<DiagnosticDraft>,
     resolved_file_references: ResolvedFileReferenceTable,
     module_origin: Option<StableModuleOriginIdentity>,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,

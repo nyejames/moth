@@ -33,7 +33,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticBag, DiagnosticKind,
+    CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticBag, DiagnosticDraft, DiagnosticKind,
     InvalidConfigReason, PreparedFailure, RuleDiagnosticKind, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -415,11 +415,11 @@ fn reject_authored_config_dialect(
 ) -> DiagnosticBag {
     let mut rejections =
         reject_authored_config_start_body(ast, authored_scope, path_fork, string_table);
-    for rejection in
-        reject_mutable_config_bindings(ast, authored_scope, path_fork).into_diagnostics()
-    {
-        rejections.push(rejection);
-    }
+    rejections.append(reject_mutable_config_bindings(
+        ast,
+        authored_scope,
+        path_fork,
+    ));
     rejections
 }
 
@@ -607,7 +607,7 @@ fn project_authored_config_declarations(
                             InvalidConfigReason::ConfigQualifierFixedField,
                             direct_field_spans.get(index).copied().flatten(),
                         ),
-                        Vec::new(),
+                        Vec::<CompilerDiagnostic>::new(),
                         string_table,
                         None,
                         || None,
@@ -855,7 +855,7 @@ fn prepare_config_file(
             } = error;
             let mut diagnostics = warnings;
             if is_duplicate_config_header_error(&diagnostic) {
-                diagnostics.push(config_duplicate_diagnostic(diagnostic));
+                diagnostics.push(config_duplicate_diagnostic(diagnostic.primary_span));
             } else {
                 diagnostics.push(diagnostic);
             }
@@ -889,11 +889,11 @@ fn prepare_config_file(
             .map_err(PreparedFailure::from)?;
         diagnosed.push(diagnostic);
     }
-    for diagnostic in validate_authored_config_surface(&output.headers, path_fork, request.file_id)?
-        .into_diagnostics()
-    {
-        diagnosed.push(diagnostic);
-    }
+    diagnosed.append(validate_authored_config_surface(
+        &output.headers,
+        path_fork,
+        request.file_id,
+    )?);
     if diagnosed.has_errors() {
         Err(capture_config_diagnostics(diagnosed, string_table))
     } else {
@@ -997,7 +997,7 @@ fn classify_header_diagnostics(bag: DiagnosticBag, authored_file_id: SourceId) -
     let mut classified = DiagnosticBag::new();
     for diagnostic in bag.into_diagnostics() {
         if is_authored_config_duplicate(&diagnostic, authored_file_id) {
-            classified.push(config_duplicate_diagnostic(diagnostic));
+            classified.push(config_duplicate_diagnostic(diagnostic.primary_span()));
         } else {
             classified.push(diagnostic);
         }
@@ -1006,12 +1006,8 @@ fn classify_header_diagnostics(bag: DiagnosticBag, authored_file_id: SourceId) -
 }
 
 /// Config displays one key label for duplicates, retaining its captured authored span.
-fn config_duplicate_diagnostic(diagnostic: CompilerDiagnostic) -> CompilerDiagnostic {
-    config_diagnostic(
-        None,
-        InvalidConfigReason::DuplicateKey,
-        diagnostic.primary_span,
-    )
+fn config_duplicate_diagnostic(span: Option<SourceSpan>) -> CompilerDiagnostic {
+    config_diagnostic(None, InvalidConfigReason::DuplicateKey, span)
 }
 
 fn is_duplicate_config_header_error(diagnostic: &CompilerDiagnostic) -> bool {
@@ -1021,13 +1017,10 @@ fn is_duplicate_config_header_error(diagnostic: &CompilerDiagnostic) -> bool {
     )
 }
 
-fn is_authored_config_duplicate(
-    diagnostic: &CompilerDiagnostic,
-    authored_file_id: SourceId,
-) -> bool {
-    is_duplicate_config_header_error(diagnostic)
+fn is_authored_config_duplicate(diagnostic: &DiagnosticDraft, authored_file_id: SourceId) -> bool {
+    diagnostic.code() == DiagnosticKind::Rule(RuleDiagnosticKind::DuplicateDeclaration).code()
         && diagnostic
-            .primary_span
+            .primary_span()
             .is_some_and(|span| span.source() == authored_file_id)
 }
 

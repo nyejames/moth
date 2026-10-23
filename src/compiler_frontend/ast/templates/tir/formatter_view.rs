@@ -1060,7 +1060,5 @@ fn representative_span_for_run(
 // -------------------------
 
 fn append_diagnostics(target: &mut DiagnosticBag, appended: DiagnosticBag) {
-    for diagnostic in appended.into_diagnostics() {
-        target.push(diagnostic);
-    }
+    target.append(appended);
 }

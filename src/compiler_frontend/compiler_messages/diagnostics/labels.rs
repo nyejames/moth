@@ -13,12 +13,48 @@ use super::facts::{
 use super::foreign::SiteRef;
 use super::store::DiagnosticStore;
 use crate::compiler_frontend::build_config::BuildConfigValueOrigin;
-use crate::compiler_frontend::compiler_messages::DiagnosticLabelMessage;
 use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayId;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
-/// The message of a compact label. Each variant of the legacy `DiagnosticLabelMessage` has one code, and a label
+/// One compact-owned generic substitution label input.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct GenericSubstitutionDiagnostic {
+    pub(crate) parameter_name: StringId,
+    pub(crate) concrete_type_id: TypeId,
+}
+
+/// A secondary label message supplied to a compact diagnostic draft.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum LabelDraftMessage {
+    PreviousDeclaration,
+    ConflictingAccess,
+    ValueMovedHere,
+    ConfigInputOrigin {
+        input_name: StringId,
+        origin: BuildConfigValueOrigin,
+    },
+    RenderedText(StringId),
+    GenericInstantiationBodySite,
+    GenericInstantiationDeclarationSite,
+    GenericInstantiationSubstitutions {
+        substitutions: Vec<GenericSubstitutionDiagnostic>,
+    },
+    GenericInferencePreviousEvidence,
+    ImmutableBindingDeclaration,
+    TypedFailureProducer {
+        error_type_id: TypeId,
+    },
+    ImplicitFailureProducer,
+    BuiltinFailureCall,
+    BuiltinFailureOrigin,
+    BuiltinWriteBackOrigin {
+        target_type_id: TypeId,
+    },
+}
+
+/// The message of a compact label. Each variant of `LabelDraftMessage` has one code, and a label
 /// without a message has `NONE`. Codes are internal to one compiler build and carry no meaning outside it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct LabelMessageCode(u8);
@@ -124,13 +160,13 @@ const _: () = assert!(
     "generic substitutions are locked at 8 bytes"
 );
 
-/// Encodes one legacy label. A label without a message encodes as `NONE` and keeps its span. Substitution entries
-/// are appended to `substitutions`, the draft's arena.
+/// Encodes one compact-owned label message. A label without a message encodes as `NONE` and keeps its span.
+/// Substitution entries are appended to `substitutions`, the draft's arena.
 ///
-/// The match is exhaustive on purpose: a new `DiagnosticLabelMessage` variant must choose its code here.
+/// The match is exhaustive on purpose: a new `LabelDraftMessage` variant must choose its code here.
 pub(super) fn encode_label(
     span: Option<SourceSpan>,
-    message: Option<DiagnosticLabelMessage>,
+    message: Option<LabelDraftMessage>,
     substitutions: &mut Vec<DraftSubstitution>,
 ) -> Result<DraftLabel, FactCapacityError> {
     let plain = |code: LabelMessageCode| DraftLabel {
@@ -144,26 +180,24 @@ pub(super) fn encode_label(
         return Ok(plain(LabelMessageCode::NONE));
     };
     Ok(match message {
-        DiagnosticLabelMessage::PreviousDeclaration => {
-            plain(LabelMessageCode::PREVIOUS_DECLARATION)
-        }
-        DiagnosticLabelMessage::ConflictingAccess => plain(LabelMessageCode::CONFLICTING_ACCESS),
-        DiagnosticLabelMessage::ValueMovedHere => plain(LabelMessageCode::VALUE_MOVED_HERE),
-        DiagnosticLabelMessage::ConfigInputOrigin { input_name, origin } => DraftLabel {
+        LabelDraftMessage::PreviousDeclaration => plain(LabelMessageCode::PREVIOUS_DECLARATION),
+        LabelDraftMessage::ConflictingAccess => plain(LabelMessageCode::CONFLICTING_ACCESS),
+        LabelDraftMessage::ValueMovedHere => plain(LabelMessageCode::VALUE_MOVED_HERE),
+        LabelDraftMessage::ConfigInputOrigin { input_name, origin } => DraftLabel {
             data: [string_word(input_name)?, origin_code(origin)],
             ..plain(LabelMessageCode::CONFIG_INPUT_ORIGIN)
         },
-        DiagnosticLabelMessage::RenderedText(text) => DraftLabel {
+        LabelDraftMessage::RenderedText(text) => DraftLabel {
             data: [string_word(text)?, 0],
             ..plain(LabelMessageCode::RENDERED_TEXT)
         },
-        DiagnosticLabelMessage::GenericInstantiationBodySite => {
+        LabelDraftMessage::GenericInstantiationBodySite => {
             plain(LabelMessageCode::GENERIC_INSTANTIATION_BODY_SITE)
         }
-        DiagnosticLabelMessage::GenericInstantiationDeclarationSite => {
+        LabelDraftMessage::GenericInstantiationDeclarationSite => {
             plain(LabelMessageCode::GENERIC_INSTANTIATION_DECLARATION_SITE)
         }
-        DiagnosticLabelMessage::GenericInstantiationSubstitutions {
+        LabelDraftMessage::GenericInstantiationSubstitutions {
             substitutions: entries,
         } => {
             let start = word_index(substitutions.len())?;
@@ -179,26 +213,24 @@ pub(super) fn encode_label(
                 ..plain(LabelMessageCode::GENERIC_INSTANTIATION_SUBSTITUTIONS)
             }
         }
-        DiagnosticLabelMessage::GenericInferencePreviousEvidence => {
+        LabelDraftMessage::GenericInferencePreviousEvidence => {
             plain(LabelMessageCode::GENERIC_INFERENCE_PREVIOUS_EVIDENCE)
         }
-        DiagnosticLabelMessage::ImmutableBindingDeclaration => {
+        LabelDraftMessage::ImmutableBindingDeclaration => {
             plain(LabelMessageCode::IMMUTABLE_BINDING_DECLARATION)
         }
-        DiagnosticLabelMessage::TypedFailureProducer { error_type_id } => DraftLabel {
+        LabelDraftMessage::TypedFailureProducer { error_type_id } => DraftLabel {
             type_words: 0b01,
             pending_types: 0b01,
             data: [pending_type_word(error_type_id)?, 0],
             ..plain(LabelMessageCode::TYPED_FAILURE_PRODUCER)
         },
-        DiagnosticLabelMessage::ImplicitFailureProducer => {
+        LabelDraftMessage::ImplicitFailureProducer => {
             plain(LabelMessageCode::IMPLICIT_FAILURE_PRODUCER)
         }
-        DiagnosticLabelMessage::BuiltinFailureCall => plain(LabelMessageCode::BUILTIN_FAILURE_CALL),
-        DiagnosticLabelMessage::BuiltinFailureOrigin => {
-            plain(LabelMessageCode::BUILTIN_FAILURE_ORIGIN)
-        }
-        DiagnosticLabelMessage::BuiltinWriteBackOrigin { target_type_id } => DraftLabel {
+        LabelDraftMessage::BuiltinFailureCall => plain(LabelMessageCode::BUILTIN_FAILURE_CALL),
+        LabelDraftMessage::BuiltinFailureOrigin => plain(LabelMessageCode::BUILTIN_FAILURE_ORIGIN),
+        LabelDraftMessage::BuiltinWriteBackOrigin { target_type_id } => DraftLabel {
             type_words: 0b01,
             pending_types: 0b01,
             data: [pending_type_word(target_type_id)?, 0],

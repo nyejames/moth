@@ -7,11 +7,14 @@
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
+    InvalidFallibleHandlingCode, InvalidFallibleHandlingView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
     TypeMismatchView, UnsupportedOperatorTypesView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::terminal::format_guidance_view;
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_boundary_messages;
@@ -302,27 +305,23 @@ fn failure_handling_renderers_resolve_custom_types_and_recovery_guidance() {
     );
     let terse_lines = format_terse_boundary_messages(&failure);
 
-    for (((diagnostic, expected_fragments), (report, view)), terse) in
+    for (((_, expected_fragments), (report, view)), terse) in
         cases.iter().zip(failure.reports.iter()).zip(terse_lines)
     {
+        let fallible = view
+            .family_view::<InvalidFallibleHandlingView>()
+            .expect("the frozen diagnostic must retain fallible-handling facts");
         let guidance =
             format_guidance_view(view, DiagnosticRenderContext::for_report(report)).join("\n");
-        if matches!(
-            &diagnostic.payload,
-            crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidFallibleHandling {
-                reason: InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
-            }
-        ) {
-            assert!(diagnostic.labels.is_empty());
+        if fallible.reason == InvalidFallibleHandlingCode::AssertionMessageCannotEscape {
+            assert_eq!(view.durable_labels().count(), 0);
             assert!(!guidance.contains("explicit invariant choice"));
             assert!(!guidance.contains("Error!"));
         }
         if matches!(
-            &diagnostic.payload,
-            crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidFallibleHandling {
-                reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { .. }
-                    | InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
-            }
+            fallible.reason,
+            InvalidFallibleHandlingCode::UnhandledBuiltinFailureInExportedFunction
+                | InvalidFallibleHandlingCode::AssertionMessageCannotEscape,
         ) {
             assert!(!guidance.contains("Witness omits"));
         }

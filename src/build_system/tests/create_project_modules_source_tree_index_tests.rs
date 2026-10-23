@@ -1,11 +1,11 @@
 use super::*;
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
     InvalidConfigCode, InvalidConfigView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReport;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 

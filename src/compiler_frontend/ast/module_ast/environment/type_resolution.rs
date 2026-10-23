@@ -1341,17 +1341,26 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             other => return other,
         };
 
-        let mut warnings = self.warnings.take_diagnostics();
-        for diagnostic in warnings.iter_mut().chain(std::iter::once(&mut failure)) {
-            if diagnostic
+        let warnings = self
+            .warnings
+            .take_diagnostics()
+            .into_iter()
+            .map(|warning| {
+                if warning.has_label_at(variant_span) {
+                    warning
+                } else {
+                    warning.with_label(variant_span, None)
+                }
+            })
+            .collect::<Vec<_>>();
+        if !failure
+            .labels
+            .iter()
+            .any(|label| label.span == variant_span)
+        {
+            failure
                 .labels
-                .iter()
-                .any(|label| label.span == variant_span)
-            {
-                continue;
-            }
-            let label = DiagnosticLabel::secondary(variant_span, None);
-            diagnostic.labels.push(label);
+                .push(DiagnosticLabel::secondary(variant_span, None));
         }
         self.warnings = DiagnosticBag::from_diagnostics(warnings);
 

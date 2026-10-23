@@ -10,7 +10,7 @@
 //!      unrelated boundaries and are never suppressed or resolved across them.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::DiagnosticDraft;
 use crate::compiler_frontend::module_compilation::{
     CompletedGeneratedFunction, GeneratedFunctionDelta, GeneratedFunctionId,
     GeneratedFunctionSidecar, KnownGeneratedFunctions, validate_completed_generated_record,
@@ -124,7 +124,7 @@ impl BoundaryGeneratedFunctionStore {
     }
 
     /// Move sidecar warnings in deterministic publication order.
-    pub(crate) fn take_sidecar_warnings(&mut self) -> Vec<CompilerDiagnostic> {
+    pub(crate) fn take_sidecar_warnings(&mut self) -> Vec<DiagnosticDraft> {
         let mut warnings = Vec::new();
         for record in &mut self.records {
             warnings.extend(record.sidecar.warnings.take_diagnostics());

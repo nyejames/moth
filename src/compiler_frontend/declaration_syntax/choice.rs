@@ -157,7 +157,7 @@ pub(crate) fn parse_choice_shell(
     // in the source text.
     let mut variants = Vec::new();
     let mut seen_variants: FxHashMap<StringId, SourceSpan> = FxHashMap::default();
-    let mut bag = DiagnosticBag::new();
+    let mut duplicate_diagnostic: Option<CompilerDiagnostic> = None;
 
     // Caller is positioned on the `::` token.
     token_stream.advance();
@@ -192,11 +192,13 @@ pub(crate) fn parse_choice_shell(
 
                 // Make sure this is not a duplicate variant name.
                 if let Some(first_span) = seen_variants.get(&variant_name) {
-                    bag.push(CompilerDiagnostic::duplicate_declaration(
-                        variant_name,
-                        Some(*first_span),
-                        current_span,
-                    ));
+                    if duplicate_diagnostic.is_none() {
+                        duplicate_diagnostic = Some(CompilerDiagnostic::duplicate_declaration(
+                            variant_name,
+                            Some(*first_span),
+                            current_span,
+                        ));
+                    }
                 } else if let Some(variant_span) = current_span {
                     seen_variants.insert(variant_name, variant_span);
                 }
@@ -455,13 +457,8 @@ pub(crate) fn parse_choice_shell(
         }
     }
 
-    if bag.has_errors() {
-        let first = bag
-            .into_diagnostics()
-            .into_iter()
-            .next()
-            .expect("choice duplicate bag holds at least one diagnostic");
-        return Err(HeaderParseFailure::Diagnostic(first));
+    if let Some(diagnostic) = duplicate_diagnostic {
+        return Err(HeaderParseFailure::Diagnostic(diagnostic));
     }
 
     Ok(variants)

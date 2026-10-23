@@ -17,10 +17,10 @@ use crate::compiler_frontend::compiler_messages::render::{
     render_malformed_html_template, render_unescaped_implicit_template_close,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, CssTemplateWarning, DiagnosticCategory, DiagnosticKind, DiagnosticPayload,
-    DiagnosticSeverity, HtmlTemplateWarning, InvalidTemplateDirectiveReason,
-    InvalidTemplateSlotReason, InvalidTemplateStructureReason, MalformedTemplateReason,
-    RuleDiagnosticKind, SyntaxDiagnosticKind,
+    CssTemplateWarning, DiagnosticCategory, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
+    HtmlTemplateWarning, InvalidTemplateDirectiveReason, InvalidTemplateSlotReason,
+    InvalidTemplateStructureReason, MalformedTemplateReason, RuleDiagnosticKind,
+    SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -586,7 +586,7 @@ diagnostic_family! {
 }
 
 /// Builds compact CSS and HTML template warnings from the legacy constructor's paired kind and reason.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn malformed_template(
+pub(crate) fn malformed_template(
     kind: SyntaxDiagnosticKind,
     reason: MalformedTemplateReason,
     span: Option<SourceSpan>,
@@ -624,7 +624,7 @@ fn malformed_html_template(
 }
 
 /// Builds the compact template-directive diagnostic from its legacy reason and optional detail.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_template_directive(
+pub(crate) fn invalid_template_directive(
     directive_name: Option<StringId>,
     reason: InvalidTemplateDirectiveReason,
     span: Option<SourceSpan>,
@@ -639,7 +639,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_temp
 }
 
 /// Builds the compact template-structure diagnostic from its typed legacy reason.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_template_structure(
+pub(crate) fn invalid_template_structure(
     reason: InvalidTemplateStructureReason,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -662,27 +662,31 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES:
     INVALID_TEMPLATE_SLOT,
 ];
 /// Maps the legacy template diagnostics onto their compact constructors.
-pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticDraft> {
-    match (diagnostic.kind, &diagnostic.payload) {
+pub(super) fn from_legacy(
+    kind: DiagnosticKind,
+    payload: DiagnosticPayload,
+    span: Option<SourceSpan>,
+) -> Result<DiagnosticDraft, DiagnosticPayload> {
+    match (kind, payload) {
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedCssTemplate),
             DiagnosticPayload::MalformedTemplate {
                 reason: MalformedTemplateReason::Css(reason),
             },
-        ) => Some(malformed_template(
+        ) => Ok(malformed_template(
             SyntaxDiagnosticKind::MalformedCssTemplate,
-            MalformedTemplateReason::Css(*reason),
-            diagnostic.primary_span,
+            MalformedTemplateReason::Css(reason),
+            span,
         )),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedHtmlTemplate),
             DiagnosticPayload::MalformedTemplate {
                 reason: MalformedTemplateReason::Html(reason),
             },
-        ) => Some(malformed_template(
+        ) => Ok(malformed_template(
             SyntaxDiagnosticKind::MalformedHtmlTemplate,
-            MalformedTemplateReason::Html(*reason),
-            diagnostic.primary_span,
+            MalformedTemplateReason::Html(reason),
+            span,
         )),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidStyleDirective),
@@ -690,10 +694,10 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 directive_name,
                 supported_directives,
             },
-        ) => Some(invalid_style_directive(
-            *directive_name,
-            *supported_directives,
-            diagnostic.primary_span,
+        ) => Ok(invalid_style_directive(
+            directive_name,
+            supported_directives,
+            span,
         )),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidTemplateDirective),
@@ -701,30 +705,19 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 directive_name,
                 reason,
             },
-        ) => Some(invalid_template_directive(
-            *directive_name,
-            *reason,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(invalid_template_directive(directive_name, reason, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidTemplateStructure),
             DiagnosticPayload::InvalidTemplateStructure { reason },
-        ) => Some(invalid_template_structure(*reason, diagnostic.primary_span)),
+        ) => Ok(invalid_template_structure(reason, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnescapedImplicitTemplateClose),
             DiagnosticPayload::UnescapedImplicitTemplateClose { source_kind },
-        ) => Some(unescaped_implicit_template_close(
-            *source_kind,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(unescaped_implicit_template_close(source_kind, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidTemplateSlot),
             DiagnosticPayload::InvalidTemplateSlot { reason, slot_name },
-        ) => Some(invalid_template_slot(
-            *reason,
-            *slot_name,
-            diagnostic.primary_span,
-        )),
-        _ => None,
+        ) => Ok(invalid_template_slot(reason, slot_name, span)),
+        (_, payload) => Err(payload),
     }
 }

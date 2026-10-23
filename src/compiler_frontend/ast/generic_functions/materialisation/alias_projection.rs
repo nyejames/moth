@@ -74,7 +74,8 @@ pub(super) fn restore_generated_local_alias(
         binding_span: None,
         config_qualifier: None,
     };
-    let lookups = Rc::make_mut(&mut environment.lookups);
+    let lookups = Rc::get_mut(&mut environment.lookups)
+        .expect("AST environment lookups are uniquely owned before materialisation");
     if lookups.declaration_table.get_by_path(&local_path).is_none() {
         append_materialised_declaration(lookups, declaration, path_fork)?;
     }

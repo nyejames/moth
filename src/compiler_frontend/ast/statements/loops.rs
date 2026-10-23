@@ -24,7 +24,9 @@ use crate::compiler_frontend::ast::statements::loop_headers::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidLoopHeaderReason};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticBag, InvalidLoopHeaderReason,
+};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
@@ -115,7 +117,7 @@ pub fn create_loop(
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     draft: &mut BodyDraft,
@@ -144,16 +146,19 @@ pub fn create_loop(
         .or(span)
         .unwrap_or_else(|| token_stream.current_span());
     let mut window = window.with_synthetic_eof_span(eof_span);
-    let (parsed_loop_header, body_context) = parse_loop_header_cursor(
+    let mut header_warnings = Vec::new();
+    let header_result = parse_loop_header_cursor(
         &mut window,
         context,
         type_interner,
         expression_builder,
         const_values,
-        warnings,
+        &mut header_warnings,
         string_table,
         path_fork,
-    )?;
+    );
+    warnings.append(DiagnosticBag::from_diagnostics(header_warnings));
+    let (parsed_loop_header, body_context) = header_result?;
 
     token_stream.set_position(colon_index.saturating_add(1))?;
 

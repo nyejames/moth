@@ -36,8 +36,8 @@ use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
 use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, PreparedFailure, ProjectContextEscapeReason,
@@ -1873,7 +1873,12 @@ pub fn build_project(
     };
 
     // Backend warnings are project-owned and appended after all frontend/package warnings.
-    warning_accumulator.append_diagnostics(std::mem::take(&mut project.warnings));
+    warning_accumulator.append_diagnostics(
+        std::mem::take(&mut project.warnings)
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+    );
     let output_owner = OutputOwner {
         builder: project_builder.backend.builder_kind(),
         profile: build_profile,

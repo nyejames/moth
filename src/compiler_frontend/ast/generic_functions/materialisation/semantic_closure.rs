@@ -455,7 +455,8 @@ pub(super) fn install_private_semantic_closure(
             declaration_span: stable_trait.declaration_span,
             visibility: TraitVisibility::Source { exported: false },
         };
-        let lookups = Rc::make_mut(&mut environment.lookups);
+        let lookups = Rc::get_mut(&mut environment.lookups)
+            .expect("AST environment lookups are uniquely owned before materialisation");
         let trait_environment = Rc::make_mut(&mut lookups.trait_environment);
         if trait_environment.insert(definition).is_some() {
             return Err(CompilerError::compiler_error(
@@ -554,7 +555,8 @@ pub(super) fn install_private_semantic_closure(
             declaration_span: stable_evidence.declaration_span,
             requirements,
         };
-        let lookups = Rc::make_mut(&mut environment.lookups);
+        let lookups = Rc::get_mut(&mut environment.lookups)
+            .expect("AST environment lookups are uniquely owned before materialisation");
         Rc::make_mut(&mut lookups.trait_evidence_environment).insert_validated(definition);
     }
     Ok(())

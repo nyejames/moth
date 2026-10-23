@@ -4,11 +4,9 @@
 //! WHY: CI, test runners, and IDEs often prefer compact output without ASCII art or colours.
 
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, InfrastructureErrors};
-#[cfg(test)]
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 #[cfg(test)]
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::compact_render_for_test;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::render::infrastructure::{
     INFRASTRUCTURE_FAILURE_CODE, ISSUE_URL, InfrastructureClass, format_error_guidance_lines,
@@ -19,6 +17,8 @@ use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, display_column_number, display_line_number,
     relative_display_path_from_root, terse_diagnostic_message,
 };
+#[cfg(test)]
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticBag};
 use crate::compiler_frontend::utilities::basic::portable_path_text;
 use std::fmt::Write;
 
@@ -146,8 +146,13 @@ pub(crate) fn format_terse_diagnostic_with_context(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let compact = compact_render_for_test(diagnostic);
-    format_terse_diagnostic_view(compact.view(), context)
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic.clone()), None);
+    format_terse_diagnostic_view(
+        compact
+            .first()
+            .expect("the diagnostic bag contains one record"),
+        context,
+    )
 }
 
 fn sanitize_terse_field(value: &str) -> String {

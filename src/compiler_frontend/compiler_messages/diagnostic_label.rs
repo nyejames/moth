@@ -9,6 +9,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::GenericSubstitutionDiagnostic;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DiagnosticLabel {
     pub(crate) span: Option<SourceSpan>,
@@ -134,10 +135,4 @@ impl DiagnosticLabelMessage {
             | DiagnosticLabelMessage::BuiltinWriteBackOrigin { .. } => {}
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct GenericSubstitutionDiagnostic {
-    pub(crate) parameter_name: StringId,
-    pub(crate) concrete_type_id: TypeId,
 }

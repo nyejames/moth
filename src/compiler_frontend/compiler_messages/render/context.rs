@@ -16,12 +16,14 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::token_le
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
-#[cfg(test)]
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::compact_render_for_test;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReport;
+#[cfg(test)]
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 #[cfg(test)]
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticLabel};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticBag, DiagnosticLabel,
+};
 #[cfg(test)]
 use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::source::line_index::{LineIndex, LinePosition};
@@ -346,8 +348,13 @@ pub(crate) fn resolve_label_render_facts_from_root(
     context: DiagnosticRenderContext<'_>,
     root: &Path,
 ) -> Vec<ResolvedDiagnosticLabel> {
-    let compact = compact_render_for_test(diagnostic);
-    DiagnosticSubject::new(compact.view()).resolved_labels(context, root)
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic.clone()), None);
+    DiagnosticSubject::new(
+        compact
+            .first()
+            .expect("the diagnostic bag contains one record"),
+    )
+    .resolved_labels(context, root)
 }
 
 /// Build one resolved label from its style, its position and its message.

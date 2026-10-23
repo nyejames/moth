@@ -32,7 +32,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::foreign::{
     ForeignSiteDraft, ForeignSlot, SiteRef,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::{
-    DraftType, LabelMessageCode,
+    DraftType, GenericSubstitutionDiagnostic, LabelDraftMessage, LabelMessageCode,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::record::{
     DiagnosticCode, SeverityOverride,
@@ -41,9 +41,8 @@ use crate::compiler_frontend::compiler_messages::diagnostics::schema::{FactDescr
 use crate::compiler_frontend::compiler_messages::diagnostics::store::DiagnosticStore;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::FamilyView;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticCategory, DiagnosticDescriptor, DiagnosticLabelMessage, DiagnosticSeverity,
-    DiagnosticToken, GenericSubstitutionDiagnostic, HirCapacityResource, TokenTag,
-    TypeMismatchContext,
+    DiagnosticCategory, DiagnosticDescriptor, DiagnosticSeverity, DiagnosticToken,
+    HirCapacityResource, TokenTag, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -114,13 +113,13 @@ fn draft_with_type_words(
     })
     .with_label(
         Some(span),
-        Some(DiagnosticLabelMessage::TypedFailureProducer {
+        Some(LabelDraftMessage::TypedFailureProducer {
             error_type_id: label_type,
         }),
     )
     .with_label(
         Some(span),
-        Some(DiagnosticLabelMessage::GenericInstantiationSubstitutions {
+        Some(LabelDraftMessage::GenericInstantiationSubstitutions {
             substitutions: vec![GenericSubstitutionDiagnostic {
                 parameter_name: StringId::from_index(2),
                 concrete_type_id: substitution_type,
@@ -200,13 +199,13 @@ fn capture_rewrites_label_and_substitution_type_words() {
     let mut draft = DiagnosticDraft::with_facts(&TEST_LABEL_FAMILY, Some(span), |_cursor| Ok(()))
         .with_label(
             Some(span),
-            Some(DiagnosticLabelMessage::TypedFailureProducer {
+            Some(LabelDraftMessage::TypedFailureProducer {
                 error_type_id: TypeId(3),
             }),
         )
         .with_label(
             Some(span),
-            Some(DiagnosticLabelMessage::GenericInstantiationSubstitutions {
+            Some(LabelDraftMessage::GenericInstantiationSubstitutions {
                 substitutions: vec![GenericSubstitutionDiagnostic {
                     parameter_name: StringId::from_index(2),
                     concrete_type_id: TypeId(7),
@@ -240,13 +239,13 @@ fn capture_rewrites_types_added_after_prior_capture_and_is_noop_when_complete() 
     draft = draft
         .with_label(
             Some(span),
-            Some(DiagnosticLabelMessage::TypedFailureProducer {
+            Some(LabelDraftMessage::TypedFailureProducer {
                 error_type_id: TypeId(8),
             }),
         )
         .with_label(
             Some(span),
-            Some(DiagnosticLabelMessage::GenericInstantiationSubstitutions {
+            Some(LabelDraftMessage::GenericInstantiationSubstitutions {
                 substitutions: vec![GenericSubstitutionDiagnostic {
                     parameter_name: StringId::from_index(3),
                     concrete_type_id: TypeId(9),
@@ -470,7 +469,7 @@ fn rebasing_a_draft_with_an_uncaptured_label_panics() {
         .expect("a draft with no types captures");
     let mut draft = draft.with_label(
         Some(span),
-        Some(DiagnosticLabelMessage::TypedFailureProducer {
+        Some(LabelDraftMessage::TypedFailureProducer {
             error_type_id: TypeId(5),
         }),
     );
@@ -487,7 +486,7 @@ fn rebasing_a_draft_with_an_uncaptured_substitution_panics() {
         .expect("a draft with no types captures");
     let mut draft = draft.with_label(
         Some(span),
-        Some(DiagnosticLabelMessage::GenericInstantiationSubstitutions {
+        Some(LabelDraftMessage::GenericInstantiationSubstitutions {
             substitutions: vec![GenericSubstitutionDiagnostic {
                 parameter_name: StringId::from_index(2),
                 concrete_type_id: TypeId(6),
@@ -516,7 +515,7 @@ fn compacting_an_undeclared_label_message_panics() {
     let mut store = DiagnosticStore::new();
     let draft = unknown_value_name(StringId::from_index(1), None).with_label(
         Some(exact_span(0, 1)),
-        Some(DiagnosticLabelMessage::PreviousDeclaration),
+        Some(LabelDraftMessage::PreviousDeclaration),
     );
     let _outcome = store.compact(draft);
 }
@@ -589,7 +588,7 @@ fn foreign_label_and_primary_share_one_identity_context() {
     let draft = duplicate_declaration(StringId::from_index(1), Some(exact_span(10, 2)))
         .with_label(
             Some(exact_span(0, 2)),
-            Some(DiagnosticLabelMessage::PreviousDeclaration),
+            Some(LabelDraftMessage::PreviousDeclaration),
         )
         .with_foreign(ForeignSiteDraft {
             slot: ForeignSlot::Label(0),
@@ -616,7 +615,7 @@ fn distinct_identities_get_distinct_context_rows() {
     let draft = duplicate_declaration(StringId::from_index(1), Some(exact_span(10, 2)))
         .with_label(
             Some(exact_span(0, 2)),
-            Some(DiagnosticLabelMessage::PreviousDeclaration),
+            Some(LabelDraftMessage::PreviousDeclaration),
         )
         .with_foreign(ForeignSiteDraft {
             slot: ForeignSlot::Label(0),

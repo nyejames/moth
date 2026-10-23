@@ -32,7 +32,7 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidControlFlowStatementReason,
+    CompilerDiagnostic, DiagnosticBag, InvalidControlFlowStatementReason,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -61,11 +61,11 @@ use single_predicate::SinglePredicateParseOutcome;
 
 /// Forwards accumulated parser warnings into the outer scope.
 ///
-/// WHAT: drains a local warning vec and emits each warning through the scope context.
+/// WHAT: drains a local draft bag and emits each warning through the scope context.
 /// WHY: branch-local parsing (e.g. `function_body_to_ast`) may produce warnings
 /// that belong to the enclosing receiver site.
-pub(super) fn emit_collected_warnings(context: &ScopeContext, warnings: Vec<CompilerDiagnostic>) {
-    for warning in warnings {
+pub(super) fn emit_collected_warnings(context: &ScopeContext, warnings: DiagnosticBag) {
+    for warning in warnings.into_diagnostics() {
         context.emit_warning(warning);
     }
 }

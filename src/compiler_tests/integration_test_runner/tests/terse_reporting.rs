@@ -19,8 +19,8 @@ use crate::build_system::create_project_modules::resource_inputs::ResourceInputR
 use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
 use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticBag, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,

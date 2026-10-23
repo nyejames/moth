@@ -400,16 +400,15 @@ impl<'a> HirBuilder<'a> {
                 let warnings = self
                     .prior_diagnostics
                     .take()
-                    .map(|diagnostics| diagnostics.take_diagnostics())
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|mut warning| {
+                    .map(|diagnostics| {
                         if let Some(handle) = &self.frozen_identity_handle {
-                            warning.attach_frozen_identity_handle_if_missing(handle.clone());
+                            for warning in diagnostics.iter_mut() {
+                                warning.attach_frozen_identity_handle_if_missing(handle.clone());
+                            }
                         }
-                        warning
+                        diagnostics.take_diagnostics()
                     })
-                    .collect();
+                    .unwrap_or_default();
                 if let Some(handle) = &self.frozen_identity_handle {
                     diagnostic.attach_frozen_identity_handle_if_missing(handle.clone());
                 }

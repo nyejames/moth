@@ -1803,14 +1803,9 @@ impl FileFrontendPrepareOutput {
                 path_fork,
             )?;
         }
-        let mut warnings = self.warnings.take_diagnostics();
-        for warning in &mut warnings {
-            rebind_source_span(&mut warning.primary_span, final_file_id);
-            for label in &mut warning.labels {
-                rebind_source_span(&mut label.span, final_file_id);
-            }
+        for warning in self.warnings.iter_mut() {
+            warning.rebind_source_ids(&mut |_| Ok(final_file_id))?;
         }
-        self.warnings = DiagnosticBag::from_diagnostics(warnings);
 
         // The table remains private to this output until every retained header has had
         // its top-level source identity rebound. Update its path-location scopes exactly once.

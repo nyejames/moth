@@ -36,13 +36,13 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
     InvalidFallibleHandlingCode, InvalidFallibleHandlingView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticPayload,
@@ -592,7 +592,7 @@ impl FrontendProject {
                 observe_diagnostic(&diagnostic);
                 return Err(PreparedFailure::with_diagnostic_and_warnings(
                     diagnostic,
-                    Vec::new(),
+                    Vec::<CompilerDiagnostic>::new(),
                     &self.frontend.string_table,
                     Some(&type_environment),
                     || Some(Arc::new(self.frontend.path_fork.snapshot_table())),

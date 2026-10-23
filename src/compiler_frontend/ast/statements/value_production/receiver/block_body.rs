@@ -24,7 +24,7 @@ use crate::compiler_frontend::ast::statements::value_production::types::ActiveVa
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidControlFlowStatementReason,
+    CompilerDiagnostic, DiagnosticBag, InvalidControlFlowStatementReason,
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -206,7 +206,7 @@ fn parse_one_value_block_body(
     let branch_scope = branch_context.scope;
     branch_context.active_value_target = Some(active_target);
 
-    let mut warnings = Vec::new();
+    let mut warnings = DiagnosticBag::new();
     let parsed_body = parse_function_body_statements(
         token_stream,
         branch_context,

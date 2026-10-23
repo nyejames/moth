@@ -41,7 +41,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DeferredFeatureReason, InvalidControlFlowStatementReason,
+    CompilerDiagnostic, DeferredFeatureReason, DiagnosticBag, InvalidControlFlowStatementReason,
     InvalidFallibleHandlingReason, InvalidMatchArmReason, InvalidStandaloneStatementReason,
     ReservedNameOwner,
 };
@@ -139,7 +139,7 @@ pub(crate) fn parse_function_body_statements(
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> StatementDispatchResult<ParsedBody> {

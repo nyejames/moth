@@ -72,18 +72,15 @@ pub(crate) fn validate_generic_function_body(
     let parse_owner = body.parse_owner()?;
     let (mut body_cursor, _) = parse_owner.cursor()?;
     // The validation context is built as an independent root by the caller, so its body must
-    // complete before this pass can inspect typed nodes.
-    let mut warning_diagnostics = warnings.take_diagnostics();
     let parsed_body = function_body_to_ast(
         &mut body_cursor,
         context,
         type_interner,
         expression_builder,
         const_values,
-        &mut warning_diagnostics,
+        warnings,
         string_table,
         path_fork,
     );
-    *warnings = DiagnosticBag::from_diagnostics(warning_diagnostics);
     parsed_body?.expect_complete_nodes("a generic function template body")
 }

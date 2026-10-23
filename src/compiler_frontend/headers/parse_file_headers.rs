@@ -192,22 +192,16 @@ fn capture_preparation_spans(
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     match &mut file_output {
         Ok(output) => {
-            let mut warnings = output.warnings.take_diagnostics();
-            for warning in &mut warnings {
-                warning
-                    .capture_preparation_span(file_id)
+            for warning in output.warnings.iter_mut() {
+                validate_preparation_draft_spans(warning, file_id)
                     .map_err(FileFrontendPrepareFailure::Infrastructure)?;
             }
-            output.warnings = DiagnosticBag::from_diagnostics(warnings);
         }
         Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
-            let mut warnings = error.warnings.take_diagnostics();
-            for warning in &mut warnings {
-                warning
-                    .capture_preparation_span(file_id)
+            for warning in error.warnings.iter_mut() {
+                validate_preparation_draft_spans(warning, file_id)
                     .map_err(FileFrontendPrepareFailure::Infrastructure)?;
             }
-            error.warnings = DiagnosticBag::from_diagnostics(warnings);
             error
                 .diagnostic
                 .capture_preparation_span(file_id)
@@ -217,6 +211,22 @@ fn capture_preparation_spans(
     }
 
     file_output
+}
+
+fn validate_preparation_draft_spans(
+    diagnostic: &crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft,
+    source: SourceId,
+) -> Result<(), CompilerError> {
+    let spans = diagnostic
+        .primary_span()
+        .into_iter()
+        .chain((0..diagnostic.label_count()).filter_map(|index| diagnostic.label_span(index)));
+    if spans.into_iter().any(|span| span.source() != source) {
+        return Err(CompilerError::compiler_error(
+            "preparation diagnostic changed source domains",
+        ));
+    }
+    Ok(())
 }
 
 /// Parse headers from an already-tokenized file against a local string-table fork, then merge

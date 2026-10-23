@@ -108,7 +108,17 @@ ACTIVE_PLAN:
 - Execution order: Phase 4 runs as the steps in `PHASE_4_EXECUTION_ORDER` below. The slice
   checklists remain the acceptance contract. Only their order and grouping changed, under the
   architecture document's repository-discovered corrections rule.
-- NEXT_SUBSTEP: P4.6 (4G producer sweep, 4I): producers construct `DiagnosticDraft` directly, tests
+- NEXT_SUBSTEP: P4.6b, the producer sweep: producer groups construct family drafts directly,
+  top-down (consumers before callees), at most two compile-heavy groups at once, then P4.6z
+  deletes the legacy model, adapter and docs remnants (4I). P4.6a is accepted in "Phase 4 P4.6a:
+  draft-only diagnostic bag": `DiagnosticBag` stores only move-only `DiagnosticDraft`s; the only
+  legacy ingress is the temporary consuming `From<CompilerDiagnostic> for DiagnosticDraft` in
+  `legacy_adapter.rs`, so `?` and `push` convert not-yet-migrated producers; family constructors
+  and the draft builder surface are crate-visible; required paths come from codec path visitors;
+  `PreparedDiagnostic` and `BoundaryAccumulator` live in `diagnostics/prepared.rs` and
+  `diagnostics/boundary_accumulator.rs`; focused tests read drafts through
+  `diagnostics/test_support.rs`. P4.6 (4G producer sweep, 4I): producers construct
+  `DiagnosticDraft` directly, tests
   use typed views, and the legacy adapter and old model are deleted. P4.5 is complete. S8 is
   accepted in "Phase 4 P4.5 S8: validation and boundary docs": `just validate` passes (unit,
   integration 2982/2982, docs check), `just clippy-features` passes, and a same-worktree five-run

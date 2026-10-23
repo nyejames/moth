@@ -20,10 +20,10 @@ use crate::build_system::create_project_modules::file_reference_resolution::{
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, PreparedFailure,
+    CompilerDiagnostic, DiagnosticBag, DiagnosticDraft, PreparedFailure,
 };
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput,
@@ -852,7 +852,7 @@ fn finalize_discovery_failure(
         FileFrontendPrepareFailure::Diagnosed(mut error) => {
             let mut error_warnings = error.warnings.take_diagnostics();
             for warning in &mut error_warnings {
-                rebind_diagnostic_source(warning, source_id);
+                rebind_draft_diagnostic_source(warning, source_id);
             }
             rebind_diagnostic_source(&mut error.diagnostic, source_id);
             for warning in error_warnings {
@@ -1001,6 +1001,18 @@ fn rebind_diagnostic_source(diagnostic: &mut CompilerDiagnostic, source_id: Sour
     rebind_source_span(&mut diagnostic.primary_span, source_id);
     for label in &mut diagnostic.labels {
         rebind_source_span(&mut label.span, source_id);
+    }
+}
+
+fn rebind_draft_diagnostic_source(diagnostic: &mut DiagnosticDraft, source_id: SourceId) {
+    let mut span = diagnostic.primary_span();
+    rebind_source_span(&mut span, source_id);
+    diagnostic.set_primary_span(span);
+
+    for index in 0..diagnostic.label_count() {
+        let mut span = diagnostic.label_span(index);
+        rebind_source_span(&mut span, source_id);
+        diagnostic.set_label_span(index, span);
     }
 }
 

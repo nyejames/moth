@@ -25,14 +25,14 @@ use crate::compiler_frontend::compiler_messages::diagnostics::foreign::{
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::{
     DomainSource, InstallMode, PendingDiagnostics,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::{
     DiagnosticReport, DiagnosticReportSet, SeverityCounts,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::resource::DiagnosticLimits;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
-    CapacityResource, DiagnosticCapacityResource, DiagnosticLabelMessage,
-    IncompatibleChoiceComparisonReason,
+    CapacityResource, DiagnosticCapacityResource, IncompatibleChoiceComparisonReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -545,14 +545,14 @@ fn freeze_panics_on_donor_label_without_its_domain() {
         duplicate_declaration(StringId::from_index(1), Some(exact_span(10, 2)))
             .with_label(
                 Some(exact_span(0, 2)),
-                Some(DiagnosticLabelMessage::PreviousDeclaration),
+                Some(LabelDraftMessage::PreviousDeclaration),
             )
-            .with_foreign(ForeignSiteDraft {
-                slot: ForeignSlot::Label(0),
-                context: FrozenIdentityHandle::for_domain(StablePackageIdentity::project_local(
+            .with_label_frozen_identity_handle(
+                0,
+                FrozenIdentityHandle::for_domain(StablePackageIdentity::project_local(
                     "freeze-orphan-label",
                 )),
-            }),
+            ),
     );
 
     let _set = batch.freeze(

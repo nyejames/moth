@@ -15,8 +15,8 @@ use crate::compiler_frontend::compiler_errors::{
     BoundaryFailure, CompilerError, CompilerErrorMetadataKey, ErrorType,
 };
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::dev_server::error_page::{
     format_compiler_messages, render_compiler_error_page, render_runtime_error_page,

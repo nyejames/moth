@@ -5,8 +5,9 @@
 //! WHY: one compile error costs a handful of array writes rather than per-diagnostic allocations, and a failed
 //! compaction changes nothing, so the store never holds a partly written diagnostic.
 
+pub(crate) mod boundary_accumulator;
 mod compaction;
-mod draft;
+pub(crate) mod draft;
 mod extras;
 mod facts;
 pub(crate) mod families;
@@ -14,6 +15,7 @@ pub(crate) mod foreign;
 pub(crate) mod freeze;
 pub(crate) mod labels;
 pub(crate) mod legacy_adapter;
+pub(crate) mod prepared;
 mod record;
 mod registry;
 pub(crate) mod report;
@@ -22,5 +24,7 @@ mod schema;
 mod store;
 pub(crate) mod view;
 
+#[cfg(test)]
+pub(crate) mod test_support;
 #[cfg(test)]
 mod tests;

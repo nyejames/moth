@@ -201,10 +201,10 @@ fn start_function_retains_segmented_source_runs_in_order_with_eof() {
         "a real duplicate after the closed expressions must still be rejected",
     );
     let duplicate_span = source_span_for(&duplicate_source, "Status", 3);
-    assert!(errors.diagnostics.iter().any(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::DuplicateDeclaration { .. }
-        ) && diagnostic.primary_span == Some(duplicate_span)
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::DuplicateDeclarationView>()
+            .is_some()
+            && diagnostic_primary_span(diagnostic) == Some(duplicate_span)
     }));
 }

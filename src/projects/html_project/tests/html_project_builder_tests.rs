@@ -13,11 +13,11 @@ use crate::build_system::output::{
 };
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
     InvalidConfigView, decode_invalid_config,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticSeverity, InvalidConfigReason, PreparedFailure,

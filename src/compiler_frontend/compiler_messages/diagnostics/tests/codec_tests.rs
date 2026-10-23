@@ -26,15 +26,14 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::generics
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::CapacityResourceFact;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::TYPE_MISMATCH;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::{
-    DraftLabel, DraftSubstitution, DraftType, LabelMessageCode, SecondaryDiagnosticLabel,
-    encode_label,
+    DraftLabel, DraftSubstitution, DraftType, GenericSubstitutionDiagnostic, LabelDraftMessage,
+    LabelMessageCode, SecondaryDiagnosticLabel, encode_label,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::record::DiagnosticCode;
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::{FactDescriptor, FamilyRow};
 use crate::compiler_frontend::compiler_messages::{
-    AstCapacityResource, CapacityResource, DiagnosticCapacityResource, DiagnosticLabelMessage,
-    DiagnosticPlace, DiagnosticToken, GenericInferenceSubject, GenericSubstitutionDiagnostic,
-    HirCapacityResource, TokenTag, TypeMismatchContext,
+    AstCapacityResource, CapacityResource, DiagnosticCapacityResource, DiagnosticPlace,
+    DiagnosticToken, GenericInferenceSubject, HirCapacityResource, TokenTag, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -237,7 +236,7 @@ fn secondary_label_rejects_a_data_index_beyond_24_bits() {
         SecondaryDiagnosticLabel::pack(None, LabelMessageCode::CONFIG_INPUT_ORIGIN, 1 << 24);
 }
 
-fn encode(message: DiagnosticLabelMessage) -> (DraftLabel, Vec<DraftSubstitution>) {
+fn encode(message: LabelDraftMessage) -> (DraftLabel, Vec<DraftSubstitution>) {
     let mut substitutions = Vec::new();
     let label = encode_label(Some(exact_span(1, 2)), Some(message), &mut substitutions)
         .expect("a small label always encodes");
@@ -246,7 +245,7 @@ fn encode(message: DiagnosticLabelMessage) -> (DraftLabel, Vec<DraftSubstitution
 
 #[test]
 fn plain_labels_carry_their_code_and_span_only() {
-    let (label, substitutions) = encode(DiagnosticLabelMessage::ValueMovedHere);
+    let (label, substitutions) = encode(LabelDraftMessage::ValueMovedHere);
     assert_eq!(label.message, LabelMessageCode::VALUE_MOVED_HERE);
     assert!(label.span.is_some());
     assert_eq!(label.pending_types, 0);
@@ -271,70 +270,70 @@ fn every_label_message_maps_to_its_code() {
     let name = StringId::from_index(1);
     let cases = [
         (
-            DiagnosticLabelMessage::PreviousDeclaration,
+            LabelDraftMessage::PreviousDeclaration,
             LabelMessageCode::PREVIOUS_DECLARATION,
         ),
         (
-            DiagnosticLabelMessage::ConflictingAccess,
+            LabelDraftMessage::ConflictingAccess,
             LabelMessageCode::CONFLICTING_ACCESS,
         ),
         (
-            DiagnosticLabelMessage::ValueMovedHere,
+            LabelDraftMessage::ValueMovedHere,
             LabelMessageCode::VALUE_MOVED_HERE,
         ),
         (
-            DiagnosticLabelMessage::ConfigInputOrigin {
+            LabelDraftMessage::ConfigInputOrigin {
                 input_name: name,
                 origin: BuildConfigValueOrigin::ExplicitInput,
             },
             LabelMessageCode::CONFIG_INPUT_ORIGIN,
         ),
         (
-            DiagnosticLabelMessage::RenderedText(name),
+            LabelDraftMessage::RenderedText(name),
             LabelMessageCode::RENDERED_TEXT,
         ),
         (
-            DiagnosticLabelMessage::GenericInstantiationBodySite,
+            LabelDraftMessage::GenericInstantiationBodySite,
             LabelMessageCode::GENERIC_INSTANTIATION_BODY_SITE,
         ),
         (
-            DiagnosticLabelMessage::GenericInstantiationDeclarationSite,
+            LabelDraftMessage::GenericInstantiationDeclarationSite,
             LabelMessageCode::GENERIC_INSTANTIATION_DECLARATION_SITE,
         ),
         (
-            DiagnosticLabelMessage::GenericInstantiationSubstitutions {
+            LabelDraftMessage::GenericInstantiationSubstitutions {
                 substitutions: Vec::new(),
             },
             LabelMessageCode::GENERIC_INSTANTIATION_SUBSTITUTIONS,
         ),
         (
-            DiagnosticLabelMessage::GenericInferencePreviousEvidence,
+            LabelDraftMessage::GenericInferencePreviousEvidence,
             LabelMessageCode::GENERIC_INFERENCE_PREVIOUS_EVIDENCE,
         ),
         (
-            DiagnosticLabelMessage::ImmutableBindingDeclaration,
+            LabelDraftMessage::ImmutableBindingDeclaration,
             LabelMessageCode::IMMUTABLE_BINDING_DECLARATION,
         ),
         (
-            DiagnosticLabelMessage::TypedFailureProducer {
+            LabelDraftMessage::TypedFailureProducer {
                 error_type_id: TypeId(1),
             },
             LabelMessageCode::TYPED_FAILURE_PRODUCER,
         ),
         (
-            DiagnosticLabelMessage::ImplicitFailureProducer,
+            LabelDraftMessage::ImplicitFailureProducer,
             LabelMessageCode::IMPLICIT_FAILURE_PRODUCER,
         ),
         (
-            DiagnosticLabelMessage::BuiltinFailureCall,
+            LabelDraftMessage::BuiltinFailureCall,
             LabelMessageCode::BUILTIN_FAILURE_CALL,
         ),
         (
-            DiagnosticLabelMessage::BuiltinFailureOrigin,
+            LabelDraftMessage::BuiltinFailureOrigin,
             LabelMessageCode::BUILTIN_FAILURE_ORIGIN,
         ),
         (
-            DiagnosticLabelMessage::BuiltinWriteBackOrigin {
+            LabelDraftMessage::BuiltinWriteBackOrigin {
                 target_type_id: TypeId(1),
             },
             LabelMessageCode::BUILTIN_WRITE_BACK_ORIGIN,
@@ -349,13 +348,13 @@ fn every_label_message_maps_to_its_code() {
 
 #[test]
 fn type_carrying_labels_mark_their_type_word_pending() {
-    let (typed, _) = encode(DiagnosticLabelMessage::TypedFailureProducer {
+    let (typed, _) = encode(LabelDraftMessage::TypedFailureProducer {
         error_type_id: TypeId(7),
     });
     assert_eq!(typed.pending_types, 0b01);
     assert_eq!(typed.data, [7, 0]);
 
-    let (written, _) = encode(DiagnosticLabelMessage::BuiltinWriteBackOrigin {
+    let (written, _) = encode(LabelDraftMessage::BuiltinWriteBackOrigin {
         target_type_id: TypeId(8),
     });
     assert_eq!(written.pending_types, 0b01);
@@ -364,12 +363,10 @@ fn type_carrying_labels_mark_their_type_word_pending() {
 
 #[test]
 fn string_carrying_labels_store_their_string_index() {
-    let (rendered, _) = encode(DiagnosticLabelMessage::RenderedText(StringId::from_index(
-        9,
-    )));
+    let (rendered, _) = encode(LabelDraftMessage::RenderedText(StringId::from_index(9)));
     assert_eq!(rendered.data, [9, 0]);
 
-    let (config, _) = encode(DiagnosticLabelMessage::ConfigInputOrigin {
+    let (config, _) = encode(LabelDraftMessage::ConfigInputOrigin {
         input_name: StringId::from_index(4),
         origin: BuildConfigValueOrigin::ExplicitInput,
     });
@@ -383,7 +380,7 @@ fn generic_substitution_labels_append_pending_entries() {
         parameter: 0,
         concrete: DraftType::Captured(1),
     }];
-    let message = DiagnosticLabelMessage::GenericInstantiationSubstitutions {
+    let message = LabelDraftMessage::GenericInstantiationSubstitutions {
         substitutions: vec![
             GenericSubstitutionDiagnostic {
                 parameter_name: StringId::from_index(5),
@@ -410,7 +407,7 @@ fn label_encoding_rejects_a_name_beyond_the_fact_range() {
     let mut substitutions = Vec::new();
     let result = encode_label(
         None,
-        Some(DiagnosticLabelMessage::RenderedText(StringId::from_index(
+        Some(LabelDraftMessage::RenderedText(StringId::from_index(
             u32::MAX,
         ))),
         &mut substitutions,
@@ -486,7 +483,7 @@ fn pending_type_words_refuse_the_absent_marker_as_an_id() {
     assert!(OptTypeFact::encode(&Some(TypeId(u32::MAX)), &mut word).is_err());
     let label = encode_label(
         None,
-        Some(DiagnosticLabelMessage::TypedFailureProducer {
+        Some(LabelDraftMessage::TypedFailureProducer {
             error_type_id: TypeId(u32::MAX),
         }),
         &mut Vec::new(),
@@ -1066,4 +1063,20 @@ fn opt_place_fact_reserves_an_invalid_place_word_and_round_trips() {
     assert_eq!(words, [ABSENT_PLACE_WORD]);
     assert_eq!(PlaceFact::decode(&words), None);
     assert_eq!(OptPlaceFact::decode(&words), Some(None));
+}
+
+#[test]
+fn opt_place_fact_path_visitor_forwards_present_paths_only() {
+    let path = PathId::try_from_index(11).expect("a small index always has a path id");
+    let mut words = [0];
+    OptPlaceFact::encode(&Some(DiagnosticPlace::Path(path)), &mut words)
+        .expect("a path place fits one fact word");
+    let mut paths = Vec::new();
+    OptPlaceFact::append_path_ids(&words, &mut paths);
+    assert_eq!(paths, [path]);
+
+    OptPlaceFact::encode(&None, &mut words).expect("absence fits one fact word");
+    paths.clear();
+    OptPlaceFact::append_path_ids(&words, &mut paths);
+    assert!(paths.is_empty());
 }

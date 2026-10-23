@@ -513,7 +513,7 @@ fn template_warnings_with_style_directives(
     source: &str,
     runtime_context: bool,
     style_directives: &StyleDirectiveRegistry,
-) -> Vec<crate::compiler_frontend::compiler_messages::CompilerDiagnostic> {
+) -> Vec<crate::compiler_frontend::compiler_messages::DiagnosticDraft> {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();

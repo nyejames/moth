@@ -28,7 +28,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{
     ContextKind, ScopeContext, TopLevelDeclarationTable, function_body_to_ast,
 };
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticBag};
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -1004,13 +1004,14 @@ fn complete_folded_body(binding_count: usize, conflicting: bool) {
     let mut interner = AstTypeInterner::new(&mut environment, &mut compatibility);
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
+    let mut warnings = DiagnosticBag::new();
     let parsed = function_body_to_ast(
         &mut cursor,
         root.clone(),
         &mut interner,
         &mut expressions,
         &mut constants,
-        &mut vec![],
+        &mut warnings,
         strings,
         &mut paths,
     )

@@ -10,12 +10,19 @@ use crate::builder_surface::external_import_providers::resolution_table::Externa
 use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerErrorMetadataKey, InfrastructureErrors,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, generics_traits_api, imports, names_declarations, project_config,
+    token_lexical,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::{
+    CompactDiagnosticBagForTest, compact_bag_for_test,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::view::{DiagnosticView, FamilyView};
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticBag};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DeferredFeatureReason, DiagnosticBag, DiagnosticKind,
-    DiagnosticLabelMessage, DiagnosticPayload, InvalidChoiceVariantReason, InvalidConfigReason,
-    InvalidDeclarationReason, InvalidDependencyClauseReason, InvalidFunctionSignatureReason,
-    InvalidSignatureMemberReason, InvalidThisUsageReason, InvalidTypeAnnotationReason,
-    ReservedNameOwner, RuleDiagnosticKind, SyntaxDiagnosticKind,
+    InvalidDependencyClauseReason, InvalidSignatureMemberReason, ReservedNameOwner,
 };
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax;
@@ -98,10 +105,61 @@ mod parse_file_headers_trait_tests;
 #[path = "parse_file_headers_type_span_tests.rs"]
 mod parse_file_headers_type_span_tests;
 
-#[derive(Debug)]
 struct HeaderTestDiagnostics {
-    diagnostics: Vec<CompilerDiagnostic>,
+    diagnostics: CompactDiagnosticBagForTest,
     string_table: StringTable,
+}
+
+impl std::fmt::Debug for HeaderTestDiagnostics {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("HeaderTestDiagnostics")
+            .field("diagnostic_count", &self.diagnostics.len())
+            .finish()
+    }
+}
+
+pub(crate) fn diagnostic_view_for_test(
+    diagnostic: CompilerDiagnostic,
+) -> CompactDiagnosticBagForTest {
+    compact_bag_for_test(DiagnosticBag::from(diagnostic), None)
+}
+
+fn diagnostic_primary_span(view: DiagnosticView<'_>) -> Option<SourceSpan> {
+    match view.primary_site() {
+        SiteRef::Absent => None,
+        SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
+    }
+}
+
+fn diagnostic_label_span(view: DiagnosticView<'_>, index: usize) -> Option<SourceSpan> {
+    view.durable_labels()
+        .nth(index)
+        .and_then(|label| match label.site {
+            SiteRef::Absent => None,
+            SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
+        })
+}
+
+fn diagnostic_previous_declaration_span(view: DiagnosticView<'_>) -> Option<SourceSpan> {
+    view.durable_labels().find_map(|label| {
+        matches!(label.message, DurableLabelMessage::PreviousDeclaration).then_some(())?;
+        match label.site {
+            SiteRef::Absent => None,
+            SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
+        }
+    })
+}
+
+fn diagnostic_has_family<View: FamilyView>(view: &DiagnosticView<'_>) -> bool {
+    view.family_view::<View>().is_some()
+}
+
+fn find_diagnostic_family<View: FamilyView>(
+    bag: &CompactDiagnosticBagForTest,
+) -> Option<DiagnosticView<'_>> {
+    bag.views()
+        .find(|diagnostic| diagnostic.family_view::<View>().is_some())
 }
 
 struct HeaderTestPrepareContext<'a> {
@@ -278,9 +336,13 @@ fn expect_prepare_infrastructure(error: FileFrontendPrepareFailure, case: &str) 
     match error {
         FileFrontendPrepareFailure::Infrastructure(_) => {}
         FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError { diagnostic, .. }) => {
+            let diagnostic_bag = diagnostic_view_for_test(diagnostic);
+            let diagnostic = diagnostic_bag
+                .first()
+                .expect("unexpected preparation diagnostic should compact");
             panic!(
-                "{case}: malformed path lookup must not fabricate a user diagnostic: {:?}",
-                diagnostic.payload
+                "{case}: malformed path lookup must not fabricate a user diagnostic: {}",
+                diagnostic.descriptor().code
             )
         }
     }
@@ -459,21 +521,18 @@ pub(crate) fn parse_single_file_headers(source: &str) -> BoundModuleHeaders {
 
 fn parse_single_file_headers_with_warnings(
     source: &str,
-) -> (
-    BoundModuleHeaders,
-    Vec<crate::compiler_frontend::compiler_messages::CompilerDiagnostic>,
-) {
+) -> (BoundModuleHeaders, CompactDiagnosticBagForTest) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@page.moth");
-    let (output, mut span_builder) = prepare_single_file_with_fork(
+    let (mut output, mut span_builder) = prepare_single_file_with_fork(
         source,
         &file_path,
         &file_path,
         &mut string_table,
         &mut path_fork,
     );
-    let warnings = output.warnings.clone().into_diagnostics();
+    let warnings = compact_bag_for_test(std::mem::take(&mut output.warnings), None);
 
     let headers = prepare_and_bind_headers_result(
         vec![output],
@@ -521,7 +580,7 @@ fn parse_single_file_headers_with_entry(
     source: &str,
     file_path: &str,
     entry_file_path: &str,
-) -> Result<BoundModuleHeaders, HeaderTestDiagnostics> {
+) -> Result<BoundModuleHeaders, Box<HeaderTestDiagnostics>> {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from(file_path);
@@ -564,10 +623,10 @@ fn parse_single_file_headers_with_entry(
         Err(FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
             diagnostic, ..
         })) => {
-            return Err(HeaderTestDiagnostics {
-                diagnostics: vec![diagnostic],
+            return Err(Box::new(HeaderTestDiagnostics {
+                diagnostics: diagnostic_view_for_test(diagnostic),
                 string_table,
-            });
+            }));
         }
         Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
             panic!("header test fixture hit infrastructure failure: {error:?}")
@@ -583,16 +642,18 @@ fn parse_single_file_headers_with_entry(
         &mut string_table,
         &mut path_fork,
     )
-    .map_err(|bag| HeaderTestDiagnostics {
-        diagnostics: bag.into_diagnostics(),
-        string_table,
+    .map_err(|bag| {
+        Box::new(HeaderTestDiagnostics {
+            diagnostics: compact_bag_for_test(bag, None),
+            string_table,
+        })
     })
 }
 
 fn expect_header_error(
-    result: Result<BoundModuleHeaders, HeaderTestDiagnostics>,
+    result: Result<BoundModuleHeaders, Box<HeaderTestDiagnostics>>,
     message: &str,
-) -> HeaderTestDiagnostics {
+) -> Box<HeaderTestDiagnostics> {
     match result {
         Ok(_) => panic!("{message}"),
         Err(errors) => errors,
@@ -751,10 +812,16 @@ fn malformed_nested_children_wrapper_constant_initializer_reports_eof_delimiter_
     );
     let errors = result.err().expect("expected parse errors");
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnexpectedEndOfFile { .. }
-    )));
+    assert!(
+        errors
+            .diagnostics
+            .views()
+            .any(
+                |diagnostic| diagnostic_has_family::<token_lexical::UnexpectedEndOfFileView>(
+                    &diagnostic
+                )
+            )
+    );
 }
 
 /// Verifies that header preparation and binding correctly aggregate per-file outputs from multiple source files.
@@ -828,7 +895,7 @@ fn parse_multi_file_headers_with_result(
     entry_path: &str,
 ) -> (
     Result<BoundModuleHeaders, DiagnosticBag>,
-    Vec<CompilerDiagnostic>,
+    CompactDiagnosticBagForTest,
     StringTable,
 ) {
     let (result, warnings, string_table, _path_fork) =
@@ -841,7 +908,7 @@ fn parse_multi_file_headers_with_path(
     entry_path: &str,
 ) -> (
     Result<BoundModuleHeaders, DiagnosticBag>,
-    Vec<CompilerDiagnostic>,
+    CompactDiagnosticBagForTest,
     StringTable,
     PathInternerFork,
 ) {
@@ -860,7 +927,7 @@ fn parse_multi_file_headers_with_path(
 
     let mut prepared_outputs = Vec::new();
     let mut span_builders = Vec::with_capacity(sources.len());
-    let mut warnings = Vec::new();
+    let mut warnings = DiagnosticBag::new();
     let mut diagnostic_bag = DiagnosticBag::new();
     let mut const_template_offset = 0usize;
     let mut runtime_fragment_offset = 0usize;
@@ -881,10 +948,10 @@ fn parse_multi_file_headers_with_path(
             &mut span_builder,
             &mut path_fork,
         ) {
-            Ok(output) => {
+            Ok(mut output) => {
                 const_template_offset += output.const_template_count;
                 runtime_fragment_offset += output.runtime_fragment_count;
-                warnings.extend(output.warnings.clone().into_diagnostics());
+                warnings.append(std::mem::take(&mut output.warnings));
                 prepared_outputs.push(output);
             }
             Err(FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
@@ -892,7 +959,7 @@ fn parse_multi_file_headers_with_path(
                 diagnostic,
                 ..
             })) => {
-                warnings.extend(file_warnings.into_diagnostics());
+                warnings.append(file_warnings);
                 diagnostic_bag.push(diagnostic);
             }
             Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
@@ -903,7 +970,12 @@ fn parse_multi_file_headers_with_path(
     }
 
     if diagnostic_bag.has_errors() {
-        return (Err(diagnostic_bag), warnings, string_table, path_fork);
+        return (
+            Err(diagnostic_bag),
+            compact_bag_for_test(warnings, None),
+            string_table,
+            path_fork,
+        );
     }
 
     let result = prepare_and_bind_headers_result(
@@ -916,7 +988,12 @@ fn parse_multi_file_headers_with_path(
         &mut path_fork,
     );
 
-    (result, warnings, string_table, path_fork)
+    (
+        result,
+        compact_bag_for_test(warnings, None),
+        string_table,
+        path_fork,
+    )
 }
 
 fn empty_void_function_def(name: &str) -> ExternalFunctionDef {
@@ -1012,16 +1089,14 @@ fn assert_generic_dependency_name_collision(source: &str) {
         }
     };
 
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidDeclaration {
-                reason: InvalidDeclarationReason::GenericParameterNameCollision { .. },
-                ..
-            }
-        ),
-        "unexpected dependency-name diagnostic: {:?}",
-        diagnostic.payload
+    let diagnostic_bag = diagnostic_view_for_test(diagnostic);
+    let diagnostic = diagnostic_bag
+        .first()
+        .expect("generic-parameter collision diagnostic should compact");
+    assert_eq!(
+        diagnostic.reason_key(),
+        Some("invalid_declaration.generic_parameter_name_collision"),
+        "unexpected dependency-name diagnostic"
     );
 }
 

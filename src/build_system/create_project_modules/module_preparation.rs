@@ -14,7 +14,7 @@ use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, PreparedFailure, SourceSpanCapacityResource,
+    CompilerDiagnostic, DiagnosticBag, DiagnosticDraft, PreparedFailure, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole,
@@ -289,7 +289,7 @@ pub(super) struct ModuleSyntaxDiscovery<'a, 'texts> {
     path_fork: PathInternerFork,
     prepared_outputs: PreparedSourceSlots,
     resolved_file_references: ResolvedFileReferenceTable,
-    warnings: Vec<CompilerDiagnostic>,
+    warnings: Vec<DiagnosticDraft>,
     source_byte_count: usize,
     contains_moth_template: bool,
     #[cfg(feature = "timers")]
@@ -563,7 +563,7 @@ impl ModulePreparationContext<'_> {
         entry_file_path: &Path,
         active_root_role: ModuleRootRole,
         source_byte_count: usize,
-    ) -> Result<(PreparedHeaderSyntax, Vec<CompilerDiagnostic>), PreparedFailure> {
+    ) -> Result<(PreparedHeaderSyntax, Vec<DiagnosticDraft>), PreparedFailure> {
         // Retained direct-preparation inputs use the source database's path domain. The mutable
         // module fork must carry that authoritative prefix before worker snapshots are created.
         Self::validate_path_fork_base(path_fork, self.source_files)?;
@@ -649,7 +649,7 @@ impl ModulePreparationContext<'_> {
         mut preparation_chunks: Vec<FilePreparationChunk>,
         module_file_count: usize,
         base_len: usize,
-    ) -> Result<(PreparedHeaderSyntax, Vec<CompilerDiagnostic>), PreparedFailure> {
+    ) -> Result<(PreparedHeaderSyntax, Vec<DiagnosticDraft>), PreparedFailure> {
         // Completion order is a scheduler detail. Merge order is the module input order encoded
         // by deterministic chunk indexes; prepared outputs are then placed by `file_index`, so
         // header order never depends on which worker finished first.
@@ -777,7 +777,7 @@ impl ModulePreparationContext<'_> {
                             ..
                         } = error;
                         warnings.extend(file_warnings.into_diagnostics());
-                        diagnostics.push(diagnostic);
+                        diagnostics.push(diagnostic.into());
                     }
                     Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
                         return Err(PreparedFailure::Infrastructure(error.into()));

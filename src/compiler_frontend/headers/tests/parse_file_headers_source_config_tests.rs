@@ -1,6 +1,5 @@
 use super::*;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
-use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 
 #[test]
 fn source_config_contracts_are_normalized_in_authored_order() {
@@ -67,22 +66,18 @@ fn source_config_numeric_defaults_materialise_at_their_declared_scalar() {
         Ok(_) => panic!("an I32 default outside its range should fail during header preparation"),
         Err(error) => error,
     };
-    let diagnostic = error
-        .into_diagnostics()
-        .into_iter()
-        .next()
+    let diagnostics = compact_bag_for_test(error, None);
+    let diagnostic = diagnostics
+        .first()
         .expect("expected a number literal diagnostic");
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidNumberLiteral {
-                reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32),
-                ..
-            }
-        ),
-        "expected an I32 range diagnostic, got {:?}",
-        diagnostic.payload
+    let facts = diagnostic
+        .family_view::<token_lexical::InvalidNumberLiteralView>()
+        .expect("expected a typed number literal diagnostic");
+    assert_eq!(
+        facts.code,
+        token_lexical::NumberLiteralCode::OutsideFixedScalarRange
     );
+    assert_eq!(facts.scalar, Some(FixedScalar::I32));
 }
 
 #[test]
@@ -99,39 +94,20 @@ fn source_config_contracts_reject_invalid_name_type_and_default_during_preparati
             Ok(_) => panic!("invalid source contract should fail before binding"),
             Err(error) => error,
         };
-        let diagnostic = error
-            .into_diagnostics()
-            .into_iter()
-            .next()
+        let diagnostics = compact_bag_for_test(error, None);
+        let diagnostic = diagnostics
+            .first()
             .expect("expected source contract diagnostic");
-        let matches_expected = match expected_kind {
-            "name" => matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidConfig {
-                    reason: InvalidConfigReason::ConfigContractNameInvalid,
-                    ..
-                }
-            ),
-            "type" => matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidConfig {
-                    reason: InvalidConfigReason::ConfigQualifierUnsupportedType,
-                    ..
-                }
-            ),
-            "default" => matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidConfig {
-                    reason: InvalidConfigReason::ConfigInputTypeMismatch { .. },
-                    ..
-                }
-            ),
-            _ => false,
+        let expected_reason = match expected_kind {
+            "name" => "invalid_config.config_contract_name_invalid",
+            "type" => "invalid_config.config_qualifier_unsupported_type",
+            "default" => "invalid_config.config_input_type_mismatch",
+            _ => "",
         };
-        assert!(
-            matches_expected,
-            "expected {expected_kind} source contract diagnostic, got {:?}",
-            diagnostic.payload
+        assert_eq!(
+            diagnostic.reason_key(),
+            Some(expected_reason),
+            "expected {expected_kind} source contract diagnostic"
         );
     }
 }
@@ -147,18 +123,14 @@ fn source_config_contracts_reject_runtime_qualifiers_before_ast() {
         Ok(_) => panic!("runtime #Config must fail during header preparation"),
         Err(error) => error,
     };
-    let diagnostic = error
-        .into_diagnostics()
-        .into_iter()
-        .next()
+    let diagnostics = compact_bag_for_test(error, None);
+    let diagnostic = diagnostics
+        .first()
         .expect("expected source placement diagnostic");
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidConfig {
-            reason: InvalidConfigReason::ConfigQualifierInvalidPlacement,
-            ..
-        }
-    ));
+    assert_eq!(
+        diagnostic.reason_key(),
+        Some("invalid_config.config_qualifier_invalid_placement")
+    );
 }
 
 #[test]
@@ -281,13 +253,13 @@ fn imported_root_discarded_body_config_marker_is_rejected() {
         "discarded imported-root body config markers must be rejected during preparation",
     );
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidConfig {
-            reason: InvalidConfigReason::ConfigQualifierInvalidPlacement,
-            ..
-        }
-    )));
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<project_config::InvalidConfigView>()
+            .is_some_and(|_| {
+                diagnostic.reason_key() == Some("invalid_config.config_qualifier_invalid_placement")
+            })
+    }));
 }
 
 #[test]
@@ -323,8 +295,7 @@ fn malformed_children_wrapper_constant_initializer_reports_eof_delimiter_error()
     );
     let errors = result.err().expect("expected parse errors");
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnexpectedEndOfFile { .. }
-    )));
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic_has_family::<token_lexical::UnexpectedEndOfFileView>(&diagnostic)
+    }));
 }

@@ -18,7 +18,7 @@ use crate::compiler_frontend::compiler_messages::render::{
     render_invalid_value_receiver,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticCategory, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
+    DiagnosticCategory, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
     InvalidBuiltinCallReason, InvalidCallShapeReason, InvalidCastReason,
     InvalidCollectionTypeReason, InvalidCopyTargetReason, InvalidFieldAccessReason,
     InvalidMapLiteralReason, InvalidMapTypeReason, InvalidMultiBindReason,
@@ -458,7 +458,7 @@ diagnostic_family! {
 
 /// The invalid-multi-bind draft for a rule-kind diagnostic. The arity counts are zero unless the reason is
 /// `ArityMismatch`.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_multi_bind(
+pub(crate) fn invalid_multi_bind(
     reason: InvalidMultiBindReason,
     target_name: Option<StringId>,
     span: Option<SourceSpan>,
@@ -478,7 +478,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_mult
 }
 
 /// Builds the compact map-literal diagnostic from its unit reason.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_map_literal(
+pub(crate) fn invalid_map_literal(
     reason: InvalidMapLiteralReason,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -488,7 +488,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_map_
     })
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_collection_type(
+pub(crate) fn invalid_collection_type(
     reason: InvalidCollectionTypeReason,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -507,7 +507,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_coll
     })
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_map_type(
+pub(crate) fn invalid_map_type(
     reason: InvalidMapTypeReason,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -525,7 +525,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_map_
     })
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_return_shape(
+pub(crate) fn invalid_return_shape(
     reason: InvalidReturnShapeReason,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -548,7 +548,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_retu
         Ok(())
     })
 }
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_builtin_call(
+pub(crate) fn invalid_builtin_call(
     reason: InvalidBuiltinCallReason,
     builtin_name: Option<StringId>,
     span: Option<SourceSpan>,
@@ -560,7 +560,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_buil
     })
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_copy_target(
+pub(crate) fn invalid_copy_target(
     reason: InvalidCopyTargetReason,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -570,7 +570,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_copy
     })
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_range_operand(
+pub(crate) fn invalid_range_operand(
     operand: RangeOperandKind,
     found_type: TypeId,
     reason: InvalidRangeOperandReason,
@@ -584,7 +584,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_rang
     })
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_receiver_call(
+pub(crate) fn invalid_receiver_call(
     reason: InvalidReceiverCallReason,
     receiver_type: Option<StringId>,
     method_name: Option<StringId>,
@@ -602,7 +602,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_rece
     .with_string_ids(receiver_binding_name.into_iter().collect())
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_field_access(
+pub(crate) fn invalid_field_access(
     reason: InvalidFieldAccessReason,
     field_name: Option<StringId>,
     receiver_type: Option<TypeId>,
@@ -618,7 +618,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_fiel
     .with_string_ids(known_fields)
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_call_shape(
+pub(crate) fn invalid_call_shape(
     reason: InvalidCallShapeReason,
     callee_name: Option<StringId>,
     span: Option<SourceSpan>,
@@ -690,7 +690,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_call
     .with_string_ids(string_ids)
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_cast(
+pub(crate) fn invalid_cast(
     reason: InvalidCastReason,
     source_type: Option<TypeId>,
     target_type: Option<TypeId>,
@@ -704,7 +704,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_cast
     })
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_value_receiver(
+pub(crate) fn invalid_value_receiver(
     receiver: ValueReceiverContext,
     target_count: usize,
     produced_count: usize,
@@ -718,47 +718,43 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_valu
     })
 }
 
-/// Maps legacy diagnostics onto compact constructors. Declines other payloads.
-pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticDraft> {
-    match (diagnostic.kind, &diagnostic.payload) {
+/// Consumes this group's legacy kind and payload when they match a compact family.
+pub(super) fn from_legacy(
+    kind: DiagnosticKind,
+    payload: DiagnosticPayload,
+    span: Option<SourceSpan>,
+) -> Result<DiagnosticDraft, DiagnosticPayload> {
+    match (kind, payload) {
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidMultiBind),
             DiagnosticPayload::InvalidMultiBind {
                 reason,
                 target_name,
             },
-        ) => Some(invalid_multi_bind(
-            *reason,
-            *target_name,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(invalid_multi_bind(reason, target_name, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidCollectionType),
             DiagnosticPayload::InvalidCollectionType { reason },
-        ) => Some(invalid_collection_type(*reason, diagnostic.primary_span)),
+        ) => Ok(invalid_collection_type(reason, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidMapType),
             DiagnosticPayload::InvalidMapType { reason },
-        ) => Some(invalid_map_type(*reason, diagnostic.primary_span)),
+        ) => Ok(invalid_map_type(reason, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidMapLiteral),
             DiagnosticPayload::InvalidMapLiteral { reason },
-        ) => Some(invalid_map_literal(*reason, diagnostic.primary_span)),
+        ) => Ok(invalid_map_literal(reason, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidBuiltinCall),
             DiagnosticPayload::InvalidBuiltinCall {
                 reason,
                 builtin_name,
             },
-        ) => Some(invalid_builtin_call(
-            *reason,
-            *builtin_name,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(invalid_builtin_call(reason, builtin_name, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidCopyTarget),
             DiagnosticPayload::InvalidCopyTarget { reason },
-        ) => Some(invalid_copy_target(*reason, diagnostic.primary_span)),
+        ) => Ok(invalid_copy_target(reason, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidRangeOperand),
             DiagnosticPayload::InvalidRangeOperand {
@@ -766,12 +762,7 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 found_type,
                 reason,
             },
-        ) => Some(invalid_range_operand(
-            *operand,
-            *found_type,
-            *reason,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(invalid_range_operand(operand, found_type, reason, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidReceiverCall),
             DiagnosticPayload::InvalidReceiverCall {
@@ -781,13 +772,13 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 receiver_kind,
                 receiver_binding_name,
             },
-        ) => Some(invalid_receiver_call(
-            *reason,
-            *receiver_type,
-            *method_name,
-            *receiver_kind,
-            *receiver_binding_name,
-            diagnostic.primary_span,
+        ) => Ok(invalid_receiver_call(
+            reason,
+            receiver_type,
+            method_name,
+            receiver_kind,
+            receiver_binding_name,
+            span,
         )),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidFieldAccess),
@@ -797,12 +788,12 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 receiver_type,
                 known_fields,
             },
-        ) => Some(invalid_field_access(
-            *reason,
-            *field_name,
-            *receiver_type,
-            known_fields.clone(),
-            diagnostic.primary_span,
+        ) => Ok(invalid_field_access(
+            reason,
+            field_name,
+            receiver_type,
+            known_fields,
+            span,
         )),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidCallShape),
@@ -810,11 +801,7 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 reason,
                 callee_name,
             },
-        ) => Some(invalid_call_shape(
-            reason.clone(),
-            *callee_name,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(invalid_call_shape(reason, callee_name, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidCast),
             DiagnosticPayload::InvalidCast {
@@ -822,12 +809,7 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 source_type,
                 target_type,
             },
-        ) => Some(invalid_cast(
-            *reason,
-            *source_type,
-            *target_type,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(invalid_cast(reason, source_type, target_type, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidValueReceiver),
             DiagnosticPayload::InvalidValueReceiver {
@@ -835,17 +817,17 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 target_count,
                 produced_count,
             },
-        ) => Some(invalid_value_receiver(
-            *receiver,
-            *target_count,
-            *produced_count,
-            diagnostic.primary_span,
+        ) => Ok(invalid_value_receiver(
+            receiver,
+            target_count,
+            produced_count,
+            span,
         )),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidReturnShape),
             DiagnosticPayload::InvalidReturnShape { reason },
-        ) => Some(invalid_return_shape(*reason, diagnostic.primary_span)),
-        _ => None,
+        ) => Ok(invalid_return_shape(reason, span)),
+        (_, payload) => Err(payload),
     }
 }
 

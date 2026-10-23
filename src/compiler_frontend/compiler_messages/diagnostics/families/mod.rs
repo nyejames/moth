@@ -3,8 +3,9 @@
 //! WHAT: each child module holds the rows for one group. `registry` joins the groups into one table.
 //! WHY: a group keeps its rows beside the diagnostics they describe, so a stage owner edits one file.
 
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::{DiagnosticKind, DiagnosticPayload};
+use crate::compiler_frontend::source::SourceSpan;
 
 pub(crate) mod calls_data;
 pub(crate) mod choices_control_flow;
@@ -16,16 +17,35 @@ pub(crate) mod templates;
 pub(crate) mod token_lexical;
 pub(crate) mod types_borrows_targets;
 
-/// The compact draft for a legacy diagnostic, from whichever group owns its kind. `None` when no
-/// compact family carries it, so the caller keeps the legacy payload.
-pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticDraft> {
-    token_lexical::from_legacy(diagnostic)
-        .or_else(|| imports::from_legacy(diagnostic))
-        .or_else(|| templates::from_legacy(diagnostic))
-        .or_else(|| project_config::from_legacy(diagnostic))
-        .or_else(|| names_declarations::from_legacy(diagnostic))
-        .or_else(|| calls_data::from_legacy(diagnostic))
-        .or_else(|| choices_control_flow::from_legacy(diagnostic))
-        .or_else(|| generics_traits_api::from_legacy(diagnostic))
-        .or_else(|| types_borrows_targets::from_legacy(diagnostic))
+type LegacyFamilyAdapter = fn(
+    DiagnosticKind,
+    DiagnosticPayload,
+    Option<SourceSpan>,
+) -> Result<DiagnosticDraft, DiagnosticPayload>;
+
+/// The compact draft for a legacy diagnostic, from whichever group owns its kind.
+pub(super) fn from_legacy(
+    kind: DiagnosticKind,
+    payload: DiagnosticPayload,
+    span: Option<SourceSpan>,
+) -> Option<DiagnosticDraft> {
+    let adapters: [LegacyFamilyAdapter; 9] = [
+        token_lexical::from_legacy,
+        imports::from_legacy,
+        templates::from_legacy,
+        project_config::from_legacy,
+        names_declarations::from_legacy,
+        calls_data::from_legacy,
+        choices_control_flow::from_legacy,
+        generics_traits_api::from_legacy,
+        types_borrows_targets::from_legacy,
+    ];
+    let mut unmatched = payload;
+    for adapter in adapters {
+        match adapter(kind, unmatched, span) {
+            Ok(draft) => return Some(draft),
+            Err(payload) => unmatched = payload,
+        }
+    }
+    None
 }

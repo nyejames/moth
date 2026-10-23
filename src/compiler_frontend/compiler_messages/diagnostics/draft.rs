@@ -14,23 +14,23 @@ use super::facts::{
 };
 use super::families::token_lexical::{COMPILER_CAPACITY_EXCEEDED, CapacityResourceFact};
 use super::foreign::{ForeignSiteDraft, ForeignSlot};
-use super::labels::{DraftType, encode_label};
+use super::labels::{DraftType, LabelDraftMessage, encode_label};
 use super::record::SeverityOverride;
 use super::schema::FamilyRow;
 use crate::compiler_frontend::compiler_messages::diagnostic_types::{
     TypeDisplayCapacityError, TypeDisplayId,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CapacityResource, DiagnosticCapacityResource, DiagnosticLabelMessage, DiagnosticSeverity,
+    CapacityResource, DiagnosticCapacityResource, DiagnosticSeverity,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::PathIdRemap;
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan};
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 
 /// A diagnostic under construction. Only `DiagnosticStore::compact` turns it into a stored record.
 #[derive(Debug)]
-pub(super) struct DiagnosticDraft {
+pub(crate) struct DiagnosticDraft {
     pub(super) core: DraftCore,
     pub(super) extra: Option<Box<DiagnosticExtraDraft>>,
 }
@@ -128,16 +128,36 @@ impl DiagnosticDraft {
         }
     }
 
-    /// Replaces this draft with the capacity stand-in, keeping the draft's local primary span.
-    fn faulted_by(self, resource: DiagnosticCapacityResource) -> Self {
-        Self::capacity_fault(self.capacity_span(), CapacityResource::Store(resource))
+    /// Replaces this draft with the capacity stand-in, retaining owner handles for boundary identity selection.
+    pub(super) fn faulted_by(mut self, resource: DiagnosticCapacityResource) -> Self {
+        let span = self.capacity_span();
+        let mut owner_handles = self
+            .extra
+            .take()
+            .map(|boxed| {
+                let mut extra = *boxed;
+                extra
+                    .owner_handles
+                    .extend(extra.foreign_sites.into_iter().map(|site| site.context));
+                extra.owner_handles
+            })
+            .unwrap_or_default();
+        let mut fault = Self::capacity_fault(span, CapacityResource::Store(resource));
+        if !owner_handles.is_empty() {
+            fault
+                .extra
+                .get_or_insert_with(Box::default)
+                .owner_handles
+                .append(&mut owner_handles);
+        }
+        fault
     }
 }
 
 impl DiagnosticDraft {
     /// Records `severity` as this draft's override. A severity equal to the family default stores nothing, so the
     /// record keeps the descriptor's severity. A faulted draft keeps its capacity severity.
-    pub(super) fn with_severity(mut self, severity: DiagnosticSeverity) -> Self {
+    pub(crate) fn with_severity(mut self, severity: DiagnosticSeverity) -> Self {
         if !self.core.faulted {
             self.core.severity =
                 SeverityOverride::for_severity(severity, self.core.family.default_severity());
@@ -145,13 +165,107 @@ impl DiagnosticDraft {
         self
     }
 
-    /// Adds a secondary label in this draft's own identity. A label from another identity takes its span here too,
-    /// then goes through `with_foreign`, which records the identity and leaves the span in place.
-    /// A label without a message is encoded as `NONE`, so it still points at its span.
-    pub(super) fn with_label(
+    pub(crate) fn severity(&self) -> DiagnosticSeverity {
+        self.core
+            .severity
+            .resolve(self.core.family.default_severity())
+    }
+
+    /// The family descriptor's stable code, for code-level classification without decoding facts.
+    pub(crate) fn code(&self) -> &'static str {
+        self.core.family.descriptor.code
+    }
+
+    pub(crate) fn primary_span(&self) -> Option<SourceSpan> {
+        self.core.span
+    }
+
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "P4.6b producer migrations use draft span and label-owner builders"
+        )
+    )]
+    pub(crate) fn set_primary_span(&mut self, span: Option<SourceSpan>) {
+        self.core.span = span;
+    }
+
+    pub(crate) fn has_label_at(&self, span: Option<SourceSpan>) -> bool {
+        self.extra
+            .as_ref()
+            .is_some_and(|extra| extra.labels.iter().any(|label| label.span == span))
+    }
+
+    pub(crate) fn label_count(&self) -> usize {
+        self.extra.as_ref().map_or(0, |extra| extra.labels.len())
+    }
+
+    pub(crate) fn label_span(&self, index: usize) -> Option<SourceSpan> {
+        self.extra
+            .as_ref()?
+            .labels
+            .get(index)
+            .and_then(|label| label.span)
+    }
+
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "P4.6b producer migrations use draft span and label-owner builders"
+        )
+    )]
+    pub(crate) fn set_label_span(&mut self, index: usize, span: Option<SourceSpan>) {
+        if let Some(label) = self
+            .extra
+            .as_deref_mut()
+            .and_then(|extra| extra.labels.get_mut(index))
+        {
+            label.span = span;
+        }
+    }
+
+    pub(crate) fn rebind_source_ids(
+        &mut self,
+        rebind: &mut impl FnMut(
+            crate::compiler_frontend::source::SourceId,
+        ) -> Result<
+            crate::compiler_frontend::source::SourceId,
+            crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError,
+        >,
+    ) -> Result<(), crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError>
+    {
+        fn rebind_span(
+            span: &mut Option<SourceSpan>,
+            rebind: &mut impl FnMut(
+                crate::compiler_frontend::source::SourceId,
+            ) -> Result<
+                crate::compiler_frontend::source::SourceId,
+                crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError,
+            >,
+        ) -> Result<(), crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError>
+        {
+            if let Some(span) = span {
+                *span = SourceSpan::new(rebind(span.source())?, span.local());
+            }
+            Ok(())
+        }
+
+        rebind_span(&mut self.core.span, rebind)?;
+        if let Some(extra) = self.extra.as_deref_mut() {
+            for label in &mut extra.labels {
+                rebind_span(&mut label.span, rebind)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Adds a secondary label in this draft's own identity. A label without a message still points at its span.
+    pub(crate) fn with_label(
         mut self,
         span: Option<SourceSpan>,
-        message: Option<DiagnosticLabelMessage>,
+        message: Option<LabelDraftMessage>,
     ) -> Self {
         if self.core.faulted {
             return self;
@@ -166,15 +280,16 @@ impl DiagnosticDraft {
         }
     }
 
-    /// Marks a span as belonging to another identity. The span stays in the draft's primary or label field. The
-    /// foreign-site row records which slot it occupies and which identity context owns it.
+    /// Marks a span as belonging to another identity.
     pub(super) fn with_foreign(mut self, site: ForeignSiteDraft) -> Self {
         if self.core.faulted {
-            // A capacity-fault draft carries no ownership rows, so its foreign primary is dropped
-            // like the stand-in record's, rather than being read later as a local span.
             if matches!(site.slot, ForeignSlot::Primary) {
                 self.core.span = None;
             }
+            self.extra
+                .get_or_insert_with(Box::default)
+                .owner_handles
+                .push(site.context);
             return self;
         }
         if let ForeignSlot::Label(index) = site.slot {
@@ -189,6 +304,128 @@ impl DiagnosticDraft {
             .foreign_sites
             .push(site);
         self
+    }
+
+    pub(crate) fn with_primary_frozen_identity_handle(
+        mut self,
+        handle: FrozenIdentityHandle,
+    ) -> Self {
+        self.set_foreign_slot(ForeignSlot::Primary, handle, false);
+        self
+    }
+
+    pub(crate) fn set_primary_frozen_identity_handle_if_missing(
+        &mut self,
+        handle: FrozenIdentityHandle,
+    ) {
+        self.set_foreign_slot(ForeignSlot::Primary, handle, true);
+    }
+
+    pub(crate) fn attach_frozen_identity_handle_if_missing(
+        &mut self,
+        handle: FrozenIdentityHandle,
+    ) {
+        self.set_primary_frozen_identity_handle_if_missing(handle.clone());
+        let label_count = self.extra.as_ref().map_or(0, |extra| extra.labels.len());
+        for index in 0..label_count {
+            if self
+                .extra
+                .as_ref()
+                .is_some_and(|extra| extra.labels[index].span.is_some())
+            {
+                self.set_label_frozen_identity_handle_if_missing(index, handle.clone());
+            }
+        }
+    }
+
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "P4.6b producer migrations use draft span and label-owner builders"
+        )
+    )]
+    pub(crate) fn with_label_frozen_identity_handle(
+        mut self,
+        index: usize,
+        handle: FrozenIdentityHandle,
+    ) -> Self {
+        self.set_foreign_slot(ForeignSlot::Label(index), handle, false);
+        self
+    }
+
+    pub(crate) fn set_label_frozen_identity_handle_if_missing(
+        &mut self,
+        index: usize,
+        handle: FrozenIdentityHandle,
+    ) {
+        let label_count = self.extra.as_ref().map_or(0, |extra| extra.labels.len());
+        assert!(
+            index < label_count,
+            "a frozen label owner names an existing label"
+        );
+        self.set_foreign_slot(ForeignSlot::Label(index), handle, true);
+    }
+
+    fn set_foreign_slot(
+        &mut self,
+        slot: ForeignSlot,
+        handle: FrozenIdentityHandle,
+        if_missing: bool,
+    ) {
+        if self.core.faulted {
+            if matches!(slot, ForeignSlot::Primary) {
+                self.core.span = None;
+            }
+            self.extra
+                .get_or_insert_with(Box::default)
+                .owner_handles
+                .push(handle);
+            return;
+        }
+        let extra = self.extra.get_or_insert_with(Box::default);
+        if let ForeignSlot::Label(index) = slot {
+            assert!(
+                index < extra.labels.len(),
+                "a foreign label site names a label that was added first"
+            );
+        }
+        if let Some(site) = extra
+            .foreign_sites
+            .iter_mut()
+            .find(|site| site.slot == slot)
+        {
+            if !if_missing {
+                site.context = handle;
+            }
+        } else {
+            extra.foreign_sites.push(ForeignSiteDraft {
+                slot,
+                context: handle,
+            });
+        }
+    }
+
+    /// Returns every frozen identity owner carried by this draft, including owners retained after a capacity fault.
+    pub(super) fn visit_identity_handles(&self, mut visit: impl FnMut(&FrozenIdentityHandle)) {
+        if let Some(extra) = self.extra.as_deref() {
+            for site in &extra.foreign_sites {
+                visit(&site.context);
+            }
+            for handle in &extra.owner_handles {
+                visit(handle);
+            }
+        }
+    }
+
+    /// Appends path IDs encoded by the family's fact codecs.
+    pub(crate) fn append_required_paths(&self, paths: &mut Vec<PathId>) {
+        let mut offset = 0;
+        for fact in self.core.family.layout {
+            let end = offset + usize::from(fact.words);
+            (fact.append_path_ids)(&self.core.facts[offset..end], paths);
+            offset = end;
+        }
     }
 
     /// Attaches the string IDs that a family declares as its extra data. An empty list stores nothing.
@@ -367,7 +604,7 @@ fn captured_word(
 impl DiagnosticDraft {
     /// Rewrites every string ID in this draft through `remap`, which must come from the table the draft was
     /// built against. An identity remap changes nothing.
-    pub(super) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         if remap.is_identity() {
             return;
         }
@@ -376,7 +613,7 @@ impl DiagnosticDraft {
 
     /// Rewrites every path ID in this draft through `remap`, which must come from the interner the draft was
     /// built against. An identity remap changes nothing.
-    pub(super) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         if remap.is_identity() {
             return;
         }
@@ -388,11 +625,11 @@ impl DiagnosticDraft {
     /// left alone: a `SourceId` names a source record, not a string or a path.
     fn remap_draft(&mut self, remap: IdRemap<'_>) {
         if self.rewrite_draft(remap).is_err() {
-            let span = self.capacity_span();
-            *self = Self::capacity_fault(
-                span,
-                CapacityResource::Store(DiagnosticCapacityResource::FactValue),
-            );
+            let resource = DiagnosticCapacityResource::FactValue;
+            let mut replacement =
+                Self::capacity_fault(self.capacity_span(), CapacityResource::Store(resource));
+            std::mem::swap(self, &mut replacement);
+            *self = replacement.faulted_by(resource);
         }
     }
 

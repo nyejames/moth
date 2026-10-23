@@ -10,8 +10,8 @@
 
 use super::*;
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::{DiagnosticSeverity, PreparedFailure};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 

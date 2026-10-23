@@ -27,6 +27,9 @@ pub(super) struct FactDescriptor {
     pub(super) possible_pending_mask: u8,
     /// Rewrites this codec's identity words through a remap. Other words are left as they are.
     pub(super) remap_ids: fn(&mut [u32], IdRemap<'_>) -> Result<(), FactCapacityError>,
+    /// Appends path IDs encoded by this fact.
+    pub(super) append_path_ids:
+        fn(&[u32], &mut Vec<crate::compiler_frontend::symbols::path_interner::PathId>),
 }
 
 impl FactDescriptor {
@@ -36,6 +39,7 @@ impl FactDescriptor {
             required_pending_mask: C::REQUIRED_PENDING_MASK,
             possible_pending_mask: C::PENDING_MASK,
             remap_ids: C::remap_ids,
+            append_path_ids: C::append_path_ids,
         }
     }
 }
@@ -267,7 +271,7 @@ macro_rules! diagnostic_family {
             }
         }
 
-        pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn $ctor(
+        pub(crate) fn $ctor(
             $($field: <$codec as $crate::compiler_frontend::compiler_messages::diagnostics::facts::FactCodec>::Draft,)*
             span: Option<$crate::compiler_frontend::source::SourceSpan>,
         ) -> $crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft {

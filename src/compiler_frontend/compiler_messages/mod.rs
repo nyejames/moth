@@ -46,9 +46,7 @@ pub(crate) use diagnostic_kind::{
     DiagnosticKind, ImportDiagnosticKind, InfrastructureDiagnosticKind, RuleDiagnosticKind,
     SyntaxDiagnosticKind, TypeDiagnosticKind,
 };
-pub(crate) use diagnostic_label::{
-    DiagnosticLabel, DiagnosticLabelMessage, DiagnosticLabelStyle, GenericSubstitutionDiagnostic,
-};
+pub(crate) use diagnostic_label::{DiagnosticLabel, DiagnosticLabelMessage, DiagnosticLabelStyle};
 pub(crate) use diagnostic_payload::{
     AstCapacityResource, BorrowAccessKind, BuiltinFailureOriginKind, BuiltinFailureWitness,
     CapacityResource, ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason,
@@ -81,6 +79,8 @@ pub(crate) use diagnostic_payload::{
 };
 pub(crate) use diagnostic_severity::DiagnosticSeverity;
 pub(crate) use diagnostic_token::DiagnosticToken;
+pub(crate) use diagnostics::draft::DiagnosticDraft;
+pub(crate) use diagnostics::labels::GenericSubstitutionDiagnostic;
 
 #[cfg(test)]
 #[path = "tests/diagnostic_model_tests.rs"]

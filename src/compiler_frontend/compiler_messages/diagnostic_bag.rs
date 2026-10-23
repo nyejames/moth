@@ -6,6 +6,7 @@
 //! batch owns frozen diagnostic facts and the identity tables needed by the final boundary.
 
 use super::compiler_errors::{CompilerError, InfrastructureErrors};
+use super::diagnostics::draft::DiagnosticDraft;
 use super::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -13,61 +14,54 @@ use crate::compiler_frontend::symbols::path_interner::{PathIdRemap, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Default)]
 pub(crate) struct DiagnosticBag {
-    diagnostics: Vec<CompilerDiagnostic>,
+    diagnostics: Vec<DiagnosticDraft>,
 }
 
 impl DiagnosticBag {
     pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn from_diagnostics<D>(diagnostics: Vec<D>) -> Self
+    where
+        D: Into<DiagnosticDraft>,
+    {
         Self {
-            diagnostics: Vec::new(),
+            diagnostics: diagnostics.into_iter().map(Into::into).collect(),
         }
     }
 
-    pub(crate) fn from_diagnostics(diagnostics: Vec<CompilerDiagnostic>) -> Self {
-        Self { diagnostics }
+    pub(crate) fn push(&mut self, diagnostic: impl Into<DiagnosticDraft>) {
+        self.diagnostics.push(diagnostic.into());
     }
 
-    pub(crate) fn push(&mut self, diagnostic: CompilerDiagnostic) {
-        self.diagnostics.push(diagnostic);
+    pub(crate) fn append(&mut self, mut other: Self) {
+        self.diagnostics.append(&mut other.diagnostics);
+    }
+
+    pub(crate) fn extend(&mut self, diagnostics: impl IntoIterator<Item = DiagnosticDraft>) {
+        self.diagnostics.extend(diagnostics);
+    }
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.diagnostics.is_empty()
     }
 
     pub(crate) fn has_errors(&self) -> bool {
         self.diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+            .any(|diagnostic| diagnostic.severity() == DiagnosticSeverity::Error)
     }
 
     #[cfg(test)]
-    pub(crate) fn has_warnings(&self) -> bool {
-        self.diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Warning)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn errors(&self) -> impl Iterator<Item = &CompilerDiagnostic> {
-        self.diagnostics
-            .iter()
-            .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn warnings(&self) -> impl Iterator<Item = &CompilerDiagnostic> {
-        self.diagnostics
-            .iter()
-            .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Warning)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn diagnostics(&self) -> &[CompilerDiagnostic] {
+    pub(crate) fn as_slice(&self) -> &[DiagnosticDraft] {
         &self.diagnostics
     }
 
-    #[cfg(test)]
-    pub(crate) fn as_slice(&self) -> &[CompilerDiagnostic] {
-        &self.diagnostics
+    pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut DiagnosticDraft> {
+        self.diagnostics.iter_mut()
     }
 
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
@@ -82,18 +76,23 @@ impl DiagnosticBag {
         }
     }
 
-    pub(crate) fn take_diagnostics(&mut self) -> Vec<CompilerDiagnostic> {
+    pub(crate) fn take_diagnostics(&mut self) -> Vec<DiagnosticDraft> {
         std::mem::take(&mut self.diagnostics)
     }
 
-    pub(crate) fn into_diagnostics(self) -> Vec<CompilerDiagnostic> {
+    pub(crate) fn into_diagnostics(self) -> Vec<DiagnosticDraft> {
         self.diagnostics
     }
 }
 
-impl From<CompilerDiagnostic> for DiagnosticBag {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
-        Self::from_diagnostics(vec![diagnostic])
+impl<D> From<D> for DiagnosticBag
+where
+    D: Into<DiagnosticDraft>,
+{
+    fn from(diagnostic: D) -> Self {
+        let mut bag = Self::new();
+        bag.push(diagnostic);
+        bag
     }
 }
 
@@ -135,16 +134,20 @@ impl PreparedFailure {
     }
 
     /// Preserve prior warnings before a diagnosed failure, in their original production order.
-    pub(crate) fn with_diagnostic_and_warnings(
+    pub(crate) fn with_diagnostic_and_warnings<D>(
         diagnostic: CompilerDiagnostic,
-        mut warning_diagnostics: Vec<CompilerDiagnostic>,
+        warning_drafts: Vec<D>,
         string_table: &StringTable,
         environment: Option<&TypeEnvironment>,
         path_table: impl FnOnce() -> Option<Arc<PathTable>>,
-    ) -> Self {
-        warning_diagnostics.push(diagnostic);
+    ) -> Self
+    where
+        D: Into<DiagnosticDraft>,
+    {
+        let mut bag = DiagnosticBag::from_diagnostics(warning_drafts);
+        bag.push(diagnostic);
         match PreparedDiagnosticBatch::capture_with_required_paths_and_types(
-            DiagnosticBag::from_diagnostics(warning_diagnostics),
+            bag,
             string_table.clone(),
             environment,
             path_table,
@@ -156,18 +159,25 @@ impl PreparedFailure {
 
     /// Preserve prior warnings beside an infrastructure failure, in their original order.
     #[cfg(test)]
-    pub(crate) fn with_infrastructure_and_warnings(
+    pub(crate) fn with_infrastructure_and_warnings<D>(
         error: CompilerError,
-        warning_diagnostics: Vec<CompilerDiagnostic>,
+        warning_drafts: Vec<D>,
         string_table: &StringTable,
         environment: Option<&TypeEnvironment>,
         path_table: impl FnOnce() -> Option<Arc<PathTable>>,
-    ) -> Self {
-        if warning_diagnostics.is_empty() {
+    ) -> Self
+    where
+        D: Into<DiagnosticDraft>,
+    {
+        let warning_drafts = warning_drafts
+            .into_iter()
+            .map(Into::into)
+            .collect::<Vec<_>>();
+        if warning_drafts.is_empty() {
             return Self::from(error);
         }
         match PreparedDiagnosticBatch::capture_with_required_paths_and_types(
-            DiagnosticBag::from_diagnostics(warning_diagnostics),
+            DiagnosticBag::from_diagnostics(warning_drafts),
             string_table.clone(),
             environment,
             path_table,
@@ -184,11 +194,14 @@ impl PreparedFailure {
         }
     }
 
-    pub(crate) fn prepend_diagnostics_with_required_paths(
+    pub(crate) fn prepend_diagnostics_with_required_paths<D>(
         &mut self,
-        prior_diagnostics: impl IntoIterator<Item = CompilerDiagnostic>,
+        prior_diagnostics: impl IntoIterator<Item = D>,
         path_table: impl FnOnce() -> Option<Arc<PathTable>>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), CompilerError>
+    where
+        D: Into<DiagnosticDraft>,
+    {
         match self {
             Self::Diagnosed(batch) | Self::Mixed { batch, .. } => {
                 batch.prepend_diagnostics_with_required_paths(prior_diagnostics, path_table)

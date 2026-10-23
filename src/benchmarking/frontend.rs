@@ -24,8 +24,8 @@ use crate::compiler_frontend::build_config::{
 };
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_messages::diagnostic_severity::DiagnosticSeverity;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_boundary_messages;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;

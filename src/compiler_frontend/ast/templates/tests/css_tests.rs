@@ -96,9 +96,13 @@ fn css_formatter_preserves_structural_anchors_and_maps_warnings_to_authored_text
         .format(input, &mut string_table)
         .expect("CSS formatter should preserve structural anchors");
 
-    let warnings = result.warnings.as_slice();
+    let warnings =
+        crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test(
+            result.warnings,
+            None,
+        );
     assert_eq!(
-        warnings.len(),
+        warnings.views().count(),
         1,
         "the malformed declaration after the anchors should be diagnosed"
     );
@@ -295,7 +299,21 @@ fn css_formatter_passes_through_comments_and_maps_warning_to_source_piece() {
     ));
 
     // The `bad` declaration warns once, attributed to the piece that authored it.
-    let warnings = result.warnings.as_slice();
-    assert_eq!(warnings.len(), 1);
-    assert_eq!(warnings[0].primary_span, Some(second_span));
+    let warnings =
+        crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test(
+            result.warnings,
+            None,
+        );
+    assert_eq!(warnings.views().count(), 1);
+    assert!(matches!(
+        warnings
+            .first()
+            .expect("the malformed declaration should yield one warning")
+            .primary_site(),
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(span)
+            | crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+                span,
+                ..
+            } if span == second_span
+    ));
 }

@@ -18,9 +18,9 @@ use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
 #[cfg(feature = "boracle")]
-use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 #[cfg(feature = "boracle")]
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticBag, PreparedFailure, SourceSpanCapacityResource,

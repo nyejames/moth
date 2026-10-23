@@ -24,8 +24,8 @@ use crate::compiler_frontend::ast::{
     Ast, AstBuildContext, AstBuildInput, FileValueResolutionServices, Stage0ResolutionFacts,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticBag, PreparedFailure,
@@ -187,13 +187,12 @@ fn prepared_infrastructure_failure_with_warnings(
     warnings: DiagnosticBag,
     string_table: &StringTable,
 ) -> PreparedFailure {
-    let warning_diagnostics = warnings.into_diagnostics();
-    if warning_diagnostics.is_empty() {
+    if warnings.is_empty() {
         return PreparedFailure::from(error);
     }
 
     match PreparedDiagnosticBatch::capture_with_required_paths(
-        DiagnosticBag::from_diagnostics(warning_diagnostics),
+        warnings,
         string_table.clone(),
         None,
         || None,
@@ -307,9 +306,7 @@ pub(crate) fn compile_moth_template_source(
     let mut path_fork = source_builder.sources().fork_path_interner();
     let mut preparation_warnings = DiagnosticBag::new();
     for prepared_source in &mut all_prepared {
-        for warning in prepared_source.warnings.take_diagnostics() {
-            preparation_warnings.push(warning);
-        }
+        preparation_warnings.append(std::mem::take(&mut prepared_source.warnings));
     }
 
     if bundle_input && direct_source_code.is_some() {
@@ -417,9 +414,7 @@ pub(crate) fn compile_moth_template_source(
                     ..
                 } = error;
                 let mut diagnostics = preparation_warnings;
-                for warning in warnings.into_diagnostics() {
-                    diagnostics.push(warning);
-                }
+                diagnostics.append(warnings);
                 diagnostics.push(diagnostic);
                 let failure = PreparedFailure::capture_diagnosed(
                     diagnostics,
@@ -440,9 +435,7 @@ pub(crate) fn compile_moth_template_source(
             }
         };
         let freeze_result = prepared.freeze_path_syntax(string_table, &mut path_fork);
-        for warning in prepared.warnings.take_diagnostics() {
-            preparation_warnings.push(warning);
-        }
+        preparation_warnings.append(std::mem::take(&mut prepared.warnings));
         all_prepared.push(prepared);
         if let Err(error) = freeze_result {
             let failure = prepared_infrastructure_failure_with_warnings(
@@ -621,7 +614,6 @@ fn capture_prior_diagnostics_in_batch(
     string_table: &StringTable,
     path_fork: &PathInternerFork,
 ) -> PreparedFailure {
-    let prior_diagnostics = prior_diagnostics.into_diagnostics();
     if prior_diagnostics.is_empty() {
         return failure;
     }
@@ -629,7 +621,7 @@ fn capture_prior_diagnostics_in_batch(
     match failure {
         PreparedFailure::Infrastructure(errors) => PreparedFailure::Mixed {
             batch: PreparedDiagnosticBatch::capture_from_bag(
-                DiagnosticBag::from_diagnostics(prior_diagnostics),
+                prior_diagnostics,
                 string_table.clone(),
                 None,
                 false,
@@ -638,11 +630,10 @@ fn capture_prior_diagnostics_in_batch(
             error: errors,
         },
         mut failure => {
-            if let Err(error) = failure
-                .prepend_diagnostics_with_required_paths(prior_diagnostics, || {
-                    Some(Arc::new(path_fork.snapshot_table()))
-                })
-            {
+            if let Err(error) = failure.prepend_diagnostics_with_required_paths(
+                prior_diagnostics.into_diagnostics(),
+                || Some(Arc::new(path_fork.snapshot_table())),
+            ) {
                 PreparedFailure::from(error)
             } else {
                 failure
@@ -713,12 +704,11 @@ fn fold_template_semantics(
     for warning in ast.warnings.drain(..) {
         warnings.push(warning);
     }
-    let warning_diagnostics = warnings.into_diagnostics();
-    let warning_batch = if warning_diagnostics.is_empty() {
+    let warning_batch = if warnings.is_empty() {
         None
     } else {
         match PreparedDiagnosticBatch::capture_from_root_string_table(
-            DiagnosticBag::from_diagnostics(warning_diagnostics),
+            warnings,
             string_table,
             None,
             || Some(Arc::new(path_fork.snapshot_table())),

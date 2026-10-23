@@ -17,8 +17,8 @@ use crate::compiler_frontend::analysis::borrow_checker::{
 use crate::compiler_frontend::analysis::borrow_checker::{BoracleModuleReport, solve_hir_module};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::module_compilation::BoracleModuleInput;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;

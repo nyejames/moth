@@ -13,8 +13,8 @@ use crate::builder_surface::BuilderSurface;
 use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticBag, InvalidConfigReason, NamingConvention, PreparedFailure,

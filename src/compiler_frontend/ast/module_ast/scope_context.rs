@@ -55,7 +55,7 @@ use crate::compiler_frontend::build_config::{
     BuildInputName, ConfigResolutionServices, ResolvedBuildConfigMap,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticDraft};
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::ActiveGenericTypeContext;
@@ -417,7 +417,7 @@ pub struct ScopeShared {
     pub(crate) choice_variant_shells_by_path: Option<Rc<FxHashMap<PathId, Vec<ChoiceVariant>>>>,
     pub(crate) resolved_module_constants_override: Option<Rc<ResolvedConstantSet>>,
     pub(crate) file_value_resolution: Option<Rc<FileValueResolutionServices>>,
-    pub(crate) emitted_warnings: Rc<RefCell<Vec<CompilerDiagnostic>>>,
+    pub(crate) emitted_warnings: Rc<RefCell<Vec<DiagnosticDraft>>>,
 
     pub(crate) generic_function_instantiation_requests: Rc<RefCell<Vec<GenericRequestSlot>>>,
     /// Emission-owned proof that a completed no-slot body has no pending failure contributors.

@@ -1,6 +1,7 @@
 use super::*;
 
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
     ExplicitMothExtensionView, ExplicitSourceExtensionView, UnsupportedExternalExtensionView,
     UnsupportedSourceFileKindView,
@@ -9,7 +10,6 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::project_
     InvalidConfigCode, InvalidConfigView, InvalidDependencyClauseView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{DiagnosticSeverity, PreparedFailure};
 

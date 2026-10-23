@@ -4,9 +4,7 @@
 //! WHY: this is the primary human-facing render path for compiler errors and warnings.
 
 #[cfg(test)]
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-#[cfg(test)]
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::compact_render_for_test;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::render::subject::DiagnosticSubject;
 use crate::compiler_frontend::compiler_messages::render::{
@@ -14,6 +12,8 @@ use crate::compiler_frontend::compiler_messages::render::{
     display_column_number, display_gutter_width, display_line_number, expand_tabs_for_display,
     primary_caret_padding, primary_underline_length, relative_display_path_from_root,
 };
+#[cfg(test)]
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticBag};
 use crate::compiler_frontend::compiler_messages::{DiagnosticLabelStyle, DiagnosticSeverity};
 use saying::say;
 use std::path::Path;
@@ -133,8 +133,12 @@ pub(crate) fn format_terminal_source_frame_for_test(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
 ) -> Option<String> {
-    let compact = compact_render_for_test(diagnostic);
-    let subject = DiagnosticSubject::new(compact.view());
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic.clone()), None);
+    let subject = DiagnosticSubject::new(
+        compact
+            .first()
+            .expect("the diagnostic bag contains one record"),
+    );
     let position = subject.primary_position(context)?;
     let frame = terminal_source_frame(&position)?;
     Some(format!(
@@ -153,8 +157,12 @@ pub(crate) fn format_label_messages_with_context(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
 ) -> Vec<String> {
-    let compact = compact_render_for_test(diagnostic);
-    let subject = DiagnosticSubject::new(compact.view());
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic.clone()), None);
+    let subject = DiagnosticSubject::new(
+        compact
+            .first()
+            .expect("the diagnostic bag contains one record"),
+    );
     let root = std::env::current_dir().unwrap_or_default();
     format_label_messages_from_subject(&subject, context, &root)
 }
@@ -165,8 +173,12 @@ pub(crate) fn format_label_messages_with_context_from_root(
     context: DiagnosticRenderContext<'_>,
     root: &Path,
 ) -> Vec<String> {
-    let compact = compact_render_for_test(diagnostic);
-    let subject = DiagnosticSubject::new(compact.view());
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic.clone()), None);
+    let subject = DiagnosticSubject::new(
+        compact
+            .first()
+            .expect("the diagnostic bag contains one record"),
+    );
     format_label_messages_from_subject(&subject, context, root)
 }
 
@@ -240,8 +252,12 @@ pub(crate) fn format_diagnostic_guidance(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
 ) -> Vec<String> {
-    let compact = compact_render_for_test(diagnostic);
-    let subject = DiagnosticSubject::new(compact.view());
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic.clone()), None);
+    let subject = DiagnosticSubject::new(
+        compact
+            .first()
+            .expect("the diagnostic bag contains one record"),
+    );
     format_guidance_from_subject(&subject, context)
 }
 

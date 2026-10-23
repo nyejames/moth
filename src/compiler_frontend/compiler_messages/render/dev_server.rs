@@ -5,9 +5,7 @@
 
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, InfrastructureErrors};
 #[cfg(test)]
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-#[cfg(test)]
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::compact_render_for_test;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::render::infrastructure::{
     INFRASTRUCTURE_FAILURE_CODE, INFRASTRUCTURE_FAILURE_TITLE, ISSUE_URL, InfrastructureClass,
@@ -19,6 +17,8 @@ use crate::compiler_frontend::compiler_messages::render::{
     display_line_number, expand_tabs_for_display, primary_caret_padding, primary_underline_length,
     relative_display_path_from_root,
 };
+#[cfg(test)]
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticBag};
 use crate::compiler_frontend::compiler_messages::{DiagnosticLabelStyle, DiagnosticSeverity};
 use crate::compiler_frontend::utilities::basic::{normalize_path, portable_path_text};
 #[cfg(test)]
@@ -100,8 +100,14 @@ pub(crate) fn render_diagnostics_html_with_context(
     diagnostics
         .iter()
         .map(|d| {
-            let compact = compact_render_for_test(d);
-            render_diagnostic_card(compact.view(), project_root, context)
+            let compact = compact_bag_for_test(DiagnosticBag::from(d.clone()), None);
+            render_diagnostic_card(
+                compact
+                    .first()
+                    .expect("the diagnostic bag contains one record"),
+                project_root,
+                context,
+            )
         })
         .collect::<Vec<_>>()
         .join("\n")

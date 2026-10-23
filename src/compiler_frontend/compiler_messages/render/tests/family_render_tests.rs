@@ -4,11 +4,12 @@
 //! WHY: the compact path reads severity from the stored record, so an override must win over the
 //! family default while the rest of the line stays unchanged.
 
-use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::compact_for_render;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::UnreachableMatchArmView;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_with_context;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, DiagnosticSeverity};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[test]
@@ -19,12 +20,21 @@ fn severity_override_on_a_family_changes_only_the_severity_letter() {
     escalated.severity = DiagnosticSeverity::Error;
 
     // Both lines must come from the compact path, or the comparison would not test a stored severity.
+    let family_default_compact =
+        compact_bag_for_test(DiagnosticBag::from(family_default.clone()), None);
+    let escalated_compact = compact_bag_for_test(DiagnosticBag::from(escalated.clone()), None);
     assert!(
-        compact_for_render(&family_default).is_some(),
+        family_default_compact
+            .first()
+            .and_then(|view| view.family_view::<UnreachableMatchArmView>())
+            .is_some(),
         "the family default must take the compact path"
     );
     assert!(
-        compact_for_render(&escalated).is_some(),
+        escalated_compact
+            .first()
+            .and_then(|view| view.family_view::<UnreachableMatchArmView>())
+            .is_some(),
         "the escalated diagnostic must take the compact path"
     );
 

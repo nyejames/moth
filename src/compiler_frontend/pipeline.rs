@@ -669,21 +669,16 @@ impl<'a> CompilerFrontend<'a> {
                 if let Some(handle) = frozen_identity_handle {
                     diagnostic.attach_frozen_identity_handle_if_missing(handle.clone());
                 }
-                let mut diagnostics = prior_diagnostics
-                    .take_diagnostics()
-                    .into_iter()
-                    .map(|mut warning| {
-                        if let Some(handle) = frozen_identity_handle {
-                            warning.attach_frozen_identity_handle_if_missing(handle.clone());
-                        }
-                        warning
-                    })
-                    .collect::<Vec<_>>();
-                diagnostics.push(diagnostic);
+                for warning in prior_diagnostics.iter_mut() {
+                    if let Some(handle) = frozen_identity_handle {
+                        warning.attach_frozen_identity_handle_if_missing(handle.clone());
+                    }
+                }
+                prior_diagnostics.push(diagnostic);
                 // Borrow and preceding warning payloads carry no type-display facts, so only a
                 // rendered path payload retains the issuing fork's snapshot.
                 let batch = PreparedDiagnosticBatch::capture_with_required_paths(
-                    DiagnosticBag::from_diagnostics(diagnostics),
+                    std::mem::take(prior_diagnostics),
                     std::mem::take(&mut self.string_table),
                     Some(type_environment),
                     || Some(Arc::new(self.path_fork.snapshot_table())),
@@ -710,14 +705,14 @@ impl<'a> CompilerFrontend<'a> {
             Err(error) => match error.into_diagnostic_or_infrastructure() {
                 Ok(diagnostic) => Err(PreparedFailure::with_diagnostic_and_warnings(
                     diagnostic,
-                    Vec::new(),
+                    Vec::<CompilerDiagnostic>::new(),
                     &self.string_table,
                     None,
                     || Some(Arc::new(self.path_fork.snapshot_table())),
                 )),
                 Err(error) => Err(PreparedFailure::with_infrastructure_and_warnings(
                     error,
-                    Vec::new(),
+                    Vec::<CompilerDiagnostic>::new(),
                     &self.string_table,
                     None,
                     || None,

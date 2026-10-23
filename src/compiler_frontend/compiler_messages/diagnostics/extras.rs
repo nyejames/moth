@@ -7,6 +7,7 @@
 use super::facts::{FactCapacityError, IdRemap};
 use super::foreign::ForeignSiteDraft;
 use super::labels::{DraftLabel, DraftSubstitution};
+use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use std::num::NonZeroU32;
 use std::ops::Range;
@@ -97,6 +98,8 @@ pub(super) enum ExtraDataDraft {
 pub(super) struct DiagnosticExtraDraft {
     pub(super) labels: Vec<DraftLabel>,
     pub(super) foreign_sites: Vec<ForeignSiteDraft>,
+    /// Owners retained when a capacity fault drops the diagnostic's foreign-site rows.
+    pub(super) owner_handles: Vec<FrozenIdentityHandle>,
     /// Entries of generic substitution labels. Each such label's data names a run of these entries.
     pub(super) substitutions: Vec<DraftSubstitution>,
     pub(super) data: ExtraDataDraft,

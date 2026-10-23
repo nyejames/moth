@@ -1,11 +1,12 @@
 use super::{
-    CompilerDiagnostic, DiagnosticPayload, DiagnosticToken, InvalidFunctionSignatureReason,
+    CompilerDiagnostic, DiagnosticBag, DiagnosticToken, InvalidFunctionSignatureReason,
     InvalidGenericParameterReason, TokenDescriptorPayload,
 };
-use crate::compiler_frontend::compiler_messages::render::terminal::format_diagnostic_guidance;
-use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, render_payload,
+use crate::compiler_frontend::compiler_messages::diagnostics::{
+    families::generics_traits_api, test_support::compact_bag_for_test,
 };
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
+use crate::compiler_frontend::compiler_messages::render::terminal::format_diagnostic_guidance;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
@@ -61,10 +62,6 @@ fn projection_fixture() -> (Arc<SourceTokens>, StringTable) {
     )
 }
 
-fn render_payload_message(payload: &DiagnosticPayload, string_table: &StringTable) -> String {
-    render_payload(payload, DiagnosticRenderContext::new(string_table)).message
-}
-
 fn render_diagnostic_message(
     diagnostic: &CompilerDiagnostic,
     string_table: &StringTable,
@@ -94,48 +91,86 @@ fn static_and_path_descriptors_project_without_payload_data() {
 }
 
 #[test]
-fn every_token_payload_render_survives_store_drop() {
+fn every_token_projection_render_survives_source_store_drop() {
     let (source_tokens, string_table) = projection_fixture();
-    let (projected_payloads, projected_rendered) = {
-        let mut projected_payloads = Vec::new();
-        let mut projected_rendered = Vec::new();
+    let mut diagnostics = Vec::with_capacity(source_tokens.len() * 3);
+    for index in 0..source_tokens.len() {
+        let index = TokenIndex::try_from_index(index).expect("fixture index should fit");
+        let token_ref = source_tokens
+            .token(index)
+            .expect("fixture token index should resolve");
+        let found = DiagnosticToken::from_token_ref(token_ref);
+        diagnostics.push(generics_traits_api::invalid_generic_parameter(
+            InvalidGenericParameterReason::InvalidToken { found },
+            None,
+        ));
+        diagnostics.push(generics_traits_api::invalid_function_signature(
+            InvalidFunctionSignatureReason::MissingArrowOrColon { found },
+            None,
+        ));
+        diagnostics.push(generics_traits_api::invalid_function_signature(
+            InvalidFunctionSignatureReason::MissingCommaOrColon { found },
+            None,
+        ));
+    }
 
-        for index in 0..source_tokens.len() {
-            let index = TokenIndex::try_from_index(index).expect("fixture index should fit");
-            let token_ref = source_tokens
-                .token(index)
-                .expect("fixture token index should resolve");
-            let projected = DiagnosticToken::from_token_ref(token_ref);
-            let payloads = [
-                DiagnosticPayload::InvalidGenericParameter {
-                    reason: InvalidGenericParameterReason::InvalidToken { found: projected },
-                },
-                DiagnosticPayload::InvalidFunctionSignature {
-                    reason: InvalidFunctionSignatureReason::MissingArrowOrColon {
-                        found: projected,
-                    },
-                },
-                DiagnosticPayload::InvalidFunctionSignature {
-                    reason: InvalidFunctionSignatureReason::MissingCommaOrColon {
-                        found: projected,
-                    },
-                },
-            ];
-            for payload in payloads {
-                projected_rendered.push(render_payload_message(&payload, &string_table));
-                projected_payloads.push(payload);
-            }
-        }
-
-        (projected_payloads, projected_rendered)
-    };
-    drop(source_tokens);
-
-    let after_drop = projected_payloads
-        .iter()
-        .map(|payload| render_payload_message(payload, &string_table))
+    let compact = compact_bag_for_test(DiagnosticBag::from_diagnostics(diagnostics), None);
+    let rendered_before_drop = compact
+        .views()
+        .map(|view| {
+            crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_view(
+                view,
+                DiagnosticRenderContext::new(&string_table),
+            )
+        })
         .collect::<Vec<_>>();
-    assert_eq!(projected_rendered, after_drop);
+    drop(source_tokens);
+    let rendered_after_drop = compact
+        .views()
+        .map(|view| {
+            crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_view(
+                view,
+                DiagnosticRenderContext::new(&string_table),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(rendered_before_drop, rendered_after_drop);
+}
+
+#[test]
+fn remapping_generic_parameter_projection_updates_symbol_text() {
+    let mut local_table = StringTable::new();
+    let name = local_table.intern("generic_name");
+    let diagnostic = generics_traits_api::invalid_generic_parameter(
+        InvalidGenericParameterReason::InvalidToken {
+            found: DiagnosticToken::from_string_tag(TokenTag::SYMBOL, name),
+        },
+        None,
+    );
+    let mut bag = DiagnosticBag::from_diagnostics(vec![diagnostic]);
+    let mut merged_table = StringTable::new();
+    let remap = merged_table.merge_from(&local_table);
+    bag.remap_string_ids(&remap);
+
+    let compact = compact_bag_for_test(bag, None);
+    let view = compact
+        .first()
+        .expect("generic parameter diagnostic should compact");
+    assert!(
+        view.family_view::<generics_traits_api::InvalidGenericParameterView>()
+            .is_some(),
+        "generic parameter projection should remain in its diagnostic family"
+    );
+    let context = DiagnosticRenderContext::new(&merged_table);
+    let subject =
+        crate::compiler_frontend::compiler_messages::render::subject::DiagnosticSubject::new(view);
+    let message = crate::compiler_frontend::compiler_messages::render::terse_diagnostic_message(
+        &subject, context,
+    );
+    assert_eq!(
+        message,
+        "Invalid generic parameter token name `generic_name`."
+    );
 }
 
 #[test]
@@ -181,27 +216,6 @@ fn projected_unexpected_and_expected_rendering_survives_store_drop() {
         .map(|diagnostic| render_diagnostic_message(diagnostic, &string_table))
         .collect::<Vec<_>>();
     assert_eq!(projected_rendered, after_drop);
-}
-#[test]
-fn remapping_generic_parameter_projection_updates_symbol_text() {
-    let mut local_table = StringTable::new();
-    let name = local_table.intern("generic_name");
-    let diagnostic = super::CompilerDiagnostic::invalid_generic_parameter(
-        InvalidGenericParameterReason::InvalidToken {
-            found: DiagnosticToken::from_string_tag(TokenTag::SYMBOL, name),
-        },
-        None,
-    );
-    let mut bag = super::DiagnosticBag::from_diagnostics(vec![diagnostic]);
-    let mut merged_table = StringTable::new();
-    let remap = merged_table.merge_from(&local_table);
-    bag.remap_string_ids(&remap);
-
-    let payload = &bag.diagnostics()[0].payload;
-    assert_eq!(
-        render_payload_message(payload, &merged_table),
-        "Invalid generic parameter token name `generic_name`."
-    );
 }
 
 #[test]

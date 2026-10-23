@@ -50,7 +50,7 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -71,7 +71,7 @@ pub struct FunctionCallParseInput<'a, 'b, 'tokens> {
     pub signature: &'a FunctionSignature,
     pub value_required: bool,
     pub allow_boundary_catch: bool,
-    pub warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
+    pub warnings: Option<&'a mut DiagnosticBag>,
     pub type_interner: &'a mut AstTypeInterner<'b>,
     pub expression_builder: &'a mut AstExpressionBuilder,
     pub const_values: &'a mut ConstValueStore,
@@ -102,7 +102,7 @@ pub struct ExternalFunctionCallParseInput<'a, 'b, 'tokens> {
     pub context: &'a ScopeContext,
     pub value_required: bool,
     pub allow_boundary_catch: bool,
-    pub warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
+    pub warnings: Option<&'a mut DiagnosticBag>,
     pub type_interner: &'a mut AstTypeInterner<'b>,
     pub expression_builder: &'a mut AstExpressionBuilder,
     pub const_values: &'a mut ConstValueStore,
@@ -147,7 +147,7 @@ pub(crate) struct CallFinishContext<'a, 'b, 'tokens> {
     pub(crate) context: &'a ScopeContext,
     pub(crate) value_required: bool,
     pub(crate) allow_boundary_catch: bool,
-    pub(crate) warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
+    pub(crate) warnings: Option<&'a mut DiagnosticBag>,
     pub(crate) type_interner: &'a mut AstTypeInterner<'b>,
     pub(crate) expression_builder: &'a mut AstExpressionBuilder,
     pub(crate) const_values: &'a mut ConstValueStore,
@@ -299,7 +299,7 @@ struct RetainedSourceCallInput<'a, 'b, 'tokens> {
     type_interner: &'a mut AstTypeInterner<'b>,
     expression_builder: &'a mut AstExpressionBuilder,
     const_values: &'a mut ConstValueStore,
-    warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
+    warnings: Option<&'a mut DiagnosticBag>,
     string_table: &'a mut StringTable,
     path_fork: &'a mut PathInternerFork,
     function_path: &'a PathId,
@@ -398,7 +398,7 @@ pub(crate) struct RetainedCallHandlingInput<'a, 'b, 'tokens> {
     pub(crate) value_required: bool,
     pub(crate) call_span: Option<SourceSpan>,
     pub(crate) allow_boundary_catch: bool,
-    pub(crate) warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
+    pub(crate) warnings: Option<&'a mut DiagnosticBag>,
     pub(crate) string_table: &'a mut StringTable,
     pub(crate) path_fork: &'a mut PathInternerFork,
 }
@@ -931,7 +931,7 @@ struct RetainedExternalCallInput<'a, 'b, 'tokens> {
     type_interner: &'a mut AstTypeInterner<'b>,
     expression_builder: &'a mut AstExpressionBuilder,
     const_values: &'a mut ConstValueStore,
-    warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
+    warnings: Option<&'a mut DiagnosticBag>,
     string_table: &'a mut StringTable,
     path_fork: &'a mut PathInternerFork,
     external_function_id: ExternalFunctionId,

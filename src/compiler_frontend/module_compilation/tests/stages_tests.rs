@@ -74,7 +74,7 @@ fn lower_hir_capacity_failure_keeps_each_warning_and_captured_site_once() {
         constants,
         Default::default(),
     );
-    ast.warnings.push(ast_warning);
+    ast.warnings.push(ast_warning.into());
     let mut warnings = DiagnosticBag::from_diagnostics(vec![
         preparation_warning,
         CompilerDiagnostic::unreachable_match_arm(Some(ast_warning_span)),

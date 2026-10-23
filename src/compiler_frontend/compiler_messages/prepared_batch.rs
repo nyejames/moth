@@ -1,14 +1,15 @@
 //! Prepared diagnostics that cross the pre-freeze boundary as a compact batch.
 //!
 //! WHAT: owns family drafts with captured type-display snapshots, the batch-local string table,
-//! explicit path rows, and frozen-identity handles collected during Pass A.
+//! explicit path rows, and frozen-identity owners carried by drafts.
 //! WHY: the boundary accumulator can merge prepared facts without retaining live stage context.
 use super::compiler_errors::CompilerError;
 use super::diagnostic_bag::DiagnosticBag;
-use super::diagnostics::legacy_adapter::{PreparedDiagnostic, prepare_diagnostic};
+use super::diagnostics::draft::DiagnosticDraft;
+use super::diagnostics::prepared::{PreparedDiagnostic, prepare_draft};
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use std::ops::Range;
@@ -20,11 +21,10 @@ pub(super) struct PreparedPathRow {
     pub(super) path_table: Arc<PathTable>,
 }
 
-/// Batch-local string, path, and frozen-identity ownership.
+/// Batch-local string and path ownership.
 pub(super) struct PreparedBatchIdentity {
     pub(super) string_table: StringTable,
     pub(super) path_rows: Vec<PreparedPathRow>,
-    pub(super) required_handles: Vec<FrozenIdentityHandle>,
 }
 
 /// Move-only pre-freeze diagnostics ready to append directly to a boundary run.
@@ -79,22 +79,22 @@ impl PreparedDiagnosticBatch {
         path_table: Option<Arc<PathTable>>,
     ) -> Self {
         let diagnostics = bag.into_diagnostics();
+        let diagnostic_count = diagnostics.len();
         let environment = if path_table_is_available {
             environment
         } else {
             None
         };
-        let has_path_row = path_table.is_some() && !diagnostics.is_empty();
-        let mut required_handles = Vec::new();
-        let mut prepared = Vec::with_capacity(diagnostics.len());
-        for diagnostic in &diagnostics {
-            let mut item = prepare_diagnostic(diagnostic, environment, &mut required_handles);
+        let has_path_row = path_table.is_some() && diagnostic_count != 0;
+        let mut prepared = Vec::with_capacity(diagnostic_count);
+        for draft in diagnostics {
+            let mut item = prepare_draft(draft, environment);
             item.set_explicit_path(has_path_row.then_some(0));
             prepared.push(item);
         }
         let path_rows = match path_table {
             Some(path_table) if has_path_row => vec![PreparedPathRow {
-                diagnostic_range: 0..diagnostics.len(),
+                diagnostic_range: 0..diagnostic_count,
                 path_table,
             }],
             _ => Vec::new(),
@@ -105,7 +105,6 @@ impl PreparedDiagnosticBatch {
             identity: Box::new(PreparedBatchIdentity {
                 string_table,
                 path_rows,
-                required_handles,
             }),
         }
     }
@@ -127,9 +126,7 @@ impl PreparedDiagnosticBatch {
         let diagnostics = bag.into_diagnostics();
         let mut required_paths = Vec::new();
         for diagnostic in &diagnostics {
-            diagnostic
-                .payload
-                .required_path_payload_paths(&mut required_paths);
+            diagnostic.append_required_paths(&mut required_paths);
         }
 
         let retain_type_context = environment.is_some() && !diagnostics.is_empty();
@@ -200,9 +197,7 @@ impl PreparedDiagnosticBatch {
         let diagnostics = bag.into_diagnostics();
         let mut required_paths = Vec::new();
         for diagnostic in &diagnostics {
-            diagnostic
-                .payload
-                .required_path_payload_paths(&mut required_paths);
+            diagnostic.append_required_paths(&mut required_paths);
         }
 
         let retain_type_context =
@@ -262,22 +257,22 @@ impl PreparedDiagnosticBatch {
         self.identity.string_table = StringTable::empty_unallocated();
     }
 
-    pub(crate) fn prepend_diagnostics(
-        &mut self,
-        prior_diagnostics: impl IntoIterator<
-            Item = crate::compiler_frontend::compiler_messages::CompilerDiagnostic,
-        >,
-    ) {
-        let prior_diagnostics = prior_diagnostics.into_iter().collect::<Vec<_>>();
+    pub(crate) fn prepend_diagnostics<D>(&mut self, prior_diagnostics: impl IntoIterator<Item = D>)
+    where
+        D: Into<DiagnosticDraft>,
+    {
+        let prior_diagnostics = prior_diagnostics
+            .into_iter()
+            .map(Into::into)
+            .collect::<Vec<_>>();
         let shift = prior_diagnostics.len();
         if shift == 0 {
             return;
         }
 
         let mut prepared = Vec::with_capacity(self.prepared.len() + shift);
-        for diagnostic in &prior_diagnostics {
-            let mut item =
-                prepare_diagnostic(diagnostic, None, &mut self.identity.required_handles);
+        for draft in prior_diagnostics {
+            let mut item = prepare_draft(draft, None);
             item.set_explicit_path(None);
             prepared.push(item);
         }
@@ -289,15 +284,18 @@ impl PreparedDiagnosticBatch {
             row.diagnostic_range.end += shift;
         }
     }
-
-    pub(crate) fn prepend_diagnostics_with_required_paths(
+    pub(crate) fn prepend_diagnostics_with_required_paths<D>(
         &mut self,
-        prior_diagnostics: impl IntoIterator<
-            Item = crate::compiler_frontend::compiler_messages::CompilerDiagnostic,
-        >,
+        prior_diagnostics: impl IntoIterator<Item = D>,
         path_table: impl FnOnce() -> Option<Arc<PathTable>>,
-    ) -> Result<(), CompilerError> {
-        let prior_diagnostics = prior_diagnostics.into_iter().collect::<Vec<_>>();
+    ) -> Result<(), CompilerError>
+    where
+        D: Into<DiagnosticDraft>,
+    {
+        let prior_diagnostics = prior_diagnostics
+            .into_iter()
+            .map(Into::into)
+            .collect::<Vec<_>>();
         let shift = prior_diagnostics.len();
         if shift == 0 {
             return Ok(());
@@ -328,9 +326,6 @@ impl PreparedDiagnosticBatch {
         prepared.append(&mut self.prepared);
         self.prepared = prepared;
 
-        let mut required_handles = std::mem::take(&mut prior_batch.identity.required_handles);
-        required_handles.append(&mut self.identity.required_handles);
-        self.identity.required_handles = required_handles;
         self.identity.string_table = std::mem::take(&mut prior_batch.identity.string_table);
         Ok(())
     }

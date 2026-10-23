@@ -23,6 +23,7 @@ use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_errors::{
     BoundaryFailure, CompilerError, CompilerErrorMetadataKey, ErrorType, InfrastructureErrors,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
     calls_data::{InvalidCallShapeView, InvalidReceiverCallView},
     choices_control_flow::CompileTimeEvaluationErrorView,
@@ -38,7 +39,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::{
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, dev_server, invalid_config_message, terminal, terse,
@@ -577,15 +578,59 @@ fn diagnostic_bag_tracks_errors_warnings_and_order() {
     );
 
     let mut bag = DiagnosticBag::new();
-    bag.push(first.clone());
-    bag.push(second.clone());
+    bag.push(first);
+    bag.push(second);
+    let compact = compact_bag_for_test(bag, None);
+    let ordered = compact
+        .views()
+        .map(|view| {
+            let facts = view
+                .family_view::<UnknownValueNameView>()
+                .expect("both records use the unknown-value family");
+            (
+                view.descriptor().code,
+                view.severity(),
+                string_table.resolve(facts.name).to_owned(),
+                matches!(view.primary_site(), SiteRef::Absent),
+                view.durable_labels().count(),
+            )
+        })
+        .collect::<Vec<_>>();
 
-    assert!(bag.has_errors());
-    assert!(bag.has_warnings());
-    assert_eq!(bag.errors().count(), 1);
-    assert_eq!(bag.warnings().count(), 1);
-    assert_eq!(bag.diagnostics(), &[first, second]);
-    assert_eq!(bag.into_diagnostics().len(), 2);
+    assert_eq!(
+        ordered
+            .iter()
+            .filter(|entry| entry.1 == DiagnosticSeverity::Error)
+            .count(),
+        1
+    );
+    assert_eq!(
+        ordered
+            .iter()
+            .filter(|entry| entry.1 == DiagnosticSeverity::Warning)
+            .count(),
+        1
+    );
+    assert_eq!(
+        ordered,
+        [
+            (
+                "MOTH-RULE-0034",
+                DiagnosticSeverity::Error,
+                String::from("missing"),
+                true,
+                0,
+            ),
+            (
+                "MOTH-RULE-0034",
+                DiagnosticSeverity::Warning,
+                String::from("warning_name"),
+                true,
+                0,
+            ),
+        ]
+    );
+    assert_eq!(compact.len(), 2);
 }
 
 #[test]
@@ -606,14 +651,63 @@ fn diagnostic_bag_counts_and_orders_structured_diagnostics() {
         },
     );
     let bag = DiagnosticBag::from_diagnostics(vec![warning.clone(), error.clone()]);
+    let compact = compact_bag_for_test(bag, None);
+    let ordered = compact
+        .views()
+        .map(|view| {
+            let facts = view
+                .family_view::<UnknownValueNameView>()
+                .expect("both records use the unknown-value family");
+            (
+                view.descriptor().code,
+                view.severity(),
+                string_table.resolve(facts.name).to_owned(),
+                matches!(view.primary_site(), SiteRef::Absent),
+                view.durable_labels().count(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ordered
+            .iter()
+            .filter(|entry| entry.1 == DiagnosticSeverity::Error)
+            .count(),
+        1
+    );
+    assert_eq!(
+        ordered
+            .iter()
+            .filter(|entry| entry.1 == DiagnosticSeverity::Warning)
+            .count(),
+        1
+    );
+    assert_eq!(
+        ordered,
+        [
+            (
+                "MOTH-RULE-0034",
+                DiagnosticSeverity::Warning,
+                String::from("maybe_unused"),
+                true,
+                0,
+            ),
+            (
+                "MOTH-RULE-0034",
+                DiagnosticSeverity::Error,
+                String::from("missing"),
+                true,
+                0,
+            ),
+        ]
+    );
 
-    assert!(bag.has_errors());
-    assert!(bag.has_warnings());
-    assert_eq!(bag.errors().count(), 1);
-    assert_eq!(bag.warnings().count(), 1);
-    assert_eq!(bag.diagnostics(), &[warning, error]);
-
-    let prepared = PreparedDiagnosticBatch::capture_from_bag(bag, string_table, None, false, None);
+    let prepared = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from_diagnostics(vec![warning, error]),
+        string_table,
+        None,
+        false,
+        None,
+    );
     let failure = finish_prepared_batch(prepared, StringTable::new());
     assert_eq!(failure.reports.counts().errors, 1);
     assert_eq!(failure.reports.counts().warnings, 1);

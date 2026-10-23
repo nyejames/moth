@@ -46,7 +46,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, GenericSubstitutionDiagnostic,
+    CompilerDiagnostic, DiagnosticBag, DiagnosticDraft, GenericSubstitutionDiagnostic,
     InvalidTemplateStructureReason, PreparedFailure,
 };
 use std::sync::Arc;
@@ -93,18 +93,11 @@ fn enclosing_callable_contract(
     })
 }
 
-fn attach_frozen_identity_handle_to_diagnostic(
-    diagnostic: &mut CompilerDiagnostic,
-    frozen_identity_handle: &FrozenIdentityHandle,
-) {
-    diagnostic.attach_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
-}
-
 pub(in crate::compiler_frontend::ast) struct AstEmission {
     /// Typed AST nodes emitted for this module (functions, structs, generic instances).
     pub(in crate::compiler_frontend::ast) ast: Vec<AstNode>,
     /// Warnings accumulated during emission (unused variables, deprecated uses, etc.).
-    pub(in crate::compiler_frontend::ast) warnings: Vec<CompilerDiagnostic>,
+    pub(in crate::compiler_frontend::ast) warnings: Vec<DiagnosticDraft>,
     /// Folded top-level const template result records keyed by source file.
     pub(in crate::compiler_frontend::ast) const_templates_by_path:
         FxHashMap<PathId, FoldedConstTemplateResult>,
@@ -234,7 +227,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         path_fork: &'context mut PathInternerFork,
         source_token_owners: crate::compiler_frontend::headers::SourceTokenOwners,
     ) -> Self {
-        let warnings = DiagnosticBag::from_diagnostics(environment.lookups.warnings.clone());
+        let lookups = std::rc::Rc::get_mut(&mut environment.lookups)
+            .expect("AST environment lookups are uniquely owned before emission");
+        let warnings = DiagnosticBag::from_diagnostics(std::mem::take(&mut lookups.warnings));
         Self {
             context,
             path_fork,
@@ -850,7 +845,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,
         );
-        let mut body_warnings = Vec::new();
+        let mut body_warnings = DiagnosticBag::new();
         let body_result = function_body_to_ast(
             &mut body_cursor,
             context,
@@ -864,13 +859,11 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         if matches!(&body_result, Ok(ParsedBody::Complete(_)))
             && let Some(frozen_identity_handle) = frozen_identity_handle.as_ref()
         {
-            for warning in &mut body_warnings {
-                attach_frozen_identity_handle_to_diagnostic(warning, frozen_identity_handle);
+            for warning in body_warnings.iter_mut() {
+                warning.attach_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
             }
         }
-        for warning in body_warnings {
-            self.warnings.push(warning);
-        }
+        self.warnings.append(body_warnings);
         let body = match body_result {
             Ok(ParsedBody::Complete(body)) => body,
             Ok(ParsedBody::Draft(_)) => {
@@ -1116,7 +1109,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,
         );
-        let mut body_warnings = Vec::new();
+        let mut body_warnings = DiagnosticBag::new();
         let body_result = function_body_to_ast(
             &mut body_cursor,
             context,
@@ -1127,9 +1120,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             string_table,
             &mut *self.path_fork,
         );
-        for warning in body_warnings {
-            self.warnings.push(warning);
-        }
+        self.warnings.append(body_warnings);
 
         let body = body_result
             .and_then(|parsed| parsed.expect_complete_nodes("a source function body"))
@@ -1212,7 +1203,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,
         );
-        let mut body_warnings = Vec::new();
+        let mut body_warnings = DiagnosticBag::new();
         let body_result = function_body_to_ast(
             &mut body_cursor,
             context,
@@ -1223,9 +1214,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             string_table,
             &mut *self.path_fork,
         );
-        for warning in body_warnings {
-            self.warnings.push(warning);
-        }
+        self.warnings.append(body_warnings);
 
         let body = body_result
             .and_then(|parsed| parsed.expect_complete_nodes("the implicit start function body"))
@@ -1401,7 +1390,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
 
     /// Captures a user-facing diagnostic and accumulated warnings before the environment drops.
     fn diagnostic_messages(
-        &self,
+        &mut self,
         diagnostic: CompilerDiagnostic,
         string_table: &StringTable,
     ) -> PreparedFailure {
@@ -1409,14 +1398,12 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     }
 
     fn diagnostic_bag_messages(
-        &self,
+        &mut self,
         bag: DiagnosticBag,
         string_table: &StringTable,
     ) -> PreparedFailure {
-        let mut diagnostics = self.warnings.clone();
-        for diagnostic in bag.into_diagnostics() {
-            diagnostics.push(diagnostic);
-        }
+        let mut diagnostics = std::mem::take(&mut self.warnings);
+        diagnostics.append(bag);
         PreparedFailure::capture_diagnosed(
             diagnostics,
             string_table.clone(),
@@ -1429,7 +1416,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     /// Converts a [`TemplateError`] (which may be user-facing or infrastructure) into the
     /// appropriate AST diagnostic failure lane.
     fn template_error_messages(
-        &self,
+        &mut self,
         error: TemplateError,
         string_table: &StringTable,
     ) -> PreparedFailure {
@@ -1446,7 +1433,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     /// A numeric deferral must never reach the emitter: every retaining lane completes at its
     /// body root, so a leak here is a precise invariant failure naming the boundary.
     fn expression_error_messages(
-        &self,
+        &mut self,
         error: ExpressionParseError,
         string_table: &StringTable,
     ) -> PreparedFailure {

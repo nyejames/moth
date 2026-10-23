@@ -7,8 +7,6 @@
 use super::subject::DiagnosticSubject;
 use super::*;
 use crate::builder_surface::SourceFileKind;
-#[cfg(test)]
-use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidValueReceiverView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
     DuplicatePublicExportView, DuplicateTraitRequirementView, GenericBoundPrivateSurfaceLeakView,
@@ -78,17 +76,6 @@ pub(crate) fn render_invalid_value_receiver(
             view.produced_count,
         ),
         guidance: vec![guidance.to_owned()],
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn render_payload(
-    payload: &DiagnosticPayload,
-    context: DiagnosticRenderContext<'_>,
-) -> RenderedPayload {
-    RenderedPayload {
-        message: render_payload_message(payload, context),
-        guidance: Vec::new(),
     }
 }
 
@@ -200,31 +187,6 @@ pub(crate) fn terse_diagnostic_message(
         subject.descriptor().title.to_owned()
     } else {
         rendered.message
-    }
-}
-
-#[cfg(test)]
-fn render_payload_message(
-    payload: &DiagnosticPayload,
-    context: DiagnosticRenderContext<'_>,
-) -> String {
-    let string_table = context.string_table;
-
-    match payload {
-        DiagnosticPayload::UnknownName { name, namespace } => {
-            unknown_name_message(*name, *namespace, string_table)
-        }
-        DiagnosticPayload::BorrowConflict { .. } => borrow_payload_message(payload, context),
-        DiagnosticPayload::InvalidGenericParameter { reason } => {
-            invalid_generic_parameter_message(reason, string_table)
-        }
-        DiagnosticPayload::InvalidFunctionSignature { reason } => {
-            invalid_function_signature_message(reason, string_table)
-        }
-        DiagnosticPayload::None => String::new(),
-        _ => unreachable!(
-            "migrated families render through the compact path; P4.6 deletes this function"
-        ),
     }
 }
 
@@ -1110,24 +1072,6 @@ pub(crate) fn render_bare_file_import(
     RenderedPayload {
         message: bare_file_import_message(view.path, context),
         guidance: Vec::new(),
-    }
-}
-
-#[cfg(test)]
-fn borrow_payload_message(
-    payload: &DiagnosticPayload,
-    context: DiagnosticRenderContext<'_>,
-) -> String {
-    match payload {
-        DiagnosticPayload::BorrowConflict {
-            place,
-            existing_access,
-            requested_access,
-            ..
-        } => borrow_conflict_message(place, *existing_access, *requested_access, context),
-        _ => unreachable!(
-            "migrated families render through the compact path; P4.6 deletes this function"
-        ),
     }
 }
 

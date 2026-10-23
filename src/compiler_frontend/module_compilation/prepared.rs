@@ -12,7 +12,7 @@
 //!       owns the immutable source database and source-origin table shared by its prepared modules.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::DiagnosticDraft;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::SourceBuildConfigContract;
 use crate::compiler_frontend::headers::parse_file_headers::PreparedHeaderSyntax;
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
@@ -71,7 +71,7 @@ pub(crate) struct PreparedModuleInput {
     /// identity through the merge.
     pub(crate) path_fork: PathInternerFork,
     /// Warnings accumulated during file preparation.
-    pub(crate) warnings: Vec<CompilerDiagnostic>,
+    pub(crate) warnings: Vec<DiagnosticDraft>,
     /// Number of source files in the module, for arena capacity estimation.
     pub(crate) source_file_count: usize,
     /// Total source byte count, for arena capacity estimation.

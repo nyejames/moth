@@ -49,7 +49,7 @@ use crate::compiler_frontend::ast::statements::value_production::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidFallibleHandlingReason,
+    CompilerDiagnostic, DiagnosticBag, InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -967,11 +967,11 @@ pub(crate) fn parse_catch_fallible_handler_typed(
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
     site: CatchFallibleHandlerSite<'_>,
-    warnings: Option<&mut Vec<CompilerDiagnostic>>,
+    warnings: Option<&mut DiagnosticBag>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedCatchHandler, ExpressionParseError> {
-    let mut local_handler_warnings: Vec<CompilerDiagnostic> = Vec::new();
+    let mut local_handler_warnings = DiagnosticBag::new();
     let warnings = match warnings {
         Some(warnings) => warnings,
         None => &mut local_handler_warnings,
@@ -997,7 +997,7 @@ pub(crate) fn parse_catch_fallible_handler_typed(
 /// Parses a `catch:` handler without an error binding.
 #[allow(
     clippy::too_many_arguments,
-    reason = "catch without binding keeps stream, scope, site, warnings and mutable parse resources apart"
+    reason = "catch without binding shares the typed catch entrypoint shape while keeping parse resources separate"
 )]
 pub(crate) fn parse_catch_without_error_binding_typed(
     token_stream: &mut AstCursor,
@@ -1006,16 +1006,15 @@ pub(crate) fn parse_catch_without_error_binding_typed(
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
     site: CatchFallibleHandlerSite<'_>,
-    warnings: Option<&mut Vec<CompilerDiagnostic>>,
+    warnings: Option<&mut DiagnosticBag>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedCatchHandler, ExpressionParseError> {
-    let mut local_handler_warnings: Vec<CompilerDiagnostic> = Vec::new();
+    let mut local_handler_warnings = DiagnosticBag::new();
     let warnings = match warnings {
         Some(warnings) => warnings,
         None => &mut local_handler_warnings,
     };
-
     parse_catch_fallible_handler_body(
         token_stream,
         context,
@@ -1038,7 +1037,7 @@ fn parse_catch_error_binding(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     site: &CatchFallibleHandlerSite<'_>,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     string_table: &mut StringTable,
 ) -> Result<ParsedCatchErrorBinding, ExpressionParseError> {
     if token_stream.current_tag() != TokenTag::TYPE_PARAMETER_BRACKET {
@@ -1176,7 +1175,7 @@ fn bind_catch_error(
 /// WHY: this is the shared backend for both binding and no-binding catch handlers.
 #[allow(
     clippy::too_many_arguments,
-    reason = "catch body parsing keeps the token stream, scope, mutable interner/string/path state, handler site, error binding, and warning sink as separate borrows"
+    reason = "catch body parsing keeps the token stream, scope, mutable interner/string/path state, handler site, and error binding as separate borrows"
 )]
 fn parse_catch_fallible_handler_body(
     token_stream: &mut AstCursor,
@@ -1186,7 +1185,7 @@ fn parse_catch_fallible_handler_body(
     const_values: &mut ConstValueStore,
     site: CatchFallibleHandlerSite<'_>,
     error: Option<ParsedCatchErrorBinding>,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedCatchHandler, ExpressionParseError> {
@@ -1214,16 +1213,19 @@ fn parse_catch_fallible_handler_body(
 
     token_stream.advance();
 
-    let parsed_body = function_body_to_ast(
+    let mut body_warnings = DiagnosticBag::new();
+    let parsed_body_result = function_body_to_ast(
         token_stream,
         handler_context,
         type_interner,
         expression_builder,
         const_values,
-        warnings,
+        &mut body_warnings,
         string_table,
         path_fork,
-    )?;
+    );
+    warnings.append(body_warnings);
+    let parsed_body = parsed_body_result?;
 
     // A handler body shares the enclosing body root's numeric domain, so its parse returns the
     // authored-order draft. A draft that retained no numeric continuation converts straight to
@@ -1317,11 +1319,11 @@ pub(super) fn parse_inline_catch_fallible_handler_typed(
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
     site: CatchFallibleHandlerSite<'_>,
-    warnings: Option<&mut Vec<CompilerDiagnostic>>,
+    warnings: Option<&mut DiagnosticBag>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedCatchHandler, ExpressionParseError> {
-    let mut local_handler_warnings: Vec<CompilerDiagnostic> = Vec::new();
+    let mut local_handler_warnings = DiagnosticBag::new();
     let warnings = match warnings {
         Some(warnings) => warnings,
         None => &mut local_handler_warnings,

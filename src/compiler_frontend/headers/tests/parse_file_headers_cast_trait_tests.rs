@@ -17,13 +17,11 @@ fn header_parsing_rejects_core_cast_trait_source_declaration() {
             format!("source declaration of {trait_name} must be rejected as a core cast trait");
         let errors = expect_header_error(result, &error_message);
 
-        assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::ReservedNameCollision {
-                reserved_by: ReservedNameOwner::CoreTrait,
-                ..
-            }
-        )));
+        assert!(errors.diagnostics.views().any(|diagnostic| {
+            diagnostic
+                .family_view::<names_declarations::ReservedNameCollisionView>()
+                .is_some_and(|facts| facts.reserved_by == ReservedNameOwner::CoreTrait)
+        }));
     }
 }
 
@@ -82,14 +80,12 @@ fn header_parsing_rejects_selection_alias_to_core_cast_trait_name() {
         "a dependency selection alias to a core cast trait name must be rejected"
     );
 
-    let errors = result.err().expect("expected parse errors");
-    assert!(errors.diagnostics().iter().any(|diagnostic| matches!(
-        &diagnostic.payload,
-        DiagnosticPayload::ReservedNameCollision {
-            reserved_by: ReservedNameOwner::CoreTrait,
-            ..
-        }
-    )));
+    let errors = compact_bag_for_test(result.err().expect("expected parse errors"), None);
+    assert!(errors.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::ReservedNameCollisionView>()
+            .is_some_and(|facts| facts.reserved_by == ReservedNameOwner::CoreTrait)
+    }));
 }
 
 #[test]
@@ -113,12 +109,10 @@ fn header_parsing_rejects_module_public_surface_re_export_with_core_cast_trait_n
         "module public-surface re-export under a core cast trait name must be rejected"
     );
 
-    let errors = result.err().expect("expected parse errors");
-    assert!(errors.diagnostics().iter().any(|diagnostic| matches!(
-        &diagnostic.payload,
-        DiagnosticPayload::ReservedNameCollision {
-            reserved_by: ReservedNameOwner::CoreTrait,
-            ..
-        }
-    )));
+    let errors = compact_bag_for_test(result.err().expect("expected parse errors"), None);
+    assert!(errors.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::ReservedNameCollisionView>()
+            .is_some_and(|facts| facts.reserved_by == ReservedNameOwner::CoreTrait)
+    }));
 }

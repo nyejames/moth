@@ -50,7 +50,7 @@ pub(in crate::compiler_frontend::ast::templates) fn install_formatted_tir_refere
     }
 
     let mut store = context.template_ir_store.borrow_mut();
-    let formatter_result = run_tir_formatter_with_warnings(
+    let formatted_root = run_tir_formatter_with_warnings(
         &mut store,
         expression_builder,
         const_values,
@@ -63,7 +63,7 @@ pub(in crate::compiler_frontend::ast::templates) fn install_formatted_tir_refere
     )?;
     let formatted_template_id = store.push_structurally_derived_template(
         reference.root,
-        formatter_result.root,
+        formatted_root,
         DerivedTemplateMetadata::preserve_source(),
     )?;
 

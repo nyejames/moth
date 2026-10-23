@@ -192,8 +192,8 @@ fn config_and_write_time_containment_share_canonical_classification() {
 
     use crate::build_system::output::manifest::validate_output_root_is_safe;
     use crate::compiler_frontend::compiler_errors::InfrastructureErrors;
+    use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
     use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-    use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 
     let _project_temp = tempfile::tempdir().expect("should create project temp dir");
     let project_root = _project_temp.path().to_path_buf();

@@ -454,7 +454,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
         self.module_symbols = module_symbols;
         self.binding_environment = binding_environment;
-        self.warnings = self.binding_environment.warnings.clone();
+        self.warnings = std::mem::take(&mut self.binding_environment.warnings);
         let declaration_lanes = prepare!(DeclarationPassLanes::from_stage3_order(
             sorted_headers,
             &ordered_semantic_declarations
@@ -719,7 +719,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// WHY: keeping final assembly in one helper makes `build` read as the
     /// semantic phase pipeline instead of ending with a large structural move.
     fn finish_environment(
-        self,
+        mut self,
         receiver_methods: Rc<ReceiverMethodCatalog>,
         trait_environment: TraitEnvironment,
         trait_evidence_environment: TraitEvidenceEnvironment,
@@ -1178,7 +1178,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     ///
     /// WHY: infrastructure drops warnings on this lane; authored diagnostics keep them.
     fn capture_failure(
-        &self,
+        &mut self,
         failure: impl Into<ExpressionParseError>,
         string_table: &StringTable,
     ) -> PreparedFailure {
@@ -1186,7 +1186,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         match failure.at_boundary_without_numeric_retention("the module environment builder") {
             Ok(diagnostic) => PreparedFailure::with_diagnostic_and_warnings(
                 diagnostic,
-                self.warnings.clone().into_diagnostics(),
+                self.warnings.take_diagnostics(),
                 string_table,
                 Some(&self.type_environment),
                 || Some(Arc::new(self.path_fork.snapshot_table())),

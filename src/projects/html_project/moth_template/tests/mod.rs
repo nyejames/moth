@@ -9,9 +9,9 @@ use crate::build_system::create_project_modules::resource_inputs::{
     ResourceContentState, ResourceInputRegistry,
 };
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, ErrorType};
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, dev_server::render_boundary_messages_html,
     terse::format_terse_boundary_messages,

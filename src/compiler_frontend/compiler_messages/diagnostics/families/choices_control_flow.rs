@@ -20,12 +20,11 @@ use crate::compiler_frontend::compiler_messages::render::{
     render_non_exhaustive_match, render_unreachable_match_arm,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticCategory, DiagnosticKind,
-    DiagnosticPayload, DiagnosticSeverity, InvalidChoiceVariantReason,
-    InvalidControlFlowStatementReason, InvalidFallibleHandlingReason, InvalidLoopHeaderReason,
-    InvalidMatchArmReason, InvalidMatchPatternReason, InvalidStandaloneStatementReason,
-    InvalidStatementPositionReason, NonExhaustiveMatchReason, RuleDiagnosticKind,
-    SyntaxDiagnosticKind,
+    CompileTimeEvaluationErrorReason, DiagnosticCategory, DiagnosticKind, DiagnosticPayload,
+    DiagnosticSeverity, InvalidChoiceVariantReason, InvalidControlFlowStatementReason,
+    InvalidFallibleHandlingReason, InvalidLoopHeaderReason, InvalidMatchArmReason,
+    InvalidMatchPatternReason, InvalidStandaloneStatementReason, InvalidStatementPositionReason,
+    NonExhaustiveMatchReason, RuleDiagnosticKind, SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -552,7 +551,7 @@ diagnostic_family! {
 }
 
 /// Stores an invalid choice-variant draft, including its available-name list as string ids.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_choice_variant(
+pub(crate) fn invalid_choice_variant(
     reason: InvalidChoiceVariantReason,
     choice_name: Option<StringId>,
     variant_name: Option<StringId>,
@@ -575,7 +574,7 @@ pub(crate) fn invalid_choice_variant_available_variants<'a>(
 }
 
 /// Stores an invalid loop-header draft with the collection-source type in a pending optional type fact.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_loop_header(
+pub(crate) fn invalid_loop_header(
     reason: InvalidLoopHeaderReason,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -587,12 +586,12 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_loop
 }
 
 /// Stores fallible-handling facts in a code plus two optional types and one per-code count.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_fallible_handling(
-    reason: &InvalidFallibleHandlingReason,
+pub(crate) fn invalid_fallible_handling(
+    reason: InvalidFallibleHandlingReason,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
     let (code, first_error_type, second_error_type, count) =
-        InvalidFallibleHandlingCode::split(reason);
+        InvalidFallibleHandlingCode::split(&reason);
     DiagnosticDraft::with_facts(&INVALID_FALLIBLE_HANDLING, span, |cursor| {
         cursor.push::<UnitFact<InvalidFallibleHandlingCode>>(&code)?;
         cursor.push::<OptTypeFact>(&first_error_type)?;
@@ -618,7 +617,7 @@ diagnostic_family! {
 }
 
 /// The non-exhaustive-match draft. The missing variant names are stored as the extra string IDs.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn non_exhaustive_match(
+pub(crate) fn non_exhaustive_match(
     reason: NonExhaustiveMatchReason,
     missing_variants: Vec<StringId>,
     span: Option<SourceSpan>,
@@ -629,37 +628,36 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn non_exhausti
     .with_string_ids(missing_variants)
 }
 
-/// Maps this module's legacy diagnostics onto compact constructors. Declines all other payloads.
-pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticDraft> {
-    let span = diagnostic.primary_span;
-    match (diagnostic.kind, &diagnostic.payload) {
+/// Consumes this module's legacy kind and payload when they match a compact family.
+pub(super) fn from_legacy(
+    kind: DiagnosticKind,
+    payload: DiagnosticPayload,
+    span: Option<SourceSpan>,
+) -> Result<DiagnosticDraft, DiagnosticPayload> {
+    match (kind, payload) {
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::UnreachableMatchArm),
             DiagnosticPayload::UnreachableMatchArm,
-        ) => Some(unreachable_match_arm(span)),
+        ) => Ok(unreachable_match_arm(span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::NonExhaustiveMatch),
             DiagnosticPayload::NonExhaustiveMatch {
                 reason,
                 missing_variants,
             },
-        ) => Some(non_exhaustive_match(
-            *reason,
-            missing_variants.clone(),
-            span,
-        )),
+        ) => Ok(non_exhaustive_match(reason, missing_variants, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidStandaloneStatement),
             DiagnosticPayload::InvalidStandaloneStatement { reason },
-        ) => Some(invalid_standalone_statement(*reason, span)),
+        ) => Ok(invalid_standalone_statement(reason, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidMatchArm),
             DiagnosticPayload::InvalidMatchArm { reason },
-        ) => Some(invalid_match_arm(*reason, span)),
+        ) => Ok(invalid_match_arm(reason, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidStatementPosition),
             DiagnosticPayload::InvalidStatementPosition { reason },
-        ) => Some(invalid_statement_position(*reason, span)),
+        ) => Ok(invalid_statement_position(reason, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidChoiceVariant),
             DiagnosticPayload::InvalidChoiceVariant {
@@ -668,17 +666,17 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 variant_name,
                 available_variants,
             },
-        ) => Some(invalid_choice_variant(
-            *reason,
-            *choice_name,
-            *variant_name,
-            available_variants.clone(),
+        ) => Ok(invalid_choice_variant(
+            reason,
+            choice_name,
+            variant_name,
+            available_variants,
             span,
         )),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidControlFlowStatement),
             DiagnosticPayload::InvalidControlFlowStatement { reason },
-        ) => Some(invalid_control_flow_statement(*reason, span)),
+        ) => Ok(invalid_control_flow_statement(reason, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidMatchPattern),
             DiagnosticPayload::InvalidMatchPattern {
@@ -686,25 +684,25 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 variant_name,
                 scrutinee_name,
             },
-        ) => Some(invalid_match_pattern(
-            *reason,
-            *variant_name,
-            *scrutinee_name,
+        ) => Ok(invalid_match_pattern(
+            reason,
+            variant_name,
+            scrutinee_name,
             span,
         )),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidLoopHeader),
             DiagnosticPayload::InvalidLoopHeader { reason },
-        ) => Some(invalid_loop_header(*reason, span)),
+        ) => Ok(invalid_loop_header(reason, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidFallibleHandling),
             DiagnosticPayload::InvalidFallibleHandling { reason },
-        ) => Some(invalid_fallible_handling(reason, span)),
+        ) => Ok(invalid_fallible_handling(reason, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::CompileTimeEvaluationError),
             DiagnosticPayload::CompileTimeEvaluationError { reason, operation },
-        ) => Some(compile_time_evaluation_error(*reason, *operation, span)),
-        _ => None,
+        ) => Ok(compile_time_evaluation_error(reason, operation, span)),
+        (_, payload) => Err(payload),
     }
 }
 

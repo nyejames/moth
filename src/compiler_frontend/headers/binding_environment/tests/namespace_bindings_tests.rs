@@ -11,9 +11,21 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTraitIdentity, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::{
+    families::{
+        imports::{
+            DuplicateImportSurfaceMemberView, ExplicitMothExtensionView, ImportNameCollisionView,
+            NotExportedByPublicSurfaceView,
+        },
+        names_declarations::ReservedNameCollisionView,
+    },
+    foreign::SiteRef,
+    labels::DurableLabelMessage,
+    test_support::{CompactDiagnosticBagForTest, compact_bag_for_test},
+    view::DiagnosticView,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticLabelStyle, DiagnosticPayload,
-    ImportDiagnosticKind, ReservedNameOwner,
+    CompilerDiagnostic, DiagnosticBag, ReservedNameOwner,
 };
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalConstantDef, ExternalConstantId, ExternalConstantValue,
@@ -145,14 +157,21 @@ fn add_selection(
 }
 
 fn assert_duplicate_dependency_surface_member(error: CompilerDiagnostic) {
-    assert_eq!(
-        error.kind,
-        DiagnosticKind::Import(ImportDiagnosticKind::DuplicateImportSurfaceMember)
+    let diagnostics = compact_bag_for_test(DiagnosticBag::from(error), None);
+    let diagnostic = diagnostics
+        .first()
+        .expect("expected one duplicate dependency diagnostic");
+    assert!(
+        diagnostic
+            .family_view::<DuplicateImportSurfaceMemberView>()
+            .is_some(),
+        "expected duplicate dependency surface member diagnostic, got {}",
+        diagnostic.descriptor().code
     );
 }
 
 fn assert_keyword_shadow_dependency_diagnostic(
-    diagnostics: &[CompilerDiagnostic],
+    diagnostics: &CompactDiagnosticBagForTest,
     expected_name: StringId,
     expected_span: &SourceSpan,
 ) {
@@ -161,30 +180,34 @@ fn assert_keyword_shadow_dependency_diagnostic(
         1,
         "keyword-shadow validation should stop dependency registration before any other diagnostic"
     );
-    let diagnostic = &diagnostics[0];
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::ReservedNameCollision {
-                name,
-                reserved_by: ReservedNameOwner::Keyword,
-            } if *name == expected_name
-        ),
-        "expected the canonical keyword-shadow diagnostic, got {:?}",
-        diagnostic.payload
-    );
+    let diagnostic = diagnostics
+        .first()
+        .expect("one compact diagnostic was asserted");
+    let facts = diagnostic
+        .family_view::<ReservedNameCollisionView>()
+        .expect("expected the canonical keyword-shadow diagnostic family");
+    assert_eq!(facts.name, expected_name);
+    assert_eq!(facts.reserved_by, ReservedNameOwner::Keyword);
     assert_eq!(
-        diagnostic.primary_span,
+        primary_span(diagnostic),
         Some(*expected_span),
         "keyword-shadow diagnostics must point at the dependency-created local name"
     );
 }
 
-fn failure_diagnostics(failure: &HeaderPreparationFailure) -> &[CompilerDiagnostic] {
-    match failure {
-        HeaderPreparationFailure::Diagnosed(diagnostics) => diagnostics.diagnostics(),
-        HeaderPreparationFailure::Infrastructure(_) => &[],
+fn primary_span(diagnostic: DiagnosticView<'_>) -> Option<SourceSpan> {
+    match diagnostic.primary_site() {
+        SiteRef::Absent => None,
+        SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
     }
+}
+
+fn failure_diagnostics(failure: HeaderPreparationFailure) -> CompactDiagnosticBagForTest {
+    let bag = match failure {
+        HeaderPreparationFailure::Diagnosed(diagnostics) => diagnostics,
+        HeaderPreparationFailure::Infrastructure(_) => DiagnosticBag::new(),
+    };
+    compact_bag_for_test(bag, None)
 }
 
 fn primary_infrastructure_error(failure: &HeaderPreparationFailure) -> Option<&CompilerError> {
@@ -246,7 +269,7 @@ fn namespace_dependency_default_rejects_keyword_shadow_name_variants() {
         .expect_err("namespace names that shadow config must be rejected");
 
         assert_keyword_shadow_dependency_diagnostic(
-            failure_diagnostics(&error),
+            &failure_diagnostics(error),
             expected_name,
             &expected_span,
         );
@@ -293,7 +316,7 @@ fn namespace_dependency_alias_rejects_keyword_shadow_name_variants() {
         .expect_err("namespace aliases that shadow config must be rejected");
 
         assert_keyword_shadow_dependency_diagnostic(
-            failure_diagnostics(&error),
+            &failure_diagnostics(error),
             expected_name,
             &expected_span,
         );
@@ -359,18 +382,26 @@ fn namespace_dependency_alias_collision_retains_exact_alias_span() {
     })
     .expect_err("namespace alias should collide with the same-file declaration");
 
-    let diagnostic = &failure_diagnostics(&error)[0];
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Import(ImportDiagnosticKind::ImportNameCollision)
+    let diagnostics = failure_diagnostics(error);
+    let diagnostic = diagnostics
+        .first()
+        .expect("expected one collision diagnostic");
+    assert!(
+        diagnostic
+            .family_view::<ImportNameCollisionView>()
+            .is_some(),
+        "expected a dependency binding name collision"
     );
-    assert_eq!(diagnostic.primary_span, Some(expected_span));
-    let previous_label = diagnostic
-        .labels
-        .iter()
-        .find(|label| label.style == DiagnosticLabelStyle::Secondary)
+    assert_eq!(primary_span(diagnostic), Some(expected_span));
+    let previous_span = diagnostic
+        .durable_labels()
+        .find(|label| matches!(label.message, DurableLabelMessage::PreviousDeclaration))
+        .and_then(|label| match label.site {
+            SiteRef::Absent => None,
+            SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
+        })
         .expect("collision should retain the previous declaration label");
-    assert_eq!(previous_label.span, Some(expected_previous_span));
+    assert_eq!(previous_span, expected_previous_span);
 }
 
 #[test]
@@ -406,12 +437,17 @@ fn explicit_moth_extension_diagnostic_retains_dependency_path_span() {
     })
     .expect_err("explicit .moth dependency should be rejected during binding");
 
-    let diagnostic = &failure_diagnostics(&error)[0];
-    assert!(matches!(
-        diagnostic.kind,
-        DiagnosticKind::Import(ImportDiagnosticKind::ExplicitMothExtension)
-    ));
-    assert_eq!(diagnostic.primary_span, Some(expected_span));
+    let diagnostics = failure_diagnostics(error);
+    let diagnostic = diagnostics
+        .first()
+        .expect("expected one extension diagnostic");
+    assert!(
+        diagnostic
+            .family_view::<ExplicitMothExtensionView>()
+            .is_some(),
+        "expected the explicit .moth extension diagnostic"
+    );
+    assert_eq!(primary_span(diagnostic), Some(expected_span));
 }
 
 #[test]
@@ -465,7 +501,7 @@ fn selected_dependency_unaliased_name_rejects_keyword_shadow_variants() {
         .expect_err("selected names that shadow config must be rejected");
 
         assert_keyword_shadow_dependency_diagnostic(
-            failure_diagnostics(&error),
+            &failure_diagnostics(error),
             expected_name,
             &expected_span,
         );
@@ -526,7 +562,7 @@ fn selected_dependency_alias_rejects_keyword_shadow_name_variants() {
         .expect_err("selected aliases that shadow config must be rejected");
 
         assert_keyword_shadow_dependency_diagnostic(
-            failure_diagnostics(&error),
+            &failure_diagnostics(error),
             expected_name,
             &expected_span,
         );
@@ -588,7 +624,7 @@ fn source_selection_binding_rejects_keyword_shadow_names_before_source_validatio
         .expect_err("source dependency names that shadow config must be rejected");
 
         assert_keyword_shadow_dependency_diagnostic(
-            failure_diagnostics(&error),
+            &failure_diagnostics(error),
             expected_name,
             &expected_span,
         );
@@ -651,7 +687,7 @@ fn provider_declaration_selection_rejects_keyword_shadow_names_before_provider_r
         .expect_err("provider declaration names that shadow config must be rejected");
 
         assert_keyword_shadow_dependency_diagnostic(
-            failure_diagnostics(&error),
+            &failure_diagnostics(error),
             expected_name,
             &expected_span,
         );
@@ -1362,12 +1398,18 @@ fn prelude_namespace_alias_collides_with_same_file_declaration() {
 
     let error =
         result.expect_err("same-file declaration should collide with prelude namespace alias");
-    assert_eq!(
-        failure_diagnostics(&error)[0].kind,
-        DiagnosticKind::Import(ImportDiagnosticKind::ImportNameCollision)
+    let diagnostics = failure_diagnostics(error);
+    let diagnostic = diagnostics
+        .first()
+        .expect("expected one collision diagnostic");
+    assert!(
+        diagnostic
+            .family_view::<ImportNameCollisionView>()
+            .is_some(),
+        "expected a dependency binding name collision"
     );
     assert_eq!(
-        failure_diagnostics(&error)[0].primary_span,
+        primary_span(diagnostic),
         Some(SourceSpan::new(
             SourceId::COMPILATION_ROOT,
             declaration_span
@@ -2606,16 +2648,18 @@ fn missing_provider_record_fails_deterministically() {
         &mut path_fork,
     )
     .expect_err("a missing provider record must fail binding deterministically");
-    let diagnostic = &failure_diagnostics(&failure)[0];
-    let DiagnosticPayload::NotExportedByPublicSurface { requested_path, .. } = &diagnostic.payload
-    else {
-        panic!("unexpected diagnostic payload: {:?}", diagnostic.payload);
-    };
+    let diagnostics = failure_diagnostics(failure);
+    let diagnostic = diagnostics
+        .first()
+        .expect("expected one missing provider record diagnostic");
+    let facts = diagnostic
+        .family_view::<NotExportedByPublicSurfaceView>()
+        .expect("expected a public-surface export diagnostic");
     assert_eq!(
-        requested_path, &expected_requested_path,
+        facts.requested_path, expected_requested_path,
         "diagnostic should retain the logical selected dependency path",
     );
-    assert_eq!(diagnostic.primary_span, Some(expected_source_span));
+    assert_eq!(primary_span(diagnostic), Some(expected_source_span));
 }
 
 #[test]

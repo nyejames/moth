@@ -19,14 +19,16 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::token_le
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::{
     ForeignSiteDraft, ForeignSlot, SiteRef,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::{
+    GenericSubstitutionDiagnostic, LabelDraftMessage,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::resource::DiagnosticLimits;
 use crate::compiler_frontend::compiler_messages::diagnostics::store::{
     DiagnosticId, DiagnosticStore,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::view::FamilyView;
 use crate::compiler_frontend::compiler_messages::{
-    CapacityResource, DiagnosticCapacityResource, DiagnosticLabelMessage,
-    GenericSubstitutionDiagnostic, HirCapacityResource, NonExhaustiveMatchReason,
+    CapacityResource, DiagnosticCapacityResource, HirCapacityResource, NonExhaustiveMatchReason,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -50,7 +52,7 @@ fn foreign_capacity_draft() -> DiagnosticDraft {
 }
 
 /// A draft on the test family with one label, so compacting it needs a label row and an extra part.
-fn labelled_test_draft(message: DiagnosticLabelMessage) -> DiagnosticDraft {
+fn labelled_test_draft(message: LabelDraftMessage) -> DiagnosticDraft {
     DiagnosticDraft::with_facts(&TEST_LABEL_FAMILY, None, |_cursor| Ok(()))
         .with_label(Some(exact_span(0, 2)), Some(message))
 }
@@ -60,7 +62,7 @@ fn label_ceiling_rejects_with_labels() {
     let mut store = limited(|limits| limits.labels = 0);
     let draft = duplicate_declaration(StringId::from_index(1), Some(exact_span(10, 2))).with_label(
         Some(exact_span(0, 2)),
-        Some(DiagnosticLabelMessage::PreviousDeclaration),
+        Some(LabelDraftMessage::PreviousDeclaration),
     );
 
     assert_eq!(
@@ -74,7 +76,7 @@ fn extra_ceiling_rejects_with_extras() {
     let mut store = limited(|limits| limits.extras = 0);
     let draft = duplicate_declaration(StringId::from_index(1), Some(exact_span(10, 2))).with_label(
         Some(exact_span(0, 2)),
-        Some(DiagnosticLabelMessage::PreviousDeclaration),
+        Some(LabelDraftMessage::PreviousDeclaration),
     );
 
     assert_eq!(
@@ -101,7 +103,7 @@ fn string_id_ceiling_rejects_with_string_ids() {
 #[test]
 fn label_data_ceiling_rejects_with_label_data() {
     let mut store = limited(|limits| limits.label_data = 0);
-    let draft = labelled_test_draft(DiagnosticLabelMessage::ConfigInputOrigin {
+    let draft = labelled_test_draft(LabelDraftMessage::ConfigInputOrigin {
         input_name: StringId::from_index(1),
         origin: BuildConfigValueOrigin::ExplicitInput,
     });
@@ -115,13 +117,12 @@ fn label_data_ceiling_rejects_with_label_data() {
 #[test]
 fn substitution_ceiling_rejects_with_substitutions() {
     let mut store = limited(|limits| limits.substitutions = 0);
-    let mut draft =
-        labelled_test_draft(DiagnosticLabelMessage::GenericInstantiationSubstitutions {
-            substitutions: vec![GenericSubstitutionDiagnostic {
-                parameter_name: StringId::from_index(2),
-                concrete_type_id: TypeId(7),
-            }],
-        });
+    let mut draft = labelled_test_draft(LabelDraftMessage::GenericInstantiationSubstitutions {
+        substitutions: vec![GenericSubstitutionDiagnostic {
+            parameter_name: StringId::from_index(2),
+            concrete_type_id: TypeId(7),
+        }],
+    });
     draft
         .capture_types(&mut |id: TypeId| TypeDisplayId::from_index(id.0 as usize))
         .expect("small test types always capture");

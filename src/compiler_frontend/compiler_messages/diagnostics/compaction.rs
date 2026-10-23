@@ -216,6 +216,7 @@ impl DiagnosticStore {
         let DiagnosticExtraDraft {
             labels,
             foreign_sites,
+            owner_handles: _owner_handles,
             substitutions,
             data,
         } = extra.map_or_else(DiagnosticExtraDraft::default, |boxed| *boxed);

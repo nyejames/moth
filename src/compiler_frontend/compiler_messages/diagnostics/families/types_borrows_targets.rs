@@ -8,7 +8,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticD
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
     OptPlaceFact, OptStringFact, OptTypeFact, PlaceFact, StringFact, TypeFact, UnitFact, unit_code,
 };
-use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelMessageCode;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::{
+    LabelDraftMessage, LabelMessageCode,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
     FamilyRow, diagnostic_family,
 };
@@ -20,11 +22,10 @@ use crate::compiler_frontend::compiler_messages::render::{
     render_use_of_uninitialized_local,
 };
 use crate::compiler_frontend::compiler_messages::{
-    BorrowAccessKind, BorrowDiagnosticKind, CompilerDiagnostic, DiagnosticCategory, DiagnosticKind,
-    DiagnosticLabelMessage, DiagnosticOperator, DiagnosticPayload, DiagnosticPlace,
-    DiagnosticSeverity, IncompatibleChoiceComparisonReason, InvalidMutableAccessReason,
-    InvalidRouteOutputReason, RuleDiagnosticKind, TypeDiagnosticKind, TypeMismatchContext,
-    UnsupportedBackendFeatureReason,
+    BorrowAccessKind, BorrowDiagnosticKind, DiagnosticCategory, DiagnosticKind, DiagnosticOperator,
+    DiagnosticPayload, DiagnosticPlace, DiagnosticSeverity, IncompatibleChoiceComparisonReason,
+    InvalidMutableAccessReason, InvalidRouteOutputReason, RuleDiagnosticKind, TypeDiagnosticKind,
+    TypeMismatchContext, UnsupportedBackendFeatureReason,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -185,7 +186,7 @@ diagnostic_family! {
 
 /// The uninitialised-local draft. The place is stored in the place fact. A `RenderedText` place is stored as a local,
 /// since both render as the same backticked name (see `PlaceFact`).
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn use_of_uninitialized_local(
+pub(crate) fn use_of_uninitialized_local(
     place: DiagnosticPlace,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -194,7 +195,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn use_of_unini
     })
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn incompatible_choice_comparison(
+pub(crate) fn incompatible_choice_comparison(
     reason: IncompatibleChoiceComparisonReason,
     lhs: TypeId,
     rhs: TypeId,
@@ -228,7 +229,7 @@ pub(crate) fn incompatible_choice_comparison_field_name(
     }
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn multiple_mutable_borrows(
+pub(crate) fn multiple_mutable_borrows(
     place: DiagnosticPlace,
     conflicting_place: Option<DiagnosticPlace>,
     existing_span: Option<SourceSpan>,
@@ -241,7 +242,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn multiple_mut
     with_conflicting_access_label(draft, existing_span)
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn shared_mutable_conflict(
+pub(crate) fn shared_mutable_conflict(
     place: DiagnosticPlace,
     existing_access: BorrowAccessKind,
     requested_access: BorrowAccessKind,
@@ -258,7 +259,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn shared_mutab
     with_conflicting_access_label(draft, existing_span)
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_mutable_access(
+pub(crate) fn invalid_mutable_access(
     place: DiagnosticPlace,
     reason: InvalidMutableAccessReason,
     conflicting_place: Option<DiagnosticPlace>,
@@ -278,16 +279,18 @@ fn with_conflicting_access_label(
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
     match span {
-        Some(span) => draft.with_label(Some(span), Some(DiagnosticLabelMessage::ConflictingAccess)),
+        Some(span) => draft.with_label(Some(span), Some(LabelDraftMessage::ConflictingAccess)),
         None => draft,
     }
 }
 
-/// Maps legacy type, borrow and target diagnostics onto their compact constructors. Declines
-/// reserved borrow payloads and unrelated diagnostics.
-pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticDraft> {
-    let span = diagnostic.primary_span;
-    match (diagnostic.kind, &diagnostic.payload) {
+/// Consumes legacy type, borrow and target payloads for this group's compact constructors.
+pub(super) fn from_legacy(
+    kind: DiagnosticKind,
+    payload: DiagnosticPayload,
+    span: Option<SourceSpan>,
+) -> Result<DiagnosticDraft, DiagnosticPayload> {
+    match (kind, payload) {
         (
             DiagnosticKind::Type(TypeDiagnosticKind::TypeMismatch),
             DiagnosticPayload::TypeMismatch {
@@ -295,32 +298,27 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 found,
                 context,
             },
-        ) => Some(type_mismatch(*expected, *found, *context, span)),
+        ) => Ok(type_mismatch(expected, found, context, span)),
         (
             DiagnosticKind::Borrow(BorrowDiagnosticKind::UseOfUninitializedLocal),
             DiagnosticPayload::UseOfUninitializedLocal { place },
-        ) => Some(use_of_uninitialized_local(place.clone(), span)),
+        ) => Ok(use_of_uninitialized_local(place, span)),
         (
             DiagnosticKind::Type(TypeDiagnosticKind::EmptyCollectionTypeAmbiguity),
             DiagnosticPayload::EmptyCollectionTypeAmbiguity,
-        ) => Some(empty_collection_type_ambiguity(span)),
+        ) => Ok(empty_collection_type_ambiguity(span)),
         (
             DiagnosticKind::Type(TypeDiagnosticKind::UnsupportedOperatorTypes),
             DiagnosticPayload::UnsupportedOperatorTypes { operator, lhs, rhs },
-        ) => Some(unsupported_operator_types(*operator, *lhs, *rhs, span)),
+        ) => Ok(unsupported_operator_types(operator, lhs, rhs, span)),
         (
             DiagnosticKind::Type(TypeDiagnosticKind::IncompatibleChoiceComparison),
             DiagnosticPayload::IncompatibleChoiceComparison { reason, lhs, rhs },
-        ) => Some(incompatible_choice_comparison(
-            reason.clone(),
-            *lhs,
-            *rhs,
-            span,
-        )),
+        ) => Ok(incompatible_choice_comparison(reason, lhs, rhs, span)),
         (
             DiagnosticKind::Type(TypeDiagnosticKind::InvalidRouteOutput),
             DiagnosticPayload::InvalidRouteOutput { reason, output },
-        ) => Some(invalid_route_output(*reason, *output, span)),
+        ) => Ok(invalid_route_output(reason, output, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::UnsupportedExternalFunction),
             DiagnosticPayload::UnsupportedExternalFunction {
@@ -328,10 +326,10 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 package_path,
                 backend_name,
             },
-        ) => Some(unsupported_external_function(
-            *function_name,
-            *package_path,
-            *backend_name,
+        ) => Ok(unsupported_external_function(
+            function_name,
+            package_path,
+            backend_name,
             span,
         )),
         (
@@ -340,16 +338,16 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 backend_name,
                 reason,
             },
-        ) => Some(unsupported_backend_feature(*backend_name, *reason, span)),
+        ) => Ok(unsupported_backend_feature(backend_name, reason, span)),
         (
             DiagnosticKind::Borrow(BorrowDiagnosticKind::MultipleMutableBorrows),
             DiagnosticPayload::MultipleMutableBorrows {
                 place,
                 conflicting_place,
             },
-        ) => Some(multiple_mutable_borrows(
-            place.clone(),
-            conflicting_place.clone(),
+        ) => Ok(multiple_mutable_borrows(
+            place,
+            conflicting_place,
             None,
             span,
         )),
@@ -361,11 +359,11 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 requested_access,
                 conflicting_place,
             },
-        ) => Some(shared_mutable_conflict(
-            place.clone(),
-            *existing_access,
-            *requested_access,
-            conflicting_place.clone(),
+        ) => Ok(shared_mutable_conflict(
+            place,
+            existing_access,
+            requested_access,
+            conflicting_place,
             None,
             span,
         )),
@@ -376,14 +374,14 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 reason,
                 conflicting_place,
             },
-        ) => Some(invalid_mutable_access(
-            place.clone(),
-            *reason,
-            conflicting_place.clone(),
+        ) => Ok(invalid_mutable_access(
+            place,
+            reason,
+            conflicting_place,
             None,
             span,
         )),
-        _ => None,
+        (_, payload) => Err(payload),
     }
 }
 

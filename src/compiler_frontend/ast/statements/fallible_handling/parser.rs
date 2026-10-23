@@ -37,7 +37,7 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidFallibleHandlingReason, TypeMismatchContext,
+    CompilerDiagnostic, DiagnosticBag, InvalidFallibleHandlingReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -827,7 +827,7 @@ fn parse_fallible_handling_suffix(
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
     site: FallibleHandlingSite<'_>,
-    warnings: Option<&mut Vec<CompilerDiagnostic>>,
+    warnings: Option<&mut DiagnosticBag>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<Option<ParsedFallibleSuffix>, ExpressionParseError> {
@@ -965,7 +965,7 @@ fn parse_catch_handling_suffix(
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
     site: FallibleHandlingSite<'_>,
-    warnings: Option<&mut Vec<CompilerDiagnostic>>,
+    warnings: Option<&mut DiagnosticBag>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedFallibleSuffix, ExpressionParseError> {
@@ -1080,7 +1080,7 @@ fn parse_catch_without_error_binding(
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
     site: FallibleHandlingSite<'_>,
-    warnings: Option<&mut Vec<CompilerDiagnostic>>,
+    warnings: Option<&mut DiagnosticBag>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedFallibleSuffix, ExpressionParseError> {
@@ -1122,7 +1122,7 @@ fn parse_catch_handler(
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
     site: FallibleHandlingSite<'_>,
-    warnings: Option<&mut Vec<CompilerDiagnostic>>,
+    warnings: Option<&mut DiagnosticBag>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedFallibleSuffix, ExpressionParseError> {
@@ -1217,7 +1217,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_call_expression(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     handler_call: FallibleCallSite,
-    warnings: Option<&mut Vec<CompilerDiagnostic>>,
+    warnings: Option<&mut DiagnosticBag>,
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
@@ -1307,7 +1307,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_host_call_expression(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     handler_call: FallibleHostCallSite,
-    warnings: Option<&mut Vec<CompilerDiagnostic>>,
+    warnings: Option<&mut DiagnosticBag>,
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
@@ -1500,7 +1500,7 @@ pub(crate) fn parse_fragment_handling_suffix(
     value_required_span: Option<SourceSpan>,
     compilation_stage: &str,
     allow_boundary_catch: bool,
-    warnings: Option<&mut Vec<CompilerDiagnostic>>,
+    warnings: Option<&mut DiagnosticBag>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<Option<ParsedFallibleSuffix>, ExpressionParseError> {

@@ -22,11 +22,11 @@ use crate::compiler_frontend::compiler_messages::render::{
     render_unknown_value_name, render_value_used_as_type,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DeferredFeatureDiagnosticKind, DeferredFeatureReason, DiagnosticCategory,
-    DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, DiagnosticToken,
-    InvalidAssignmentTargetReason, InvalidDeclarationReason, InvalidSignatureMemberReason,
-    InvalidTypeAnnotationReason, NameNamespace, NamingConvention, ReservedNameOwner,
-    RuleDiagnosticKind, SyntaxDiagnosticKind, TypeAnnotationContext,
+    DeferredFeatureDiagnosticKind, DeferredFeatureReason, DiagnosticCategory, DiagnosticKind,
+    DiagnosticPayload, DiagnosticSeverity, DiagnosticToken, InvalidAssignmentTargetReason,
+    InvalidDeclarationReason, InvalidSignatureMemberReason, InvalidTypeAnnotationReason,
+    NameNamespace, NamingConvention, ReservedNameOwner, RuleDiagnosticKind, SyntaxDiagnosticKind,
+    TypeAnnotationContext,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -430,7 +430,7 @@ diagnostic_family! {
 
 /// The duplicate-declaration draft. The primary site is the duplicate. The earlier declaration is not part of this
 /// constructor: the legacy adapter adds it as a label, and only when its span is known.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn duplicate_declaration(
+pub(crate) fn duplicate_declaration(
     name: StringId,
     duplicate_span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -439,16 +439,13 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn duplicate_de
     })
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn shadowed_name(
-    name: StringId,
-    span: Option<SourceSpan>,
-) -> DiagnosticDraft {
+pub(crate) fn shadowed_name(name: StringId, span: Option<SourceSpan>) -> DiagnosticDraft {
     DiagnosticDraft::with_facts(&SHADOWED_NAME, span, |cursor| {
         cursor.push::<StringFact>(&name)
     })
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_assignment_target(
+pub(crate) fn invalid_assignment_target(
     reason: InvalidAssignmentTargetReason,
     target_name: Option<StringId>,
     _target_type: Option<crate::compiler_frontend::datatypes::ids::TypeId>,
@@ -464,7 +461,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_assi
     })
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_declaration(
+pub(crate) fn invalid_declaration(
     reason: InvalidDeclarationReason,
     name: Option<StringId>,
     span: Option<SourceSpan>,
@@ -481,14 +478,11 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_decl
     }
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn deferred_feature(
-    feature: StringId,
-    span: Option<SourceSpan>,
-) -> DiagnosticDraft {
+pub(crate) fn deferred_feature(feature: StringId, span: Option<SourceSpan>) -> DiagnosticDraft {
     deferred_feature_reason(DeferredFeatureReason::NamedFeature { feature }, span)
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn deferred_feature_reason(
+pub(crate) fn deferred_feature_reason(
     reason: DeferredFeatureReason,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -499,7 +493,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn deferred_fea
     })
 }
 /// The invalid-type-annotation draft preserves its context, reason code and optional found token.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_type_annotation(
+pub(crate) fn invalid_type_annotation(
     context: TypeAnnotationContext,
     reason: InvalidTypeAnnotationReason,
     span: Option<SourceSpan>,
@@ -512,7 +506,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_type
     })
 }
 /// Mirrors the legacy constructor by selecting the compact family from the namespace pair.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn namespace_misuse(
+pub(crate) fn namespace_misuse(
     name: StringId,
     expected: NameNamespace,
     found: NameNamespace,
@@ -530,32 +524,35 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn namespace_mi
 }
 
 /// Maps this group's legacy diagnostics onto compact constructors. Declines other payloads.
-pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticDraft> {
-    let span = diagnostic.primary_span;
-    match (diagnostic.kind, &diagnostic.payload) {
+pub(super) fn from_legacy(
+    kind: DiagnosticKind,
+    payload: DiagnosticPayload,
+    span: Option<SourceSpan>,
+) -> Result<DiagnosticDraft, DiagnosticPayload> {
+    match (kind, payload) {
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::DuplicateDeclaration),
             DiagnosticPayload::DuplicateDeclaration { name },
-        ) => Some(duplicate_declaration(*name, span)),
+        ) => Ok(duplicate_declaration(name, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidTypeAnnotation),
             DiagnosticPayload::InvalidTypeAnnotation { context, reason },
-        ) => Some(invalid_type_annotation(*context, reason.clone(), span)),
+        ) => Ok(invalid_type_annotation(context, reason, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::IdentifierNamingConvention),
             DiagnosticPayload::IdentifierNamingConvention {
                 name,
                 expected_style,
             },
-        ) => Some(identifier_naming_convention(*name, *expected_style, span)),
+        ) => Ok(identifier_naming_convention(name, expected_style, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::ReservedBuiltinName),
             DiagnosticPayload::ReservedBuiltinName { name },
-        ) => Some(reserved_builtin_name(*name, span)),
+        ) => Ok(reserved_builtin_name(name, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidSignatureMember),
             DiagnosticPayload::InvalidSignatureMember { reason },
-        ) => Some(invalid_signature_member(*reason, span)),
+        ) => Ok(invalid_signature_member(reason, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
             DiagnosticPayload::NamespaceMisuse {
@@ -564,12 +561,12 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 found,
             },
         ) if !matches!(
-            (*expected, *found),
+            (expected, found),
             (NameNamespace::Type, NameNamespace::Value)
                 | (NameNamespace::Value, NameNamespace::Type)
         ) =>
         {
-            Some(namespace_misuse(*name, *expected, *found, span))
+            Ok(namespace_misuse(name, expected, found, span))
         }
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::ValueUsedAsType),
@@ -578,8 +575,8 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 expected,
                 found,
             },
-        ) if *expected == NameNamespace::Type && *found == NameNamespace::Value => {
-            Some(namespace_misuse(*name, *expected, *found, span))
+        ) if expected == NameNamespace::Type && found == NameNamespace::Value => {
+            Ok(namespace_misuse(name, expected, found, span))
         }
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::TypeUsedAsValue),
@@ -588,8 +585,8 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 expected,
                 found,
             },
-        ) if *expected == NameNamespace::Value && *found == NameNamespace::Type => {
-            Some(namespace_misuse(*name, *expected, *found, span))
+        ) if expected == NameNamespace::Value && found == NameNamespace::Type => {
+            Ok(namespace_misuse(name, expected, found, span))
         }
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::UnknownValueName),
@@ -597,38 +594,38 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 name,
                 namespace: NameNamespace::Value,
             },
-        ) => Some(unknown_value_name(*name, span)),
+        ) => Ok(unknown_value_name(name, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::UnknownTypeName),
             DiagnosticPayload::UnknownName {
                 name,
                 namespace: NameNamespace::Type,
             },
-        ) => Some(unknown_type_name(*name, span)),
+        ) => Ok(unknown_type_name(name, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidTopLevelRuntimeStatement),
             DiagnosticPayload::None,
-        ) => Some(invalid_top_level_runtime_statement(span)),
+        ) => Ok(invalid_top_level_runtime_statement(span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidStructDefaultValue),
             DiagnosticPayload::InvalidStructDefaultValue,
-        ) => Some(invalid_struct_default_value(span)),
+        ) => Ok(invalid_struct_default_value(span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::MissingDeclarationInitializer),
             DiagnosticPayload::MissingDeclarationInitializer { name },
-        ) => Some(missing_declaration_initializer(*name, span)),
+        ) => Ok(missing_declaration_initializer(name, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::ConstRecordUsedAsValue),
             DiagnosticPayload::ConstRecordUsedAsValue { record_name },
-        ) => Some(const_record_used_as_value(*record_name, span)),
+        ) => Ok(const_record_used_as_value(record_name, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::ShadowedName),
             DiagnosticPayload::ShadowedName { name },
-        ) => Some(shadowed_name(*name, span)),
+        ) => Ok(shadowed_name(name, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::ReservedNameCollision),
             DiagnosticPayload::ReservedNameCollision { name, reserved_by },
-        ) => Some(reserved_name_collision(*name, *reserved_by, span)),
+        ) => Ok(reserved_name_collision(name, reserved_by, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidAssignmentTarget),
             DiagnosticPayload::InvalidAssignmentTarget {
@@ -638,26 +635,26 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 field_name,
                 root_binding_name,
             },
-        ) => Some(invalid_assignment_target(
-            *reason,
-            *target_name,
-            *target_type,
-            *field_name,
-            *root_binding_name,
+        ) => Ok(invalid_assignment_target(
+            reason,
+            target_name,
+            target_type,
+            field_name,
+            root_binding_name,
             span,
         )),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidDeclaration),
             DiagnosticPayload::InvalidDeclaration { reason, name },
-        ) => Some(invalid_declaration(reason.clone(), *name, span)),
+        ) => Ok(invalid_declaration(reason, name, span)),
         (
             DiagnosticKind::DeferredFeature(DeferredFeatureDiagnosticKind::DeferredFeature),
             DiagnosticPayload::DeferredFeature { reason },
-        ) => Some(match reason {
-            DeferredFeatureReason::NamedFeature { feature } => deferred_feature(*feature, span),
-            _ => deferred_feature_reason(reason.clone(), span),
+        ) => Ok(match reason {
+            DeferredFeatureReason::NamedFeature { feature } => deferred_feature(feature, span),
+            reason => deferred_feature_reason(reason, span),
         }),
-        _ => None,
+        (_, payload) => Err(payload),
     }
 }
 

@@ -35,7 +35,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::types_bo
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::{
     ForeignSiteDraft, ForeignSlot, SiteRef,
 };
-use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelMessageCode;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::{
+    GenericSubstitutionDiagnostic, LabelDraftMessage, LabelMessageCode,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::record::DiagnosticCode;
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::FamilyRow;
 use crate::compiler_frontend::compiler_messages::diagnostics::store::{
@@ -46,9 +48,9 @@ use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext
 use crate::compiler_frontend::compiler_messages::render::context::compact_label_message_text;
 use crate::compiler_frontend::compiler_messages::{
     CapacityResource, DiagnosticCapacityResource, DiagnosticCategory, DiagnosticDescriptor,
-    DiagnosticLabelMessage, DiagnosticPlace, DiagnosticSeverity, DiagnosticToken,
-    GenericInferenceSubject, GenericSubstitutionDiagnostic, InvalidGenericInstantiationReason,
-    InvalidMultiBindReason, InvalidTraitConformanceReason, NonExhaustiveMatchReason, TokenTag,
+    DiagnosticPlace, DiagnosticSeverity, DiagnosticToken, GenericInferenceSubject,
+    InvalidGenericInstantiationReason, InvalidMultiBindReason, InvalidTraitConformanceReason,
+    NonExhaustiveMatchReason, TokenTag,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, builtin_type_ids};
@@ -261,18 +263,18 @@ fn label_draft(input_name: StringId, rendered_text: StringId) -> DiagnosticDraft
     DiagnosticDraft::with_facts(&REMAP_LABEL_FAMILY, None, |_| Ok(()))
         .with_label(
             Some(exact_span(0, 5)),
-            Some(DiagnosticLabelMessage::ConfigInputOrigin {
+            Some(LabelDraftMessage::ConfigInputOrigin {
                 input_name,
                 origin: BuildConfigValueOrigin::BuilderGlobal,
             }),
         )
         .with_label(
             Some(exact_span(6, 3)),
-            Some(DiagnosticLabelMessage::RenderedText(rendered_text)),
+            Some(LabelDraftMessage::RenderedText(rendered_text)),
         )
         .with_label(
             Some(exact_span(10, 4)),
-            Some(DiagnosticLabelMessage::GenericInferencePreviousEvidence),
+            Some(LabelDraftMessage::GenericInferencePreviousEvidence),
         )
 }
 
@@ -280,7 +282,7 @@ fn label_draft(input_name: StringId, rendered_text: StringId) -> DiagnosticDraft
 fn substitution_draft(parameter_name: StringId) -> DiagnosticDraft {
     DiagnosticDraft::with_facts(&TEST_LABEL_FAMILY, None, |_| Ok(())).with_label(
         Some(exact_span(0, 3)),
-        Some(DiagnosticLabelMessage::GenericInstantiationSubstitutions {
+        Some(LabelDraftMessage::GenericInstantiationSubstitutions {
             substitutions: vec![GenericSubstitutionDiagnostic {
                 parameter_name,
                 concrete_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),

@@ -2,7 +2,11 @@ use super::*;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView;
 use crate::compiler_frontend::ast::templates::template::TemplateType;
-use crate::compiler_frontend::compiler_messages::{DiagnosticKind, SyntaxDiagnosticKind};
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::MalformedHtmlTemplateView;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[test]
@@ -251,26 +255,29 @@ fn const_html_template_emits_sanitation_warnings() {
         false,
         &style_directives,
     );
+    let warnings = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
 
     assert!(!warnings.is_empty());
-    assert!(warnings.iter().all(|warning| {
-        matches!(
-            warning.kind,
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedHtmlTemplate)
-        )
-    }));
-    assert!(warnings.iter().any(|warning| matches!(
-        warning.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedHtmlTemplate)
-    )));
-    assert!(warnings.iter().any(|warning| matches!(
-        warning.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedHtmlTemplate)
-    )));
-    assert!(warnings.iter().any(|warning| matches!(
-        warning.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedHtmlTemplate)
-    )));
+    assert!(
+        warnings
+            .views()
+            .all(|warning| { warning.family_view::<MalformedHtmlTemplateView>().is_some() })
+    );
+    assert!(
+        warnings
+            .views()
+            .any(|warning| { warning.family_view::<MalformedHtmlTemplateView>().is_some() })
+    );
+    assert!(
+        warnings
+            .views()
+            .any(|warning| { warning.family_view::<MalformedHtmlTemplateView>().is_some() })
+    );
+    assert!(
+        warnings
+            .views()
+            .any(|warning| { warning.family_view::<MalformedHtmlTemplateView>().is_some() })
+    );
 }
 
 #[test]
@@ -281,13 +288,24 @@ fn html_validation_warnings_keep_authored_spans() {
         false,
         &style_directives,
     );
+    let warnings = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
+    let expected_span = SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::exact(7, 88, &mut ExtendedSpanBuilder::new())
+            .expect("HTML body literal span should fit"),
+    );
 
     assert!(!warnings.is_empty());
     assert!(
+        warnings.views().all(|warning| {
+            warning.family_view::<MalformedHtmlTemplateView>().is_some()
+                && matches!(warning.primary_site(), SiteRef::Local(span) if span == expected_span)
+        }),
+        "html warnings should keep their exact authored source span: {:?}",
         warnings
-            .iter()
-            .all(|warning| warning.primary_span.is_some()),
-        "html warnings should keep authored source spans"
+            .views()
+            .map(|warning| warning.primary_site())
+            .collect::<Vec<_>>(),
     );
 }
 
@@ -299,11 +317,13 @@ fn runtime_html_templates_emit_warnings_for_static_body_segments() {
         true,
         &style_directives,
     );
+    let warnings = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
     assert!(!warnings.is_empty());
-    assert!(warnings.iter().all(|warning| matches!(
-        warning.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedHtmlTemplate)
-    )));
+    assert!(
+        warnings
+            .views()
+            .all(|warning| { warning.family_view::<MalformedHtmlTemplateView>().is_some() })
+    );
 }
 
 #[test]

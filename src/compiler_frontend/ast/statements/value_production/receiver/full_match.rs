@@ -26,7 +26,7 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidControlFlowStatementReason,
+    CompilerDiagnostic, DiagnosticBag, InvalidControlFlowStatementReason,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -94,7 +94,7 @@ pub(super) fn parse_value_match_at_receiver(
     let receiver_kind = target.receiver_kind;
     let expected_result_type_ids = target.result_type_ids.clone();
     let needs_slot_inference = target.needs_slot_inference();
-    let mut warnings = Vec::new();
+    let mut warnings = DiagnosticBag::new();
     let parsed_match = parse_match_block(
         scrutinee,
         token_stream,

@@ -10,7 +10,7 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidFallibleHandlingReason,
+    CompilerDiagnostic, DiagnosticBag, InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -30,7 +30,7 @@ pub(super) fn validate_catch_fallible_handler_binding(
     handler_name: StringId,
     span: Option<SourceSpan>,
     _compilation_stage: &str,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     string_table: &StringTable,
 ) -> Result<(), ExpressionParseError> {
     ensure_not_keyword_shadow_identifier(handler_name, span, string_table)

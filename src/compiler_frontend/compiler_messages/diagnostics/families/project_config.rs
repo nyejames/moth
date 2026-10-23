@@ -22,11 +22,11 @@ use crate::compiler_frontend::compiler_messages::render::{
     render_project_context_escape, render_unsupported_builder_package,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, ConfigDiagnosticKind, DependencyClauseKind, DiagnosticCategory,
-    DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, InvalidCompileTimePathReason,
-    InvalidConfigReason, InvalidDependencyClauseReason, InvalidOutputFolderReason,
-    InvalidPageMetadataReason, LegacyDependencyClauseReason, NamespaceTypeValueMisuseKind,
-    ProjectContextEscapeReason, RuleDiagnosticKind, SyntaxDiagnosticKind,
+    ConfigDiagnosticKind, DependencyClauseKind, DiagnosticCategory, DiagnosticKind,
+    DiagnosticPayload, DiagnosticSeverity, InvalidCompileTimePathReason, InvalidConfigReason,
+    InvalidDependencyClauseReason, InvalidOutputFolderReason, InvalidPageMetadataReason,
+    LegacyDependencyClauseReason, NamespaceTypeValueMisuseKind, ProjectContextEscapeReason,
+    RuleDiagnosticKind, SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -174,7 +174,7 @@ diagnostic_family! {
 }
 
 /// Stores the clause kind and reason as typed facts.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_dependency_clause(
+pub(crate) fn invalid_dependency_clause(
     clause_kind: DependencyClauseKind,
     reason: InvalidDependencyClauseReason,
     span: Option<SourceSpan>,
@@ -207,7 +207,7 @@ diagnostic_family! {
 }
 
 /// Builds the legacy clause diagnostic with its fixed reason and optional replacement.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn legacy_dependency_clause(
+pub(crate) fn legacy_dependency_clause(
     replacement: Option<StringId>,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -236,10 +236,7 @@ diagnostic_family! {
 }
 
 /// The circular-dependency draft stores its path as one fixed-width fact.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn circular_dependency(
-    path: PathId,
-    span: Option<SourceSpan>,
-) -> DiagnosticDraft {
+pub(crate) fn circular_dependency(path: PathId, span: Option<SourceSpan>) -> DiagnosticDraft {
     DiagnosticDraft::with_facts(&CIRCULAR_DEPENDENCY, span, |cursor| {
         cursor.push::<PathFact>(&path)?;
         Ok(())
@@ -247,67 +244,47 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn circular_dep
 }
 
 /// Maps the supported legacy diagnostics onto their compact constructors.
-pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticDraft> {
-    match (diagnostic.kind, &diagnostic.payload) {
+pub(super) fn from_legacy(
+    kind: DiagnosticKind,
+    payload: DiagnosticPayload,
+    span: Option<SourceSpan>,
+) -> Result<DiagnosticDraft, DiagnosticPayload> {
+    match (kind, payload) {
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::UnsupportedBuilderPackage),
             DiagnosticPayload::UnsupportedBuilderPackage { package_path },
-        ) => Some(unsupported_builder_package(
-            *package_path,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(unsupported_builder_package(package_path, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidPageMetadata),
             DiagnosticPayload::InvalidPageMetadata { key, reason },
-        ) => Some(invalid_page_metadata(
-            *key,
-            *reason,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(invalid_page_metadata(key, reason, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidCompileTimePath),
             DiagnosticPayload::InvalidCompileTimePath { path, reason },
-        ) => Some(invalid_compile_time_path(
-            *path,
-            *reason,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(invalid_compile_time_path(path, reason, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidDependencyClause),
             DiagnosticPayload::InvalidDependencyClause {
                 clause_kind,
                 reason,
             },
-        ) => Some(invalid_dependency_clause(
-            *clause_kind,
-            *reason,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(invalid_dependency_clause(clause_kind, reason, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::LegacyDependencyClause),
             DiagnosticPayload::LegacyDependencyClause { replacement, .. },
-        ) => Some(legacy_dependency_clause(
-            *replacement,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(legacy_dependency_clause(replacement, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::CircularDependency),
             DiagnosticPayload::CircularDependency { path },
-        ) => Some(circular_dependency(*path, diagnostic.primary_span)),
+        ) => Ok(circular_dependency(path, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::DependencyNamespaceUsedAsValue),
             DiagnosticPayload::DependencyNamespaceUsedAsValue { record_name },
-        ) => Some(dependency_namespace_used_as_value(
-            *record_name,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(dependency_namespace_used_as_value(record_name, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::NestedDependencyTraversal),
             DiagnosticPayload::NestedDependencyTraversal { record_name },
-        ) => Some(nested_dependency_traversal(
-            *record_name,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(nested_dependency_traversal(record_name, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::NamespaceTypeValueMisuse),
             DiagnosticPayload::NamespaceTypeValueMisuse {
@@ -315,25 +292,16 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 expected,
                 found,
             },
-        ) => Some(namespace_type_value_misuse(
-            *name,
-            *expected,
-            *found,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(namespace_type_value_misuse(name, expected, found, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::ProjectContextEscape),
             DiagnosticPayload::ProjectContextEscape { reason },
-        ) => Some(project_context_escape(*reason, diagnostic.primary_span)),
+        ) => Ok(project_context_escape(reason, span)),
         (
             DiagnosticKind::Config(ConfigDiagnosticKind::InvalidConfig),
             DiagnosticPayload::InvalidConfig { key, reason },
-        ) => Some(invalid_config_reason(
-            *key,
-            reason.clone(),
-            diagnostic.primary_span,
-        )),
-        _ => None,
+        ) => Ok(invalid_config_reason(key, reason, span)),
+        (_, payload) => Err(payload),
     }
 }
 
@@ -396,7 +364,7 @@ diagnostic_family! {
 }
 
 /// Encodes a compile-time-path reason and its optional case-mismatch labels.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_compile_time_path(
+pub(crate) fn invalid_compile_time_path(
     path: PathId,
     reason: InvalidCompileTimePathReason,
     span: Option<SourceSpan>,
@@ -444,7 +412,7 @@ diagnostic_family! {
 }
 
 /// Builds the nested traversal diagnostic while preserving its legacy record-name fact.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn nested_dependency_traversal(
+pub(crate) fn nested_dependency_traversal(
     record_name: StringId,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -912,7 +880,7 @@ diagnostic_family! {
 }
 
 /// Builds an invalid-config draft, preserving the legacy constructor inputs.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_config_reason(
+pub(crate) fn invalid_config_reason(
     key: Option<StringId>,
     reason: InvalidConfigReason,
     span: Option<SourceSpan>,

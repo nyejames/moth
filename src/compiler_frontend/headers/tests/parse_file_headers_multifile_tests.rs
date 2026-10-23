@@ -65,12 +65,9 @@ fn multi_file_parsing_aggregates_warnings_from_all_files() {
         "expected four naming-convention warnings (two from each file)"
     );
     assert!(
-        warnings.iter().all(|warning| matches!(
-            warning.kind,
-            DiagnosticKind::Rule(
-                crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::IdentifierNamingConvention
-            )
-        )),
+        warnings.views().all(|warning| {
+            diagnostic_has_family::<names_declarations::IdentifierNamingConventionView>(&warning)
+        }),
         "all warnings should be naming convention warnings"
     );
 }
@@ -104,12 +101,9 @@ fn multi_file_parsing_preserves_warnings_before_later_parse_error() {
         "expected two naming-convention warnings from the failing helper file to be preserved"
     );
     assert!(
-        warnings.iter().all(|warning| matches!(
-            warning.kind,
-            DiagnosticKind::Rule(
-                crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::IdentifierNamingConvention
-            )
-        )),
+        warnings.views().all(|warning| {
+            diagnostic_has_family::<names_declarations::IdentifierNamingConventionView>(&warning)
+        }),
         "all warnings should be naming convention warnings"
     );
 }
@@ -161,12 +155,9 @@ fn per_file_fork_merge_produces_correct_headers_and_warnings_for_multiple_files(
         "expected four naming convention warnings for PascalCase constants"
     );
     assert!(
-        warnings.iter().all(|warning| matches!(
-            warning.kind,
-            DiagnosticKind::Rule(
-                crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::IdentifierNamingConvention
-            )
-        )),
+        warnings.views().all(|warning| {
+            diagnostic_has_family::<names_declarations::IdentifierNamingConventionView>(&warning)
+        }),
         "all warnings should be naming convention warnings"
     );
 }
@@ -202,20 +193,21 @@ fn per_file_fork_merge_remaps_non_identity_strings_across_multiple_files() {
         "expected two naming convention warnings before errors"
     );
 
-    let errors = result.err().expect("expected errors").into_diagnostics();
+    let errors = result.err().expect("expected errors");
+    let errors = compact_bag_for_test(errors, None);
     assert_eq!(errors.len(), 2, "expected two deferred feature errors");
 
     let mut feature_names = Vec::new();
-    for error in &errors {
-        let DiagnosticPayload::DeferredFeature { reason } = &error.payload else {
-            panic!("expected DeferredFeature payload, got {:?}", error.payload);
-        };
-        match reason {
-            DeferredFeatureReason::NamedFeature { feature } => {
-                feature_names.push(string_table.resolve(*feature).to_owned());
-            }
-            other => panic!("expected NamedFeature reason, got {:?}", other),
-        }
+    for error in errors.views() {
+        let facts = error
+            .family_view::<names_declarations::DeferredFeatureView>()
+            .expect("expected DeferredFeature family");
+        assert_eq!(
+            facts.code,
+            names_declarations::DeferredFeatureCode::NamedFeature
+        );
+        let feature = facts.feature.expect("NamedFeature retains its text");
+        feature_names.push(string_table.resolve(feature).to_owned());
     }
 
     assert!(
@@ -358,14 +350,12 @@ fn explicit_extension_provider_requires_alias_or_selection() {
     let result =
         parse_single_file_headers_with_entry("@drawing.js\n", "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(result, "bare provider clauses should be rejected");
-    assert!(errors.diagnostics.iter().any(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidDependencyClause {
-                reason: InvalidDependencyClauseReason::ProviderRequiresBinding,
-                ..
-            }
-        )
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<project_config::InvalidDependencyClauseView>()
+            .is_some_and(|facts| {
+                facts.reason == InvalidDependencyClauseReason::ProviderRequiresBinding
+            })
     }));
 }
 
@@ -404,13 +394,17 @@ fn dependency_clause_is_rejected_in_config_source() {
     else {
         panic!("config dependency rejection must use a source diagnostic");
     };
-    assert!(matches!(
-        &diagnostic.payload,
-        DiagnosticPayload::InvalidDependencyClause {
-            reason: InvalidDependencyClauseReason::DependencyClauseNotAllowed,
-            ..
-        }
-    ));
+    let diagnostic_bag = diagnostic_view_for_test(diagnostic);
+    let diagnostic = diagnostic_bag
+        .first()
+        .expect("config dependency diagnostic should compact");
+    assert!(
+        diagnostic
+            .family_view::<project_config::InvalidDependencyClauseView>()
+            .is_some_and(|facts| {
+                facts.reason == InvalidDependencyClauseReason::DependencyClauseNotAllowed
+            })
+    );
 }
 
 #[test]
@@ -607,10 +601,13 @@ fn api_only_active_roots_reject_every_root_activity_form() {
                 }
             };
 
-            assert_eq!(
-                diagnostic.kind,
-                DiagnosticKind::Rule(RuleDiagnosticKind::InvalidTopLevelRuntimeStatement)
-            );
+            let diagnostic_bag = diagnostic_view_for_test(diagnostic);
+            let diagnostic = diagnostic_bag
+                .first()
+                .expect("API-only root diagnostic should compact");
+            assert!(diagnostic_has_family::<
+                names_declarations::InvalidTopLevelRuntimeStatementView,
+            >(&diagnostic));
         }
     }
 }

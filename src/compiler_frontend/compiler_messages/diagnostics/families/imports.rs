@@ -7,7 +7,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticD
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
     OptStringFact, PathFact, StringFact, UnitFact, unit_code,
 };
-use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelMessageCode;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::{
+    LabelDraftMessage, LabelMessageCode,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
     FamilyRow, diagnostic_family,
 };
@@ -25,9 +27,9 @@ use crate::compiler_frontend::compiler_messages::render::{
     render_unsupported_external_extension, render_unsupported_source_file_kind,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticCategory, DiagnosticKind, DiagnosticLabelMessage,
-    DiagnosticPayload, DiagnosticSeverity, ImportDiagnosticKind, ImportPublicSurfaceType,
-    InvalidExternalModuleReason, InvalidImportPathReason,
+    DiagnosticCategory, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
+    ImportDiagnosticKind, ImportPublicSurfaceType, InvalidExternalModuleReason,
+    InvalidImportPathReason,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -152,9 +154,7 @@ diagnostic_family! {
 
 /// The unused-import draft. No production path produces it yet, so only tests construct it.
 #[cfg(test)]
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn unused_import(
-    span: Option<SourceSpan>,
-) -> DiagnosticDraft {
+pub(crate) fn unused_import(span: Option<SourceSpan>) -> DiagnosticDraft {
     DiagnosticDraft::with_facts(&UNUSED_IMPORT, span, |_cursor| Ok(()))
 }
 
@@ -174,47 +174,44 @@ diagnostic_family! {
     }
 }
 
-/// Maps legacy import diagnostics onto their compact constructors.
-pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticDraft> {
-    match (diagnostic.kind, &diagnostic.payload) {
+/// Consumes legacy import kinds and payloads for this group's compact constructors.
+pub(super) fn from_legacy(
+    kind: DiagnosticKind,
+    payload: DiagnosticPayload,
+    span: Option<SourceSpan>,
+) -> Result<DiagnosticDraft, DiagnosticPayload> {
+    match (kind, payload) {
         (
             DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget),
             DiagnosticPayload::MissingImportTarget { path },
-        ) => Some(missing_import_target(*path, diagnostic.primary_span)),
+        ) => Ok(missing_import_target(path, span)),
         (
             DiagnosticKind::Import(ImportDiagnosticKind::BareFileImport),
             DiagnosticPayload::BareFileImport { path },
-        ) => Some(bare_file_import(*path, diagnostic.primary_span)),
+        ) => Ok(bare_file_import(path, span)),
         (
             DiagnosticKind::Import(ImportDiagnosticKind::AmbiguousImportTarget),
             DiagnosticPayload::AmbiguousImportTarget { path },
-        ) => Some(ambiguous_import_target(*path, diagnostic.primary_span)),
+        ) => Ok(ambiguous_import_target(path, span)),
         (
             DiagnosticKind::Import(ImportDiagnosticKind::DirectSpecialFileImport),
             DiagnosticPayload::DirectSpecialFileImport { path },
-        ) => Some(direct_special_file_import(*path, diagnostic.primary_span)),
+        ) => Ok(direct_special_file_import(path, span)),
         (
             DiagnosticKind::Import(ImportDiagnosticKind::DependencyAliasCaseMismatch),
             DiagnosticPayload::DependencyAliasCaseMismatch { alias, symbol },
-        ) => Some(dependency_alias_case_mismatch(
-            *alias,
-            *symbol,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(dependency_alias_case_mismatch(alias, symbol, span)),
         (
             DiagnosticKind::Import(ImportDiagnosticKind::ImportNameCollision),
             DiagnosticPayload::ImportNameCollision { name },
         ) => {
-            // The outer legacy adapter copies the existing labels after mapping the payload facts.
-            Some(import_name_collision(*name, None, diagnostic.primary_span))
+            // The shared adapter preserves the existing labels after mapping the payload facts.
+            Ok(import_name_collision(name, None, span))
         }
         (
             DiagnosticKind::Import(ImportDiagnosticKind::NotExportedBySourceFile),
             DiagnosticPayload::NotExportedBySourceFile { symbol_path },
-        ) => Some(not_exported_by_source_file(
-            *symbol_path,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(not_exported_by_source_file(symbol_path, span)),
         (
             DiagnosticKind::Import(ImportDiagnosticKind::NotExportedByPublicSurface),
             DiagnosticPayload::NotExportedByPublicSurface {
@@ -222,117 +219,80 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 public_surface_name,
                 public_surface_type,
             },
-        ) => Some(not_exported_by_public_surface(
-            *requested_path,
-            *public_surface_name,
-            *public_surface_type,
-            diagnostic.primary_span,
+        ) => Ok(not_exported_by_public_surface(
+            requested_path,
+            public_surface_name,
+            public_surface_type,
+            span,
         )),
         (
             DiagnosticKind::Import(ImportDiagnosticKind::MissingModuleRootPublicSurface),
             DiagnosticPayload::MissingModuleRootPublicSurface { symbol_path },
-        ) => Some(missing_module_root_public_surface(
-            *symbol_path,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(missing_module_root_public_surface(symbol_path, span)),
         (
             DiagnosticKind::Import(ImportDiagnosticKind::MissingPackageSymbol),
             DiagnosticPayload::MissingPackageSymbol {
                 symbol,
                 package_path,
             },
-        ) => Some(missing_package_symbol(
-            *symbol,
-            *package_path,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(missing_package_symbol(symbol, package_path, span)),
         (
             DiagnosticKind::Import(ImportDiagnosticKind::CrossModuleImportNotExported),
             DiagnosticPayload::CrossModuleImportNotExported { symbol_path },
-        ) => Some(cross_module_import_not_exported(
-            *symbol_path,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(cross_module_import_not_exported(symbol_path, span)),
         (
             DiagnosticKind::Import(ImportDiagnosticKind::InvalidImportPath),
             DiagnosticPayload::InvalidImportPath { path, reason },
-        ) => Some(invalid_import_path(*path, *reason, diagnostic.primary_span)),
+        ) => Ok(invalid_import_path(path, reason, span)),
         (
             DiagnosticKind::Import(ImportDiagnosticKind::DirectSymbolPathImport),
             DiagnosticPayload::DirectSymbolPathImport { path },
-        ) => Some(direct_symbol_path_import(*path, diagnostic.primary_span)),
+        ) => Ok(direct_symbol_path_import(path, span)),
         (
             DiagnosticKind::Import(ImportDiagnosticKind::InvalidNamespaceDefaultName),
             DiagnosticPayload::InvalidNamespaceDefaultName { path },
-        ) => Some(invalid_namespace_default_name(
-            *path,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(invalid_namespace_default_name(path, span)),
         (
             DiagnosticKind::Import(ImportDiagnosticKind::DuplicateImportSurfaceMember),
             DiagnosticPayload::DuplicateImportSurfaceMember {
                 surface_path,
                 member_name,
             },
-        ) => Some(duplicate_import_surface_member(
-            *surface_path,
-            *member_name,
-            diagnostic.primary_span,
+        ) => Ok(duplicate_import_surface_member(
+            surface_path,
+            member_name,
+            span,
         )),
         (
             DiagnosticKind::Import(ImportDiagnosticKind::ExplicitMothExtension),
             DiagnosticPayload::ExplicitMothExtension { path },
-        ) => Some(explicit_moth_extension(*path, diagnostic.primary_span)),
+        ) => Ok(explicit_moth_extension(path, span)),
         (
             DiagnosticKind::Import(ImportDiagnosticKind::UnsupportedExternalExtension),
             DiagnosticPayload::UnsupportedExternalExtension { path, extension },
-        ) => Some(unsupported_external_extension(
-            *path,
-            *extension,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(unsupported_external_extension(path, extension, span)),
         (
             DiagnosticKind::Import(ImportDiagnosticKind::InvalidExternalModule),
             DiagnosticPayload::InvalidExternalModule { path, reason },
-        ) => Some(invalid_external_module(
-            *path,
-            reason.clone(),
-            diagnostic.primary_span,
-        )),
+        ) => Ok(invalid_external_module(path, reason, span)),
         (
             DiagnosticKind::Import(ImportDiagnosticKind::ExplicitSourceExtension),
             DiagnosticPayload::ExplicitSourceExtension { path, extension },
-        ) => Some(explicit_source_extension(
-            *path,
-            *extension,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(explicit_source_extension(path, extension, span)),
         (
             DiagnosticKind::Import(ImportDiagnosticKind::UnsupportedSourceFileKind),
             DiagnosticPayload::UnsupportedSourceFileKind { path, extension },
-        ) => Some(unsupported_source_file_kind(
-            *path,
-            *extension,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(unsupported_source_file_kind(path, extension, span)),
         (
             DiagnosticKind::Import(ImportDiagnosticKind::InvalidSourceFileEntry),
             DiagnosticPayload::InvalidSourceFileEntry { path, extension },
-        ) => Some(invalid_source_file_entry(
-            *path,
-            *extension,
-            diagnostic.primary_span,
-        )),
+        ) => Ok(invalid_source_file_entry(path, extension, span)),
         (
             DiagnosticKind::Import(ImportDiagnosticKind::DuplicateMothTemplateInputPath),
             DiagnosticPayload::DuplicateMothTemplateInputPath { path },
         ) => {
-            // The outer legacy adapter copies existing labels after mapping the payload facts.
-            Some(duplicate_moth_template_input_path(
-                *path,
-                None,
-                diagnostic.primary_span,
-            ))
+            // The shared adapter preserves existing labels after mapping the payload facts.
+            Ok(duplicate_moth_template_input_path(path, None, span))
         }
         (
             DiagnosticKind::Import(ImportDiagnosticKind::MothTemplateInputsShareNoCommonAncestor),
@@ -340,12 +300,12 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 first_path,
                 second_path,
             },
-        ) => Some(moth_template_inputs_share_no_common_ancestor(
-            *first_path,
-            *second_path,
-            diagnostic.primary_span,
+        ) => Ok(moth_template_inputs_share_no_common_ancestor(
+            first_path,
+            second_path,
+            span,
         )),
-        _ => None,
+        (_, payload) => Err(payload),
     }
 }
 
@@ -430,7 +390,7 @@ diagnostic_family! {
 }
 
 /// Stores a colliding binding name and its prior-declaration label.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn import_name_collision(
+pub(crate) fn import_name_collision(
     name: StringId,
     previous_span: Option<SourceSpan>,
     span: Option<SourceSpan>,
@@ -442,7 +402,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn import_name_
     match previous_span {
         Some(previous_span) => draft.with_label(
             Some(previous_span),
-            Some(DiagnosticLabelMessage::PreviousDeclaration),
+            Some(LabelDraftMessage::PreviousDeclaration),
         ),
         None => draft,
     }
@@ -555,7 +515,7 @@ diagnostic_family! {
 }
 
 /// Stores an invalid path reason code and its optional case-mismatch names.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_import_path(
+pub(crate) fn invalid_import_path(
     path: PathId,
     reason: InvalidImportPathReason,
     span: Option<SourceSpan>,
@@ -571,7 +531,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_impo
 }
 
 /// Stores an invalid external-module reason code and its shared string fact.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_external_module(
+pub(crate) fn invalid_external_module(
     path: PathId,
     reason: InvalidExternalModuleReason,
     span: Option<SourceSpan>,
@@ -750,7 +710,7 @@ diagnostic_family! {
 }
 
 /// Stores a duplicate Moth template input path and its message-less label.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn duplicate_moth_template_input_path(
+pub(crate) fn duplicate_moth_template_input_path(
     path: PathId,
     first_span: Option<SourceSpan>,
     duplicate_span: Option<SourceSpan>,

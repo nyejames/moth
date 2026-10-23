@@ -1,14 +1,14 @@
 //! Final source ownership and failure publication for private discovery traversals.
 
 use super::discovery_identity_rebind::{
-    SourceIdentityMap, build_source_identity_map, rebind_discovery_diagnostics,
+    SourceIdentityMap, build_source_identity_map, final_source_id,
     rebind_resolved_file_reference_diagnostics, rebind_source_discovery_failure,
 };
 use super::discovery_missing_source_load::load_missing_sources;
 use super::*;
 use crate::build_system::create_project_modules::compilation::append_finish_failure;
-use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, DiagnosticDraft};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use std::sync::Arc;
 /// Finish only retained work on an aborted walk. Queued sources remain unloaded.
@@ -67,7 +67,7 @@ pub(super) fn finalize_failed_discovery(
         match result {
             Ok(output) => {
                 let mut file_warnings = output.warnings.into_diagnostics();
-                if let Err(error) = rebind_discovery_diagnostics(&mut file_warnings, source_ids) {
+                if let Err(error) = rebind_discovery_drafts(&mut file_warnings, source_ids) {
                     return finish_discovery_source_owner(
                         PreparedFailure::Infrastructure(error.into()),
                         source_builder,
@@ -78,9 +78,7 @@ pub(super) fn finalize_failed_discovery(
 
             Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
                 let mut file_warnings = error.warnings.into_diagnostics();
-                if let Err(remap_error) =
-                    rebind_discovery_diagnostics(&mut file_warnings, source_ids)
-                {
+                if let Err(remap_error) = rebind_discovery_drafts(&mut file_warnings, source_ids) {
                     return finish_discovery_source_owner(
                         PreparedFailure::Infrastructure(remap_error.into()),
                         source_builder,
@@ -114,7 +112,7 @@ pub(super) fn finalize_failed_discovery(
         SourceDiscoveryError::Diagnostic(diagnostic) => {
             let table = std::mem::take(string_table);
             let mut diagnostics = warnings;
-            diagnostics.push(diagnostic);
+            diagnostics.push(diagnostic.into());
             let batch = match PreparedDiagnosticBatch::capture_with_required_paths(
                 DiagnosticBag::from_diagnostics(diagnostics),
                 table,
@@ -148,6 +146,17 @@ pub(super) fn finalize_failed_discovery(
         }
     };
     finish_discovery_source_owner(terminal_failure, source_builder)
+}
+
+/// Rebind source identities carried by compact preparation drafts before final source publication.
+fn rebind_discovery_drafts(
+    diagnostics: &mut [DiagnosticDraft],
+    source_ids: &SourceIdentityMap,
+) -> Result<(), crate::compiler_frontend::compiler_errors::CompilerError> {
+    for diagnostic in diagnostics {
+        diagnostic.rebind_source_ids(&mut |source_id| final_source_id(source_id, source_ids))?;
+    }
+    Ok(())
 }
 
 /// Finish the final source owner beside a typed failure.

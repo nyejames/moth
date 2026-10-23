@@ -14,6 +14,7 @@ use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::compiler_messages::TypeAnnotationContext;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
     InvalidTypeAnnotationView, UnknownValueNameView,
 };
@@ -24,7 +25,6 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::token_le
     InvalidNumberLiteralView, NumberLiteralCode,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
 use crate::compiler_frontend::source::ExtendedSpanBuilder;

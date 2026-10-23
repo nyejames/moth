@@ -10,7 +10,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
     CountFact, FactCapacityError, FactCodec, IdRemap, OptStringFact, OptTokenFact, OptTypeFact,
     OptUnitFact, StringFact, TypeFact, UnitCode, UnitFact, unit_code,
 };
-use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelMessageCode;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::{
+    LabelDraftMessage, LabelMessageCode,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
     FamilyRow, diagnostic_family,
 };
@@ -26,13 +28,13 @@ use crate::compiler_frontend::compiler_messages::render::{
     render_unsupported_trait_feature,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticCategory, DiagnosticKind, DiagnosticLabelMessage,
-    DiagnosticPayload, DiagnosticSeverity, GenericApplicationErrorReason, GenericInferenceSubject,
-    InvalidFunctionSignatureReason, InvalidGenericInstantiationReason,
-    InvalidGenericParameterReason, InvalidParameterContractReason,
-    InvalidReceiverDeclarationReason, InvalidThisUsageReason, InvalidTraitConformanceReason,
-    InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, ParameterContractKind,
-    PublicGenericOwnerKind, RuleDiagnosticKind, SyntaxDiagnosticKind,
+    DiagnosticCategory, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
+    GenericApplicationErrorReason, GenericInferenceSubject, InvalidFunctionSignatureReason,
+    InvalidGenericInstantiationReason, InvalidGenericParameterReason,
+    InvalidParameterContractReason, InvalidReceiverDeclarationReason, InvalidThisUsageReason,
+    InvalidTraitConformanceReason, InvalidTraitIncompatibilityReason,
+    InvalidTraitKeywordUsageReason, ParameterContractKind, PublicGenericOwnerKind,
+    RuleDiagnosticKind, SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -1437,7 +1439,7 @@ fn split_invalid_trait_conformance(
     (shape, reason_name)
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_trait_conformance(
+pub(crate) fn invalid_trait_conformance(
     target_name: StringId,
     trait_name: Option<StringId>,
     reason: InvalidTraitConformanceReason,
@@ -1583,7 +1585,7 @@ diagnostic_family! {
 }
 
 /// Stores the duplicate name and its message-less prior-declaration label.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn duplicate_public_export(
+pub(crate) fn duplicate_public_export(
     name: StringId,
     previous_span: Option<SourceSpan>,
     span: Option<SourceSpan>,
@@ -1651,7 +1653,7 @@ diagnostic_family! {
     }
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_parameter_contract(
+pub(crate) fn invalid_parameter_contract(
     reason: InvalidParameterContractReason,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -1663,7 +1665,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_para
     })
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_generic_parameter(
+pub(crate) fn invalid_generic_parameter(
     reason: InvalidGenericParameterReason,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -1674,7 +1676,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_gene
     })
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_this_usage(
+pub(crate) fn invalid_this_usage(
     reason: InvalidThisUsageReason,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -1685,7 +1687,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_this
     })
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_receiver_declaration(
+pub(crate) fn invalid_receiver_declaration(
     reason: InvalidReceiverDeclarationReason,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -1697,7 +1699,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_rece
     })
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_function_signature(
+pub(crate) fn invalid_function_signature(
     reason: InvalidFunctionSignatureReason,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -1708,7 +1710,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_func
     })
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_generic_instantiation(
+pub(crate) fn invalid_generic_instantiation(
     type_name: Option<StringId>,
     reason: InvalidGenericInstantiationReason,
     span: Option<SourceSpan>,
@@ -1720,7 +1722,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_gene
     draft.with_string_ids(extra)
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn conflicting_generic_inference(
+pub(crate) fn conflicting_generic_inference(
     type_name: Option<StringId>,
     subject: GenericInferenceSubject,
     conflict: BindingConflict,
@@ -1742,13 +1744,13 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn conflicting_
     match previous_evidence_span {
         Some(span) => draft.with_label(
             Some(span),
-            Some(DiagnosticLabelMessage::GenericInferencePreviousEvidence),
+            Some(LabelDraftMessage::GenericInferencePreviousEvidence),
         ),
         None => draft,
     }
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn duplicate_trait_requirement(
+pub(crate) fn duplicate_trait_requirement(
     trait_name: StringId,
     requirement_name: StringId,
     first_span: Option<SourceSpan>,
@@ -1760,70 +1762,67 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn duplicate_tr
             cursor.push::<StringFact>(&requirement_name)
         });
     if first_span.is_some() {
-        draft.with_label(
-            first_span,
-            Some(DiagnosticLabelMessage::PreviousDeclaration),
-        )
+        draft.with_label(first_span, Some(LabelDraftMessage::PreviousDeclaration))
     } else {
         draft
     }
 }
 
 /// The compact draft for a legacy generic, trait or API diagnostic in this group.
-pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticDraft> {
-    let span = diagnostic.primary_span;
-    match (diagnostic.kind, &diagnostic.payload) {
+pub(super) fn from_legacy(
+    kind: DiagnosticKind,
+    payload: DiagnosticPayload,
+    span: Option<SourceSpan>,
+) -> Result<DiagnosticDraft, DiagnosticPayload> {
+    match (kind, payload) {
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidGenericApplication),
             DiagnosticPayload::InvalidGenericApplication { reason },
-        ) => Some(invalid_generic_application(*reason, span)),
+        ) => Ok(invalid_generic_application(reason, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidParameterContract),
             DiagnosticPayload::InvalidParameterContract { reason },
-        ) => Some(invalid_parameter_contract(*reason, span)),
+        ) => Ok(invalid_parameter_contract(reason, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidGenericParameter),
             DiagnosticPayload::InvalidGenericParameter { reason },
-        ) => Some(invalid_generic_parameter(reason.clone(), span)),
+        ) => Ok(invalid_generic_parameter(reason, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidThisUsage),
             DiagnosticPayload::InvalidThisUsage { reason },
-        ) => Some(invalid_this_usage(*reason, span)),
+        ) => Ok(invalid_this_usage(reason, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidReceiverDeclaration),
             DiagnosticPayload::InvalidReceiverDeclaration { reason },
-        ) => Some(invalid_receiver_declaration(*reason, span)),
+        ) => Ok(invalid_receiver_declaration(reason, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidFunctionSignature),
             DiagnosticPayload::InvalidFunctionSignature { reason },
-        ) => Some(invalid_function_signature(reason.clone(), span)),
+        ) => Ok(invalid_function_signature(reason, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidGenericInstantiation),
             DiagnosticPayload::InvalidGenericInstantiation { type_name, reason },
-        ) => {
-            let draft = match reason {
-                InvalidGenericInstantiationReason::ConflictingInference {
-                    subject,
+        ) => Ok(match reason {
+            InvalidGenericInstantiationReason::ConflictingInference {
+                subject,
+                parameter_id,
+                parameter_name,
+                existing_type_id,
+                replacement_type_id,
+            } => conflicting_generic_inference(
+                type_name,
+                subject,
+                BindingConflict {
                     parameter_id,
-                    parameter_name,
                     existing_type_id,
                     replacement_type_id,
-                } => conflicting_generic_inference(
-                    *type_name,
-                    *subject,
-                    BindingConflict {
-                        parameter_id: *parameter_id,
-                        existing_type_id: *existing_type_id,
-                        replacement_type_id: *replacement_type_id,
-                    },
-                    *parameter_name,
-                    span,
-                    None,
-                ),
-                reason => invalid_generic_instantiation(*type_name, reason.clone(), span),
-            };
-            Some(draft)
-        }
+                },
+                parameter_name,
+                span,
+                None,
+            ),
+            reason => invalid_generic_instantiation(type_name, reason, span),
+        }),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidTraitConformance),
             DiagnosticPayload::InvalidTraitConformance {
@@ -1831,25 +1830,25 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 trait_name,
                 reason,
             },
-        ) => Some(invalid_trait_conformance(
-            *target_name,
-            *trait_name,
-            reason.clone(),
+        ) => Ok(invalid_trait_conformance(
+            target_name,
+            trait_name,
+            reason,
             span,
         )),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::UnknownTrait),
             DiagnosticPayload::UnknownTrait { name },
-        ) => Some(unknown_trait(*name, span)),
+        ) => Ok(unknown_trait(name, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::DuplicateTraitRequirement),
             DiagnosticPayload::DuplicateTraitRequirement {
                 trait_name,
                 requirement_name,
             },
-        ) => Some(duplicate_trait_requirement(
-            *trait_name,
-            *requirement_name,
+        ) => Ok(duplicate_trait_requirement(
+            trait_name,
+            requirement_name,
             None,
             span,
         )),
@@ -1859,22 +1858,22 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 trait_name,
                 surface_type,
             },
-        ) => Some(trait_private_surface_leak(*trait_name, *surface_type, span)),
+        ) => Ok(trait_private_surface_leak(trait_name, surface_type, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::ExportOutsideModuleRoot),
             DiagnosticPayload::None,
-        ) => Some(export_outside_module_root(span)),
+        ) => Ok(export_outside_module_root(span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::UnsupportedTraitFeature),
             DiagnosticPayload::UnsupportedTraitFeature {
                 trait_name,
                 feature,
             },
-        ) => Some(unsupported_trait_feature(*trait_name, *feature, span)),
+        ) => Ok(unsupported_trait_feature(trait_name, feature, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::TraitNameUsedAsType),
             DiagnosticPayload::TraitNameUsedAsType { trait_name },
-        ) => Some(trait_name_used_as_type(*trait_name, span)),
+        ) => Ok(trait_name_used_as_type(trait_name, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::GenericBoundPrivateSurfaceLeak),
             DiagnosticPayload::GenericBoundPrivateSurfaceLeak {
@@ -1882,16 +1881,13 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 owner_name,
                 trait_name,
             },
-        ) => Some(generic_bound_private_surface_leak(
-            *owner_kind,
-            *owner_name,
-            *trait_name,
-            span,
+        ) => Ok(generic_bound_private_surface_leak(
+            owner_kind, owner_name, trait_name, span,
         )),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidTraitKeywordUsage),
             DiagnosticPayload::InvalidTraitKeywordUsage { reason },
-        ) => Some(invalid_trait_keyword_usage(*reason, span)),
+        ) => Ok(invalid_trait_keyword_usage(reason, span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidTraitIncompatibility),
             DiagnosticPayload::InvalidTraitIncompatibility {
@@ -1899,22 +1895,22 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 incompatible_trait_name,
                 reason,
             },
-        ) => Some(invalid_trait_incompatibility(
-            *subject_name,
-            *incompatible_trait_name,
-            *reason,
+        ) => Ok(invalid_trait_incompatibility(
+            subject_name,
+            incompatible_trait_name,
+            reason,
             span,
         )),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidExportTarget),
             DiagnosticPayload::None,
-        ) => Some(invalid_export_target(span)),
+        ) => Ok(invalid_export_target(span)),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::DuplicatePublicExport),
             DiagnosticPayload::DuplicatePublicExport { name },
         ) => {
-            // The outer adapter copies this existing message-less label once.
-            Some(duplicate_public_export(*name, None, span))
+            // The outer adapter moves this existing message-less label once.
+            Ok(duplicate_public_export(name, None, span))
         }
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::PrivateTypeInExportedApi),
@@ -1922,16 +1918,16 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 exported_name,
                 private_type,
             },
-        ) => Some(private_type_in_exported_api(
-            *exported_name,
-            *private_type,
+        ) => Ok(private_type_in_exported_api(
+            exported_name,
+            private_type,
             span,
         )),
         (
             DiagnosticKind::Rule(RuleDiagnosticKind::DuplicateExportBlock),
             DiagnosticPayload::None,
-        ) => Some(duplicate_export_block(span)),
-        _ => None,
+        ) => Ok(duplicate_export_block(span)),
+        (_, payload) => Err(payload),
     }
 }
 

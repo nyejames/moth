@@ -13,19 +13,19 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, DiagnosticKind, DiagnosticPayload, PreparedFailure,
-    SyntaxDiagnosticKind,
-};
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PreparedFailure};
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
 use crate::compiler_frontend::headers::SourceTokenOwner;
+use crate::compiler_frontend::headers::parse_file_headers::parse_file_headers_tests::diagnostic_view_for_test;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, HeaderKind,
     HeaderParseOptions, HeaderPreparationFailure, SourcePreparationDelta, bind_module_headers,
@@ -595,7 +595,7 @@ impl MothTemplateScopeFixture {
             StringTable,
             PathInternerFork,
         ),
-        CompilerDiagnostic,
+        DiagnosticDraft,
     > {
         let html_interface = empty_provider_interface("html");
         let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
@@ -625,7 +625,7 @@ impl MothTemplateScopeFixture {
             crate::compiler_frontend::headers::parse_file_headers::BoundModuleHeaders,
             StringTable,
         ),
-        CompilerDiagnostic,
+        DiagnosticDraft,
     > {
         self.prepare_and_bind_headers_with_providers_with_table(
             prepared_relative_paths,
@@ -645,7 +645,7 @@ impl MothTemplateScopeFixture {
             crate::compiler_frontend::headers::parse_file_headers::BoundModuleHeaders,
             StringTable,
         ),
-        (CompilerDiagnostic, StringTable),
+        (DiagnosticDraft, StringTable),
     > {
         let style_directives = StyleDirectiveRegistry::built_ins();
         let external_package_registry = Arc::new(ExternalPackageRegistry::new());
@@ -695,7 +695,7 @@ impl MothTemplateScopeFixture {
                         FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
                             diagnostic,
                             ..
-                        }) => (diagnostic, string_table.clone()),
+                        }) => (diagnostic.into(), string_table.clone()),
                         FileFrontendPrepareFailure::Infrastructure(error) => {
                             panic!("fixture tokenization hit infrastructure failure: {error:?}")
                         }
@@ -732,7 +732,7 @@ impl MothTemplateScopeFixture {
                 FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
                     diagnostic,
                     ..
-                }) => (diagnostic, string_table.clone()),
+                }) => (diagnostic.into(), string_table.clone()),
                 FileFrontendPrepareFailure::Infrastructure(error) => {
                     panic!("fixture preparation hit infrastructure failure: {error:?}")
                 }
@@ -809,7 +809,7 @@ impl MothTemplateScopeFixture {
     }
 
     fn capture_ast_diagnostic(
-        diagnostic: CompilerDiagnostic,
+        diagnostic: DiagnosticDraft,
         string_table: StringTable,
         path_fork: &PathInternerFork,
     ) -> PreparedFailure {
@@ -886,7 +886,7 @@ fn prepared_module_roots(entry_root: &Path, files: &[PathBuf]) -> ModuleRootTabl
     ModuleRootTable::from_records(records)
 }
 
-fn first_diagnostic_from_bag(bag: DiagnosticBag) -> CompilerDiagnostic {
+fn first_diagnostic_from_bag(bag: DiagnosticBag) -> DiagnosticDraft {
     bag.into_diagnostics()
         .into_iter()
         .next()
@@ -1250,16 +1250,18 @@ fn unescaped_outer_close_diagnostic_flows_through_pipeline_preparation() {
     };
 
     assert!(warnings.as_slice().is_empty());
+    let diagnostic_bag = diagnostic_view_for_test(diagnostic);
+    let diagnostic = diagnostic_bag
+        .first()
+        .expect("unescaped template-close diagnostic should compact");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0032");
     assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnescapedImplicitTemplateClose)
+        diagnostic
+            .family_view::<templates::UnescapedImplicitTemplateCloseView>()
+            .expect("unescaped template-close family")
+            .source_kind,
+        SourceFileKind::MothTemplate
     );
-    assert!(matches!(
-        &diagnostic.payload,
-        DiagnosticPayload::UnescapedImplicitTemplateClose {
-            source_kind: SourceFileKind::MothTemplate
-        }
-    ));
 }
 
 #[test]

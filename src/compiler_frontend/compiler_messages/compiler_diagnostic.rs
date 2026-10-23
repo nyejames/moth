@@ -11,8 +11,8 @@ use crate::compiler_frontend::compiler_messages::DiagnosticIdentity;
 use crate::compiler_frontend::compiler_messages::{
     BorrowAccessKind, BorrowDiagnosticKind, BuiltinFailureOriginKind, CapacityResource,
     ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason, ConfigDiagnosticKind,
-    DeferredFeatureDiagnosticKind, DeferredFeatureReason, DependencyClauseKind, DiagnosticBag,
-    DiagnosticKind, DiagnosticLabel, DiagnosticLabelMessage, DiagnosticOperator, DiagnosticPayload,
+    DeferredFeatureDiagnosticKind, DeferredFeatureReason, DependencyClauseKind, DiagnosticKind,
+    DiagnosticLabel, DiagnosticLabelMessage, DiagnosticOperator, DiagnosticPayload,
     DiagnosticPlace, DiagnosticSeverity, DiagnosticToken, GenericApplicationErrorReason,
     GenericInferenceSubject, ImportDiagnosticKind, ImportPublicSurfaceType,
     IncompatibleChoiceComparisonReason, InvalidCastReason, InvalidChoiceVariantReason,
@@ -2210,17 +2210,5 @@ impl CompilerDiagnostic {
     /// Remap every complete path identity after a module-local path fork merges.
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         self.payload.remap_path_ids(remap);
-    }
-}
-
-impl From<DiagnosticBag> for CompilerDiagnostic {
-    fn from(bag: DiagnosticBag) -> Self {
-        // Header dispatch still has one narrow boundary that collapses a local diagnostic bag
-        // into the single-diagnostic API it inherited. An empty bag here means a parser helper
-        // returned an error without a diagnostic, which is an internal compiler bug.
-        bag.into_diagnostics()
-            .into_iter()
-            .next()
-            .expect("DiagnosticBag conversion requires at least one diagnostic")
     }
 }

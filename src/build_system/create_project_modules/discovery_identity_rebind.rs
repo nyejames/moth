@@ -81,16 +81,6 @@ pub(super) fn rebind_discovery_diagnostic(
     Ok(())
 }
 
-pub(super) fn rebind_discovery_diagnostics(
-    diagnostics: &mut [CompilerDiagnostic],
-    source_ids: &SourceIdentityMap,
-) -> Result<(), CompilerError> {
-    for diagnostic in diagnostics {
-        rebind_discovery_diagnostic(diagnostic, source_ids)?;
-    }
-    Ok(())
-}
-
 pub(super) fn rebind_discovery_compiler_error(
     error: &mut CompilerError,
     source_ids: &SourceIdentityMap,

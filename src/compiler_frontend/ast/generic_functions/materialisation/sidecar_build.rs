@@ -623,7 +623,8 @@ where
             declaration_span,
             requirements,
         };
-        let lookups = Rc::make_mut(&mut environment.lookups);
+        let lookups = Rc::get_mut(&mut environment.lookups)
+            .expect("AST environment lookups are uniquely owned before materialisation");
         match evidence_kind {
             TraitEvidenceKind::Canonical => Rc::make_mut(&mut lookups.trait_evidence_environment)
                 .insert_validated(generated_evidence),
@@ -839,7 +840,8 @@ fn install_generated_requester_template<N: MaterialisationNominalSource>(
     } else {
         None
     };
-    let lookups = Rc::make_mut(&mut environment.lookups);
+    let lookups = Rc::get_mut(&mut environment.lookups)
+        .expect("AST environment lookups are uniquely owned before materialisation");
     Rc::make_mut(&mut lookups.resolved_function_signatures_by_path).insert(
         method_path,
         crate::compiler_frontend::ast::type_resolution::ResolvedFunctionSignature {
@@ -1314,7 +1316,8 @@ fn install_generated_requester_bound_trait<N: MaterialisationNominalSource>(
         declaration_span: source.declaration_span,
         visibility: source.visibility.clone(),
     };
-    let lookups = Rc::make_mut(&mut environment.lookups);
+    let lookups = Rc::get_mut(&mut environment.lookups)
+        .expect("AST environment lookups are uniquely owned before materialisation");
     let trait_environment = Rc::make_mut(&mut lookups.trait_environment);
     if trait_environment.insert(definition).is_some() {
         return Err(CompilerError::compiler_error(

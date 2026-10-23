@@ -724,8 +724,8 @@ fn forced_path_exhaustion_during_module_publication_reports_capacity_diagnostic(
     use crate::compiler_frontend::compiler_messages::{
         DiagnosticSeverity, PreparedFailure, SourceSpanCapacityResource,
         diagnostics::{
+            boundary_accumulator::BoundaryAccumulator,
             families::token_lexical::SourceSpanCapacityView, freeze::InstallMode,
-            legacy_adapter::BoundaryAccumulator,
         },
     };
     use crate::compiler_frontend::symbols::path_interner::{
@@ -1351,7 +1351,7 @@ fn canonical_tail_retains_donor_only_package_identity() {
 fn published_warning_paths_remap_to_preserve_original_spelling() {
     use crate::build_system::create_project_modules::compiled_boundary::CompiledGraphBoundary;
     use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
-    use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+    use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
     use crate::compiler_frontend::compiler_messages::{
         CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
         ImportDiagnosticKind,

@@ -14,7 +14,7 @@ use crate::build_system::BuildProfile;
 use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project};
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::projects::settings::Config;
 use std::path::PathBuf;
 /// The smallest document that satisfies the ordered HTML shell contract.

@@ -553,7 +553,8 @@ impl GenericTemplateArtefact {
             } else {
                 None
             };
-            let lookups = Rc::make_mut(&mut environment.lookups);
+            let lookups = Rc::get_mut(&mut environment.lookups)
+                .expect("AST environment lookups are uniquely owned before materialisation");
             Rc::make_mut(&mut lookups.nominal_type_ids_by_path).insert(local_path, type_id);
             Rc::make_mut(&mut lookups.source_nominal_paths).insert(local_path);
             if let Some(kind) = generic_kind {
@@ -674,7 +675,8 @@ impl GenericTemplateArtefact {
                     binding_span: span,
                     config_qualifier: None,
                 };
-                let lookups = Rc::make_mut(&mut environment.lookups);
+                let lookups = Rc::get_mut(&mut environment.lookups)
+                    .expect("AST environment lookups are uniquely owned before materialisation");
                 let declaration_id = match lookups
                     .declaration_table
                     .declaration_id_by_path(&local_path)
@@ -757,7 +759,8 @@ impl GenericTemplateArtefact {
                 binding_span: None,
                 config_qualifier: None,
             };
-            let lookups = Rc::make_mut(&mut environment.lookups);
+            let lookups = Rc::get_mut(&mut environment.lookups)
+                .expect("AST environment lookups are uniquely owned before materialisation");
             if lookups
                 .declaration_table
                 .get_by_path(&method_path)
@@ -1061,7 +1064,8 @@ impl GenericTemplateArtefact {
                 body_tokens: Some(body),
                 declaration_span: nested.declaration_span,
             };
-            let lookups = Rc::make_mut(&mut environment.lookups);
+            let lookups = Rc::get_mut(&mut environment.lookups)
+                .expect("AST environment lookups are uniquely owned before materialisation");
             lookups
                 .generic_function_templates_by_path
                 .insert(nested_path, template);
@@ -1182,7 +1186,8 @@ impl GenericTemplateArtefact {
                     .iter()
                     .any(|definition| definition.nominal_path == nominal_path)
                 {
-                    Rc::make_mut(&mut environment.lookups)
+                    Rc::get_mut(&mut environment.lookups)
+                        .expect("AST environment lookups are uniquely owned before materialisation")
                         .imported_choice_definitions
                         .push(crate::compiler_frontend::ast::AstChoiceDefinition { nominal_path });
                 }
@@ -1218,11 +1223,14 @@ impl GenericTemplateArtefact {
                 )?
             {
                 Rc::make_mut(
-                    &mut Rc::make_mut(&mut environment.lookups).resolved_struct_fields_by_path,
+                    &mut Rc::get_mut(&mut environment.lookups)
+                        .expect("AST environment lookups are uniquely owned before materialisation")
+                        .resolved_struct_fields_by_path,
                 )
                 .insert(nominal_path, fields);
             }
-            Rc::make_mut(&mut environment.lookups)
+            Rc::get_mut(&mut environment.lookups)
+                .expect("AST environment lookups are uniquely owned before materialisation")
                 .imported_struct_definitions
                 .push(AstImportedStructDefinition { nominal_path });
         }
@@ -1491,7 +1499,8 @@ impl super::stable_types::StableCallableBinding {
                 string_table,
             },
         )?;
-        let lookups = Rc::make_mut(&mut environment.lookups);
+        let lookups = Rc::get_mut(&mut environment.lookups)
+            .expect("AST environment lookups are uniquely owned before materialisation");
         if lookups.declaration_table.get_by_path(&local_path).is_none() {
             append_materialised_declaration(
                 lookups,
@@ -1541,7 +1550,8 @@ impl super::stable_types::StableCallableBinding {
             string_table,
             path_fork,
         )?;
-        Rc::make_mut(&mut environment.lookups)
+        Rc::get_mut(&mut environment.lookups)
+            .expect("AST environment lookups are uniquely owned before materialisation")
             .imported_functions_by_local_path
             .insert(self.local_path, contract);
         Ok(())

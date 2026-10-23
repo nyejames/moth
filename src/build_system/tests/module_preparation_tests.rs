@@ -13,7 +13,11 @@ use super::super::prepared_source::{PreparedSourceInput, PreparedSourceKind};
 use crate::builder_surface::SourceFileKindRegistry;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::CompilerFrontend;
-use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::{
+    families::names_declarations::IdentifierNamingConventionView,
+    test_support::compact_bag_for_test,
+};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
@@ -786,7 +790,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         "semantic compilation should preserve the module entry point"
     );
     assert!(
-        draft.warnings.as_slice().is_empty(),
+        draft.warnings.is_empty(),
         "semantic compilation should not introduce warnings for a clean generic free-function declaration"
     );
     let materialisation_context = draft
@@ -1305,13 +1309,13 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
         2,
         "expected two naming-convention warnings from Beta and Gamma"
     );
+    let compact = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
     assert!(
-        warnings.iter().all(|w| matches!(
-            w.kind,
-            crate::compiler_frontend::compiler_messages::DiagnosticKind::Rule(
-                crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::IdentifierNamingConvention
-            )
-        )),
+        compact.views().all(|warning| {
+            warning
+                .family_view::<IdentifierNamingConventionView>()
+                .is_some()
+        }),
         "all warnings should be naming convention warnings"
     );
 
@@ -1775,13 +1779,16 @@ fn indexed_file_preparation_moves_warnings_to_the_module_owner() {
         1,
         "indexed file preparation should keep the PascalCase value warning exactly once"
     );
+    let compact = compact_bag_for_test(
+        DiagnosticBag::from_diagnostics(prepared.semantic.warnings),
+        None,
+    );
+    assert_eq!(compact.len(), 1);
     assert!(
-        matches!(
-            prepared.semantic.warnings[0].kind,
-            crate::compiler_frontend::compiler_messages::DiagnosticKind::Rule(
-                crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::IdentifierNamingConvention
-            )
-        ),
+        compact
+            .first()
+            .and_then(|warning| warning.family_view::<IdentifierNamingConventionView>())
+            .is_some(),
         "the retained warning should be the identifier naming convention diagnostic"
     );
 }
@@ -1817,13 +1824,12 @@ fn chunked_file_preparation_preserves_warning_source_order() {
         )
         .expect("chunked preparation should succeed with warnings");
 
-    let warning_names: Vec<_> = warnings
-        .iter()
-        .filter_map(|warning| match &warning.payload {
-            DiagnosticPayload::IdentifierNamingConvention { name, .. } => {
-                Some(fixture.frontend.string_table.resolve(*name).to_owned())
-            }
-            _ => None,
+    let compact = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
+    let warning_names: Vec<_> = compact
+        .views()
+        .filter_map(|warning| {
+            let facts = warning.family_view::<IdentifierNamingConventionView>()?;
+            Some(fixture.frontend.string_table.resolve(facts.name).to_owned())
         })
         .collect();
     let expected_names: Vec<_> = (0..super::FILE_PREPARATION_ALWAYS_PARALLEL_FILE_COUNT)
@@ -2431,8 +2437,8 @@ fn forced_path_exhaustion_during_chunk_merge_reports_capacity_diagnostic() {
     use crate::compiler_frontend::compiler_messages::{
         DiagnosticSeverity, PreparedFailure, SourceSpanCapacityResource,
         diagnostics::{
+            boundary_accumulator::BoundaryAccumulator,
             families::token_lexical::SourceSpanCapacityView, freeze::InstallMode,
-            legacy_adapter::BoundaryAccumulator,
         },
     };
     use crate::compiler_frontend::symbols::path_interner::ForcedExhaustionGuard;

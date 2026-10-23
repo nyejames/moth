@@ -16,8 +16,8 @@ use crate::build_system::build::DeferredResourceOutput;
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::folded_value::OwnedFoldedString;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::single_source_compilation::{

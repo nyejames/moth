@@ -92,8 +92,8 @@ use crate::build_system::output::ValidatedDirectoryOutputSettings;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::instrumentation::{log_frontend_counters, reset_frontend_counters};
 #[cfg(feature = "boracle")]
 use crate::compiler_frontend::module_compilation::BoracleModuleInput;

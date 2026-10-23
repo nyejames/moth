@@ -23,11 +23,11 @@ use crate::compiler_frontend::compiler_messages::render::{
 };
 use crate::compiler_frontend::compiler_messages::{
     AstCapacityResource, CapacityResource, ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason,
-    CompilerDiagnostic, DiagnosticCapacityResource, DiagnosticCategory,
-    DiagnosticCompoundAssignmentOperator, DiagnosticKind, DiagnosticOperator, DiagnosticPayload,
-    DiagnosticSeverity, DiagnosticToken, HirCapacityResource, InvalidExpressionReason,
-    InvalidMultiBindReason, InvalidStringEscapeReason, MissingWhitespace, OperatorOperandPosition,
-    PathKind, SourceSpanCapacityResource, SymbolicSpacingConstruct, SymbolicSpacingError,
+    DiagnosticCapacityResource, DiagnosticCategory, DiagnosticCompoundAssignmentOperator,
+    DiagnosticKind, DiagnosticOperator, DiagnosticPayload, DiagnosticSeverity, DiagnosticToken,
+    HirCapacityResource, InvalidExpressionReason, InvalidMultiBindReason,
+    InvalidStringEscapeReason, MissingWhitespace, OperatorOperandPosition, PathKind,
+    SourceSpanCapacityResource, SymbolicSpacingConstruct, SymbolicSpacingError,
     SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::source::SourceSpan;
@@ -886,7 +886,7 @@ diagnostic_family! {
 }
 
 /// The compiler-capacity draft for `resource` at `span`. Callers use it when a fixed-size limit is reached.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn compiler_capacity_exceeded(
+pub(crate) fn compiler_capacity_exceeded(
     resource: impl Into<CapacityResource>,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -895,101 +895,104 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn compiler_cap
     })
 }
 
-/// Maps this group's legacy diagnostics onto their compact constructors. Declines other payloads.
-pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticDraft> {
-    let span = diagnostic.primary_span;
-    match (diagnostic.kind, &diagnostic.payload) {
+/// Consumes this group's legacy kind and payload when they match a compact family.
+pub(super) fn from_legacy(
+    kind: DiagnosticKind,
+    payload: DiagnosticPayload,
+    span: Option<SourceSpan>,
+) -> Result<DiagnosticDraft, DiagnosticPayload> {
+    match (kind, payload) {
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::ExpectedToken),
             DiagnosticPayload::ExpectedToken { expected, found },
-        ) => Some(expected_token_from_projections(*expected, *found, span)),
+        ) => Ok(expected_token_from_projections(expected, found, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::CompilerCapacityExceeded),
             DiagnosticPayload::CompilerCapacityExceeded { resource },
-        ) => Some(compiler_capacity_exceeded(*resource, span)),
+        ) => Ok(compiler_capacity_exceeded(resource, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedToken),
             DiagnosticPayload::UnexpectedToken { found },
-        ) => Some(unexpected_token_from_tag(*found, span)),
+        ) => Ok(unexpected_token_from_tag(found, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedToken),
             DiagnosticPayload::InvalidMultiBind {
                 reason,
                 target_name,
             },
-        ) => Some(invalid_multi_bind_syntax(*reason, *target_name, span)),
+        ) => Ok(invalid_multi_bind_syntax(reason, target_name, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedTrailingComma),
             DiagnosticPayload::UnexpectedTrailingComma,
-        ) => Some(unexpected_trailing_comma(span)),
+        ) => Ok(unexpected_trailing_comma(span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnterminatedStringLiteral),
             DiagnosticPayload::None,
-        ) => Some(unterminated_string_literal(span)),
+        ) => Ok(unterminated_string_literal(span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidCharacter),
             DiagnosticPayload::InvalidCharacter { character },
-        ) => Some(invalid_character(*character, span)),
+        ) => Ok(invalid_character(character, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidNumberLiteral),
             DiagnosticPayload::InvalidNumberLiteral {
                 literal_text,
                 reason,
             },
-        ) => Some(invalid_number_literal(*literal_text, *reason, span)),
+        ) => Ok(invalid_number_literal(literal_text, reason, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidCharLiteral),
             DiagnosticPayload::None,
-        ) => Some(invalid_char_literal(span)),
+        ) => Ok(invalid_char_literal(span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidIdentifier),
             DiagnosticPayload::None,
-        ) => Some(invalid_identifier(span)),
+        ) => Ok(invalid_identifier(span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::MissingClosingDelimiter),
             DiagnosticPayload::MissingClosingDelimiter { expected_delimiter },
-        ) => Some(missing_closing_delimiter(*expected_delimiter, span)),
+        ) => Ok(missing_closing_delimiter(expected_delimiter, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedTokenInDeclaration),
             DiagnosticPayload::None,
-        ) => Some(unexpected_token_in_declaration(span)),
+        ) => Ok(unexpected_token_in_declaration(span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedEndOfFile),
             DiagnosticPayload::UnexpectedEndOfFile { expected_delimiter },
-        ) => Some(unexpected_end_of_file(*expected_delimiter, span)),
+        ) => Ok(unexpected_end_of_file(expected_delimiter, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidPath),
             DiagnosticPayload::InvalidPath { path_kind },
-        ) => Some(invalid_path(*path_kind, span)),
+        ) => Ok(invalid_path(path_kind, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidExpression),
             DiagnosticPayload::InvalidExpression { reason },
-        ) => Some(invalid_expression(*reason, span)),
+        ) => Ok(invalid_expression(reason, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::MissingOperatorOperand),
             DiagnosticPayload::MissingOperatorOperand { operator, position },
-        ) => Some(missing_operator_operand(*operator, *position, span)),
+        ) => Ok(missing_operator_operand(operator, position, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::ExpectedSymbolStatement),
             DiagnosticPayload::ExpectedSymbolStatement,
-        ) => Some(expected_symbol_statement(span)),
+        ) => Ok(expected_symbol_statement(span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::MissingCollectionItem),
             DiagnosticPayload::MissingCollectionItem,
-        ) => Some(missing_collection_item(span)),
+        ) => Ok(missing_collection_item(span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::CommonSyntaxMistake),
             DiagnosticPayload::CommonSyntaxMistake { reason },
-        ) => Some(match reason {
+        ) => Ok(match reason {
             CommonSyntaxMistakeReason::InvalidChoiceVariantSpacing { gap } => {
-                invalid_choice_variant_spacing(*gap, span)
+                invalid_choice_variant_spacing(gap, span)
             }
-            _ => common_syntax_mistake(reason.clone(), span),
+            reason => common_syntax_mistake(reason, span),
         }),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidStringEscape),
             DiagnosticPayload::InvalidStringEscape { reason },
-        ) => Some(invalid_string_escape(*reason, span)),
+        ) => Ok(invalid_string_escape(reason, span)),
         (
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::SourceSpanCapacity),
             DiagnosticPayload::SourceSpanCapacity {
@@ -997,8 +1000,8 @@ pub(super) fn from_legacy(diagnostic: &CompilerDiagnostic) -> Option<DiagnosticD
                 length,
                 resource,
             },
-        ) => Some(source_span_capacity(*start, *length, *resource, span)),
-        _ => None,
+        ) => Ok(source_span_capacity(start, length, resource, span)),
+        (_, payload) => Err(payload),
     }
 }
 
@@ -1158,7 +1161,7 @@ diagnostic_family! {
     }
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn common_syntax_mistake(
+pub(crate) fn common_syntax_mistake(
     reason: CommonSyntaxMistakeReason,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -1171,7 +1174,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn common_synta
     })
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_choice_variant_spacing(
+pub(crate) fn invalid_choice_variant_spacing(
     gap: ChoiceVariantSeparatorGap,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -1181,7 +1184,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_choi
     )
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_string_escape(
+pub(crate) fn invalid_string_escape(
     reason: InvalidStringEscapeReason,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -1192,7 +1195,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_stri
     })
 }
 
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn source_span_capacity(
+pub(crate) fn source_span_capacity(
     start: u32,
     length: u32,
     resource: SourceSpanCapacityResource,
@@ -1225,7 +1228,7 @@ diagnostic_family! {
 }
 
 /// The unexpected-token draft for a token the parser did not expect, at `span`.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn unexpected_token_from_tag(
+pub(crate) fn unexpected_token_from_tag(
     found: DiagnosticToken,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -1235,7 +1238,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn unexpected_t
 }
 
 /// The unexpected-token draft for a multi-bind mismatch at `span`.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_multi_bind_syntax(
+pub(crate) fn invalid_multi_bind_syntax(
     reason: InvalidMultiBindReason,
     target_name: Option<StringId>,
     span: Option<SourceSpan>,
@@ -1272,9 +1275,7 @@ diagnostic_family! {
 }
 
 /// The unexpected-trailing-comma draft at `span`. The row carries no facts.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn unexpected_trailing_comma(
-    span: Option<SourceSpan>,
-) -> DiagnosticDraft {
+pub(crate) fn unexpected_trailing_comma(span: Option<SourceSpan>) -> DiagnosticDraft {
     DiagnosticDraft::with_facts(&UNEXPECTED_TRAILING_COMMA, span, |_cursor| Ok(()))
 }
 
@@ -1295,9 +1296,7 @@ diagnostic_family! {
 }
 
 /// The unterminated-string-literal draft at `span`. The row carries no facts.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn unterminated_string_literal(
-    span: Option<SourceSpan>,
-) -> DiagnosticDraft {
+pub(crate) fn unterminated_string_literal(span: Option<SourceSpan>) -> DiagnosticDraft {
     DiagnosticDraft::with_facts(&UNTERMINATED_STRING_LITERAL, span, |_cursor| Ok(()))
 }
 
@@ -1318,10 +1317,7 @@ diagnostic_family! {
 }
 
 /// The invalid-character draft for `character` at `span`.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_character(
-    character: char,
-    span: Option<SourceSpan>,
-) -> DiagnosticDraft {
+pub(crate) fn invalid_character(character: char, span: Option<SourceSpan>) -> DiagnosticDraft {
     DiagnosticDraft::with_facts(&INVALID_CHARACTER, span, |cursor| {
         cursor.push::<CharFact>(&character)
     })
@@ -1350,7 +1346,7 @@ diagnostic_family! {
 }
 
 /// The invalid-number-literal draft for `literal_text` and `reason` at `span`.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_number_literal(
+pub(crate) fn invalid_number_literal(
     literal_text: StringId,
     reason: NumberLiteralErrorReason,
     span: Option<SourceSpan>,
@@ -1381,9 +1377,7 @@ diagnostic_family! {
 }
 
 /// The invalid-character-literal draft at `span`. The row carries no facts.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_char_literal(
-    span: Option<SourceSpan>,
-) -> DiagnosticDraft {
+pub(crate) fn invalid_char_literal(span: Option<SourceSpan>) -> DiagnosticDraft {
     DiagnosticDraft::with_facts(&INVALID_CHAR_LITERAL, span, |_cursor| Ok(()))
 }
 
@@ -1404,9 +1398,7 @@ diagnostic_family! {
 }
 
 /// The invalid-identifier draft at `span`. The row carries no facts.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn invalid_identifier(
-    span: Option<SourceSpan>,
-) -> DiagnosticDraft {
+pub(crate) fn invalid_identifier(span: Option<SourceSpan>) -> DiagnosticDraft {
     DiagnosticDraft::with_facts(&INVALID_IDENTIFIER, span, |_cursor| Ok(()))
 }
 
@@ -1427,7 +1419,7 @@ diagnostic_family! {
 }
 
 /// The missing-closing-delimiter draft for `expected_delimiter` at `span`.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn missing_closing_delimiter(
+pub(crate) fn missing_closing_delimiter(
     expected_delimiter: StringId,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
@@ -1453,9 +1445,7 @@ diagnostic_family! {
 }
 
 /// The unexpected-token-in-declaration draft at `span`. The row carries no facts.
-pub(in crate::compiler_frontend::compiler_messages::diagnostics) fn unexpected_token_in_declaration(
-    span: Option<SourceSpan>,
-) -> DiagnosticDraft {
+pub(crate) fn unexpected_token_in_declaration(span: Option<SourceSpan>) -> DiagnosticDraft {
     DiagnosticDraft::with_facts(&UNEXPECTED_TOKEN_IN_DECLARATION, span, |_cursor| Ok(()))
 }
 
