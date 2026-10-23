@@ -4,7 +4,6 @@
 //! WHY: diagnostics carry `TypeId`s, so the boundary captures semantic type identity before the
 //! renderer turns it into source-level names.
 
-use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
@@ -242,7 +241,6 @@ fn failure_handling_renderers_resolve_custom_types_and_recovery_guidance() {
             InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
                 error_type_id: error_types[0],
                 witness: Box::new(BuiltinFailureWitness {
-                    codes: vec![BuiltinErrorCode::IntOverflow],
                     call_spans: vec![None, None, None],
                     origin_span: None,
                     origin: BuiltinFailureOriginKind::Operation,
@@ -261,7 +259,6 @@ fn failure_handling_renderers_resolve_custom_types_and_recovery_guidance() {
         (
             InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
                 witness: Box::new(BuiltinFailureWitness {
-                    codes: vec![BuiltinErrorCode::DivideByZero],
                     call_spans: Vec::new(),
                     origin_span: None,
                     origin: BuiltinFailureOriginKind::Operation,

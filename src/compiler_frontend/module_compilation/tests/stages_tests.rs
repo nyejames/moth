@@ -7,9 +7,10 @@ use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::unreachable_match_arm;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::CompilerCapacityExceededView;
 use crate::compiler_frontend::compiler_messages::{
-    CapacityResource, CompilerDiagnostic, DiagnosticBag, DiagnosticSeverity, HirCapacityResource,
+    CapacityResource, DiagnosticBag, DiagnosticSeverity, HirCapacityResource,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::expression_store::HirExpressionStoreTestLimits;
@@ -43,9 +44,8 @@ fn lower_hir_capacity_failure_keeps_each_warning_and_captured_site_once() {
     let authored_span = test_span(10);
     let ast_warning_span = test_span(20);
     let preparation_warning_span = test_span(30);
-    let ast_warning = CompilerDiagnostic::unreachable_match_arm(Some(ast_warning_span));
-    let preparation_warning =
-        CompilerDiagnostic::unreachable_match_arm(Some(preparation_warning_span));
+    let ast_warning = unreachable_match_arm(Some(ast_warning_span));
+    let preparation_warning = unreachable_match_arm(Some(preparation_warning_span));
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
     let literal = expressions
@@ -74,10 +74,10 @@ fn lower_hir_capacity_failure_keeps_each_warning_and_captured_site_once() {
         constants,
         Default::default(),
     );
-    ast.warnings.push(ast_warning.into());
+    ast.warnings.push(ast_warning);
     let mut warnings = DiagnosticBag::from_diagnostics(vec![
         preparation_warning,
-        CompilerDiagnostic::unreachable_match_arm(Some(ast_warning_span)),
+        unreachable_match_arm(Some(ast_warning_span)),
     ]);
 
     let type_environment = std::mem::take(&mut ast.type_environment);

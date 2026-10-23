@@ -40,8 +40,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticVi
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DependencyClauseKind, DiagnosticBag, InvalidCompileTimePathReason,
-    InvalidDependencyClauseReason, PathKind, PreparedFailure,
+    DependencyClauseKind, DiagnosticBag, InvalidDependencyClauseReason, PathKind, PreparedFailure,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -307,9 +306,14 @@ fn load_missing_source_paths_with_registered_paths_for_test(
     .map_err(|error| match error {
         SourceDatabaseError::Capacity(capacity) => (
             PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
-                DiagnosticBag::from(CompilerDiagnostic::source_table_capacity(
-                    capacity.resource(),
-                )),
+                DiagnosticBag::from(
+                    crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::source_span_capacity(
+                        0,
+                        u32::MAX,
+                        capacity.resource(),
+                        None,
+                    ),
+                ),
                 string_table.clone(),
                 None,
                 false,
@@ -1379,7 +1383,6 @@ impl ExternalImportProvider for CanonicalPathPackageProvider {
             exported_types: vec![ExternalTypeId(package_id.0)],
             exported_free_functions: vec![ExternalFunctionId::Synthetic(package_id.0)],
             runtime_asset: None,
-            diagnostics: vec![],
             required_runtime_imports: vec![],
         }))
     }
@@ -1473,7 +1476,6 @@ impl ExternalImportProvider for ResolvingCountingProvider {
             exported_types: vec![ExternalTypeId(package_id.0)],
             exported_free_functions: vec![ExternalFunctionId::Synthetic(package_id.0)],
             runtime_asset: Some(fixture_js_runtime_asset(request.canonical_source_path)),
-            diagnostics: vec![],
             required_runtime_imports: vec![RequiredRuntimeImport {
                 module_name: "@moth/runtime".to_owned(),
                 imported_names: vec!["mothOk".to_owned()],

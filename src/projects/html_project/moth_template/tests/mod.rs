@@ -8,10 +8,14 @@ use super::bundle::prepare_file_value_bundle;
 use crate::build_system::create_project_modules::resource_inputs::{
     ResourceContentState, ResourceInputRegistry,
 };
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::file_value_resolution::retained_reference_error;
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, ErrorType};
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, dev_server::render_boundary_messages_html,
     terse::format_terse_boundary_messages,
@@ -818,7 +822,8 @@ fn aborted_content_walk_retains_unvisited_canonical_source_identity() {
 /// aligned with the final logical source as the bundle settles its identities.
 #[test]
 fn retained_resolution_diagnostics_name_the_final_logical_source() {
-    let temp_dir = temp_project(&[("page.mtf", "# Page\n\n[@absent.md]")]);
+    const SOURCE: &str = "# Page\n\n[@absent.md]";
+    let temp_dir = temp_project(&[("page.mtf", SOURCE)]);
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut units = MothTemplateInput::Files(vec![temp_dir.path().join("page.mtf")])
@@ -836,6 +841,7 @@ fn retained_resolution_diagnostics_name_the_final_logical_source() {
     )
     .expect("an unresolvable reference is a retained diagnostic, not a bundle failure");
 
+    let entry_source_id = bundle.prepared_entry.file_id;
     let diagnostic = bundle
         .resolved_file_references
         .iter()
@@ -844,11 +850,30 @@ fn retained_resolution_diagnostics_name_the_final_logical_source() {
             _ => None,
         })
         .expect("a reference to an absent target should retain a diagnostic");
+    let ExpressionParseError::Diagnostic(diagnostic) = retained_reference_error(*diagnostic) else {
+        panic!("a retained missing-target failure should emit a user diagnostic");
+    };
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let view = compact
+        .first()
+        .expect("the emitted resolution diagnostic should compact");
+    let span = match view.primary_site() {
+        SiteRef::Local(span) | SiteRef::Foreign { span, .. } => span,
+        SiteRef::Absent => panic!("the emitted diagnostic should retain its authored source span"),
+    };
+    assert_eq!(span.source(), entry_source_id);
 
-    assert!(
-        diagnostic.primary_span.is_some(),
-        "the retained resolution diagnostic should keep its authored source span",
-    );
+    let source_files = bundle
+        .source_files
+        .finish()
+        .expect("the prepared source database should finalize");
+    assert_eq!(source_files.retained_text(entry_source_id), Some(SOURCE));
+    let range = span.byte_range(&source_files);
+    let expected_start = SOURCE
+        .find("@absent.md")
+        .expect("fixture should contain the absent target path") as u32;
+    assert_eq!(range.start(), expected_start);
+    assert_eq!(range.end(), expected_start + "@absent.md".len() as u32);
 }
 
 #[test]

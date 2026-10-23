@@ -5,8 +5,12 @@
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
+    invalid_mutable_access, multiple_mutable_borrows, shared_mutable_conflict,
+    use_of_uninitialized_local,
+};
 use crate::compiler_frontend::compiler_messages::{
-    BorrowAccessKind, CompilerDiagnostic, DiagnosticPlace, InvalidMutableAccessReason,
+    BorrowAccessKind, DiagnosticPlace, InvalidMutableAccessReason,
 };
 use crate::compiler_frontend::hir::hir_side_table::{HirLocalOriginKind, HirLocation};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId, LocalId};
@@ -119,8 +123,7 @@ impl<'a> BorrowDiagnostics<'a> {
         existing_span: Option<SourceSpan>,
         span: Option<SourceSpan>,
     ) -> BorrowCheckError {
-        CompilerDiagnostic::multiple_mutable_borrows(place, conflicting_place, existing_span, span)
-            .into()
+        multiple_mutable_borrows(place, conflicting_place, existing_span, span).into()
     }
 
     pub(super) fn shared_mutable_conflict(
@@ -132,7 +135,7 @@ impl<'a> BorrowDiagnostics<'a> {
         existing_span: Option<SourceSpan>,
         span: Option<SourceSpan>,
     ) -> BorrowCheckError {
-        CompilerDiagnostic::shared_mutable_conflict(
+        shared_mutable_conflict(
             place,
             existing_access,
             requested_access,
@@ -151,14 +154,7 @@ impl<'a> BorrowDiagnostics<'a> {
         conflicting_span: Option<SourceSpan>,
         span: Option<SourceSpan>,
     ) -> BorrowCheckError {
-        CompilerDiagnostic::invalid_mutable_access(
-            place,
-            reason,
-            conflicting_place,
-            conflicting_span,
-            span,
-        )
-        .into()
+        invalid_mutable_access(place, reason, conflicting_place, conflicting_span, span).into()
     }
 
     pub(super) fn use_of_uninitialized_local(
@@ -166,6 +162,6 @@ impl<'a> BorrowDiagnostics<'a> {
         place: DiagnosticPlace,
         span: Option<SourceSpan>,
     ) -> BorrowCheckError {
-        CompilerDiagnostic::use_of_uninitialized_local(place, span).into()
+        use_of_uninitialized_local(place, span).into()
     }
 }

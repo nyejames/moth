@@ -4,7 +4,10 @@ use super::discovery_provider_imports::{
     unsupported_external_extension_error,
 };
 use super::*;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, SourceSpanCapacityResource};
+use crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    project_config, token_lexical,
+};
 use crate::compiler_frontend::paths::path_normalization::{
     is_relative_dependency_path, join_and_normalize_path,
 };
@@ -675,11 +678,12 @@ fn resolve_module_root_bare_dependency(
                 ),
             )),
             crate::compiler_frontend::symbols::path_interner::PathInternError::TableFull => {
-                SourceDiscoveryError::Diagnostic(
-                    CompilerDiagnostic::source_table_capacity(
-                        SourceSpanCapacityResource::LogicalPath,
-                    ),
-                )
+                SourceDiscoveryError::Diagnostic(token_lexical::source_span_capacity(
+                    0,
+                    u32::MAX,
+                    SourceSpanCapacityResource::LogicalPath,
+                    None,
+                ))
             }
             crate::compiler_frontend::symbols::path_interner::PathInternError::BaseMismatch {
                 ..
@@ -691,8 +695,11 @@ fn resolve_module_root_bare_dependency(
     let module_local_provider = path_fork
         .try_join(module_prefix, provider, &mut scratch)
         .ok_or_else(|| {
-            SourceDiscoveryError::Diagnostic(CompilerDiagnostic::source_table_capacity(
+            SourceDiscoveryError::Diagnostic(token_lexical::source_span_capacity(
+                0,
+                u32::MAX,
                 SourceSpanCapacityResource::LogicalPath,
+                None,
             ))
         })?;
 
@@ -740,7 +747,7 @@ fn handle_provider_capable_dependency(
         {
             return Ok(DependencyPolicyAction::Skip);
         }
-        return Err(CompilerDiagnostic::invalid_dependency_clause(
+        return Err(project_config::invalid_dependency_clause(
             clause_kind,
             InvalidDependencyClauseReason::ProjectGlobalsPathReserved,
             dependency_span,
@@ -844,10 +851,10 @@ fn handle_provider_capable_dependency(
 /// provider itself. Those lanes retain their existing ownership and source context; only the
 /// direct diagnostic produced at this dependency boundary is attributed to the clause span.
 fn with_provider_dependency_span(
-    mut diagnostic: CompilerDiagnostic,
+    mut diagnostic: DiagnosticDraft,
     source_span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    diagnostic.primary_span = source_span;
+) -> DiagnosticDraft {
+    diagnostic.set_primary_span(source_span);
     diagnostic
 }
 

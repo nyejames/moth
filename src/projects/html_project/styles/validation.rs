@@ -12,8 +12,9 @@ use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterInput, FormatterInputPiece, FormatterOutput, FormatterOutputPiece,
 };
 use crate::compiler_frontend::ast::templates::template::FormatterResult;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, MalformedTemplateReason, SyntaxDiagnosticKind,
+    DiagnosticBag, MalformedTemplateReason, SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -113,11 +114,7 @@ impl PassThroughFormatterInput {
                 .into_iter()
                 .filter_map(|warning| {
                     let span = map_warning_span_to_source_span(&self.spans, &warning)?;
-                    Some(CompilerDiagnostic::malformed_template(
-                        kind,
-                        warning.reason,
-                        span,
-                    ))
+                    Some(templates::malformed_template(kind, warning.reason, span))
                 })
                 .collect(),
         )

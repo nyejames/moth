@@ -6,7 +6,9 @@
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidPageMetadataReason};
+use crate::compiler_frontend::compiler_messages::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::InvalidPageMetadataReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, owned_folded_string_from_const_string,
 };
@@ -68,12 +70,12 @@ pub(crate) struct HtmlPageMetadataPlan {
 ///      the infrastructure failure into a user diagnostic.
 #[derive(Debug)]
 pub(crate) enum PageMetadataError {
-    Diagnostic(CompilerDiagnostic),
+    Diagnostic(DiagnosticDraft),
     Infrastructure(CompilerError),
 }
 
-impl From<CompilerDiagnostic> for PageMetadataError {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
+impl From<DiagnosticDraft> for PageMetadataError {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
         Self::Diagnostic(diagnostic)
     }
 }
@@ -230,9 +232,7 @@ fn invalid_page_metadata_rejection(
     reason: InvalidPageMetadataReason,
     span: Option<SourceSpan>,
 ) -> PageMetadataError {
-    PageMetadataError::Diagnostic(CompilerDiagnostic::invalid_page_metadata(
-        key_id, reason, span,
-    ))
+    PageMetadataError::Diagnostic(project_config::invalid_page_metadata(key_id, reason, span))
 }
 
 #[cfg(test)]

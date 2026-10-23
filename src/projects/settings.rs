@@ -9,9 +9,10 @@ use crate::compiler_frontend::build_config::{
 };
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, InvalidConfigReason, PreparedFailure,
+    DiagnosticBag, DiagnosticDraft, InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::module_compilation::{
@@ -188,9 +189,9 @@ impl Config {
         key: &str,
         reason: InvalidConfigReason,
         string_table: &mut StringTable,
-    ) -> CompilerDiagnostic {
+    ) -> DiagnosticDraft {
         let key_id = string_table.intern(key);
-        CompilerDiagnostic::invalid_config_reason(Some(key_id), reason, self.setting_span(key))
+        project_config::invalid_config_reason(Some(key_id), reason, self.setting_span(key))
     }
 
     pub fn config_file_path(&self) -> PathBuf {
@@ -204,9 +205,9 @@ impl Config {
 /// narrow escape hatch for filesystem/tooling failures discovered during validation.
 /// WHY: `BackendBuilder::validate_project_config` is a build boundary, so callers need one result
 /// type that can still distinguish normal user config feedback from internal failures.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ProjectConfigError {
-    Diagnostic(CompilerDiagnostic),
+    Diagnostic(DiagnosticDraft),
     Infrastructure(Box<CompilerError>),
 }
 
@@ -228,7 +229,7 @@ impl ProjectConfigError {
     }
 
     #[cfg(test)]
-    pub(crate) fn diagnostic(&self) -> Option<&CompilerDiagnostic> {
+    pub(crate) fn into_diagnostic(self) -> Option<DiagnosticDraft> {
         match self {
             ProjectConfigError::Diagnostic(diagnostic) => Some(diagnostic),
             ProjectConfigError::Infrastructure(_) => None,
@@ -236,8 +237,8 @@ impl ProjectConfigError {
     }
 }
 
-impl From<CompilerDiagnostic> for ProjectConfigError {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
+impl From<DiagnosticDraft> for ProjectConfigError {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
         ProjectConfigError::Diagnostic(diagnostic)
     }
 }

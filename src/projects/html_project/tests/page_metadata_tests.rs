@@ -3,9 +3,13 @@
 use super::*;
 use crate::compiler_frontend::ast::const_values::facts::{ConstBindingScope, ConstBindingSource};
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidPageMetadataView;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::{
+    CompactDiagnosticBagForTest, compact_bag_for_test,
+};
 use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terminal};
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, InvalidPageMetadataReason, RuleDiagnosticKind,
+    DiagnosticBag, DiagnosticDraft, InvalidPageMetadataReason,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
@@ -89,13 +93,8 @@ fn fixture_resource_id(resources: &mut ModuleResourceTable, relative_path: &str)
     resources.intern_origin(origin, None)
 }
 
-/// Renders the page-metadata diagnostic message through the shared render boundary.
-fn metadata_error_message(
-    diagnostic: &crate::compiler_frontend::compiler_messages::CompilerDiagnostic,
-    string_table: &StringTable,
-) -> String {
-    let render_context = DiagnosticRenderContext::new(string_table);
-    terminal::format_diagnostic_guidance(diagnostic, render_context).join("\n")
+fn compact_metadata_diagnostic(diagnostic: DiagnosticDraft) -> CompactDiagnosticBagForTest {
+    compact_bag_for_test(DiagnosticBag::from(diagnostic), None)
 }
 #[test]
 fn extracts_reserved_entry_metadata() {
@@ -185,22 +184,19 @@ fn rejects_non_string_reserved_values() {
     .expect_err("non-string metadata should fail") else {
         panic!("page metadata infrastructure failure is not a user diagnostic");
     };
-    assert_eq!(
-        error.kind,
-        DiagnosticKind::Rule(RuleDiagnosticKind::InvalidPageMetadata)
-    );
-    assert_eq!(error.kind.descriptor().code, "MOTH-RULE-0061");
-    match &error.payload {
-        crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidPageMetadata {
-            reason,
-            ..
-        } => {
-            assert_eq!(*reason, InvalidPageMetadataReason::NotAString);
-        }
-        other => panic!("expected InvalidPageMetadata payload, got {other:?}"),
-    }
+    let compact = compact_metadata_diagnostic(error);
+    let diagnostic = compact
+        .first()
+        .expect("page-metadata diagnostic should have a compact view");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0061");
+    let facts = diagnostic
+        .family_view::<InvalidPageMetadataView>()
+        .expect("page-metadata diagnostic should retain typed facts");
+    assert_eq!(facts.reason, InvalidPageMetadataReason::NotAString);
 
-    let message = metadata_error_message(&error, &string_table);
+    let message =
+        terminal::format_guidance_view(diagnostic, DiagnosticRenderContext::new(&string_table))
+            .join("\n");
     assert!(
         message.contains("must fold to a string"),
         "unexpected message: {message}"
@@ -344,17 +340,16 @@ fn rejects_duplicate_reserved_values() {
     .expect_err("duplicate metadata should fail") else {
         panic!("page metadata infrastructure failure is not a user diagnostic");
     };
+    let compact = compact_metadata_diagnostic(error);
+    let diagnostic = compact
+        .first()
+        .expect("page-metadata diagnostic should have a compact view");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0061");
+    let facts = diagnostic
+        .family_view::<InvalidPageMetadataView>()
+        .expect("page-metadata diagnostic should retain typed facts");
     assert_eq!(
-        error.kind,
-        DiagnosticKind::Rule(RuleDiagnosticKind::InvalidPageMetadata)
+        facts.reason,
+        InvalidPageMetadataReason::DuplicateDeclaration
     );
-    match &error.payload {
-        crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidPageMetadata {
-            reason,
-            ..
-        } => {
-            assert_eq!(*reason, InvalidPageMetadataReason::DuplicateDeclaration);
-        }
-        other => panic!("expected InvalidPageMetadata payload, got {other:?}"),
-    }
 }

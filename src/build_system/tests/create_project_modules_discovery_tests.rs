@@ -1,6 +1,27 @@
 use super::*;
-use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::file_value_resolution::retained_reference_error;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidCompileTimePathCode, InvalidCompileTimePathView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::{
+    compact_bag_for_test, compact_resolved_failure_for_test,
+};
+use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceFailure;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+
+fn invalid_compile_time_path_reason(
+    failure: ResolvedFileReferenceFailure,
+) -> Option<InvalidCompileTimePathCode> {
+    let compact = compact_resolved_failure_for_test(failure);
+    compact
+        .views()
+        .next()?
+        .family_view::<InvalidCompileTimePathView>()
+        .map(|facts| facts.reason)
+}
 #[test]
 fn discover_modules_uses_reachable_files_only() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
@@ -490,9 +511,18 @@ fn directory_stage0_retains_missing_resource_diagnostic_without_aborting_discove
         )
         .expect("entry source should remain in the source database")
         .id;
-    let span = diagnostic
-        .primary_span
-        .expect("Stage 0 file-reference diagnostics retain their authored span");
+    let emitted = retained_reference_error(*diagnostic);
+    let ExpressionParseError::Diagnostic(emitted) = emitted else {
+        panic!("a missing resource should emit a user diagnostic");
+    };
+    let compact = compact_bag_for_test(DiagnosticBag::from(emitted), None);
+    let diagnostic_view = compact
+        .first()
+        .expect("the emitted missing-resource diagnostic should compact");
+    let span = match diagnostic_view.primary_site() {
+        SiteRef::Local(span) | SiteRef::Foreign { span, .. } => span,
+        SiteRef::Absent => panic!("the emitted diagnostic should retain its primary span"),
+    };
     assert_eq!(span.source(), source_id);
     let range = span.byte_range(&source_files);
     let source_text = source_files
@@ -608,17 +638,14 @@ fn directory_stage0_classifies_not_a_directory_as_typed_path_failure() {
         .resolved_file_references
         .iter()
         .collect::<Vec<_>>();
-    assert!(matches!(
-        &references[0].outcome,
-        ResolvedFileReferenceOutcome::Diagnostic(diagnostic)
-            if matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidCompileTimePath {
-                    reason: InvalidCompileTimePathReason::TargetNotRegular,
-                    ..
-                }
-            )
-    ));
+    let diagnostic = match &references[0].outcome {
+        ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => diagnostic,
+        outcome => panic!("expected an invalid path diagnostic, got {outcome:?}"),
+    };
+    assert_eq!(
+        invalid_compile_time_path_reason(*diagnostic),
+        Some(InvalidCompileTimePathCode::TargetNotRegular),
+    );
 }
 
 #[test]
@@ -678,10 +705,9 @@ fn directory_stage0_rejects_missing_targets_under_child_module_roots_without_wat
         .resolved_file_references
         .iter()
         .filter_map(|reference| match &reference.outcome {
-            ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => match &diagnostic.payload {
-                DiagnosticPayload::InvalidCompileTimePath { reason, .. } => Some(*reason),
-                _ => None,
-            },
+            ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => {
+                invalid_compile_time_path_reason(*diagnostic)
+            }
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -689,7 +715,7 @@ fn directory_stage0_rejects_missing_targets_under_child_module_roots_without_wat
     assert!(
         reasons
             .iter()
-            .all(|reason| *reason == InvalidCompileTimePathReason::EscapesModuleBoundary)
+            .all(|reason| *reason == InvalidCompileTimePathCode::EscapesModuleBoundary)
     );
     assert!(resource_inputs.records().is_empty());
     assert!(resource_inputs.missing_watch_interests().is_empty());
@@ -767,18 +793,17 @@ fn directory_stage0_rejects_missing_symlink_ancestors_without_watch() {
         .resolved_file_references
         .iter()
         .filter_map(|reference| match &reference.outcome {
-            ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => match &diagnostic.payload {
-                DiagnosticPayload::InvalidCompileTimePath { reason, .. } => Some(*reason),
-                _ => None,
-            },
+            ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => {
+                invalid_compile_time_path_reason(*diagnostic)
+            }
             _ => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(reasons.len(), 6);
     assert!(
         reasons.iter().all(
-            |reason| *reason == InvalidCompileTimePathReason::EscapesSymlink
-                || *reason == InvalidCompileTimePathReason::EscapesModuleBoundary
+            |reason| *reason == InvalidCompileTimePathCode::EscapesSymlink
+                || *reason == InvalidCompileTimePathCode::EscapesModuleBoundary
         ),
         "unexpected symlink-ancestor reasons: {reasons:?}"
     );
@@ -836,32 +861,43 @@ fn multi_module_retained_path_diagnostic_keeps_its_module_string_table() {
         .next()
         .expect("nested module should retain one file reference");
     let diagnostic = match &reference.outcome {
-        ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => diagnostic,
+        ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => *diagnostic,
         outcome => panic!("expected a retained diagnostic, got {outcome:?}"),
     };
-    let DiagnosticPayload::InvalidCompileTimePath {
-        reason: InvalidCompileTimePathReason::CaseMismatch { provided, expected },
-        ..
-    } = &diagnostic.payload
-    else {
-        panic!("expected a retained case-mismatch diagnostic");
-    };
+    let compact = compact_resolved_failure_for_test(diagnostic);
+    let diagnostic_view = compact
+        .views()
+        .next()
+        .expect("the retained diagnostic should have a compact view");
+    let facts = diagnostic_view
+        .family_view::<InvalidCompileTimePathView>()
+        .expect("the retained diagnostic should have typed path facts");
+    assert_eq!(facts.reason, InvalidCompileTimePathCode::CaseMismatch);
     assert_eq!(
-        module.prepared.semantic.string_table.resolve(*provided),
+        module.prepared.semantic.string_table.resolve(
+            facts
+                .provided
+                .expect("case mismatch should retain provided text")
+        ),
         "Assets"
     );
     assert_eq!(
-        module.prepared.semantic.string_table.resolve(*expected),
+        module.prepared.semantic.string_table.resolve(
+            facts
+                .expected
+                .expect("case mismatch should retain expected text")
+        ),
         "assets"
     );
     let path_table = module.prepared.semantic.path_fork.snapshot_table();
-    let rendered = crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_with_context(
-        diagnostic,
-        crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext::new(
-            &module.prepared.semantic.string_table,
-        )
-        .with_path_table(&path_table),
-    );
+    let rendered =
+        crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_view(
+            diagnostic_view,
+            crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext::new(
+                &module.prepared.semantic.string_table,
+            )
+            .with_path_table(&path_table),
+        );
     assert!(rendered.contains("Assets") && rendered.contains("assets"));
 }
 
@@ -1068,19 +1104,15 @@ fn ordinary_synthetic_stage0_rejects_child_and_support_boundaries() {
 
     assert_eq!(collected.input_files.len(), 1);
     assert_eq!(collected.resolved_file_references.len(), 4);
-    assert!(collected.resolved_file_references.iter().all(|reference| {
-        matches!(
-            &reference.outcome,
-            SingleFileReferenceOutcome::Diagnostic(diagnostic)
-                if matches!(
-                    &diagnostic.payload,
-                    DiagnosticPayload::InvalidCompileTimePath {
-                        reason: InvalidCompileTimePathReason::EscapesModuleBoundary,
-                        ..
-                    }
-                )
-        )
-    }));
+    assert!(collected.resolved_file_references.into_iter().all(
+        |reference| match reference.outcome {
+            SingleFileReferenceOutcome::Diagnostic(diagnostic) => {
+                invalid_compile_time_path_reason(diagnostic)
+                    == Some(InvalidCompileTimePathCode::EscapesModuleBoundary)
+            }
+            _ => false,
+        }
+    ));
     assert!(resource_inputs.records().is_empty());
     assert!(resource_inputs.missing_watch_interests().is_empty());
 }

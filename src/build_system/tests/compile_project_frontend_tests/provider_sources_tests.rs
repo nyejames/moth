@@ -51,7 +51,6 @@ impl ExternalImportProvider for DummyJsImportProvider {
                 use_widget_function_id,
             ],
             runtime_asset: None,
-            diagnostics: Vec::new(),
             required_runtime_imports: Vec::new(),
         }))
     }
@@ -324,7 +323,6 @@ impl ExternalImportProvider for DummyJsImportProviderWithLowering {
             runtime_asset: Some(fixture_dummy_js_runtime_asset(
                 request.canonical_source_path.clone(),
             )),
-            diagnostics: Vec::new(),
             required_runtime_imports: Vec::new(),
         }))
     }

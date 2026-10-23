@@ -3,21 +3,42 @@
 use super::{
     HtmlSiteConfig, PageUrlStyle, parse_html_site_config, prefix_origin, strip_origin_prefix,
 };
-use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidConfigReason};
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidConfigCode, InvalidConfigView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::{
+    CompactDiagnosticBagForTest, compact_bag_for_test,
+};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::{Config, ProjectConfigError};
+
 use std::path::PathBuf;
 
-/// Extract the typed `InvalidConfig` payload from a config parse error.
+/// Compact the typed `InvalidConfig` diagnostic from a config parse error.
 ///
-/// WHAT: returns the setting key and reason carried by the rejection diagnostic.
-/// WHY: routing rejection tests assert exact typed key/value facts rather than rendered prose.
-fn invalid_config_payload(error: &ProjectConfigError) -> (&Option<StringId>, &InvalidConfigReason) {
-    let diagnostic = error.diagnostic().expect("config error should be typed");
-    match &diagnostic.payload {
-        DiagnosticPayload::InvalidConfig { key, reason } => (key, reason),
-        _ => panic!("expected InvalidConfig payload"),
+/// WHAT: exposes the stable family view used by routing rejection assertions.
+/// WHY: routing tests assert compact config facts rather than legacy payload structure.
+fn invalid_config_diagnostics(error: ProjectConfigError) -> CompactDiagnosticBagForTest {
+    let diagnostic = error
+        .into_diagnostic()
+        .expect("config error should be typed");
+    compact_bag_for_test(DiagnosticBag::from(diagnostic), None)
+}
+
+fn invalid_config_primary_span(error: ProjectConfigError) -> Option<SourceSpan> {
+    match invalid_config_diagnostics(error)
+        .first()
+        .expect("config error should have a compact diagnostic")
+        .primary_site()
+    {
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent => None,
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(span)
+        | crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+            span,
+            ..
+        } => Some(span),
     }
 }
 
@@ -32,21 +53,22 @@ fn assert_origin_value_rejection(
 ) {
     let error =
         parse_html_site_config(config, string_table).expect_err("invalid origin should fail");
-    let (key, reason) = invalid_config_payload(&error);
+    let compact = invalid_config_diagnostics(error);
+    let diagnostic = compact.first().expect("expected one config diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("config error should retain typed invalid-config facts");
+    assert_eq!(facts.reason, InvalidConfigCode::InvalidProjectSettingValue);
+    let strings = diagnostic.string_ids();
     assert_eq!(
-        string_table.resolve(key.expect("origin key should be present")),
+        string_table.resolve(*strings.last().expect("origin key should be present")),
         "origin",
     );
-    match reason {
-        InvalidConfigReason::InvalidProjectSettingValue { value, .. } => {
-            assert_eq!(
-                string_table.resolve(*value),
-                invalid_value,
-                "origin rejection should report the exact invalid value",
-            );
-        }
-        _ => panic!("expected InvalidProjectSettingValue for invalid origin"),
-    }
+    assert_eq!(
+        string_table.resolve(strings[0]),
+        invalid_value,
+        "origin rejection should report the exact invalid value",
+    );
 }
 
 #[test]
@@ -91,14 +113,20 @@ fn parser_rejects_invalid_origin() {
     config.html_section.origin = Some(String::from(""));
     let empty_error =
         parse_html_site_config(&config, &mut string_table).expect_err("empty origin should fail");
-    let (key, reason) = invalid_config_payload(&empty_error);
+    let compact = invalid_config_diagnostics(empty_error);
+    let diagnostic = compact.first().expect("expected one config diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("config error should retain typed invalid-config facts");
+    assert_eq!(facts.reason, InvalidConfigCode::EmptyProjectSetting);
     assert_eq!(
-        string_table.resolve(key.expect("origin key should be present")),
+        string_table.resolve(
+            *diagnostic
+                .string_ids()
+                .last()
+                .expect("origin key should be present")
+        ),
         "origin",
-    );
-    assert!(
-        matches!(reason, InvalidConfigReason::EmptyProjectSetting),
-        "empty origin should report EmptyProjectSetting",
     );
 
     // Query or fragment characters are rejected as non-path content.
@@ -114,20 +142,27 @@ fn parser_rejects_invalid_page_url_style() {
     let mut string_table = StringTable::new();
     let error =
         parse_html_site_config(&config, &mut string_table).expect_err("invalid value should fail");
-    let (key, reason) = invalid_config_payload(&error);
+    let compact = invalid_config_diagnostics(error);
+    let diagnostic = compact.first().expect("expected one config diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("config error should retain typed invalid-config facts");
+    assert_eq!(facts.reason, InvalidConfigCode::InvalidProjectSettingValue);
+    let strings = diagnostic.string_ids();
     assert_eq!(
-        string_table.resolve(key.expect("page_url_style key should be present")),
+        string_table.resolve(
+            *strings
+                .last()
+                .expect("page_url_style key should be present")
+        ),
         "page_url_style",
     );
-    let InvalidConfigReason::InvalidProjectSettingValue { value, expected } = reason else {
-        panic!("expected InvalidProjectSettingValue for invalid page_url_style");
-    };
     assert_eq!(
-        string_table.resolve(*value),
+        string_table.resolve(strings[0]),
         "slashy",
         "page_url_style rejection should report the exact invalid value",
     );
-    let expected_values = string_table.resolve(*expected);
+    let expected_values = string_table.resolve(strings[1]);
     assert!(expected_values.contains("trailing_slash"));
     assert!(expected_values.contains("no_trailing_slash"));
     assert!(expected_values.contains("ignore"));
@@ -152,8 +187,7 @@ fn parser_uses_precise_span_from_setting_spans() {
     let error =
         parse_html_site_config(&config, &mut string_table).expect_err("invalid origin should fail");
 
-    let diagnostic = error.diagnostic().expect("config error should be typed");
-    assert_eq!(diagnostic.primary_span, Some(precise_span));
+    assert_eq!(invalid_config_primary_span(error), Some(precise_span));
 }
 
 #[test]
@@ -165,8 +199,7 @@ fn parser_uses_no_span_when_setting_has_no_authored_source() {
     let error =
         parse_html_site_config(&config, &mut string_table).expect_err("invalid origin should fail");
 
-    let diagnostic = error.diagnostic().expect("config error should be typed");
-    assert_eq!(diagnostic.primary_span, None);
+    assert_eq!(invalid_config_primary_span(error), None);
 }
 
 #[test]

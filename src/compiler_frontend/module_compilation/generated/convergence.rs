@@ -22,10 +22,14 @@ use crate::compiler_frontend::ast::generic_functions::{
     ModuleMaterialisationPreparedBuilder, StableFunctionTarget,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::invalid_fallible_handling;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::invalid_trait_conformance;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    BuiltinFailureOriginKind, BuiltinFailureWitness, CompilerDiagnostic, DiagnosticBag,
-    InvalidFallibleHandlingReason, PreparedFailure,
+    BuiltinFailureOriginKind, BuiltinFailureWitness, DiagnosticBag, InvalidFallibleHandlingReason,
+    InvalidTraitConformanceReason, PreparedFailure,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::CallTarget;
@@ -1111,7 +1115,6 @@ fn builtin_failure_witness_search<'a>(
     entered: &mut FxHashSet<FunctionId>,
 ) -> Result<BuiltinFailureWitness, CompilerError> {
     let mut witness = BuiltinFailureWitness {
-        codes: Vec::new(),
         call_spans: Vec::new(),
         origin_span: None,
         origin: BuiltinFailureOriginKind::Operation,
@@ -1125,13 +1128,11 @@ fn builtin_failure_witness_search<'a>(
             let target = match &contributor.source {
                 HirBuiltinFailureSource::NumericOperation
                 | HirBuiltinFailureSource::AuthoredCastConversion => {
-                    witness.codes = contributor.codes.clone();
                     witness.origin_span = contributor.span;
                     witness.origin = BuiltinFailureOriginKind::Operation;
                     break;
                 }
                 HirBuiltinFailureSource::CompoundWriteBack { target, .. } => {
-                    witness.codes = contributor.codes.clone();
                     witness.origin_span = contributor.span;
                     witness.origin =
                         BuiltinFailureOriginKind::CompoundWriteBack { target: *target };
@@ -1241,11 +1242,43 @@ pub(crate) fn infer_builtin_failure_summaries(
     }
 }
 
+fn append_builtin_failure_witness_labels(
+    mut draft: DiagnosticDraft,
+    call_spans: &[Option<SourceSpan>],
+    origin_span: Option<SourceSpan>,
+    origin: BuiltinFailureOriginKind,
+) -> DiagnosticDraft {
+    for span in call_spans.iter().flatten() {
+        draft = draft.with_label(Some(*span), Some(LabelDraftMessage::BuiltinFailureCall));
+    }
+    if let Some(span) = origin_span {
+        let message = match origin {
+            BuiltinFailureOriginKind::Operation => LabelDraftMessage::BuiltinFailureOrigin,
+            BuiltinFailureOriginKind::CompoundWriteBack { target } => {
+                LabelDraftMessage::BuiltinWriteBackOrigin {
+                    target_type_id: target,
+                }
+            }
+        };
+        draft = draft.with_label(Some(span), Some(message));
+    }
+    draft
+}
+
+fn builtin_failure_reason_witness(witness: &BuiltinFailureWitness) -> Box<BuiltinFailureWitness> {
+    Box::new(BuiltinFailureWitness {
+        call_spans: Vec::new(),
+        origin_span: None,
+        origin: witness.origin,
+        elided_call_hops: witness.elided_call_hops,
+    })
+}
+
 pub(crate) fn builtin_failure_diagnostic(
     hir: &HirModule,
     report: &BorrowCheckReport,
     function: FunctionId,
-) -> Result<Option<CompilerDiagnostic>, CompilerError> {
+) -> Result<Option<DiagnosticDraft>, CompilerError> {
     let facts = hir.function_failure_facts.get(&function).ok_or_else(|| {
         CompilerError::compiler_error("builtin failure boundary lost its semantic facts")
     })?;
@@ -1262,18 +1295,29 @@ pub(crate) fn builtin_failure_diagnostic(
                 if check.eligibility_only {
                     break;
                 }
-                return Ok(Some(CompilerDiagnostic::invalid_fallible_handling(
-                    InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
-                        error_type_id: check.error_type_id,
-                        typed_producer_span: check.typed_producer_span,
-                        implicit_producer_span: candidate.span,
-                    },
-                    check.catch_span,
-                )));
+                let reason = InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
+                    error_type_id: check.error_type_id,
+                    typed_producer_span: check.typed_producer_span,
+                    implicit_producer_span: candidate.span,
+                };
+                let mut draft = invalid_fallible_handling(reason, check.catch_span);
+                if let Some(span) = check.typed_producer_span {
+                    draft = draft.with_label(
+                        Some(span),
+                        Some(LabelDraftMessage::TypedFailureProducer {
+                            error_type_id: check.error_type_id,
+                        }),
+                    );
+                }
+                if let Some(span) = candidate.span {
+                    draft = draft
+                        .with_label(Some(span), Some(LabelDraftMessage::ImplicitFailureProducer));
+                }
+                return Ok(Some(draft));
             }
         }
         if check.eligibility_only && !eligible {
-            return Ok(Some(CompilerDiagnostic::invalid_fallible_handling(
+            return Ok(Some(invalid_fallible_handling(
                 InvalidFallibleHandlingReason::CatchOnNonFallible,
                 check.catch_span,
             )));
@@ -1288,7 +1332,7 @@ pub(crate) fn builtin_failure_diagnostic(
         if retained_call_summary(hir, report, target)?
             .is_none_or(|summary| summary.escapes_builtin_failure)
         {
-            return Ok(Some(CompilerDiagnostic::invalid_fallible_handling(
+            return Ok(Some(invalid_fallible_handling(
                 InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
                 contributor.span,
             )));
@@ -1301,29 +1345,54 @@ pub(crate) fn builtin_failure_diagnostic(
     // summaries, before private-lane installation can erase an apparently infallible catch.
     if let Some(contract) = &facts.infallible_cast_evidence {
         let witness = builtin_failure_witness(hir, report, function, contributor)?;
-        return Ok(Some(CompilerDiagnostic::infallible_cast_evidence_failure(
-            contract, &witness,
-        )));
+        let draft = invalid_trait_conformance(
+            contract.target_name,
+            Some(contract.trait_name),
+            InvalidTraitConformanceReason::InferredFailureInInfallibleCast {
+                requirement_name: contract.requirement_name,
+            },
+            contract.span,
+        );
+        let draft = append_builtin_failure_witness_labels(
+            draft,
+            &witness.call_spans,
+            witness.origin_span,
+            witness.origin,
+        );
+        return Ok(Some(draft));
     }
+    if matches!(
+        facts.boundary,
+        HirBuiltinFailureBoundary::InferPrivate | HirBuiltinFailureBoundary::BuiltinErrorSlot
+    ) {
+        return Ok(None);
+    }
+    let witness = builtin_failure_witness(hir, report, function, contributor)?;
+    let reason_witness = builtin_failure_reason_witness(&witness);
     let reason = match facts.boundary {
-        HirBuiltinFailureBoundary::InferPrivate | HirBuiltinFailureBoundary::BuiltinErrorSlot => {
-            return Ok(None);
-        }
         HirBuiltinFailureBoundary::CustomErrorSlot(error_type_id) => {
             InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
                 error_type_id,
-                witness: Box::new(builtin_failure_witness(hir, report, function, contributor)?),
+                witness: reason_witness,
             }
         }
         HirBuiltinFailureBoundary::ExportedNoSlot => {
             InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
-                witness: Box::new(builtin_failure_witness(hir, report, function, contributor)?),
+                witness: reason_witness,
             }
         }
+        HirBuiltinFailureBoundary::InferPrivate | HirBuiltinFailureBoundary::BuiltinErrorSlot => {
+            unreachable!("non-reporting builtin failure boundaries returned above")
+        }
     };
-    Ok(Some(CompilerDiagnostic::invalid_fallible_handling(
-        reason, facts.span,
-    )))
+    let draft = invalid_fallible_handling(reason, facts.span);
+    let draft = append_builtin_failure_witness_labels(
+        draft,
+        &witness.call_spans,
+        witness.origin_span,
+        witness.origin,
+    );
+    Ok(Some(draft))
 }
 
 fn validate_builtin_failure_boundaries(

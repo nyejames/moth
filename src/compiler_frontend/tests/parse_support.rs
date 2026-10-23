@@ -14,13 +14,13 @@ use crate::compiler_frontend::ast::{
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayId;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, DiagnosticSeverity, InvalidCompileTimePathReason,
-    PreparedFailure,
+    DiagnosticBag, DiagnosticSeverity, InvalidCompileTimePathReason, PreparedFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SourceTokenOwner;
@@ -34,7 +34,8 @@ use crate::compiler_frontend::module_dependencies::{
 };
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, PreparedFileReferenceTable, ResolvedFileReference,
-    ResolvedFileReferenceOutcome, ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
+    ResolvedFileReferenceFailure, ResolvedFileReferenceOutcome, ResolvedFileReferenceTable,
+    ResolvedFileReferenceTarget,
 };
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
@@ -92,14 +93,14 @@ fn test_file_value_resolution_services(
             }
             PreparedFileReferenceClass::ContentSource
             | PreparedFileReferenceClass::ResourceFile => ResolvedFileReferenceOutcome::Diagnostic(
-                CompilerDiagnostic::invalid_compile_time_path(
-                    path_syntax
+                ResolvedFileReferenceFailure::InvalidCompileTimePath {
+                    path: path_syntax
                         .try_path(reference.path_syntax)
                         .expect("prepared reference should point into its path table")
                         .root,
-                    InvalidCompileTimePathReason::MissingTarget,
-                    Some(reference.span),
-                ),
+                    reason: InvalidCompileTimePathReason::MissingTarget,
+                    span: reference.span,
+                },
             ),
         };
 
@@ -125,11 +126,11 @@ fn test_file_value_resolution_services(
 }
 
 fn capture_diagnostic_failure(
-    diagnostic: CompilerDiagnostic,
+    diagnostic: DiagnosticDraft,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
 ) -> PreparedFailure {
-    capture_diagnostic_bag_failure(diagnostic.into(), string_table, path_fork)
+    capture_diagnostic_bag_failure(DiagnosticBag::from(diagnostic), string_table, path_fork)
 }
 
 fn capture_diagnostic_bag_failure(
@@ -193,7 +194,7 @@ pub(crate) fn parse_single_file_ast_build_result_with_registry(
         Err(TokenizeFailure::Diagnosed(diagnostic)) => {
             let (string_table, _) = source_context.preparation_parts();
             return Err(capture_diagnostic_failure(
-                diagnostic,
+                diagnostic.into(),
                 string_table,
                 &path_fork,
             ));
@@ -223,7 +224,7 @@ pub(crate) fn parse_single_file_ast_build_result_with_registry(
             crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareError {
                 diagnostic, ..
             },
-        )) => return Err(capture_diagnostic_failure(diagnostic, string_table, &path_fork)),
+        )) => return Err(capture_diagnostic_failure(diagnostic.into(), string_table, &path_fork)),
         Err(crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Infrastructure(
             error,
         )) => panic!("single-file test preparation hit infrastructure failure: {error:?}"),
@@ -425,7 +426,7 @@ pub(crate) fn tokenize_source_for_test(
     module_path: &std::path::Path,
     tokenizer_entry_mode: TokenizerEntryMode,
     span_builder: &mut ExtendedSpanBuilder,
-) -> Result<(SourceTokenOwner, Arc<PathSyntaxTable>), CompilerDiagnostic> {
+) -> Result<(SourceTokenOwner, Arc<PathSyntaxTable>), DiagnosticDraft> {
     let (owner, path_syntax) = CompilerFrontend::tokenize_source(
         frontend.source_files.as_ref(),
         frontend.style_directives,
@@ -441,7 +442,7 @@ pub(crate) fn tokenize_source_for_test(
             crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareError {
                 diagnostic, ..
             },
-        ) => diagnostic,
+        ) => DiagnosticDraft::from(diagnostic),
         crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Infrastructure(
             error,
         ) => panic!("tokenization test hit infrastructure failure: {error:?}"),

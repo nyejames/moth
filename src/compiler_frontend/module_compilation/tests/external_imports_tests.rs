@@ -48,7 +48,6 @@ fn provider_record(package_id: ExternalPackageId) -> ResolvedExternalImport {
         exported_types: Vec::new(),
         exported_free_functions: Vec::new(),
         runtime_asset: Some(runtime_asset()),
-        diagnostics: Vec::new(),
         required_runtime_imports: vec![
             runtime_import("@moth/runtime", &["mothOk", "mothErr"]),
             runtime_import("@test/empty", &[]),

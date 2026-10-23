@@ -19,11 +19,12 @@ use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
 #[cfg(feature = "boracle")]
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{imports, token_lexical};
 #[cfg(feature = "boracle")]
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, PreparedFailure, SourceSpanCapacityResource,
+    DiagnosticBag, PreparedFailure, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
@@ -238,8 +239,11 @@ fn compile_single_file_frontend_with_target(
                     // PathId to render.
                     return Err(PreparedFailure::Diagnosed(
                         PreparedDiagnosticBatch::capture_from_bag(
-                            DiagnosticBag::from(CompilerDiagnostic::source_table_capacity(
+                            DiagnosticBag::from(token_lexical::source_span_capacity(
+                                0,
+                                u32::MAX,
                                 SourceSpanCapacityResource::LogicalPath,
+                                None,
                             )),
                             std::mem::take(string_table),
                             None,
@@ -256,8 +260,7 @@ fn compile_single_file_frontend_with_target(
                 }
             };
         let extension = string_table.intern(extension_text);
-        let diagnostic =
-            CompilerDiagnostic::invalid_source_file_entry(interned_path, extension, None);
+        let diagnostic = imports::invalid_source_file_entry(interned_path, extension, None);
 
         // Move the local string table and path identity into the diagnosed lane. Discovery aborts
         // before a source database exists, so the path snapshot must travel with the diagnostic.

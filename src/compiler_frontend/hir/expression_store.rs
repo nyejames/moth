@@ -6,7 +6,9 @@
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, HirCapacityResource};
+use crate::compiler_frontend::compiler_messages::HirCapacityResource;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::compiler_capacity_exceeded;
 use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirMapEntry, HirVariantField,
 };
@@ -16,15 +18,15 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::source::SourceSpan;
 
-/// A source-caused HIR capacity diagnostic or an infrastructure/invariant failure.
+/// A source-caused HIR capacity draft or an infrastructure/invariant failure.
 #[derive(Debug)]
 pub(crate) enum HirConstructionFailure {
-    Diagnosed(CompilerDiagnostic),
+    Diagnosed(DiagnosticDraft),
     Infrastructure(CompilerError),
 }
 
-impl From<CompilerDiagnostic> for HirConstructionFailure {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
+impl From<DiagnosticDraft> for HirConstructionFailure {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
         Self::Diagnosed(diagnostic)
     }
 }
@@ -993,7 +995,7 @@ impl HirExpressionStore {
         resource: HirCapacityResource,
         span: Option<SourceSpan>,
     ) -> HirConstructionFailure {
-        CompilerDiagnostic::compiler_capacity_exceeded(resource, span).into()
+        compiler_capacity_exceeded(resource, span).into()
     }
 
     fn infrastructure_failure(message: String, span: Option<SourceSpan>) -> HirConstructionFailure {

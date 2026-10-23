@@ -5,10 +5,11 @@ use super::{
 };
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, InvalidConfigReason,
+    DiagnosticBag, DiagnosticDraft, InvalidConfigReason,
 };
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceSpan,
@@ -18,7 +19,7 @@ use std::fs;
 use std::sync::Arc;
 
 fn boundary_failure(
-    diagnostic: CompilerDiagnostic,
+    diagnostic: DiagnosticDraft,
     string_table: StringTable,
     source_database: Option<Arc<SourceDatabase>>,
 ) -> BoundaryFailure {
@@ -55,7 +56,7 @@ fn rendered_runtime_page_includes_version_error_text_and_dark_mode() {
 
 #[test]
 fn formatted_compiler_messages_include_typed_diagnostics() {
-    let diagnostic = CompilerDiagnostic::invalid_config_reason(
+    let diagnostic = project_config::invalid_config_reason(
         None,
         InvalidConfigReason::UnsupportedScalarValue,
         None,
@@ -98,7 +99,7 @@ fn compiler_error_page_links_to_project_relative_resolved_source_path() {
     let mut span_builder = ExtendedSpanBuilder::new();
     let local_span = LocalSpan::exact(4, 3, &mut span_builder).expect("span should fit inline");
     let source_span = SourceSpan::new(source_id, local_span);
-    let diagnostic = CompilerDiagnostic::invalid_config_reason(
+    let diagnostic = project_config::invalid_config_reason(
         None,
         InvalidConfigReason::UnsupportedScalarValue,
         Some(source_span),

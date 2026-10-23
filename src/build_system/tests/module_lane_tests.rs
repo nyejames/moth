@@ -20,11 +20,12 @@ use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationConte
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::UnknownValueNameView;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, DiagnosticSeverity,
+    DiagnosticBag, DiagnosticDraft, DiagnosticSeverity,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids::NONE;
@@ -913,7 +914,7 @@ fn test_prepared_diagnostics(
     string_table: &mut StringTable,
 ) -> PreparedDiagnosticBatch {
     let name = string_table.intern("missing_name");
-    let diagnostic = CompilerDiagnostic::unknown_value_name(name, None);
+    let diagnostic = names_declarations::unknown_value_name(name, None);
     PreparedDiagnosticBatch::capture_from_bag(
         DiagnosticBag::from(diagnostic),
         string_table.clone(),
@@ -1692,7 +1693,7 @@ fn frontend_with_sidecar_warnings(string_table: &mut StringTable) -> ProjectFron
 }
 
 fn prepared_success_warning(
-    warning: CompilerDiagnostic,
+    warning: DiagnosticDraft,
     string_table: &StringTable,
     environment: &TypeEnvironment,
 ) -> PreparedDiagnosticBatch {
@@ -1705,14 +1706,9 @@ fn prepared_success_warning(
     )
 }
 
-fn test_warning_diagnostic(
-    module_path: &str,
-    string_table: &mut StringTable,
-) -> CompilerDiagnostic {
+fn test_warning_diagnostic(module_path: &str, string_table: &mut StringTable) -> DiagnosticDraft {
     let name = string_table.intern(module_path);
-    let mut diagnostic = CompilerDiagnostic::unknown_value_name(name, None);
-    diagnostic.severity = DiagnosticSeverity::Warning;
-    diagnostic
+    names_declarations::unknown_value_name(name, None).with_severity(DiagnosticSeverity::Warning)
 }
 
 fn generated_test_identity(name: &str) -> GeneratedFunctionIdentity {

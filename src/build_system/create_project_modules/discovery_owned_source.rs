@@ -119,7 +119,7 @@ fn prepare_owned_source_text(
             )
             .map_err(|failure| match failure {
                 TokenizeFailure::Diagnosed(diagnostic) => {
-                    SourceDiscoveryError::Diagnostic(diagnostic)
+                    SourceDiscoveryError::Diagnostic(diagnostic.into())
                 }
                 TokenizeFailure::Infrastructure(error) => {
                     SourceDiscoveryError::Infrastructure(error)

@@ -40,7 +40,7 @@ use crate::projects::html_project::external_js::runtime_module_registry::Runtime
 /// Parses a single JS source file into a `ParsedJsModule` using an explicit registry.
 ///
 /// WHAT: extracts annotations and scans JS exports/imports before binding the parser-owned facts.
-/// This function does not interact with `ExternalPackageRegistry` or `CompilerDiagnostic`.
+/// This function does not interact with `ExternalPackageRegistry` or construct diagnostic drafts.
 /// It returns parser-local data that package registration and provider code convert later.
 pub(crate) fn parse_js_module(source: &str, registry: &RuntimeModuleRegistry) -> ParsedJsModule {
     let comment_result = extract_annotations(source, registry);

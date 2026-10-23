@@ -85,7 +85,8 @@ pub(super) fn finalize_failed_discovery(
                     );
                 }
                 warnings.extend(file_warnings);
-                preparation_failure = Some(SourceDiscoveryError::Diagnostic(error.diagnostic));
+                preparation_failure =
+                    Some(SourceDiscoveryError::Diagnostic(error.diagnostic.into()));
             }
 
             Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
@@ -112,7 +113,7 @@ pub(super) fn finalize_failed_discovery(
         SourceDiscoveryError::Diagnostic(diagnostic) => {
             let table = std::mem::take(string_table);
             let mut diagnostics = warnings;
-            diagnostics.push(diagnostic.into());
+            diagnostics.push(diagnostic);
             let batch = match PreparedDiagnosticBatch::capture_with_required_paths(
                 DiagnosticBag::from_diagnostics(diagnostics),
                 table,

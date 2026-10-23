@@ -19,12 +19,13 @@ use crate::compiler_frontend::build_config::{
 };
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, DiagnosticSeverity, NamingConvention, PreparedFailure,
+    DiagnosticBag, DiagnosticDraft, DiagnosticSeverity, NamingConvention, PreparedFailure,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -39,11 +40,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-fn naming_convention_warning(name: StringId) -> CompilerDiagnostic {
-    CompilerDiagnostic::identifier_naming_convention(name, NamingConvention::CamelCase, None)
+fn naming_convention_warning(name: StringId) -> DiagnosticDraft {
+    names_declarations::identifier_naming_convention(name, NamingConvention::CamelCase, None)
 }
 fn warning_accumulator(
-    warnings: Vec<CompilerDiagnostic>,
+    warnings: Vec<DiagnosticDraft>,
     string_table: StringTable,
 ) -> BoundaryAccumulator {
     let mut accumulator = BoundaryAccumulator::with_root_string_table(&string_table);

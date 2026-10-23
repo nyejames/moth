@@ -291,8 +291,10 @@ pub(super) fn from_legacy(
             DiagnosticKind::Import(ImportDiagnosticKind::DuplicateMothTemplateInputPath),
             DiagnosticPayload::DuplicateMothTemplateInputPath { path },
         ) => {
-            // The shared adapter preserves existing labels after mapping the payload facts.
-            Ok(duplicate_moth_template_input_path(path, None, span))
+            // The shared adapter appends the legacy labels, which carry the message-less label.
+            Ok(duplicate_moth_template_input_path_without_labels(
+                path, span,
+            ))
         }
         (
             DiagnosticKind::Import(ImportDiagnosticKind::MothTemplateInputsShareNoCommonAncestor),
@@ -710,23 +712,38 @@ diagnostic_family! {
 }
 
 /// Stores a duplicate Moth template input path and its message-less label.
+// The compiler-source-token-and-diagnostic-data-layout plan retains the
+// direct-template source boundary. Its current consumer is the test-gated
+// Moth-template input service.
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "P4.6z: plan-retained direct-template boundary; consumer is the test-gated Moth-template input service"
+    )
+)]
 pub(crate) fn duplicate_moth_template_input_path(
     path: PathId,
     first_span: Option<SourceSpan>,
     duplicate_span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
-    let draft = DiagnosticDraft::with_facts(
+    duplicate_moth_template_input_path_without_labels(path, duplicate_span)
+        .with_label(first_span, None)
+}
+
+/// Stores the duplicate path fact alone; the legacy adapter appends the labels it was given.
+fn duplicate_moth_template_input_path_without_labels(
+    path: PathId,
+    duplicate_span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    DiagnosticDraft::with_facts(
         &DUPLICATE_MOTH_TEMPLATE_INPUT_PATH,
         duplicate_span,
         |cursor| {
             cursor.push::<PathFact>(&path)?;
             Ok(())
         },
-    );
-    match first_span {
-        Some(first_span) => draft.with_label(Some(first_span), None),
-        None => draft,
-    }
+    )
 }
 
 diagnostic_family! {

@@ -15,10 +15,13 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    project_config, token_lexical,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, DiagnosticLabel, DiagnosticLabelMessage,
-    InvalidConfigReason, PreparedFailure,
+    DiagnosticBag, InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
     SourceBuildConfigContract, build_input_type_name,
@@ -810,7 +813,7 @@ pub(super) fn build_config_resolution_failure(
         let diagnostic = match value_location {
             Some(BuildConfigValueLocation::Command(location)) => {
                 let key = string_table.intern(contract.name().as_str());
-                CompilerDiagnostic::invalid_config_reason(
+                project_config::invalid_config_reason(
                     Some(key),
                     InvalidConfigReason::ConfigInputOutOfRange {
                         literal,
@@ -821,9 +824,9 @@ pub(super) fn build_config_resolution_failure(
                 )
             }
             Some(BuildConfigValueLocation::Source(span)) => {
-                CompilerDiagnostic::invalid_number_literal(literal, reason, Some(span))
+                token_lexical::invalid_number_literal(literal, reason, Some(span))
             }
-            None => CompilerDiagnostic::invalid_number_literal(literal, reason, contract.span()),
+            None => token_lexical::invalid_number_literal(literal, reason, contract.span()),
         };
         return PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
             DiagnosticBag::from(diagnostic),
@@ -842,7 +845,7 @@ pub(super) fn build_config_resolution_failure(
         let first_description = string_table.get_or_intern(describe_build_config_contract(first));
         let conflicting_description =
             string_table.get_or_intern(describe_build_config_contract(conflicting));
-        CompilerDiagnostic::invalid_config_reason(
+        project_config::invalid_config_reason(
             Some(key),
             InvalidConfigReason::ConfigContractConflict {
                 first: first_description,
@@ -850,10 +853,7 @@ pub(super) fn build_config_resolution_failure(
             },
             conflicting.span(),
         )
-        .with_labels(vec![DiagnosticLabel::secondary(
-            first.span(),
-            Some(DiagnosticLabelMessage::PreviousDeclaration),
-        )])
+        .with_label(first.span(), Some(LabelDraftMessage::PreviousDeclaration))
     } else if let Some(contract) = error.contract_fact() {
         let provided = match &error {
             BuildConfigResolutionError::DefaultTypeMismatch { provided, .. }
@@ -865,17 +865,7 @@ pub(super) fn build_config_resolution_failure(
             let expected_name =
                 string_table.get_or_intern(build_input_type_name(contract.value_type()));
             let primary_span = contract.span();
-            let mut labels = Vec::new();
-            if let Some(BuildConfigValueLocation::Source(span)) = error.value_location() {
-                let mut related = DiagnosticLabel::secondary(Some(*span), None);
-                // The default value lives at the contract's own authored span, so only that
-                // alias may reuse the contract span. Command values stay spanless.
-                if Some(*span) == primary_span {
-                    related.span = primary_span;
-                }
-                labels.push(related);
-            }
-            CompilerDiagnostic::invalid_config_reason(
+            let mut diagnostic = project_config::invalid_config_reason(
                 Some(key),
                 InvalidConfigReason::ConfigInputTypeMismatch {
                     provided: provided_name,
@@ -883,8 +873,18 @@ pub(super) fn build_config_resolution_failure(
                     provided_argument_index,
                 },
                 primary_span,
-            )
-            .with_labels(labels)
+            );
+            if let Some(BuildConfigValueLocation::Source(span)) = error.value_location() {
+                // The default value lives at the contract's own authored span, so only that
+                // alias may reuse the contract span. Command values stay spanless.
+                let label_span = if Some(*span) == primary_span {
+                    primary_span
+                } else {
+                    Some(*span)
+                };
+                diagnostic = diagnostic.with_label(label_span, None);
+            }
+            diagnostic
         } else {
             let primary_span = if matches!(
                 &error,
@@ -894,14 +894,14 @@ pub(super) fn build_config_resolution_failure(
             } else {
                 None
             };
-            CompilerDiagnostic::invalid_config_reason(
+            project_config::invalid_config_reason(
                 Some(key),
                 InvalidConfigReason::MissingConfigInput,
                 primary_span,
             )
         }
     } else {
-        CompilerDiagnostic::invalid_config_reason(
+        project_config::invalid_config_reason(
             Some(key),
             InvalidConfigReason::UnknownBuildConfigInput {
                 key,

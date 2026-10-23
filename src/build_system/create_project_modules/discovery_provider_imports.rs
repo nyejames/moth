@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{imports, project_config};
 use crate::compiler_frontend::paths::path_normalization::join_and_normalize_path;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 // -------------------------
@@ -259,7 +260,7 @@ fn check_provider_dependency_module_boundary(
 
     if consumer_container != target_container {
         return Err(SourceDiscoveryError::from(
-            CompilerDiagnostic::cross_module_import_not_exported(dependency_path, source_span),
+            imports::cross_module_import_not_exported(dependency_path, source_span),
         ));
     }
 
@@ -301,9 +302,9 @@ pub(super) fn unsupported_builder_package_error(
     package_path: &str,
     source_span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     let package_path_id = string_table.intern(package_path);
-    CompilerDiagnostic::unsupported_builder_package(package_path_id, source_span)
+    project_config::unsupported_builder_package(package_path_id, source_span)
 }
 
 pub(super) fn unsupported_external_extension_error(
@@ -311,7 +312,7 @@ pub(super) fn unsupported_external_extension_error(
     extension: &str,
     source_span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     let extension_id = string_table.intern(extension);
-    CompilerDiagnostic::unsupported_external_extension(import_path, extension_id, source_span)
+    imports::unsupported_external_extension(import_path, extension_id, source_span)
 }

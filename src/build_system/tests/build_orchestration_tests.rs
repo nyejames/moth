@@ -19,16 +19,17 @@ use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
-use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
     InvalidConfigCode, InvalidConfigView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, DiagnosticCategory, DiagnosticLabel, DiagnosticLabelMessage,
-    DiagnosticSeverity, PreparedFailure,
+    DiagnosticBag, DiagnosticCategory, DiagnosticSeverity, PreparedFailure,
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
@@ -104,7 +105,7 @@ fn assert_invalid_project_setting(
 }
 
 fn prepared_warning_accumulator(
-    diagnostic: CompilerDiagnostic,
+    diagnostic: DiagnosticDraft,
     root_string_table: crate::compiler_frontend::symbols::string_interning::StringTable,
     source_database: Arc<SourceDatabase>,
     domain: StablePackageIdentity,
@@ -258,7 +259,7 @@ fn build_result_warning_handoff_resolves_generated_donor_source_context() {
     let mut span_builder = ExtendedSpanBuilder::new();
     let local_span =
         LocalSpan::exact(0, 1, &mut span_builder).expect("warning span should fit inline");
-    let warning = CompilerDiagnostic::unreachable_match_arm(Some(SourceSpan::new(
+    let warning = choices_control_flow::unreachable_match_arm(Some(SourceSpan::new(
         package_source_id,
         local_span,
     )))
@@ -375,15 +376,15 @@ fn build_result_warning_handoff_keeps_related_package_label_out_of_default_conte
     let local_span =
         LocalSpan::exact(0, 1, &mut span_builder).expect("diagnostic span should fit inline");
     let package_handle = FrozenIdentityHandle::for_domain(package_identity.clone());
-    let diagnostic = CompilerDiagnostic::unreachable_match_arm(Some(SourceSpan::new(
+    let diagnostic = choices_control_flow::unreachable_match_arm(Some(SourceSpan::new(
         project_source_id,
         local_span,
     )))
-    .with_labels(vec![DiagnosticLabel::secondary_with_frozen_identity(
+    .with_label(
         Some(SourceSpan::new(package_source_id, local_span)),
-        Some(DiagnosticLabelMessage::GenericInstantiationBodySite),
-        package_handle,
-    )]);
+        Some(LabelDraftMessage::GenericInstantiationBodySite),
+    )
+    .with_label_frozen_identity_handle(0, package_handle);
 
     let mut result = BuildResult {
         project: Project {

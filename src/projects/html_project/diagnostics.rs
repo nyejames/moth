@@ -4,10 +4,11 @@
 //! diagnostics.
 //! WHY: HTML builder mistakes are user-facing project feedback, not infrastructure failures.
 
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, DiagnosticLabel, DiagnosticLabelMessage,
-    InvalidConfigReason, PreparedFailure,
+    DiagnosticBag, DiagnosticDraft, InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
@@ -21,7 +22,7 @@ use std::sync::Arc;
 pub(crate) fn missing_homepage_diagnostic(
     entry_root: &Path,
     string_table: &mut StringTable,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     html_config_diagnostic(
         |string_table| InvalidConfigReason::MissingHtmlHomepage {
             entry_root: path_id(entry_root, string_table),
@@ -35,7 +36,7 @@ pub(crate) fn duplicate_html_output_path_diagnostic(
     existing_entry_point: &Path,
     output_path: &Path,
     string_table: &mut StringTable,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     html_config_diagnostic(
         |string_table| InvalidConfigReason::DuplicateHtmlOutputPath {
             output_path: path_id(output_path, string_table),
@@ -57,13 +58,13 @@ pub(crate) fn resource_output_path_collision_diagnostic(
     conflicting_origin: &str,
     conflicting_span: Option<ResourceDiagnosticSite>,
     string_table: &mut StringTable,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     let reason = InvalidConfigReason::ResourceOutputPathCollision {
         output_path: path_id(output_path, string_table),
         existing_origin: string_table.intern(existing_origin),
         conflicting_origin: string_table.intern(conflicting_origin),
     };
-    let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
+    let mut diagnostic = project_config::invalid_config_reason(
         None,
         reason,
         conflicting_span.as_ref().map(|site| site.span),
@@ -76,21 +77,16 @@ pub(crate) fn resource_output_path_collision_diagnostic(
             .with_primary_frozen_identity_handle(FrozenIdentityHandle::for_domain(domain));
     }
 
-    let existing_label = match existing_span {
-        Some(site) => match site.source_domain {
-            Some(domain) => DiagnosticLabel::secondary_with_frozen_identity(
-                Some(site.span),
-                Some(DiagnosticLabelMessage::PreviousDeclaration),
-                FrozenIdentityHandle::for_domain(domain),
-            ),
-            None => DiagnosticLabel::secondary(
-                Some(site.span),
-                Some(DiagnosticLabelMessage::PreviousDeclaration),
-            ),
-        },
-        None => DiagnosticLabel::secondary(None, Some(DiagnosticLabelMessage::PreviousDeclaration)),
-    };
-    diagnostic.with_labels(vec![existing_label])
+    let existing_site = existing_span.as_ref();
+    let mut diagnostic = diagnostic.with_label(
+        existing_site.map(|site| site.span),
+        Some(LabelDraftMessage::PreviousDeclaration),
+    );
+    if let Some(domain) = existing_site.and_then(|site| site.source_domain.clone()) {
+        diagnostic = diagnostic
+            .with_label_frozen_identity_handle(0, FrozenIdentityHandle::for_domain(domain));
+    }
+    diagnostic
 }
 
 /// Build a typed diagnostic for a resource claiming a builder-owned artefact path.
@@ -100,34 +96,30 @@ pub(crate) fn resource_output_path_reserved_diagnostic(
     artefact_kind: &str,
     span: Option<ResourceDiagnosticSite>,
     string_table: &mut StringTable,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     let reason = InvalidConfigReason::ResourceOutputPathReserved {
         output_path: path_id(output_path, string_table),
         origin: string_table.intern(origin),
         artefact_kind: string_table.intern(artefact_kind),
     };
-    let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
-        None,
-        reason,
-        span.as_ref().map(|site| site.span),
-    );
+    let mut diagnostic =
+        project_config::invalid_config_reason(None, reason, span.as_ref().map(|site| site.span));
     if let Some(domain) = span.as_ref().and_then(|site| site.source_domain.clone()) {
         diagnostic = diagnostic
             .with_primary_frozen_identity_handle(FrozenIdentityHandle::for_domain(domain));
     }
-
     diagnostic
 }
 
 fn html_config_diagnostic(
     reason: impl FnOnce(&mut StringTable) -> InvalidConfigReason,
     string_table: &mut StringTable,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_config_reason(None, reason(string_table), None)
+) -> DiagnosticDraft {
+    project_config::invalid_config_reason(None, reason(string_table), None)
 }
 
 pub(crate) fn capture_html_diagnostic(
-    diagnostic: CompilerDiagnostic,
+    diagnostic: DiagnosticDraft,
     root_string_table: &StringTable,
     environment: Option<&TypeEnvironment>,
     path_table: impl FnOnce() -> Option<Arc<PathTable>>,

@@ -12,7 +12,7 @@
 //! - HIR core data structures use `TypeId` for semantic type identity. They do not carry
 //!   parse-era type syntax values as executable semantic state.
 //! - HIR validation uses `CompilerError` with `ErrorType::HirTransformation` for invariant
-//!   failures only. It must not construct `CompilerDiagnostic`.
+//!   failures only; source-facing diagnostics must be emitted before validation.
 //! - HIR lowering uses `CompilerError` with `ErrorType::HirTransformation` for transformation
 //!   invariants, and a typed source diagnostic when an authored module exceeds a compact HIR
 //!   expression or edge capacity. Function-body terminality is validated by AST; fallthrough

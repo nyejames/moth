@@ -10,6 +10,7 @@ use crate::compiler_frontend::compiler_errors::{
     BoundaryFailure, CompilerError, CompilerErrorMetadataKey, ErrorType, InfrastructureErrors,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
@@ -136,7 +137,7 @@ fn boundary_failure(failure: PreparedFailure) -> BoundaryFailure {
 }
 
 fn diagnostic_failure(
-    diagnostics: Vec<crate::compiler_frontend::compiler_messages::CompilerDiagnostic>,
+    diagnostics: Vec<DiagnosticDraft>,
     table: crate::compiler_frontend::symbols::string_interning::StringTable,
 ) -> BoundaryFailure {
     boundary_failure(PreparedFailure::Diagnosed(
@@ -153,12 +154,12 @@ fn diagnostic_failure(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
     use crate::compiler_frontend::symbols::string_interning::StringTable;
     use crate::compiler_tests::test_support::assert_panics_with;
 
     fn failure_with_diagnostics(
-        diagnostics: Vec<CompilerDiagnostic>,
+        diagnostics: Vec<DiagnosticDraft>,
         table: StringTable,
     ) -> BoundaryFailure {
         diagnostic_failure(diagnostics, table)
@@ -171,7 +172,7 @@ mod tests {
     #[test]
     fn assert_exact_diagnostic_codes_matches_single_error() {
         let mut table = StringTable::new();
-        let diagnostic = CompilerDiagnostic::unknown_value_name(table.intern("missing"), None);
+        let diagnostic = names_declarations::unknown_value_name(table.intern("missing"), None);
         let failure = failure_with_diagnostics(vec![diagnostic], table);
         assert_exact_diagnostic_codes(&failure, &["MOTH-RULE-0034"]);
     }
@@ -179,7 +180,7 @@ mod tests {
     #[test]
     fn assert_exact_diagnostic_codes_rejects_wrong_count() {
         let mut table = StringTable::new();
-        let diagnostic = CompilerDiagnostic::unknown_value_name(table.intern("missing"), None);
+        let diagnostic = names_declarations::unknown_value_name(table.intern("missing"), None);
         let failure = failure_with_diagnostics(vec![diagnostic], table);
         assert_panics_with("diagnostic codes must match exactly", || {
             assert_exact_diagnostic_codes(&failure, &["MOTH-RULE-0034", "MOTH-RULE-0034"]);
@@ -217,7 +218,7 @@ mod tests {
     #[test]
     fn assert_exact_infrastructure_error_rejects_additional_rule_error() {
         let mut table = StringTable::new();
-        let diagnostic = CompilerDiagnostic::unknown_value_name(table.intern("missing"), None);
+        let diagnostic = names_declarations::unknown_value_name(table.intern("missing"), None);
         let batch = PreparedDiagnosticBatch::capture_from_bag(
             DiagnosticBag::from(diagnostic),
             table,

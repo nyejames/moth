@@ -6,7 +6,8 @@
 //! WHY: backends should fail early with a structured user-facing diagnostic rather than
 //! panicking or emitting a vague lowering error deep in backend code.
 
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets;
 use crate::compiler_frontend::external_packages::{ExternalFunctionId, ExternalPackageRegistry};
 use crate::compiler_frontend::hir::reachability::{HirReachability, ReachableExternalCall};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -40,7 +41,7 @@ pub fn validate_hir_external_package_support(
     registry: &ExternalPackageRegistry,
     target: BackendTarget,
     string_table: &mut StringTable,
-) -> Result<(), CompilerDiagnostic> {
+) -> Result<(), DiagnosticDraft> {
     for call in &reachability.reachable_external_calls {
         if !has_backend_lowering(registry, call.function_id, &target) {
             let diagnostic =
@@ -81,7 +82,7 @@ fn unsupported_external_function_diagnostic(
     call: &ReachableExternalCall,
     target: &BackendTarget,
     string_table: &mut StringTable,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     let function_name = registry
         .resolve_function_symbol_path(call.function_id)
         .map(|path| path.display_text())
@@ -94,7 +95,7 @@ fn unsupported_external_function_diagnostic(
 
     let package_path = registry.resolve_function_package(call.function_id);
 
-    CompilerDiagnostic::unsupported_external_function(
+    types_borrows_targets::unsupported_external_function(
         string_table.intern(&function_name),
         package_path.map(|path| string_table.intern(path)),
         string_table.intern(target.as_str()),

@@ -22,7 +22,7 @@ use crate::builder_surface::config_schema::{
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PreparedFailure};
+use crate::compiler_frontend::compiler_messages::{DiagnosticDraft, PreparedFailure};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOwnerId;
@@ -80,7 +80,7 @@ fn generated_source_identity_handle(
 }
 
 fn attach_module_source_identity(
-    diagnostic: &mut CompilerDiagnostic,
+    diagnostic: &mut DiagnosticDraft,
     hir: &HirModule,
     source_domain: Option<&StablePackageIdentity>,
 ) {
@@ -90,7 +90,7 @@ fn attach_module_source_identity(
 }
 
 fn capture_module_diagnostic(
-    mut diagnostic: CompilerDiagnostic,
+    mut diagnostic: DiagnosticDraft,
     hir: &HirModule,
     source_domain: Option<&StablePackageIdentity>,
     type_environment: &TypeEnvironment,

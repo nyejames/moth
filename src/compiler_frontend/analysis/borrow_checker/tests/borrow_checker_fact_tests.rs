@@ -780,7 +780,7 @@ fn mutable_alias_final_read_in_same_statement_blocks_source_read() {
         );
         let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
             .expect_err("exclusive holder is still active during its final-read statement");
-        assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
+        assert_borrow_error_kind(error, BorrowDiagnosticKind::SharedMutableConflict);
     }
 }
 
@@ -804,7 +804,7 @@ fn mutable_alias_reachable_write_keeps_loan_active() {
         );
         let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
             .expect_err("a reachable write through the holder keeps its exclusive loan active");
-        assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
+        assert_borrow_error_kind(error, BorrowDiagnosticKind::SharedMutableConflict);
     }
 }
 
@@ -1294,10 +1294,10 @@ fn check_unequal_path_alias_activity(
     if later_branch_use {
         let error = report.expect_err("one later-use branch must keep the alias active");
         if mutable_alias {
-            assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
+            assert_borrow_error_kind(error, BorrowDiagnosticKind::SharedMutableConflict);
         } else {
             assert_invalid_mutable_access_reason(
-                &error,
+                error,
                 InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
             );
         }
@@ -3388,7 +3388,7 @@ fn catch_handler_cannot_load_never_initialised_success_call_result() {
     );
     let error = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
         .expect_err("the handler must not read the skipped outer call's result");
-    assert_borrow_error_kind(&error, BorrowDiagnosticKind::UseOfUninitializedLocal);
+    assert_borrow_error_kind(error, BorrowDiagnosticKind::UseOfUninitializedLocal);
 }
 
 #[test]

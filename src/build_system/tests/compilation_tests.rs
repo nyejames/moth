@@ -792,9 +792,7 @@ fn source_finish_failures_preserve_every_cause_and_original_provenance() {
         CompilerErrorMetadataKey, ErrorType, InfrastructureErrors,
     };
     use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
-    use crate::compiler_frontend::compiler_messages::{
-        CompilerDiagnostic, DiagnosticBag, PreparedFailure,
-    };
+    use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PreparedFailure};
     use crate::compiler_frontend::source::{LocalSpan, SourceDatabase, SourceId, SourceSpan};
 
     let root_string_table = StringTable::new();
@@ -813,7 +811,9 @@ fn source_finish_failures_preserve_every_cause_and_original_provenance() {
         let failure = if mixed {
             PreparedFailure::Mixed {
                 batch: PreparedDiagnosticBatch::capture_from_root_string_table(
-                    DiagnosticBag::from(CompilerDiagnostic::unexpected_trailing_comma(None)),
+                    DiagnosticBag::from(
+                        crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_trailing_comma(None),
+                    ),
                     &root_string_table,
                     None,
                     || None,
@@ -903,10 +903,8 @@ fn check_only_success_result_with_warnings() -> (
     crate::compiler_frontend::module_compilation::ModuleSemanticResult,
     String,
 ) {
-    use crate::compiler_frontend::compiler_messages::{
-        CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
-        ImportDiagnosticKind,
-    };
+    use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
 
     let origin = StableModuleOriginIdentity::from_portable_path(
         StablePackageIdentity::project_local("combined-publication-tests"),
@@ -930,12 +928,10 @@ fn check_only_success_result_with_warnings() -> (
         .try_intern_portable_path("sidecar/lib-target.moth", &mut module_string_table)
         .expect("the direct warning path should intern");
     let mut module_warnings = DiagnosticBag::new();
-    module_warnings.push(CompilerDiagnostic::with_severity(
-        DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget),
-        DiagnosticSeverity::Warning,
-        None,
-        DiagnosticPayload::MissingImportTarget { path: warning_path },
-    ));
+    module_warnings.push(
+        imports::missing_import_target(warning_path, None)
+            .with_severity(DiagnosticSeverity::Warning),
+    );
     let sidecar_path = module_path_fork
         .try_intern_portable_path("sidecar/generated-target.moth", &mut module_string_table)
         .expect("the sidecar warning path should intern");
@@ -965,12 +961,10 @@ fn check_only_success_result_with_warnings() -> (
         },
     };
     let mut sidecar_warnings = DiagnosticBag::new();
-    sidecar_warnings.push(CompilerDiagnostic::with_severity(
-        DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget),
-        DiagnosticSeverity::Warning,
-        None,
-        DiagnosticPayload::MissingImportTarget { path: sidecar_path },
-    ));
+    sidecar_warnings.push(
+        imports::missing_import_target(sidecar_path, None)
+            .with_severity(DiagnosticSeverity::Warning),
+    );
 
     let identity = generated_identity("check_only_sidecar");
     let summary = generated_summary();
@@ -1084,11 +1078,9 @@ fn canonical_tail_preserves_facade_failure_and_warning_sources() {
     use crate::compiler_frontend::compiler_errors::{
         CompilerError, CompilerErrorMetadataKey, ErrorType,
     };
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
     use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
-    use crate::compiler_frontend::compiler_messages::{
-        CompilerDiagnostic, DiagnosticBag, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
-        NameNamespace, RuleDiagnosticKind,
-    };
+    use crate::compiler_frontend::compiler_messages::{DiagnosticBag, DiagnosticSeverity};
     use crate::compiler_frontend::source::{
         ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceSpan,
     };
@@ -1120,16 +1112,9 @@ fn canonical_tail_preserves_facade_failure_and_warning_sources() {
         CompilerErrorMetadataKey::CompilationStage,
         "original stage".to_owned(),
     );
-    let warning = CompilerDiagnostic::with_severity(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownValueName),
-        DiagnosticSeverity::Warning,
-        None,
-        DiagnosticPayload::UnknownName {
-            name,
-            namespace: NameNamespace::Value,
-        },
-    );
-    let expected_warning_code = warning.kind.code();
+    let warning = names_declarations::unknown_value_name(name, None)
+        .with_severity(DiagnosticSeverity::Warning);
+    let expected_warning_code = warning.code();
     let batch = PreparedDiagnosticBatch::capture_from_bag(
         DiagnosticBag::from_diagnostics(vec![warning]),
         strings.clone(),
@@ -1351,11 +1336,9 @@ fn canonical_tail_retains_donor_only_package_identity() {
 fn published_warning_paths_remap_to_preserve_original_spelling() {
     use crate::build_system::create_project_modules::compiled_boundary::CompiledGraphBoundary;
     use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
+    use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
     use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
-    use crate::compiler_frontend::compiler_messages::{
-        CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
-        ImportDiagnosticKind,
-    };
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
     use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerBuilder};
 
     // The build table interns "zeta.moth" first. The module fork then inherits that prefix and
@@ -1389,12 +1372,9 @@ fn published_warning_paths_remap_to_preserve_original_spelling() {
         .expect("the module-local warning path should intern");
     compiled.string_table = module_string_table;
     compiled.path_fork = module_path_fork;
-    compiled.warnings.push(CompilerDiagnostic::with_severity(
-        DiagnosticKind::Import(ImportDiagnosticKind::MissingImportTarget),
-        DiagnosticSeverity::Warning,
-        None,
-        DiagnosticPayload::MissingImportTarget { path: local_path },
-    ));
+    compiled.warnings.push(
+        imports::missing_import_target(local_path, None).with_severity(DiagnosticSeverity::Warning),
+    );
     assert_ne!(
         local_path,
         PathId::ROOT,

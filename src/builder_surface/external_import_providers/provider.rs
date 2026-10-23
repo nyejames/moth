@@ -6,7 +6,6 @@
 //!      fit the same shape without leaking JS-specific concepts into the trait.
 
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
-use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::external_packages::{
@@ -237,8 +236,6 @@ pub struct ResolvedExternalImport {
     pub exported_free_functions: Vec<ExternalFunctionId>,
     /// Optional runtime asset that the backend must emit.
     pub runtime_asset: Option<RuntimeAssetIdentity>,
-    /// Diagnostics or warnings emitted while parsing the external file.
-    pub diagnostics: Vec<CompilerDiagnostic>,
     /// Runtime module imports that generated glue must include.
     pub required_runtime_imports: Vec<RequiredRuntimeImport>,
 }

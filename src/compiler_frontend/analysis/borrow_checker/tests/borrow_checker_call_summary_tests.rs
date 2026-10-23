@@ -24,8 +24,12 @@ use crate::compiler_frontend::ast::statements::functions::{
     FunctionSignature, ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
+    MultipleMutableBorrowsView, SharedMutableConflictView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::{
-    BorrowAccessKind, BorrowDiagnosticKind, DiagnosticPayload, InvalidMutableAccessReason,
+    BorrowAccessKind, DiagnosticBag, InvalidMutableAccessReason,
 };
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -55,8 +59,7 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
     make_test_variable, node, param_with_type_id, symbol, test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::{
-    assert_borrow_error_kind, assert_infrastructure_error_contains,
-    assert_invalid_mutable_access_reason, run_borrow_checker,
+    assert_infrastructure_error_contains, assert_invalid_mutable_access_reason, run_borrow_checker,
 };
 use crate::compiler_frontend::tests::external_package_support::{
     default_external_package_registry, register_external_function,
@@ -2256,7 +2259,7 @@ fn host_mutable_parameter_requires_mutable_access() {
     );
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("mutable host parameter should enforce mutable access");
-    assert_invalid_mutable_access_reason(&error, InvalidMutableAccessReason::ImmutablePlace);
+    assert_invalid_mutable_access_reason(error, InvalidMutableAccessReason::ImmutablePlace);
 }
 
 #[test]
@@ -2558,7 +2561,17 @@ fn two_mutable_args_to_same_root_are_rejected() {
     );
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("two mutable args to the same root should fail");
-    assert_borrow_error_kind(&error, BorrowDiagnosticKind::MultipleMutableBorrows);
+    let draft = error
+        .into_draft_or_infrastructure()
+        .expect("borrow failure should retain its typed diagnostic");
+    let compact = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let diagnostic = compact
+        .first()
+        .expect("multiple-mutable-borrows diagnostic should compact");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-BORROW-0002");
+    diagnostic
+        .family_view::<MultipleMutableBorrowsView>()
+        .expect("multiple-mutable-borrows diagnostic should retain typed facts");
 }
 
 #[test]
@@ -2678,17 +2691,19 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
     );
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("shared then mutable access to same root in a call must fail");
-    let payload = assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
-    let DiagnosticPayload::SharedMutableConflict {
-        existing_access,
-        requested_access,
-        ..
-    } = payload
-    else {
-        panic!("expected shared/mutable conflict payload, found {payload:?}");
-    };
+    let draft = error
+        .into_draft_or_infrastructure()
+        .expect("borrow failure should retain its typed diagnostic");
+    let compact = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let diagnostic = compact
+        .first()
+        .expect("shared/mutable conflict diagnostic should compact");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-BORROW-0003");
+    let conflict = diagnostic
+        .family_view::<SharedMutableConflictView>()
+        .expect("shared/mutable conflict should retain typed access facts");
     assert_eq!(
-        (*existing_access, *requested_access),
+        (conflict.existing_access, conflict.requested_access),
         (BorrowAccessKind::Shared, BorrowAccessKind::Mutable)
     );
 }
@@ -3226,7 +3241,7 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
     );
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("immutable argument passed to mutable user param and reused must fail");
-    assert_invalid_mutable_access_reason(&error, InvalidMutableAccessReason::ImmutablePlace);
+    assert_invalid_mutable_access_reason(error, InvalidMutableAccessReason::ImmutablePlace);
 }
 
 #[test]

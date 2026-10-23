@@ -6,9 +6,9 @@
 
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, PreparedFailure, SourceSpanCapacityResource,
-};
+use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{imports, token_lexical};
+use crate::compiler_frontend::compiler_messages::{PreparedFailure, SourceSpanCapacityResource};
 use crate::compiler_frontend::symbols::path_interner::{
     NonUtf8PathComponent, PathId, PathInternError, PathInternerFork,
 };
@@ -243,7 +243,7 @@ fn no_common_ancestor_failure(
             return failure;
         }
     };
-    let diagnostic = CompilerDiagnostic::moth_template_inputs_share_no_common_ancestor(
+    let diagnostic = imports::moth_template_inputs_share_no_common_ancestor(
         first_interned,
         second_interned,
         None,
@@ -279,8 +279,11 @@ fn intern_filesystem_path_identity(
                 .into()
             }
             PathInternError::TableFull => PreparedFailure::capture_diagnosed(
-                DiagnosticBag::from(CompilerDiagnostic::source_table_capacity(
+                DiagnosticBag::from(token_lexical::source_span_capacity(
+                    0,
+                    u32::MAX,
                     SourceSpanCapacityResource::LogicalPath,
+                    None,
                 )),
                 string_table.clone(),
                 None,
@@ -390,7 +393,7 @@ fn reject_duplicate_source_paths(
 
         if !seen_paths.insert(normalized.clone()) {
             let path = intern_filesystem_path_identity(&normalized, path_fork, string_table)?;
-            diagnostics.push(CompilerDiagnostic::duplicate_moth_template_input_path(
+            diagnostics.push(imports::duplicate_moth_template_input_path(
                 path, None, None,
             ));
             has_duplicates = true;

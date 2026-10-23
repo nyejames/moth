@@ -25,6 +25,8 @@ use crate::compiler_frontend::ast::{
     Stage0ResolutionFacts,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+#[cfg(test)]
+use crate::compiler_frontend::compiler_messages::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticBag, PreparedFailure,
@@ -225,7 +227,12 @@ fn source_identity_facts(
             SourceDatabaseError::Capacity(capacity) => {
                 FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
                     warnings: DiagnosticBag::new(),
-                    diagnostic: CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                    diagnostic: CompilerDiagnostic::source_span_capacity(
+                        0,
+                        u32::MAX,
+                        capacity.resource(),
+                        None,
+                    ),
                 })
             }
             SourceDatabaseError::Infrastructure(error) => {
@@ -254,7 +261,12 @@ fn source_identity_facts_for_id(
             SourceDatabaseError::Capacity(capacity) => {
                 FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
                     warnings: DiagnosticBag::new(),
-                    diagnostic: CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                    diagnostic: CompilerDiagnostic::source_span_capacity(
+                        0,
+                        u32::MAX,
+                        capacity.resource(),
+                        None,
+                    ),
                 })
             }
             SourceDatabaseError::Infrastructure(error) => {
@@ -292,7 +304,12 @@ fn source_identity_facts_for_owner(
             SourceDatabaseError::Capacity(capacity) => {
                 FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
                     warnings: DiagnosticBag::new(),
-                    diagnostic: CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                    diagnostic: CompilerDiagnostic::source_span_capacity(
+                        0,
+                        u32::MAX,
+                        capacity.resource(),
+                        None,
+                    ),
                 })
             }
             SourceDatabaseError::Infrastructure(error) => {
@@ -675,8 +692,8 @@ impl<'a> CompilerFrontend<'a> {
                     }
                 }
                 prior_diagnostics.push(diagnostic);
-                // Borrow and preceding warning payloads carry no type-display facts, so only a
-                // rendered path payload retains the issuing fork's snapshot.
+                // The borrow diagnostic and preceding warnings carry no type-display facts, so only a
+                // rendered path fact retains the issuing fork's snapshot.
                 let batch = PreparedDiagnosticBatch::capture_with_required_paths(
                     std::mem::take(prior_diagnostics),
                     std::mem::take(&mut self.string_table),
@@ -702,17 +719,17 @@ impl<'a> CompilerFrontend<'a> {
             &self.string_table,
         ) {
             Ok(report) => Ok(report),
-            Err(error) => match error.into_diagnostic_or_infrastructure() {
+            Err(error) => match error.into_draft_or_infrastructure() {
                 Ok(diagnostic) => Err(PreparedFailure::with_diagnostic_and_warnings(
                     diagnostic,
-                    Vec::<CompilerDiagnostic>::new(),
+                    Vec::<DiagnosticDraft>::new(),
                     &self.string_table,
                     None,
                     || Some(Arc::new(self.path_fork.snapshot_table())),
                 )),
                 Err(error) => Err(PreparedFailure::with_infrastructure_and_warnings(
                     error,
-                    Vec::<CompilerDiagnostic>::new(),
+                    Vec::<DiagnosticDraft>::new(),
                     &self.string_table,
                     None,
                     || None,

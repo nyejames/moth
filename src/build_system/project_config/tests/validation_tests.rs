@@ -24,9 +24,14 @@ use crate::builder_surface::config_schema::{
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticPayload, InvalidConfigReason, InvalidOutputFolderReason,
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidConfigCode, InvalidConfigView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::{
+    CompactDiagnosticBagForTest, compact_bag_for_test,
+};
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, DiagnosticDraft};
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, PublicConstTemplate, PublicConstTemplateKind,
     PublicConstTemplatePiece, PublicConstTemplateSlot, PublicFoldedField, PublicFoldedValue,
@@ -37,7 +42,7 @@ use crate::compiler_frontend::single_source_compilation::{
 };
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::routing::{PageUrlStyle, parse_html_site_config};
 use crate::projects::settings::{Config, HtmlSectionConfig};
@@ -94,7 +99,7 @@ fn validate_field(
     field: &ConfigSchemaField,
     value: &PublicFoldedValue,
     string_table: &mut StringTable,
-) -> (Option<ValidatedConfigValue>, Vec<CompilerDiagnostic>) {
+) -> (Option<ValidatedConfigValue>, TestDiagnostics) {
     let field_indexes = SchemaFieldIndexes::build(schema);
     let view = ConfigSchemaView {
         schema,
@@ -119,7 +124,7 @@ fn validate_field(
         ValueCheck::Reported => None,
     };
 
-    (validated, errors)
+    (validated, test_diagnostics(errors))
 }
 
 fn validated_string(validated: &ValidatedConfigValue) -> &str {
@@ -139,14 +144,50 @@ fn validated_record(validated: &ValidatedConfigValue) -> Vec<(&str, &ValidatedCo
     }
 }
 
-fn first_invalid_reason(diagnostics: &[CompilerDiagnostic]) -> &InvalidConfigReason {
-    let Some(diagnostic) = diagnostics.first() else {
-        panic!("expected at least one diagnostic, got none");
-    };
+#[derive(Debug)]
+struct InvalidConfigFacts {
+    reason: InvalidConfigCode,
+    string_ids: Vec<StringId>,
+}
 
-    match &diagnostic.payload {
-        DiagnosticPayload::InvalidConfig { reason, .. } => reason,
-        payload => panic!("expected an InvalidConfig payload, got {payload:?}"),
+struct TestDiagnostics(CompactDiagnosticBagForTest);
+
+impl std::fmt::Debug for TestDiagnostics {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let codes = self
+            .0
+            .views()
+            .map(|diagnostic| diagnostic.descriptor().code)
+            .collect::<Vec<_>>();
+        formatter.debug_list().entries(codes).finish()
+    }
+}
+
+impl std::ops::Deref for TestDiagnostics {
+    type Target = CompactDiagnosticBagForTest;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+fn test_diagnostics(diagnostics: Vec<DiagnosticDraft>) -> TestDiagnostics {
+    TestDiagnostics(compact_bag_for_test(
+        DiagnosticBag::from_diagnostics(diagnostics),
+        None,
+    ))
+}
+
+fn first_invalid_facts(diagnostics: &TestDiagnostics) -> InvalidConfigFacts {
+    let diagnostic = diagnostics
+        .first()
+        .expect("expected at least one diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("expected an InvalidConfig family view");
+    InvalidConfigFacts {
+        reason: facts.reason,
+        string_ids: diagnostic.string_ids().to_vec(),
     }
 }
 
@@ -223,11 +264,9 @@ fn rejects_wrong_record_shape_on_record_field() {
         validated.is_none(),
         "a non-record value must not validate as a record"
     );
-    assert!(
-        matches!(
-            first_invalid_reason(&errors),
-            InvalidConfigReason::InvalidConfigValueShape { .. }
-        ),
+    assert_eq!(
+        first_invalid_facts(&errors).reason,
+        InvalidConfigCode::InvalidConfigValueShape,
         "unexpected diagnostics: {errors:?}"
     );
 }
@@ -248,11 +287,9 @@ fn rejects_shape_failure_inside_nested_record() {
         validated.is_none(),
         "a nested string field must reject an int"
     );
-    assert!(
-        matches!(
-            first_invalid_reason(&errors),
-            InvalidConfigReason::InvalidConfigValueShape { .. }
-        ),
+    assert_eq!(
+        first_invalid_facts(&errors).reason,
+        InvalidConfigCode::InvalidConfigValueShape,
         "unexpected diagnostics: {errors:?}"
     );
 }
@@ -277,11 +314,9 @@ fn rejects_unknown_field_in_closed_record() {
         validated.is_none(),
         "a closed record must reject unknown fields"
     );
-    assert!(
-        matches!(
-            first_invalid_reason(&errors),
-            InvalidConfigReason::UnknownRecordField { .. }
-        ),
+    assert_eq!(
+        first_invalid_facts(&errors).reason,
+        InvalidConfigCode::UnknownRecordField,
         "unexpected diagnostics: {errors:?}"
     );
 }
@@ -350,11 +385,9 @@ fn rejects_missing_required_record_field() {
         validated.is_none(),
         "a record without its required field must fail"
     );
-    assert!(
-        matches!(
-            first_invalid_reason(&errors),
-            InvalidConfigReason::MissingRequiredRecordField { .. }
-        ),
+    assert_eq!(
+        first_invalid_facts(&errors).reason,
+        InvalidConfigCode::MissingRequiredRecordField,
         "unexpected diagnostics: {errors:?}"
     );
 }
@@ -419,12 +452,14 @@ fn enforces_closed_string_domain_inside_record() {
         validated.is_none(),
         "a value outside the closed domain must fail"
     );
-    let InvalidConfigReason::InvalidConfigValueShape { expected } = first_invalid_reason(&errors)
-    else {
-        panic!("expected a value-shape diagnostic, got {errors:?}");
-    };
+    let facts = first_invalid_facts(&errors);
     assert_eq!(
-        string_table.resolve(*expected),
+        facts.reason,
+        InvalidConfigCode::InvalidConfigValueShape,
+        "expected a value-shape diagnostic: {errors:?}"
+    );
+    assert_eq!(
+        string_table.resolve(facts.string_ids[0]),
         "one of: \"alpha\", \"beta\"",
         "closed-domain failures must report the allowed set"
     );
@@ -486,11 +521,9 @@ fn rejects_a_scalar_for_a_string_collection() {
     let (validated, errors) =
         validate_field(&schema, folders_field, &text("lib"), &mut string_table);
     assert!(validated.is_none());
-    assert!(
-        matches!(
-            first_invalid_reason(&errors),
-            InvalidConfigReason::InvalidConfigValueShape { .. }
-        ),
+    assert_eq!(
+        first_invalid_facts(&errors).reason,
+        InvalidConfigCode::InvalidConfigValueShape,
         "unexpected diagnostics: {errors:?}"
     );
 
@@ -534,11 +567,9 @@ fn rejects_int_element_in_string_collection_with_shape_reason() {
         validated.is_none(),
         "an int element must fail the collection"
     );
-    assert!(
-        matches!(
-            first_invalid_reason(&errors),
-            InvalidConfigReason::InvalidConfigValueShape { .. }
-        ),
+    assert_eq!(
+        first_invalid_facts(&errors).reason,
+        InvalidConfigCode::InvalidConfigValueShape,
         "unexpected diagnostics: {errors:?}"
     );
     assert_eq!(
@@ -619,7 +650,7 @@ fn accepts_int_collection_and_nested_optional_elements() {
 // -------------------------
 //  Grouped Project Record Application
 // -------------------------
-fn apply_result(result: Result<(), ConfigApplyError>) -> Result<(), Vec<CompilerDiagnostic>> {
+fn apply_result(result: Result<(), ConfigApplyError>) -> Result<(), Vec<DiagnosticDraft>> {
     match result {
         Ok(()) => Ok(()),
         Err(ConfigApplyError::Diagnostics(errors)) => Err(errors),
@@ -635,7 +666,7 @@ fn apply_result(result: Result<(), ConfigApplyError>) -> Result<(), Vec<Compiler
 fn validate_and_apply(
     declarations: Vec<(&str, PublicFoldedValue)>,
     string_table: &mut StringTable,
-) -> (Config, Vec<CompilerDiagnostic>) {
+) -> (Config, TestDiagnostics) {
     let surface = BuilderSurface::with_mandatory_core();
 
     validate_and_apply_with_surface(declarations, &surface, string_table)
@@ -647,7 +678,7 @@ fn validate_and_apply_with_surface(
     declarations: Vec<(&str, PublicFoldedValue)>,
     surface: &BuilderSurface,
     string_table: &mut StringTable,
-) -> (Config, Vec<CompilerDiagnostic>) {
+) -> (Config, TestDiagnostics) {
     let source = CompiledConfigSource {
         declarations: declarations
             .into_iter()
@@ -671,9 +702,9 @@ fn validate_and_apply_with_surface(
         &surface.config_schemas,
         string_table,
     )) {
-        Ok(()) => (config, Vec::new()),
+        Ok(()) => (config, test_diagnostics(Vec::new())),
 
-        Err(errors) => (config, errors),
+        Err(errors) => (config, test_diagnostics(errors)),
     }
 }
 
@@ -758,13 +789,10 @@ fn rejects_grouped_project_record_missing_required_name() {
         &mut string_table,
     );
 
-    let reason = first_invalid_reason(&errors);
-    let InvalidConfigReason::MissingRequiredRecordField { record, field } = reason else {
-        panic!("expected a missing-required-field diagnostic, got {reason:?}");
-    };
-    assert_eq!(string_table.resolve(*record), "project record");
-    assert_eq!(string_table.resolve(*field), "name");
-
+    let facts = first_invalid_facts(&errors);
+    assert_eq!(facts.reason, InvalidConfigCode::MissingRequiredRecordField);
+    assert_eq!(string_table.resolve(facts.string_ids[0]), "project record");
+    assert_eq!(string_table.resolve(facts.string_ids[1]), "name");
     // The rejected record applies none of its fields.
     assert_eq!(config.project_name, "");
     assert_eq!(config.entry_root, PathBuf::from(""));
@@ -810,11 +838,9 @@ fn rejects_wrong_shape_inside_grouped_project_record() {
         &mut string_table,
     );
 
-    let reason = first_invalid_reason(&errors);
-    let InvalidConfigReason::InvalidConfigValueShape { expected } = reason else {
-        panic!("expected a value-shape diagnostic, got {reason:?}");
-    };
-    assert_eq!(string_table.resolve(*expected), "a string value");
+    let facts = first_invalid_facts(&errors);
+    assert_eq!(facts.reason, InvalidConfigCode::InvalidConfigValueShape);
+    assert_eq!(string_table.resolve(facts.string_ids[0]), "a string value");
     assert_eq!(
         config.project_name, "",
         "a rejected record field must not apply to the config"
@@ -826,11 +852,9 @@ fn rejects_legacy_flat_project_selector_on_file_root() {
     let mut string_table = StringTable::new();
 
     let (_, errors) = validate_and_apply(vec![("project", text("html"))], &mut string_table);
-    let reason = first_invalid_reason(&errors);
-    let InvalidConfigReason::InvalidConfigValueShape { expected } = reason else {
-        panic!("expected a record-shape diagnostic for the legacy selector, got {reason:?}");
-    };
-    assert_eq!(string_table.resolve(*expected), "a record value");
+    let facts = first_invalid_facts(&errors);
+    assert_eq!(facts.reason, InvalidConfigCode::InvalidConfigValueShape);
+    assert_eq!(string_table.resolve(facts.string_ids[0]), "a record value");
 }
 
 #[test]
@@ -875,11 +899,9 @@ fn rejects_retired_flat_config_keys_instead_of_treating_them_as_helpers() {
             ],
             &mut string_table,
         );
-        assert!(
-            matches!(
-                first_invalid_reason(&errors),
-                InvalidConfigReason::UnknownKey { .. }
-            ),
+        assert_eq!(
+            first_invalid_facts(&errors).reason,
+            InvalidConfigCode::UnknownKey,
             "retired key {key} must be rejected, got {errors:?}"
         );
     }
@@ -900,16 +922,18 @@ fn rejects_grouped_project_entry_root_that_escapes_the_project() {
         &mut string_table,
     );
 
-    let reason = first_invalid_reason(&errors);
-    let InvalidConfigReason::InvalidProjectSettingValue { expected, .. } = reason else {
-        panic!("expected an entry-root containment diagnostic, got {reason:?}");
-    };
+    let facts = first_invalid_facts(&errors);
+    assert_eq!(
+        facts.reason,
+        InvalidConfigCode::InvalidProjectSettingValue,
+        "expected an entry-root containment diagnostic: {errors:?}"
+    );
     assert!(
         string_table
-            .resolve(*expected)
+            .resolve(facts.string_ids[1])
             .contains("strictly below the project root"),
         "unexpected expected-text: {}",
-        string_table.resolve(*expected)
+        string_table.resolve(facts.string_ids[1])
     );
     assert_eq!(
         config.entry_root,
@@ -947,19 +971,19 @@ fn rejects_grouped_project_entry_root_symlink_outside_the_project() {
     };
     let mut config = Config::new(root.clone());
     let surface = BuilderSurface::with_mandatory_core();
-    let errors = apply_result(validate_and_apply_config_declarations(
-        &mut config,
-        &source,
-        &surface.config_schemas,
-        &mut string_table,
-    ))
-    .expect_err("a symlink out of the project must fail");
+    let errors = test_diagnostics(
+        apply_result(validate_and_apply_config_declarations(
+            &mut config,
+            &source,
+            &surface.config_schemas,
+            &mut string_table,
+        ))
+        .expect_err("a symlink out of the project must fail"),
+    );
 
-    assert!(
-        matches!(
-            first_invalid_reason(&errors),
-            InvalidConfigReason::InvalidProjectSettingValue { .. }
-        ),
+    assert_eq!(
+        first_invalid_facts(&errors).reason,
+        InvalidConfigCode::InvalidProjectSettingValue,
         "unexpected diagnostics: {errors:?}"
     );
 }
@@ -989,19 +1013,19 @@ fn rejects_grouped_project_entry_root_that_is_a_regular_file() {
     };
     let mut config = Config::new(root);
     let surface = BuilderSurface::with_mandatory_core();
-    let errors = apply_result(validate_and_apply_config_declarations(
-        &mut config,
-        &source,
-        &surface.config_schemas,
-        &mut string_table,
-    ))
-    .expect_err("a file-valued entry_root must fail");
+    let errors = test_diagnostics(
+        apply_result(validate_and_apply_config_declarations(
+            &mut config,
+            &source,
+            &surface.config_schemas,
+            &mut string_table,
+        ))
+        .expect_err("a file-valued entry_root must fail"),
+    );
 
-    assert!(
-        matches!(
-            first_invalid_reason(&errors),
-            InvalidConfigReason::InvalidProjectSettingValue { .. }
-        ),
+    assert_eq!(
+        first_invalid_facts(&errors).reason,
+        InvalidConfigCode::InvalidProjectSettingValue,
         "unexpected diagnostics: {errors:?}"
     );
     assert_eq!(config.entry_root, PathBuf::from(""));
@@ -1085,12 +1109,10 @@ fn rejects_unknown_field_in_closed_grouped_html_section() {
         &mut string_table,
     );
 
-    let reason = first_invalid_reason(&errors);
-    let InvalidConfigReason::UnknownRecordField { record, field } = reason else {
-        panic!("expected an unknown-record-field diagnostic, got {reason:?}");
-    };
-    assert_eq!(string_table.resolve(*record), "html section");
-    assert_eq!(string_table.resolve(*field), "custom_key");
+    let facts = first_invalid_facts(&errors);
+    assert_eq!(facts.reason, InvalidConfigCode::UnknownRecordField);
+    assert_eq!(string_table.resolve(facts.string_ids[0]), "html section");
+    assert_eq!(string_table.resolve(facts.string_ids[1]), "custom_key");
 
     // The rejected section applies nothing.
     assert_eq!(config.html_section.origin, None);
@@ -1109,13 +1131,10 @@ fn private_helpers_do_not_satisfy_required_html_section() {
         &mut string_table,
     );
 
-    let reason = first_invalid_reason(&errors);
-    assert!(
-        matches!(
-            reason,
-            InvalidConfigReason::MissingActiveBuilderSection { .. }
-        ),
-        "former top-level builder names are private helpers, got {reason:?}"
+    assert_eq!(
+        first_invalid_facts(&errors).reason,
+        InvalidConfigCode::MissingActiveBuilderSection,
+        "former top-level builder names are private helpers, got {errors:?}"
     );
     assert_eq!(config.html_section.origin, None);
 }
@@ -1128,11 +1147,9 @@ fn requires_the_active_html_builder_section() {
     let (_, errors) =
         validate_and_apply_with_surface(vec![grouped_project()], &surface, &mut string_table);
 
-    let reason = first_invalid_reason(&errors);
-    let InvalidConfigReason::MissingActiveBuilderSection { section } = reason else {
-        panic!("expected a missing-builder-section diagnostic, got {reason:?}");
-    };
-    assert_eq!(string_table.resolve(*section), "html");
+    let facts = first_invalid_facts(&errors);
+    assert_eq!(facts.reason, InvalidConfigCode::MissingActiveBuilderSection);
+    assert_eq!(string_table.resolve(facts.string_ids[0]), "html");
 }
 
 #[test]
@@ -1219,24 +1236,30 @@ fn preserves_project_shape_diagnostic_after_dependency_projection() {
         .and_then(|declaration| declaration.span);
 
     let mut config = Config::new(PathBuf::from("project"));
-    let errors = apply_result(validate_and_apply_config_declarations(
-        &mut config,
-        &compiled,
-        &surface.config_schemas,
-        &mut string_table,
-    ))
-    .expect_err("a non-record project declaration must be rejected by schema validation");
+    let errors = test_diagnostics(
+        apply_result(validate_and_apply_config_declarations(
+            &mut config,
+            &compiled,
+            &surface.config_schemas,
+            &mut string_table,
+        ))
+        .expect_err("a non-record project declaration must be rejected by schema validation"),
+    );
     let diagnostic = errors
         .first()
         .expect("the shape diagnostic should be present");
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidConfig {
-            reason: InvalidConfigReason::InvalidConfigValueShape { .. },
-            ..
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("the shape diagnostic should retain typed config facts");
+    assert_eq!(facts.reason, InvalidConfigCode::InvalidConfigValueShape);
+    let primary_span = match diagnostic.primary_site() {
+        SiteRef::Local(span) => Some(span),
+        SiteRef::Absent => None,
+        SiteRef::Foreign { .. } => {
+            panic!("the shape diagnostic should keep a local primary site")
         }
-    ));
-    assert_eq!(diagnostic.primary_span, project_span);
+    };
+    assert_eq!(primary_span, project_span);
 }
 
 // -------------------------
@@ -1342,16 +1365,13 @@ fn rejects_parent_traversal_in_grouped_html_output_root() {
     let output_errors = validate_directory_output_settings(&config, &mut string_table)
         .expect_err("a parent-traversing output root must be rejected");
 
-    let reason = first_invalid_reason(&output_errors);
-    let InvalidConfigReason::InvalidOutputFolder { folder, reason } = reason else {
-        panic!("expected an invalid-output-folder diagnostic, got {reason:?}");
-    };
-
-    assert_eq!(*reason, InvalidOutputFolderReason::ParentDirectorySegment);
+    let output_errors = test_diagnostics(output_errors);
+    let facts = first_invalid_facts(&output_errors);
     assert_eq!(
-        string_table.resolve(folder.expect("the rejected folder is interned")),
-        "../outside"
+        facts.reason,
+        InvalidConfigCode::InvalidOutputFolderParentDirectorySegmentWithFolder
     );
+    assert_eq!(string_table.resolve(facts.string_ids[0]), "../outside");
 }
 
 #[test]
@@ -1376,12 +1396,14 @@ fn rejects_an_invalid_moth_project_identifier() {
         &mut string_table,
     );
 
-    let reason = first_invalid_reason(&errors);
-    let InvalidConfigReason::InvalidProjectSettingValue { expected, .. } = reason else {
-        panic!("expected a project-identifier diagnostic, got {reason:?}");
-    };
+    let facts = first_invalid_facts(&errors);
     assert_eq!(
-        string_table.resolve(*expected),
+        facts.reason,
+        InvalidConfigCode::InvalidProjectSettingValue,
+        "expected a project-identifier diagnostic, got {errors:?}"
+    );
+    assert_eq!(
+        string_table.resolve(facts.string_ids[1]),
         "a valid Moth project identifier"
     );
 }
@@ -1469,10 +1491,10 @@ fn rejects_unresolved_project_template_metadata() {
         &mut string_table,
     );
 
-    let reason = first_invalid_reason(&errors);
-    assert!(
-        matches!(reason, InvalidConfigReason::InvalidConfigValueShape { .. }),
-        "unresolved templates must not become project metadata, got {reason:?}"
+    assert_eq!(
+        first_invalid_facts(&errors).reason,
+        InvalidConfigCode::InvalidConfigValueShape,
+        "unresolved templates must not become project metadata, got {errors:?}"
     );
 }
 
@@ -1688,10 +1710,10 @@ fn scalar_leaves_preserve_exact_identity_and_payload() {
             validated.is_none(),
             "{scalar:?} must reject {different_scalar:?}"
         );
-        assert!(matches!(
-            first_invalid_reason(&errors),
-            InvalidConfigReason::InvalidConfigValueShape { .. }
-        ));
+        assert_eq!(
+            first_invalid_facts(&errors).reason,
+            InvalidConfigCode::InvalidConfigValueShape
+        );
     }
 }
 
@@ -1714,10 +1736,10 @@ fn project_loop_limit_rejects_another_integer_width() {
         )],
         &mut string_table,
     );
-    assert!(matches!(
-        first_invalid_reason(&errors),
-        InvalidConfigReason::InvalidConfigValueShape { .. }
-    ));
+    assert_eq!(
+        first_invalid_facts(&errors).reason,
+        InvalidConfigCode::InvalidConfigValueShape
+    );
 }
 
 #[test]
@@ -1738,13 +1760,13 @@ fn project_loop_limit_preserves_resource_bound_diagnostics() {
             )],
             &mut string_table,
         );
-        let InvalidConfigReason::InvalidProjectSettingValue {
-            expected: actual, ..
-        } = first_invalid_reason(&errors)
-        else {
-            panic!("expected a loop resource-bound diagnostic, got {errors:?}");
-        };
-        assert_eq!(string_table.resolve(*actual), expected);
+        let facts = first_invalid_facts(&errors);
+        assert_eq!(
+            facts.reason,
+            InvalidConfigCode::InvalidProjectSettingValue,
+            "expected a loop resource-bound diagnostic, got {errors:?}"
+        );
+        assert_eq!(string_table.resolve(facts.string_ids[1]), expected);
     }
 
     let mut string_table = StringTable::new();

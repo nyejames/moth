@@ -375,7 +375,6 @@ fn inactive_assertion_keeps_private_call_facts_after_ast_release() {
     let witness = summaries.witness(contributor);
     assert_eq!(witness.call_spans, vec![contributor.span]);
     assert!(witness.origin_span.is_none());
-    assert!(witness.codes.is_empty());
 }
 
 #[test]
@@ -452,7 +451,6 @@ fn deferred_custom_catch_keeps_typed_locations_and_candidates_after_ast_release(
     let witness = summaries.witness(candidate);
     assert_eq!(witness.call_spans, vec![candidate.span]);
     assert!(witness.origin_span.is_none());
-    assert!(witness.codes.is_empty());
 }
 
 #[test]
@@ -675,7 +673,7 @@ fn recursive_witness_skips_back_edge_before_later_numeric_origin() {
     // WHAT: the recursive call precedes the overflow producer in source order in both the
     //       self-recursive and the mutually recursive fixtures.
     // WHY: the witness must skip only the back-edge and retain the available origin instead
-    //      of stopping with call-only hops and empty cause codes.
+    //      of stopping with call-only hops and no origin.
     for source in [
         "helper |value I32, ready Bool| -> I32:\n\
              if ready:\n        return helper(value, ready)\n    ;\n    return value * 2\n;\n\
@@ -748,7 +746,6 @@ fn recursive_witness_skips_back_edge_before_later_numeric_origin() {
             .first_active(&facts.body.implicit)
             .expect("the boundary escapes through its helper");
         let witness = summaries.witness(entry);
-        assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
         assert_eq!(witness.origin, BuiltinFailureOriginKind::Operation);
 
         // The origin is the actual multiplication in the helper, never the skipped call.
@@ -815,7 +812,6 @@ fn unavailable_call_before_numeric_origin_stops_at_the_visible_leaf() {
         .expect("the unavailable call precedes the producer")
         .span;
     assert_eq!(witness.call_spans, vec![unavailable_span]);
-    assert_eq!(witness.codes, Vec::<BuiltinErrorCode>::new());
     assert!(witness.origin_span.is_none());
 }
 
@@ -922,7 +918,6 @@ fn mutually_recursive_component_with_late_origin_expands_each_body_once() {
         .span;
     assert_eq!(witness.origin, BuiltinFailureOriginKind::Operation);
     assert_eq!(witness.origin_span, numeric_span);
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
     assert_eq!(witness.call_spans, vec![entry.span]);
     assert_eq!(witness.elided_call_hops, 0);
     assert_eq!(summaries.witness(entry), witness);

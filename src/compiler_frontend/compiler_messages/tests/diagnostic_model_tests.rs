@@ -19,7 +19,6 @@ use super::{
     TypeMismatchContext, UnsupportedBackendFeatureReason, ValueReceiverContext,
     is_well_formed_reason_key,
 };
-use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_errors::{
     BoundaryFailure, CompilerError, CompilerErrorMetadataKey, ErrorType, InfrastructureErrors,
 };
@@ -2466,7 +2465,6 @@ fn failure_handling_diagnostics_preserve_producer_types_and_spans() {
             InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
                 error_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 witness: Box::new(BuiltinFailureWitness {
-                    codes: vec![BuiltinErrorCode::IntOverflow],
                     call_spans: vec![first_span, None],
                     origin_span: second_span,
                     origin: BuiltinFailureOriginKind::Operation,
@@ -2479,10 +2477,6 @@ fn failure_handling_diagnostics_preserve_producer_types_and_spans() {
         (
             InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
                 witness: Box::new(BuiltinFailureWitness {
-                    codes: vec![
-                        BuiltinErrorCode::DivideByZero,
-                        BuiltinErrorCode::IntOverflow,
-                    ],
                     call_spans: vec![first_span],
                     origin_span: second_span,
                     origin: BuiltinFailureOriginKind::Operation,
@@ -2631,7 +2625,6 @@ fn builtin_failure_witness_labels_render_calls_before_the_original_operation() {
     ];
     let origin_span = Some(exact_span(source, 26, 8, &mut builder));
     let witness = Box::new(BuiltinFailureWitness {
-        codes: vec![BuiltinErrorCode::IntOverflow],
         call_spans,
         origin_span,
         origin: BuiltinFailureOriginKind::Operation,
@@ -4170,7 +4163,6 @@ fn failure_writeback_label_keeps_target_type_in_frozen_prepared_output() {
     let diagnostic = CompilerDiagnostic::invalid_fallible_handling(
         InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
             witness: Box::new(BuiltinFailureWitness {
-                codes: vec![BuiltinErrorCode::IntOverflow],
                 call_spans: vec![],
                 origin_span,
                 origin: BuiltinFailureOriginKind::CompoundWriteBack {

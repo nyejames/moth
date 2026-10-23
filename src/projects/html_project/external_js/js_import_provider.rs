@@ -12,8 +12,9 @@ use crate::builder_surface::external_import_providers::provider::{
     ExternalImportProviderKind, ExternalImportRequest, ResolvedExternalImport,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{imports, token_lexical};
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticSeverity, InvalidExternalModuleReason, PreparedFailure, SourceSpanCapacityResource,
 };
@@ -99,8 +100,11 @@ impl ExternalImportProvider for JsExternalImportProvider {
             }
             Err(PathInternError::TableFull) => {
                 return Err(context.capture_diagnostic_failure(DiagnosticBag::from(
-                    CompilerDiagnostic::source_table_capacity(
+                    token_lexical::source_span_capacity(
+                        0,
+                        u32::MAX,
                         SourceSpanCapacityResource::LogicalPath,
+                        None,
                     ),
                 )));
             }
@@ -129,9 +133,10 @@ impl ExternalImportProvider for JsExternalImportProvider {
             context.string_table,
         ));
 
+        // All diagnostics here are error severity, so a successful import carries none.
         if diagnostics
             .iter()
-            .any(|d| d.severity == DiagnosticSeverity::Error)
+            .any(|diagnostic| diagnostic.severity() == DiagnosticSeverity::Error)
         {
             return Err(
                 context.capture_diagnostic_failure(DiagnosticBag::from_diagnostics(diagnostics))
@@ -165,7 +170,6 @@ impl ExternalImportProvider for JsExternalImportProvider {
             exported_types: registered.exported_types,
             exported_free_functions: registered.exported_free_functions,
             runtime_asset: Some(runtime_asset),
-            diagnostics,
             required_runtime_imports,
         }))
     }
@@ -192,12 +196,12 @@ fn reject_receiver_methods_in_project_local_js(
     parsed: &ParsedJsModule,
     js_source_path: PathId,
     string_table: &mut StringTable,
-) -> Vec<CompilerDiagnostic> {
+) -> Vec<DiagnosticDraft> {
     let mut diagnostics = Vec::new();
 
     for receiver_method in &parsed.receiver_methods {
         let moth_name = string_table.intern(&receiver_method.moth_name);
-        diagnostics.push(CompilerDiagnostic::invalid_external_module(
+        diagnostics.push(imports::invalid_external_module(
             js_source_path,
             InvalidExternalModuleReason::ReceiverMethod { moth_name },
             None,
@@ -216,12 +220,12 @@ fn convert_js_parser_diagnostics(
     js_source_path: PathId,
     import_span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> Vec<CompilerDiagnostic> {
+) -> Vec<DiagnosticDraft> {
     let mut diagnostics = Vec::with_capacity(parser_diagnostics.len());
 
     for parser_diagnostic in parser_diagnostics {
         let parser_detail = string_table.intern(&parser_diagnostic.message);
-        diagnostics.push(CompilerDiagnostic::invalid_external_module(
+        diagnostics.push(imports::invalid_external_module(
             js_source_path,
             InvalidExternalModuleReason::ParserDiagnostic { parser_detail },
             import_span,

@@ -30,7 +30,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRema
 
 /// A diagnostic under construction. Only `DiagnosticStore::compact` turns it into a stored record.
 #[derive(Debug)]
-pub(crate) struct DiagnosticDraft {
+pub struct DiagnosticDraft {
     pub(super) core: DraftCore,
     pub(super) extra: Option<Box<DiagnosticExtraDraft>>,
 }

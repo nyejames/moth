@@ -12,9 +12,10 @@
 
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, DiagnosticDraft, PreparedFailure, SourceSpanCapacityResource,
+    DiagnosticBag, DiagnosticDraft, PreparedFailure, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole,
@@ -694,8 +695,11 @@ impl ModulePreparationContext<'_> {
                 .map_err(|error| match error {
                     crate::compiler_frontend::symbols::path_interner::PathInternError::TableFull => {
                         PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
-                            DiagnosticBag::from(CompilerDiagnostic::source_table_capacity(
+                            DiagnosticBag::from(token_lexical::source_span_capacity(
+                                0,
+                                u32::MAX,
                                 SourceSpanCapacityResource::LogicalPath,
+                                None,
                             )),
                             std::mem::take(string_table),
                             None,

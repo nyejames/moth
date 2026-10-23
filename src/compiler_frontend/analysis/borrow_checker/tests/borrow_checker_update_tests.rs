@@ -13,8 +13,11 @@ use crate::compiler_frontend::analysis::borrow_checker::transfer::{
     BorrowTransferContext, transfer_block,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::LocalMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::InvalidMutableAccessView;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::{
-    BorrowDiagnosticKind, InvalidMutableAccessReason,
+    BorrowDiagnosticKind, DiagnosticBag, InvalidMutableAccessReason,
 };
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
@@ -25,6 +28,7 @@ use crate::compiler_frontend::hir::statements::{
 };
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::validate_hir_module;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::borrow_fixture_support::{
@@ -33,6 +37,29 @@ use crate::compiler_frontend::tests::borrow_fixture_support::{
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 use crate::compiler_frontend::tests::type_id_fixture_support::lower_ast;
+
+fn assert_invalid_mutable_access_at(
+    error: BorrowCheckError,
+    expected_reason: InvalidMutableAccessReason,
+    expected_span: SourceSpan,
+) {
+    let draft = error
+        .into_draft_or_infrastructure()
+        .expect("borrow failure should retain its typed diagnostic");
+    let compact = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let diagnostic = compact
+        .first()
+        .expect("invalid mutable access diagnostic should compact");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-BORROW-0007");
+    let access = diagnostic
+        .family_view::<InvalidMutableAccessView>()
+        .expect("invalid mutable access should retain typed facts");
+    assert_eq!(access.reason, expected_reason);
+    assert!(matches!(
+        diagnostic.primary_site(),
+        SiteRef::Local(span) if span == expected_span
+    ));
+}
 
 #[test]
 fn ordinary_updates_reject_definitely_and_possibly_uninitialized_targets() {
@@ -92,7 +119,7 @@ sentinel = 0\n\
         );
         let error = transfer_isolated_statement(&checker, &layout, block, update, &mut state)
             .expect_err("an update must not initialize any possibly uninitialized path");
-        assert_borrow_error_kind(&error, BorrowDiagnosticKind::UseOfUninitializedLocal);
+        assert_borrow_error_kind(error, BorrowDiagnosticKind::UseOfUninitializedLocal);
     }
 }
 
@@ -206,7 +233,7 @@ sentinel = 0\n\
                 .expect_err(
                     "a dedicated result update must not initialize a possibly uninitialized path",
                 );
-        assert_borrow_error_kind(&error, BorrowDiagnosticKind::UseOfUninitializedLocal);
+        assert_borrow_error_kind(error, BorrowDiagnosticKind::UseOfUninitializedLocal);
     }
 }
 
@@ -321,7 +348,7 @@ sentinel = 0\n\
         let error =
             transfer_isolated_statement(&checker, &layout, call_block, call_statement, &mut state)
                 .expect_err("a dedicated update of an immutable binding must fail");
-        assert_invalid_mutable_access_reason(&error, InvalidMutableAccessReason::ImmutablePlace);
+        assert_invalid_mutable_access_reason(error, InvalidMutableAccessReason::ImmutablePlace);
     }
 }
 
@@ -495,7 +522,7 @@ sentinel = 0\n\
 
         let error = transfer_isolated_statement(&checker, &layout, block, update, &mut state)
             .expect_err("ordinary assignment to an immutable binding must fail");
-        assert_invalid_mutable_access_reason(&error, InvalidMutableAccessReason::ImmutablePlace);
+        assert_invalid_mutable_access_reason(error, InvalidMutableAccessReason::ImmutablePlace);
     }
 }
 
@@ -572,16 +599,10 @@ observed = copy observer\n\
 
     let error = transfer_isolated_statement(&checker, &layout, block, update, &mut state)
         .expect_err("a mixed update may still write through to its source root");
-    assert_invalid_mutable_access_reason(
-        &error,
+    assert_invalid_mutable_access_at(
+        error,
         InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
-    );
-    assert_eq!(
-        error
-            .diagnostic()
-            .and_then(|diagnostic| diagnostic.primary_span),
-        Some(expected_span),
-        "the failure must be reported at the isolated post-join update"
+        expected_span,
     );
 }
 
@@ -743,16 +764,10 @@ observed = copy observer\n\
         &mut state,
     )
     .expect_err("the dedicated update may write through to the competing source alias");
-    assert_invalid_mutable_access_reason(
-        &error,
+    assert_invalid_mutable_access_at(
+        error,
         InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
-    );
-    assert_eq!(
-        error
-            .diagnostic()
-            .and_then(|diagnostic| diagnostic.primary_span),
-        Some(expected_span),
-        "the failure must be reported at the isolated result update"
+        expected_span,
     );
 }
 

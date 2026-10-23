@@ -22,15 +22,20 @@ use super::synthetic_build_results::{
 use crate::build_system::build::{BuildResult, FileKind};
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, imports, names_declarations, token_lexical,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, InvalidAssignmentTargetReason, InvalidOutputFolderReason,
+    DiagnosticBag, InvalidAssignmentTargetReason, InvalidOutputFolderReason,
 };
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceSpan,
 };
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -44,7 +49,7 @@ fn test_span(source: SourceId, start: u32, length: u32) -> SourceSpan {
 }
 
 fn boundary_failure(
-    diagnostics: Vec<CompilerDiagnostic>,
+    diagnostics: Vec<DiagnosticDraft>,
     string_table: StringTable,
     source_database: Option<Arc<SourceDatabase>>,
 ) -> BoundaryFailure {
@@ -60,21 +65,35 @@ fn boundary_failure(
     accumulator.finish(InstallMode::Frozen)
 }
 
+fn assignment_target_draft(
+    target_name: Option<StringId>,
+    declaration_span: Option<SourceSpan>,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    let draft = names_declarations::invalid_assignment_target(
+        InvalidAssignmentTargetReason::ImmutableBinding,
+        target_name,
+        None,
+        None,
+        None,
+        span,
+    );
+    match declaration_span {
+        Some(declaration_span) => draft.with_label(
+            Some(declaration_span),
+            Some(LabelDraftMessage::ImmutableBindingDeclaration),
+        ),
+        None => draft,
+    }
+}
+
 fn diagnostic_messages(codes: &[&str]) -> BoundaryFailure {
     let string_table = StringTable::new();
     let diagnostics = codes
         .iter()
         .map(|code| match *code {
-            "MOTH-RULE-0044" => CompilerDiagnostic::invalid_assignment_target(
-                InvalidAssignmentTargetReason::ImmutableBinding,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            ),
-            "MOTH-SYNTAX-0003" => CompilerDiagnostic::unexpected_trailing_comma(None),
+            "MOTH-RULE-0044" => assignment_target_draft(None, None, None),
+            "MOTH-SYNTAX-0003" => token_lexical::unexpected_trailing_comma(None),
             other => panic!("test diagnostic code is not constructed: {other}"),
         })
         .collect();
@@ -104,15 +123,7 @@ fn diagnostic_expectation(
 fn failure_message_contains_uses_structured_render_output() {
     let mut string_table = StringTable::new();
     let variable_name = string_table.intern("value");
-    let diagnostic = CompilerDiagnostic::invalid_assignment_target(
-        InvalidAssignmentTargetReason::ImmutableBinding,
-        Some(variable_name),
-        None,
-        None,
-        None,
-        None,
-        None,
-    );
+    let diagnostic = assignment_target_draft(Some(variable_name), None, None);
     let failure = boundary_failure(vec![diagnostic], string_table, None);
     let expectation = FailureExpectation {
         warnings: WarningExpectation::Ignore,
@@ -148,15 +159,7 @@ fn failure_message_contains_includes_rendered_label_text() {
     source_database
         .retain_text(source_id, "value\n".to_owned())
         .expect("label source text should be retained");
-    let diagnostic = CompilerDiagnostic::invalid_assignment_target(
-        InvalidAssignmentTargetReason::ImmutableBinding,
-        None,
-        None,
-        None,
-        None,
-        Some(test_span(source_id, 0, 1)),
-        None,
-    );
+    let diagnostic = assignment_target_draft(None, Some(test_span(source_id, 0, 1)), None);
     let failure = boundary_failure(
         vec![diagnostic],
         string_table,
@@ -318,15 +321,7 @@ fn structured_diagnostic_messages(fixture_root: &Path) -> BoundaryFailure {
 
     let primary_span = test_span(primary_source, 7, 1);
     let secondary_span = test_span(secondary_source, 13, 1);
-    let diagnostic = CompilerDiagnostic::invalid_assignment_target(
-        InvalidAssignmentTargetReason::ImmutableBinding,
-        None,
-        None,
-        None,
-        None,
-        Some(secondary_span),
-        Some(primary_span),
-    );
+    let diagnostic = assignment_target_draft(None, Some(secondary_span), Some(primary_span));
 
     boundary_failure(
         vec![diagnostic],
@@ -405,15 +400,7 @@ fn relative_structured_diagnostic_messages(scope: &str, fixture_root: &Path) -> 
         .retain_text(source_id, "aa\nbb\ncc\ndddd\n".to_owned())
         .expect("relative structured source text should be retained");
 
-    let diagnostic = CompilerDiagnostic::invalid_assignment_target(
-        InvalidAssignmentTargetReason::ImmutableBinding,
-        None,
-        None,
-        None,
-        None,
-        None,
-        Some(test_span(source_id, 7, 1)),
-    );
+    let diagnostic = assignment_target_draft(None, None, Some(test_span(source_id, 7, 1)));
     boundary_failure(
         vec![diagnostic],
         string_table,
@@ -598,10 +585,8 @@ fn warning_build_result(codes: &[&str]) -> BuildResult {
     let warnings = codes
         .iter()
         .map(|code| match *code {
-            "MOTH-RULE-0022" => CompilerDiagnostic::unreachable_match_arm(None),
-            "MOTH-IMPORT-0003" => {
-                CompilerDiagnostic::dependency_alias_case_mismatch(alias, symbol, None)
-            }
+            "MOTH-RULE-0022" => choices_control_flow::unreachable_match_arm(None),
+            "MOTH-IMPORT-0003" => imports::dependency_alias_case_mismatch(alias, symbol, None),
             other => panic!("test warning code is not constructed: {other}"),
         })
         .collect();
@@ -734,8 +719,8 @@ fn ignore_and_forbid_keep_their_structured_warning_behaviour() {
 #[test]
 fn exact_warning_codes_match_warnings_retained_in_failed_compilation_messages() {
     let string_table = StringTable::new();
-    let warning = CompilerDiagnostic::unreachable_match_arm(None);
-    let error = CompilerDiagnostic::unexpected_trailing_comma(None);
+    let warning = choices_control_flow::unreachable_match_arm(None);
+    let error = token_lexical::unexpected_trailing_comma(None);
     let failure = boundary_failure(vec![error, warning], string_table, None);
     // diagnostic_codes owns the error contract only; warning_codes independently owns the
     // warning. A warning code must never appear in diagnostic_codes for a failed compilation.
@@ -756,8 +741,8 @@ fn exact_warning_codes_match_warnings_retained_in_failed_compilation_messages() 
 #[test]
 fn warnings_ignore_truly_ignores_warnings_on_a_failed_compilation() {
     let string_table = StringTable::new();
-    let warning = CompilerDiagnostic::unreachable_match_arm(None);
-    let error = CompilerDiagnostic::unexpected_trailing_comma(None);
+    let warning = choices_control_flow::unreachable_match_arm(None);
+    let error = token_lexical::unexpected_trailing_comma(None);
     let failure = boundary_failure(vec![error, warning], string_table, None);
     let expectation = FailureExpectation {
         warnings: WarningExpectation::Ignore,
@@ -776,8 +761,8 @@ fn warnings_ignore_truly_ignores_warnings_on_a_failed_compilation() {
 #[test]
 fn warning_code_cannot_satisfy_failure_diagnostic_codes() {
     let string_table = StringTable::new();
-    let warning = CompilerDiagnostic::unreachable_match_arm(None);
-    let error = CompilerDiagnostic::unexpected_trailing_comma(None);
+    let warning = choices_control_flow::unreachable_match_arm(None);
+    let error = token_lexical::unexpected_trailing_comma(None);
     let failure = boundary_failure(vec![error, warning], string_table, None);
     // Authoring the warning code as a diagnostic code must fail: the warning is not in the
     // error-severity stream, so the multiset reports it as missing.
@@ -809,8 +794,8 @@ fn warning_code_cannot_satisfy_failure_diagnostic_codes() {
 #[test]
 fn warning_prose_cannot_satisfy_error_message_contains() {
     let string_table = StringTable::new();
-    let warning = CompilerDiagnostic::unreachable_match_arm(None);
-    let error = CompilerDiagnostic::unexpected_trailing_comma(None);
+    let warning = choices_control_flow::unreachable_match_arm(None);
+    let error = token_lexical::unexpected_trailing_comma(None);
     let failure = boundary_failure(vec![error, warning], string_table, None);
     // The unreachable-match-arm warning prose must not satisfy message_contains because the
     // fragment check only inspects error-severity diagnostics.

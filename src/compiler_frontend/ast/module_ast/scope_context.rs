@@ -73,8 +73,8 @@ use crate::compiler_frontend::instrumentation::{
 };
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::paths::file_references::{
-    PreparedFileReferenceClass, ResolvedFileReferenceOutcome, ResolvedFileReferenceTable,
-    ResolvedFileReferenceTarget, ResourceSourceId,
+    PreparedFileReferenceClass, ResolvedFileReferenceFailure, ResolvedFileReferenceOutcome,
+    ResolvedFileReferenceTable, ResolvedFileReferenceTarget, ResourceSourceId,
 };
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
@@ -193,7 +193,7 @@ pub(crate) enum Stage0ResolvedFileReferenceOutcome<'a> {
         owner_relative_path: &'a PortableResourcePath,
     },
     IdentifiedSourceKind,
-    Diagnostic(&'a CompilerDiagnostic),
+    Diagnostic(ResolvedFileReferenceFailure),
 }
 
 impl Stage0ResolutionFacts {
@@ -295,7 +295,7 @@ fn ordinary_reference_view<'a>(
             Stage0ResolvedFileReferenceOutcome::IdentifiedSourceKind
         }
         ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => {
-            Stage0ResolvedFileReferenceOutcome::Diagnostic(diagnostic)
+            Stage0ResolvedFileReferenceOutcome::Diagnostic(*diagnostic)
         }
     };
     Ok(Stage0ResolvedFileReferenceView {

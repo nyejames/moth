@@ -21,6 +21,7 @@ use crate::build_system::create_project_modules::resource_inputs::ResourceInputR
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticBag, DiagnosticDraft, PreparedFailure,
@@ -30,8 +31,8 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     HeaderParseOptions, SourcePreparationDelta,
 };
 use crate::compiler_frontend::paths::file_references::{
-    PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
-    ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
+    PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceFailure,
+    ResolvedFileReferenceOutcome, ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
 };
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -177,8 +178,11 @@ pub(super) fn prepare_file_value_bundle(
         )
         .map_err(|error| match error {
             SourceDatabaseError::Capacity(capacity) => PreparedFailure::capture_diagnosed(
-                DiagnosticBag::from(CompilerDiagnostic::source_table_capacity(
+                DiagnosticBag::from(token_lexical::source_span_capacity(
+                    0,
+                    u32::MAX,
                     capacity.resource(),
+                    None,
                 )),
                 string_table.clone(),
                 None,
@@ -262,8 +266,11 @@ pub(super) fn prepare_file_value_bundle(
                     SourceDatabaseError::Capacity(capacity) => {
                         FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
                             warnings: DiagnosticBag::new(),
-                            diagnostic: CompilerDiagnostic::source_table_capacity(
+                            diagnostic: CompilerDiagnostic::source_span_capacity(
+                                0,
+                                u32::MAX,
                                 capacity.resource(),
+                                None,
                             ),
                         })
                     }
@@ -445,8 +452,8 @@ pub(super) fn prepare_file_value_bundle(
                 ));
             }
         };
-        if let ResolvedFileReferenceOutcome::Diagnostic(diagnostic) = &mut outcome {
-            rebind_diagnostic_source(diagnostic, owner_source_file);
+        if let ResolvedFileReferenceOutcome::Diagnostic(failure) = &mut outcome {
+            rebind_resolved_failure_source(failure, owner_source_file);
         }
         if let Err(error) = resolved_file_references.push(ResolvedFileReference {
             source_file: owner_source_file,
@@ -528,8 +535,11 @@ fn finalize_known_sources(
             // Final registration publishes the authored template closure, so its compact-table
             // exhaustion is a typed source-capacity rejection, not infrastructure.
             SourceDatabaseError::Capacity(capacity) => PreparedFailure::capture_diagnosed(
-                DiagnosticBag::from(CompilerDiagnostic::source_table_capacity(
+                DiagnosticBag::from(token_lexical::source_span_capacity(
+                    0,
+                    u32::MAX,
                     capacity.resource(),
+                    None,
                 )),
                 string_table.clone(),
                 None,
@@ -652,8 +662,11 @@ fn finalize_known_sources(
                 ))),
                 Err(SourceDatabaseError::Capacity(capacity)) => {
                     Some(PreparedFailure::capture_diagnosed(
-                        DiagnosticBag::from(CompilerDiagnostic::source_table_capacity(
+                        DiagnosticBag::from(token_lexical::source_span_capacity(
+                            0,
+                            u32::MAX,
                             capacity.resource(),
+                            None,
                         )),
                         string_table.clone(),
                         None,
@@ -854,12 +867,13 @@ fn finalize_discovery_failure(
             for warning in &mut error_warnings {
                 rebind_draft_diagnostic_source(warning, source_id);
             }
-            rebind_diagnostic_source(&mut error.diagnostic, source_id);
+            let mut diagnostic: DiagnosticDraft = error.diagnostic.into();
+            rebind_draft_diagnostic_source(&mut diagnostic, source_id);
             for warning in error_warnings {
                 prior_warnings.push(warning);
             }
             PreparedFailure::with_diagnostic_and_warnings(
-                error.diagnostic,
+                diagnostic,
                 prior_warnings.into_diagnostics(),
                 string_table,
                 None,
@@ -997,10 +1011,10 @@ fn rebind_source_span(span: &mut Option<SourceSpan>, source_id: SourceId) {
     }
 }
 
-fn rebind_diagnostic_source(diagnostic: &mut CompilerDiagnostic, source_id: SourceId) {
-    rebind_source_span(&mut diagnostic.primary_span, source_id);
-    for label in &mut diagnostic.labels {
-        rebind_source_span(&mut label.span, source_id);
+fn rebind_resolved_failure_source(failure: &mut ResolvedFileReferenceFailure, source_id: SourceId) {
+    let span = failure.span_mut();
+    if span.source() != SourceId::COMPILATION_ROOT {
+        *span = SourceSpan::new(source_id, span.local());
     }
 }
 

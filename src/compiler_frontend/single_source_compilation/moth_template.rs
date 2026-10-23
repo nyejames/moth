@@ -25,11 +25,10 @@ use crate::compiler_frontend::ast::{
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, PreparedFailure,
-};
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PreparedFailure};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, owned_folded_string_from_const_string,
@@ -289,8 +288,11 @@ pub(crate) fn compile_moth_template_source(
                 )
                 .map_err(|error| match error {
                     SourceDatabaseError::Capacity(capacity) => PreparedFailure::capture_diagnosed(
-                        DiagnosticBag::from(CompilerDiagnostic::source_table_capacity(
+                        DiagnosticBag::from(token_lexical::source_span_capacity(
+                            0,
+                            u32::MAX,
                             capacity.resource(),
+                            None,
                         )),
                         string_table.clone(),
                         None,

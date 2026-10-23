@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 pub(super) type SourceIdentityMap = FxHashMap<SourceId, SourceId>;
 
@@ -64,21 +65,25 @@ pub(super) fn rebind_discovery_span(
     source_ids: &SourceIdentityMap,
 ) -> Result<(), CompilerError> {
     if let Some(span) = span {
-        let source_id = final_source_id(span.source(), source_ids)?;
-        *span = SourceSpan::new(source_id, span.local());
+        rebind_discovery_source_span(span, source_ids)?;
     }
     Ok(())
 }
 
-pub(super) fn rebind_discovery_diagnostic(
-    diagnostic: &mut CompilerDiagnostic,
+fn rebind_discovery_source_span(
+    span: &mut SourceSpan,
     source_ids: &SourceIdentityMap,
 ) -> Result<(), CompilerError> {
-    rebind_discovery_span(&mut diagnostic.primary_span, source_ids)?;
-    for label in &mut diagnostic.labels {
-        rebind_discovery_span(&mut label.span, source_ids)?;
-    }
+    let source_id = final_source_id(span.source(), source_ids)?;
+    *span = SourceSpan::new(source_id, span.local());
     Ok(())
+}
+
+pub(super) fn rebind_discovery_diagnostic(
+    diagnostic: &mut DiagnosticDraft,
+    source_ids: &SourceIdentityMap,
+) -> Result<(), CompilerError> {
+    diagnostic.rebind_source_ids(&mut |source_id| final_source_id(source_id, source_ids))
 }
 
 pub(super) fn rebind_discovery_compiler_error(
@@ -147,8 +152,8 @@ pub(super) fn rebind_resolved_file_reference_diagnostics(
     source_ids: &SourceIdentityMap,
 ) -> Result<(), CompilerError> {
     for reference in references {
-        if let SingleFileReferenceOutcome::Diagnostic(diagnostic) = &mut reference.outcome {
-            rebind_discovery_diagnostic(diagnostic, source_ids)?;
+        if let SingleFileReferenceOutcome::Diagnostic(failure) = &mut reference.outcome {
+            rebind_discovery_source_span(failure.span_mut(), source_ids)?;
         }
     }
     Ok(())

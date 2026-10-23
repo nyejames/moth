@@ -5,7 +5,6 @@
 //! while preserving structured diagnostics across compiler stages.
 
 use super::*;
-use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::source::SourceSpan;
 
 // -------------------------------
@@ -1580,10 +1579,9 @@ pub enum InvalidFallibleHandlingReason {
 /// Boundary-inward evidence for one escaping built-in failure.
 ///
 /// Producers retain at most the first three private call sites, then the terminal numeric/range
-/// operation separately. An unresolved or cyclic chain has no invented origin or cause codes.
+/// operation separately. An unresolved or cyclic chain has no invented origin.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BuiltinFailureWitness {
-    pub codes: Vec<BuiltinErrorCode>,
     pub call_spans: Vec<Option<SourceSpan>>,
     pub origin_span: Option<SourceSpan>,
     pub origin: BuiltinFailureOriginKind,

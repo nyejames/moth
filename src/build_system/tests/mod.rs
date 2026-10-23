@@ -13,11 +13,16 @@ use crate::builder_surface::BuilderSurface;
 use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
+use crate::compiler_frontend::compiler_messages::NamingConvention;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    names_declarations, project_config,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, InvalidConfigReason, NamingConvention, PreparedFailure,
+    DiagnosticBag, InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::module_compilation::ModuleRootActivity;
 use crate::compiler_frontend::source::SourceSpan;
@@ -160,7 +165,14 @@ fn write_project_outputs(
     project: &Project,
     options: &WriteOptions,
 ) -> Result<OutputWriteSummary, BoundaryFailure> {
-    let mut project = project.clone();
+    let mut project = Project {
+        output_files: project.output_files.clone(),
+        entry_page_rel: project.entry_page_rel.clone(),
+        cleanup_policy: project.cleanup_policy.clone(),
+        warnings: Vec::new(),
+        deferred_resources: project.deferred_resources.clone(),
+        resource_inputs: project.resource_inputs.clone(),
+    };
     let mut string_table = StringTable::default();
     match write_project_outputs_with_table(&mut project, options, &mut string_table) {
         Ok(summary) => Ok(summary),
@@ -239,8 +251,8 @@ fn html_project(output_files: Vec<OutputFile>, entry_page_rel: Option<PathBuf>) 
     }
 }
 
-fn naming_convention_warning(name: StringId, span: Option<SourceSpan>) -> CompilerDiagnostic {
-    CompilerDiagnostic::identifier_naming_convention(name, NamingConvention::CamelCase, span)
+fn naming_convention_warning(name: StringId, span: Option<SourceSpan>) -> DiagnosticDraft {
+    names_declarations::identifier_naming_convention(name, NamingConvention::CamelCase, span)
 }
 
 struct WarningBuilder;
@@ -439,12 +451,13 @@ impl BackendBuilder for FailingValidationBuilder {
         _config: &Config,
         string_table: &mut StringTable,
     ) -> Result<(), ProjectConfigError> {
-        Err(CompilerDiagnostic::invalid_config_reason(
-            Some(string_table.intern("fake_config_error")),
-            InvalidConfigReason::UnsupportedScalarValue,
-            None,
-        )
-        .into())
+        Err(ProjectConfigError::Diagnostic(
+            project_config::invalid_config_reason(
+                Some(string_table.intern("fake_config_error")),
+                InvalidConfigReason::UnsupportedScalarValue,
+                None,
+            ),
+        ))
     }
 
     fn frontend_surface(&self) -> BuilderSurface {
@@ -518,7 +531,7 @@ impl BackendBuilder for MultiModuleDiagnosticBuilder {
             .expect("directory build should discover docs module");
 
         let warning = naming_convention_warning(string_table.get_or_intern("x".to_string()), None);
-        let error = CompilerDiagnostic::unknown_value_name(
+        let error = names_declarations::unknown_value_name(
             string_table.get_or_intern("homepage diagnostic".to_string()),
             None,
         );

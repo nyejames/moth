@@ -17,18 +17,16 @@ use crate::compiler_frontend::compiler_messages::{
     GenericInferenceSubject, ImportDiagnosticKind, ImportPublicSurfaceType,
     IncompatibleChoiceComparisonReason, InvalidCastReason, InvalidChoiceVariantReason,
     InvalidCollectionTypeReason, InvalidCompileTimePathReason, InvalidConfigReason,
-    InvalidDependencyClauseReason, InvalidExpressionReason, InvalidExternalModuleReason,
-    InvalidFallibleHandlingReason, InvalidFunctionSignatureReason, InvalidGenericParameterReason,
-    InvalidImportPathReason, InvalidLoopHeaderReason, InvalidMapLiteralReason,
-    InvalidMapTypeReason, InvalidMatchArmReason, InvalidMutableAccessReason,
-    InvalidPageMetadataReason, InvalidParameterContractReason, InvalidRangeOperandReason,
-    InvalidRouteOutputReason, InvalidSignatureMemberReason, InvalidStandaloneStatementReason,
-    InvalidStatementPositionReason, InvalidStringEscapeReason, InvalidTemplateDirectiveReason,
-    InvalidTemplateStructureReason, InvalidTraitConformanceReason,
-    InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason,
-    LegacyDependencyClauseReason, MalformedTemplateReason, NameNamespace,
-    NamespaceTypeValueMisuseKind, NamingConvention, OperatorOperandPosition, PathKind,
-    ProjectContextEscapeReason, PublicGenericOwnerKind, RangeOperandKind, RuleDiagnosticKind,
+    InvalidDependencyClauseReason, InvalidExpressionReason, InvalidFallibleHandlingReason,
+    InvalidFunctionSignatureReason, InvalidGenericParameterReason, InvalidImportPathReason,
+    InvalidLoopHeaderReason, InvalidMapLiteralReason, InvalidMapTypeReason, InvalidMatchArmReason,
+    InvalidParameterContractReason, InvalidRangeOperandReason, InvalidRouteOutputReason,
+    InvalidSignatureMemberReason, InvalidStandaloneStatementReason, InvalidStatementPositionReason,
+    InvalidStringEscapeReason, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
+    InvalidTraitConformanceReason, InvalidTraitIncompatibilityReason,
+    InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason, LegacyDependencyClauseReason,
+    NameNamespace, NamespaceTypeValueMisuseKind, NamingConvention, OperatorOperandPosition,
+    PathKind, PublicGenericOwnerKind, RangeOperandKind, RuleDiagnosticKind,
     SourceSpanCapacityResource, SyntaxDiagnosticKind, TypeAnnotationContext, TypeDiagnosticKind,
     TypeMismatchContext, UnsupportedBackendFeatureReason, ValueReceiverContext,
 };
@@ -410,80 +408,14 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn invalid_source_file_entry(
-        path: PathId,
-        extension: StringId,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Import(ImportDiagnosticKind::InvalidSourceFileEntry),
-            span,
-            DiagnosticPayload::InvalidSourceFileEntry { path, extension },
-        )
-    }
-
-    // The compiler-source-token-and-diagnostic-data-layout plan retains the direct-template
-    // source boundary. Its current consumer is the test-gated Moth-template input service.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn moth_template_inputs_share_no_common_ancestor(
-        first_path: PathId,
-        second_path: PathId,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Import(ImportDiagnosticKind::MothTemplateInputsShareNoCommonAncestor),
-            span,
-            DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor {
-                first_path,
-                second_path,
-            },
-        )
-    }
-
-    // The compiler-source-token-and-diagnostic-data-layout plan retains the direct-template
-    // source boundary. Its current consumer is the test-gated Moth-template input service.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn duplicate_moth_template_input_path(
-        path: PathId,
-        first_span: Option<SourceSpan>,
-        duplicate_span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Import(ImportDiagnosticKind::DuplicateMothTemplateInputPath),
-            duplicate_span,
-            DiagnosticPayload::DuplicateMothTemplateInputPath { path },
-        )
-        .with_labels(vec![DiagnosticLabel::secondary(first_span, None)])
-    }
-
-    pub(crate) fn unsupported_external_extension(
-        path: PathId,
-        extension: StringId,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Import(ImportDiagnosticKind::UnsupportedExternalExtension),
-            span,
-            DiagnosticPayload::UnsupportedExternalExtension { path, extension },
-        )
-    }
-
-    pub(crate) fn invalid_external_module(
-        path: PathId,
-        reason: InvalidExternalModuleReason,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Import(ImportDiagnosticKind::InvalidExternalModule),
-            span,
-            DiagnosticPayload::InvalidExternalModule { path, reason },
-        )
-    }
-
     // ------------------------------------------------------------------
     //  Borrow Constructors
     // ------------------------------------------------------------------
 
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn multiple_mutable_borrows(
         place: DiagnosticPlace,
         conflicting_place: Option<DiagnosticPlace>,
@@ -509,6 +441,10 @@ impl CompilerDiagnostic {
         .with_labels(labels)
     }
 
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn shared_mutable_conflict(
         place: DiagnosticPlace,
         existing_access: BorrowAccessKind,
@@ -560,44 +496,6 @@ impl CompilerDiagnostic {
             DiagnosticPayload::UseAfterPossibleMove { place },
         )
         .with_labels(labels)
-    }
-
-    pub(crate) fn invalid_mutable_access(
-        place: DiagnosticPlace,
-        reason: InvalidMutableAccessReason,
-        conflicting_place: Option<DiagnosticPlace>,
-        conflicting_span: Option<SourceSpan>,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        let mut labels = Vec::new();
-        if let Some(conflicting_span) = conflicting_span {
-            labels.push(DiagnosticLabel::secondary(
-                Some(conflicting_span),
-                Some(DiagnosticLabelMessage::ConflictingAccess),
-            ));
-        }
-
-        Self::new(
-            DiagnosticKind::Borrow(BorrowDiagnosticKind::InvalidMutableAccess),
-            span,
-            DiagnosticPayload::InvalidMutableAccess {
-                place,
-                reason,
-                conflicting_place,
-            },
-        )
-        .with_labels(labels)
-    }
-
-    pub(crate) fn use_of_uninitialized_local(
-        place: DiagnosticPlace,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Borrow(BorrowDiagnosticKind::UseOfUninitializedLocal),
-            span,
-            DiagnosticPayload::UseOfUninitializedLocal { place },
-        )
     }
 
     // ------------------------------------------------------------------
@@ -688,23 +586,6 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn unsupported_external_function(
-        function_name: StringId,
-        package_path: Option<StringId>,
-        backend_name: StringId,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::UnsupportedExternalFunction),
-            span,
-            DiagnosticPayload::UnsupportedExternalFunction {
-                function_name,
-                package_path,
-                backend_name,
-            },
-        )
-    }
-
     pub(crate) fn invalid_range_operand(
         operand: RangeOperandKind,
         found_type: TypeId,
@@ -722,17 +603,10 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn unsupported_builder_package(
-        package_path: StringId,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::UnsupportedBuilderPackage),
-            span,
-            DiagnosticPayload::UnsupportedBuilderPackage { package_path },
-        )
-    }
-
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn unsupported_backend_feature(
         backend_name: StringId,
         reason: UnsupportedBackendFeatureReason,
@@ -745,18 +619,6 @@ impl CompilerDiagnostic {
                 backend_name,
                 reason,
             },
-        )
-    }
-
-    pub(crate) fn invalid_page_metadata(
-        key: StringId,
-        reason: InvalidPageMetadataReason,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::InvalidPageMetadata),
-            span,
-            DiagnosticPayload::InvalidPageMetadata { key, reason },
         )
     }
 
@@ -830,19 +692,6 @@ impl CompilerDiagnostic {
             DiagnosticSeverity::Warning,
             span,
             DiagnosticPayload::DependencyAliasCaseMismatch { alias, symbol },
-        )
-    }
-
-    pub(crate) fn malformed_template(
-        kind: SyntaxDiagnosticKind,
-        reason: MalformedTemplateReason,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::with_severity(
-            DiagnosticKind::Syntax(kind),
-            DiagnosticSeverity::Warning,
-            span,
-            DiagnosticPayload::MalformedTemplate { reason },
         )
     }
 
@@ -1486,17 +1335,6 @@ impl CompilerDiagnostic {
                 exported_name,
                 private_type,
             },
-        )
-    }
-
-    pub(crate) fn project_context_escape(
-        reason: ProjectContextEscapeReason,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::ProjectContextEscape),
-            span,
-            DiagnosticPayload::ProjectContextEscape { reason },
         )
     }
 

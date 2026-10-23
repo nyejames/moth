@@ -10,12 +10,12 @@
 //! identity, output placement, hashes or byte contents.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::InvalidCompileTimePathReason;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Shallow classification of one non-dependency path row.
@@ -170,6 +170,36 @@ pub(crate) enum ResolvedFileReferenceTarget {
     IdentifiedSourceKind,
 }
 
+/// A user-authored failure retained for one file-reference occurrence.
+///
+/// Stores semantic facts, not a built diagnostic. A row can be read more than once, and each
+/// emission site builds its diagnostic from these facts.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum ResolvedFileReferenceFailure {
+    InvalidCompileTimePath {
+        path: PathId,
+        reason: InvalidCompileTimePathReason,
+        span: SourceSpan,
+    },
+    /// An absolute path component, which a compile-time path cannot contain.
+    InvalidComponent { span: SourceSpan },
+    UnsupportedSourceFileKind {
+        path: PathId,
+        extension: StringId,
+        span: SourceSpan,
+    },
+}
+
+impl ResolvedFileReferenceFailure {
+    pub(crate) fn span_mut(&mut self) -> &mut SourceSpan {
+        match self {
+            Self::InvalidCompileTimePath { span, .. }
+            | Self::InvalidComponent { span }
+            | Self::UnsupportedSourceFileKind { span, .. } => span,
+        }
+    }
+}
+
 /// The settled Stage 0 outcome for one authored file-reference occurrence.
 ///
 /// User-authored target failures are retained beside the path identity so a surrounding AST
@@ -181,7 +211,7 @@ pub(crate) enum ResolvedFileReferenceOutcome {
     /// extensionless path retained for AST's typed diagnostic).
     NoPhysicalTarget,
     Target(ResolvedFileReferenceTarget),
-    Diagnostic(CompilerDiagnostic),
+    Diagnostic(ResolvedFileReferenceFailure),
 }
 
 /// Module-compilation table pairing prepared path rows with Stage 0 resolved targets.

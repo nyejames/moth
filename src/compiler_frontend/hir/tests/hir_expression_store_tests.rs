@@ -4,8 +4,11 @@
 //! WHY: every durable expression edge and variable payload must stay in one module-owned store.
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::CompilerCapacityExceededView;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::{
-    CapacityResource, DiagnosticPayload, HirCapacityResource,
+    CapacityResource, DiagnosticBag, HirCapacityResource,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::expression_rewrite::rewrite_expression_bottom_up;
@@ -56,13 +59,14 @@ fn assert_capacity_diagnostic<T>(
         }
         Ok(_) => panic!("expected HIR capacity diagnostic"),
     };
-    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0037");
-    assert_eq!(diagnostic.primary_span, Some(span));
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::CompilerCapacityExceeded { resource: actual }
-            if actual == CapacityResource::from(resource)
-    ));
+    let diagnostics = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = diagnostics.first().expect("capacity draft should compact");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0037");
+    assert!(matches!(diagnostic.primary_site(), SiteRef::Local(actual) if actual == span));
+    let capacity = diagnostic
+        .family_view::<CompilerCapacityExceededView>()
+        .expect("capacity diagnostic should retain its typed resource");
+    assert_eq!(capacity.resource, CapacityResource::from(resource));
 }
 
 fn nonempty_test_span() -> SourceSpan {

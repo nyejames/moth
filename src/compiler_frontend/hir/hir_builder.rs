@@ -412,12 +412,14 @@ impl<'a> HirBuilder<'a> {
                 if let Some(handle) = &self.frozen_identity_handle {
                     diagnostic.attach_frozen_identity_handle_if_missing(handle.clone());
                 }
-                PreparedFailure::with_diagnostic_and_warnings(
-                    diagnostic,
-                    warnings,
-                    self.string_table,
+                let mut diagnostics = DiagnosticBag::from_diagnostics(warnings);
+                diagnostics.push(diagnostic);
+                PreparedFailure::capture_diagnosed(
+                    diagnostics,
+                    self.string_table.clone(),
                     Some(&self.type_environment),
-                    || Some(Arc::new(self.path_fork.snapshot_table())),
+                    true,
+                    Some(Arc::new(self.path_fork.snapshot_table())),
                 )
             }
             // Infrastructure failures keep no prior warnings: the AST lane never renders warnings

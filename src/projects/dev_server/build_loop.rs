@@ -60,8 +60,8 @@ struct BuildOutcome {
     diagnostics_summary: String,
     /// Full structured warnings for successful dev builds.
     ///
-    /// WHAT: carries the same `CompilerDiagnostic` payloads that would be printed on a CLI build
-    /// so the dev-server terminal can show complete warnings after a successful rebuild.
+    /// WHAT: retains the same structured warning facts that would be reported on a CLI build so
+    /// the dev-server terminal can show complete warnings after a successful rebuild.
     /// WHY: `diagnostics_summary` is intentionally brief for SSE/state consumers; terminal output
     /// needs the full diagnostic cards without rebuilding them from summary titles.
     success_messages: Option<BoundaryFailure>,

@@ -43,10 +43,10 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticPayload,
-    InvalidFallibleHandlingReason, PreparedFailure,
+    CompileTimeEvaluationErrorReason, DiagnosticBag, InvalidFallibleHandlingReason, PreparedFailure,
 };
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
@@ -550,13 +550,6 @@ impl FrontendProject {
 
     /// Exercise the summary owner's semantic contract checks without claiming backend delivery.
     fn failure_contract_result(&mut self) -> Result<HirModule, PreparedFailure> {
-        self.failure_contract_result_with_observer(|_| {})
-    }
-
-    fn failure_contract_result_with_observer(
-        &mut self,
-        mut observe_diagnostic: impl FnMut(&CompilerDiagnostic),
-    ) -> Result<HirModule, PreparedFailure> {
         let ast = self
             .ast_result()
             .expect("AST construction should succeed before failure contract checks");
@@ -589,34 +582,26 @@ impl FrontendProject {
                 )
                 .map_err(PreparedFailure::from)?;
             if let Some(diagnostic) = diagnostic {
-                observe_diagnostic(&diagnostic);
-                return Err(PreparedFailure::with_diagnostic_and_warnings(
-                    diagnostic,
-                    Vec::<CompilerDiagnostic>::new(),
-                    &self.frontend.string_table,
+                return Err(PreparedFailure::capture_diagnosed(
+                    DiagnosticBag::from(diagnostic),
+                    self.frontend.string_table.clone(),
                     Some(&type_environment),
-                    || Some(Arc::new(self.frontend.path_fork.snapshot_table())),
+                    true,
+                    Some(Arc::new(self.frontend.path_fork.snapshot_table())),
                 ));
             }
         }
         Ok(hir)
     }
-    fn failure_contract_boundary_result(&mut self) -> Result<HirModule, BoundaryFailure> {
-        self.failure_contract_boundary_result_with_observer(|_| {})
-    }
 
-    fn failure_contract_boundary_result_with_observer(
-        &mut self,
-        observe_diagnostic: impl FnMut(&CompilerDiagnostic),
-    ) -> Result<HirModule, BoundaryFailure> {
-        self.failure_contract_result_with_observer(observe_diagnostic)
-            .map_err(|failure| {
-                freeze_prepared_failure(
-                    failure,
-                    self.frontend.take_source_files(),
-                    &self.frontend.string_table,
-                )
-            })
+    fn failure_contract_boundary_result(&mut self) -> Result<HirModule, BoundaryFailure> {
+        self.failure_contract_result().map_err(|failure| {
+            freeze_prepared_failure(
+                failure,
+                self.frontend.take_source_files(),
+                &self.frontend.string_table,
+            )
+        })
     }
 
     fn hir(&mut self) -> crate::compiler_frontend::hir::module::HirModule {
@@ -2089,11 +2074,8 @@ fn implicit_failure_custom_contract_requires_explicit_mapping_even_with_other_er
              if invalid:\n        return! Failure(\"invalid\")\n    ;\n\
              return left * right\n;\n",
     );
-    let mut producer_codes = None;
     let messages = project
-        .failure_contract_boundary_result_with_observer(|diagnostic| {
-            producer_codes = Some(builtin_failure_codes(diagnostic));
-        })
+        .failure_contract_boundary_result()
         .expect_err("custom return! must not discharge numeric failure");
     let boundary_diagnostic = single_ast_error_view(&messages);
     let facts = boundary_diagnostic
@@ -2113,10 +2095,6 @@ fn implicit_failure_custom_contract_requires_explicit_mapping_even_with_other_er
         vec![(BuiltinFailureLabelRole::OperationOrigin, true)]
     );
     assert_eq!(frozen_elided_call_hops(&messages), Some(0));
-    assert_eq!(
-        producer_codes.expect("custom contract witness codes"),
-        vec![BuiltinErrorCode::IntOverflow]
-    );
 
     let mut project = failure_project(
         "Failure = | message String |\n\
@@ -2817,17 +2795,63 @@ fn implicit_failure_custom_catch_reports_handler_compatibility_before_protected_
         )
         .expect("custom catch compatibility must produce a semantic diagnosis")
         .expect("the failing inner helper must make its custom catch incompatible");
-    assert_eq!(diagnostic.primary_span, inner_check.catch_span);
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason: InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
-                error_type_id, typed_producer_span, implicit_producer_span,
-            },
-        } if error_type_id == inner_check.error_type_id
-            && typed_producer_span == inner_check.typed_producer_span
-            && implicit_producer_span == inner_private_span
-    ));
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let view = compact
+        .first()
+        .expect("generated catch compatibility draft should compact");
+    let facts = view
+        .family_view::<InvalidFallibleHandlingView>()
+        .expect("generated catch compatibility should retain fallible facts");
+    assert_eq!(view.descriptor().code, "MOTH-RULE-0051");
+    assert_eq!(
+        diagnostic_primary_span(view),
+        inner_check.catch_span,
+        "generated catch compatibility should retain its primary span"
+    );
+    assert_eq!(
+        facts.reason,
+        InvalidFallibleHandlingCode::CustomErrorMixedWithImplicitFailure
+    );
+    assert_eq!(facts.second_error_type, None);
+    let expected_error_type = format!("TypeId({})", inner_check.error_type_id.0);
+    assert_eq!(
+        view.types().display_for_render(
+            facts
+                .first_error_type
+                .expect("mixed catch retains its typed error type"),
+            &project.frontend.string_table,
+            None,
+        ),
+        expected_error_type
+    );
+
+    let mut typed_producer = None;
+    let mut implicit_producer = None;
+    for label in view.durable_labels() {
+        let span = match label.site {
+            SiteRef::Local(span) | SiteRef::Foreign { span, .. } => span,
+            SiteRef::Absent => panic!("generated catch producer labels should retain spans"),
+        };
+        match label.message {
+            DurableLabelMessage::TypedFailureProducer { error_type } => {
+                typed_producer = Some((error_type, span));
+            }
+            DurableLabelMessage::ImplicitFailureProducer => implicit_producer = Some(span),
+            _ => {}
+        }
+    }
+    let (typed_error_type, typed_producer_span) =
+        typed_producer.expect("generated catch should retain the typed producer label");
+    assert_eq!(
+        view.types()
+            .display_for_render(typed_error_type, &project.frontend.string_table, None,),
+        expected_error_type
+    );
+    assert_eq!(Some(typed_producer_span), inner_check.typed_producer_span);
+    assert_eq!(
+        implicit_producer, inner_private_span,
+        "generated catch should retain the implicit producer span"
+    );
 }
 
 #[test]
@@ -3581,11 +3605,8 @@ fn implicit_failure_error_wrapper_struct_is_not_canonical() {
         "Wrapped = | inner Error |\n\
          safe_product |left I32, right I32| -> I32, Wrapped!:\n    return left * right\n;\n",
     );
-    let mut producer_codes = None;
     let messages = project
-        .failure_contract_boundary_result_with_observer(|diagnostic| {
-            producer_codes = Some(builtin_failure_codes(diagnostic));
-        })
+        .failure_contract_boundary_result()
         .expect_err("a struct wrapping Error is not builtin Error");
     assert_eq!(error_diagnostics(&messages).count(), 1);
     let boundary_diagnostic = single_ast_error_view(&messages);
@@ -3606,10 +3627,6 @@ fn implicit_failure_error_wrapper_struct_is_not_canonical() {
         vec![(BuiltinFailureLabelRole::OperationOrigin, true)]
     );
     assert_eq!(frozen_elided_call_hops(&messages), Some(0));
-    assert_eq!(
-        producer_codes.expect("wrapper slot witness codes"),
-        vec![BuiltinErrorCode::IntOverflow]
-    );
 
     // The same wrapper must not unlock builtin mixing under catch either: a Wrapped-typed
     // producer alongside implicit failure stays a custom/implicit mix.
@@ -3816,20 +3833,8 @@ fn implicit_failure_dormant_generic_contracts_validate_before_instantiation() {
 }
 
 #[test]
-fn implicit_failure_range_loop_witnesses_carry_step_guard_codes() {
-    let int_codes = vec![
-        BuiltinErrorCode::IntOverflow,
-        BuiltinErrorCode::InvalidRangeStep,
-    ];
-    let float_codes = vec![
-        BuiltinErrorCode::FloatNonFinite,
-        BuiltinErrorCode::InvalidRangeStep,
-        BuiltinErrorCode::RangeStepNoProgress,
-    ];
-    for (scalar, end, zero, expected) in [
-        ("I32", "10", "0", &int_codes),
-        ("F64", "10.0", "0.0", &float_codes),
-    ] {
+fn implicit_failure_range_loop_witnesses_retain_origin_labels() {
+    for (scalar, end, zero) in [("I32", "10", "0"), ("F64", "10.0", "0.0")] {
         // Converged boundary: a custom error slot sees the HIR-projected contributor.
         let mut project = failure_project(&format!(
             "Failure = | message String |\n\
@@ -3837,11 +3842,8 @@ fn implicit_failure_range_loop_witnesses_carry_step_guard_codes() {
                  loop start to {end} by step |value|:\n        return value\n    ;\n\
                  return {zero}\n;\n"
         ));
-        let mut producer_codes = None;
         let messages = project
-            .failure_contract_boundary_result_with_observer(|diagnostic| {
-                producer_codes = Some(builtin_failure_codes(diagnostic));
-            })
+            .failure_contract_boundary_result()
             .expect_err("custom contract must discharge range step failure");
         let boundary_diagnostic = single_ast_error_view(&messages);
         let facts = boundary_diagnostic
@@ -3860,11 +3862,7 @@ fn implicit_failure_range_loop_witnesses_carry_step_guard_codes() {
             frozen_builtin_failure_labels(&messages),
             vec![(BuiltinFailureLabelRole::OperationOrigin, true)]
         );
-        assert_eq!(
-            &producer_codes.expect("range loop witness codes"),
-            expected,
-            "converged {scalar}"
-        );
+        assert_eq!(frozen_elided_call_hops(&messages), Some(0));
 
         // Dormant generic boundary: the finalizer reads the AST contributor directly.
         let mut project = failure_project(&format!(
@@ -4000,21 +3998,6 @@ fn implicit_failure_dormant_recursive_chain_with_numeric_origin_is_rejected() {
     );
 }
 
-/// Extract producer-only builtin codes, which are not stored in the frozen diagnostic record.
-fn builtin_failure_codes(diagnostic: &CompilerDiagnostic) -> Vec<BuiltinErrorCode> {
-    match &diagnostic.payload {
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason:
-                InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness }
-                | InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
-                    witness,
-                    ..
-                },
-        } => witness.codes.clone(),
-        _ => panic!("expected builtin failure witness, got {diagnostic:?}"),
-    }
-}
-
 #[derive(Debug, PartialEq, Eq)]
 struct FrozenBuiltinFailureSite {
     role: BuiltinFailureLabelRole,
@@ -4023,15 +4006,11 @@ struct FrozenBuiltinFailureSite {
 
 #[derive(Debug, PartialEq, Eq)]
 struct BoundaryBuiltinFailureWitness {
-    codes: Vec<BuiltinErrorCode>,
     sites: Vec<FrozenBuiltinFailureSite>,
 }
 
-/// Keep exact frozen label spans beside producer-only witness codes.
-fn boundary_failure_witness(
-    failure: &BoundaryFailure,
-    producer_codes: &[BuiltinErrorCode],
-) -> BoundaryBuiltinFailureWitness {
+/// Keep exact frozen label spans for the compact boundary witness.
+fn boundary_failure_witness(failure: &BoundaryFailure) -> BoundaryBuiltinFailureWitness {
     let diagnostic = single_ast_error_view(failure);
     let facts = diagnostic
         .family_view::<InvalidFallibleHandlingView>()
@@ -4069,10 +4048,7 @@ fn boundary_failure_witness(
         })
         .collect();
 
-    BoundaryBuiltinFailureWitness {
-        codes: producer_codes.to_vec(),
-        sites,
-    }
+    BoundaryBuiltinFailureWitness { sites }
 }
 
 fn assert_recursive_witness_fixture_sites(
@@ -4171,7 +4147,7 @@ fn frozen_elided_call_hops(failure: &BoundaryFailure) -> Option<usize> {
 fn implicit_failure_self_recursive_back_edge_keeps_overflow_origin_at_both_boundaries() {
     // WHAT: the recursive branch precedes the overflow producer in source order.
     // WHY: both witness walkers must skip only the back-edge and retain the available
-    //      multiplication origin instead of reporting call-only hops with empty codes.
+    //      multiplication origin instead of reporting only call hops.
     const HELPER: &str = "helper |value I32, ready Bool| -> I32:\n\
          if ready:\n        return helper(value, ready)\n    ;\n    return value * 2\n;\n";
     const FAILURE: &str = "Failure = | message String |\n";
@@ -4183,17 +4159,10 @@ fn implicit_failure_self_recursive_back_edge_keeps_overflow_origin_at_both_bound
     // The harness lowers plain exports without public origins, so the slot carries the
     // concrete contract here; the witness walker under test is the same HIR one.
     let mut project = failure_project(&concrete_source);
-    let mut producer_codes = None;
     let messages = project
-        .failure_contract_boundary_result_with_observer(|diagnostic| {
-            producer_codes = Some(builtin_failure_codes(diagnostic));
-        })
+        .failure_contract_boundary_result()
         .expect_err("escaping overflow must be rejected at the concrete boundary");
-    let witness = boundary_failure_witness(
-        &messages,
-        &producer_codes.expect("concrete boundary witness"),
-    );
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
+    let witness = boundary_failure_witness(&messages);
     assert_recursive_witness_fixture_sites(&witness, &concrete_source, "helper");
 
     // The dormant generic boundary exercises the AST finalizer over the same helper shape.
@@ -4214,21 +4183,12 @@ fn implicit_failure_self_recursive_back_edge_keeps_overflow_origin_at_both_bound
     );
     assert_eq!(frozen_elided_call_hops(&failure), Some(0));
 
-    // Repeated runs produce the same structured witness.
+    // Repeated runs produce the same compact witness.
     let mut project = failure_project(&concrete_source);
-    let mut producer_codes = None;
     let messages = project
-        .failure_contract_boundary_result_with_observer(|diagnostic| {
-            producer_codes = Some(builtin_failure_codes(diagnostic));
-        })
+        .failure_contract_boundary_result()
         .expect_err("the repeated run must reject the same boundary");
-    assert_eq!(
-        boundary_failure_witness(
-            &messages,
-            &producer_codes.expect("repeated concrete boundary witness"),
-        ),
-        witness
-    );
+    assert_eq!(boundary_failure_witness(&messages), witness);
 }
 
 #[test]
@@ -4241,17 +4201,10 @@ fn implicit_failure_mutual_recursive_back_edge_keeps_overflow_origin_at_both_bou
         "{FAILURE}{HELPERS}boundary |value I32, ready Bool| -> I32, Failure!:\n    return first(value, ready)\n;\n"
     );
     let mut project = failure_project(&concrete_source);
-    let mut producer_codes = None;
     let messages = project
-        .failure_contract_boundary_result_with_observer(|diagnostic| {
-            producer_codes = Some(builtin_failure_codes(diagnostic));
-        })
+        .failure_contract_boundary_result()
         .expect_err("escaping overflow must be rejected at the concrete boundary");
-    let witness = boundary_failure_witness(
-        &messages,
-        &producer_codes.expect("concrete boundary witness"),
-    );
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
+    let witness = boundary_failure_witness(&messages);
     assert_recursive_witness_fixture_sites(&witness, &concrete_source, "first");
 
     let mut project = failure_project(&format!(
@@ -4272,19 +4225,10 @@ fn implicit_failure_mutual_recursive_back_edge_keeps_overflow_origin_at_both_bou
     assert_eq!(frozen_elided_call_hops(&failure), Some(0));
 
     let mut project = failure_project(&concrete_source);
-    let mut producer_codes = None;
     let messages = project
-        .failure_contract_boundary_result_with_observer(|diagnostic| {
-            producer_codes = Some(builtin_failure_codes(diagnostic));
-        })
+        .failure_contract_boundary_result()
         .expect_err("the repeated run must reject the same boundary");
-    assert_eq!(
-        boundary_failure_witness(
-            &messages,
-            &producer_codes.expect("repeated concrete boundary witness"),
-        ),
-        witness
-    );
+    assert_eq!(boundary_failure_witness(&messages), witness);
 }
 
 #[test]

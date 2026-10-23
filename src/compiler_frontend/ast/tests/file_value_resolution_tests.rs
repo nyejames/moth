@@ -22,8 +22,8 @@ use crate::compiler_frontend::ast::{
     TopLevelDeclarationTable,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, InvalidCompileTimePathReason,
-    InvalidExpressionReason, PathKind, RuleDiagnosticKind, SyntaxDiagnosticKind,
+    DiagnosticKind, DiagnosticPayload, InvalidCompileTimePathReason, InvalidExpressionReason,
+    PathKind, RuleDiagnosticKind, SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -37,8 +37,9 @@ use crate::compiler_frontend::headers::plain_markdown_prepare::{
 };
 use crate::compiler_frontend::module_compilation::FrontendOptions;
 use crate::compiler_frontend::paths::file_references::{
-    PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
-    ResolvedFileReferenceTable, ResolvedFileReferenceTarget, ResourceSourceId,
+    PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceFailure,
+    ResolvedFileReferenceOutcome, ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
+    ResourceSourceId,
 };
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::resource_identity::{
@@ -48,7 +49,9 @@ use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase};
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, FrozenIdentityHandle, LocalSpan, SourceDatabase, SourceId, SourceSpan,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -305,13 +308,15 @@ fn content_file_value_behind_child_module_boundary_surfaces_stage0_diagnostic() 
     let result = resolve_file_value_fixture(
         "@child/existing.mtf",
         PreparedFileReferenceClass::ContentSource,
-        ResolvedFileReferenceOutcome::Diagnostic(CompilerDiagnostic::invalid_compile_time_path(
-            path_fork
-                .try_intern_portable_path("child/existing.mtf", &mut boundary_strings)
-                .expect("test path fits"),
-            InvalidCompileTimePathReason::EscapesModuleBoundary,
-            None,
-        )),
+        ResolvedFileReferenceOutcome::Diagnostic(
+            ResolvedFileReferenceFailure::InvalidCompileTimePath {
+                path: path_fork
+                    .try_intern_portable_path("child/existing.mtf", &mut boundary_strings)
+                    .expect("test path fits"),
+                reason: InvalidCompileTimePathReason::EscapesModuleBoundary,
+                span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+            },
+        ),
     );
 
     assert_surfaced_stage0_boundary_diagnostic(
@@ -327,13 +332,15 @@ fn resource_file_value_behind_support_facade_surfaces_stage0_diagnostic() {
     let result = resolve_file_value_fixture(
         "@support/existing.svg",
         PreparedFileReferenceClass::ResourceFile,
-        ResolvedFileReferenceOutcome::Diagnostic(CompilerDiagnostic::invalid_compile_time_path(
-            path_fork
-                .try_intern_portable_path("support/existing.svg", &mut boundary_strings)
-                .expect("test path fits"),
-            InvalidCompileTimePathReason::EscapesModuleBoundary,
-            None,
-        )),
+        ResolvedFileReferenceOutcome::Diagnostic(
+            ResolvedFileReferenceFailure::InvalidCompileTimePath {
+                path: path_fork
+                    .try_intern_portable_path("support/existing.svg", &mut boundary_strings)
+                    .expect("test path fits"),
+                reason: InvalidCompileTimePathReason::EscapesModuleBoundary,
+                span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+            },
+        ),
     );
 
     assert_surfaced_stage0_boundary_diagnostic(

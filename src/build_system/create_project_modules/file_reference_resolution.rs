@@ -10,12 +10,11 @@
 
 use crate::builder_surface::SourceFileKindRegistry;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidCompileTimePathReason, PathKind,
-};
+use crate::compiler_frontend::compiler_messages::InvalidCompileTimePathReason;
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReference, PreparedFileReferenceClass, ResolvedFileReference,
-    ResolvedFileReferenceOutcome, ResolvedFileReferenceTarget, ResourceSourceId,
+    ResolvedFileReferenceFailure, ResolvedFileReferenceOutcome, ResolvedFileReferenceTarget,
+    ResourceSourceId,
 };
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
@@ -144,15 +143,14 @@ impl<'a> FileReferenceResolver<'a> {
             .map(|component| string_table.resolve(*component).to_owned())
             .collect::<Vec<_>>();
 
-        if let Some(mut diagnostic) =
-            invalid_components_diagnostic(&authored_components, authored_path, Some(reference.span))
+        if let Some(failure) =
+            invalid_components_failure(&authored_components, authored_path, reference.span)
         {
-            set_primary_span_from_reference(&mut diagnostic, reference);
             return Ok(ResolvedFileReference {
                 source_file,
                 path_syntax: reference.path_syntax,
                 class: reference.class,
-                outcome: ResolvedFileReferenceOutcome::Diagnostic(diagnostic),
+                outcome: ResolvedFileReferenceOutcome::Diagnostic(failure),
             });
         }
 
@@ -241,17 +239,17 @@ impl<'a> FileReferenceResolver<'a> {
                         .extension()
                         .and_then(|extension| extension.to_str())
                         .unwrap_or_default();
-                    let mut diagnostic = CompilerDiagnostic::unsupported_source_file_kind(
-                        authored_path,
-                        string_table.intern(extension),
-                        Some(reference.span),
-                    );
-                    set_primary_span_from_reference(&mut diagnostic, reference);
                     return Ok(ResolvedFileReference {
                         source_file,
                         path_syntax: reference.path_syntax,
                         class: reference.class,
-                        outcome: ResolvedFileReferenceOutcome::Diagnostic(diagnostic),
+                        outcome: ResolvedFileReferenceOutcome::Diagnostic(
+                            ResolvedFileReferenceFailure::UnsupportedSourceFileKind {
+                                path: authored_path,
+                                extension: string_table.intern(extension),
+                                span: reference.span,
+                            },
+                        ),
                     });
                 }
                 let target_source_index = self.indexed_source(consumer_module_id, &canonical)?;
@@ -394,24 +392,15 @@ impl<'a> FileReferenceResolver<'a> {
             source_file,
             path_syntax: reference.path_syntax,
             class: reference.class,
-            outcome: {
-                let mut diagnostic = CompilerDiagnostic::invalid_compile_time_path(
-                    authored_path,
+            outcome: ResolvedFileReferenceOutcome::Diagnostic(
+                ResolvedFileReferenceFailure::InvalidCompileTimePath {
+                    path: authored_path,
                     reason,
-                    Some(reference.span),
-                );
-                set_primary_span_from_reference(&mut diagnostic, reference);
-                ResolvedFileReferenceOutcome::Diagnostic(diagnostic)
-            },
+                    span: reference.span,
+                },
+            ),
         }
     }
-}
-
-fn set_primary_span_from_reference(
-    diagnostic: &mut CompilerDiagnostic,
-    reference: &PreparedFileReference,
-) {
-    diagnostic.primary_span = Some(reference.span);
 }
 
 fn resolve_physical_target_cached(
@@ -713,48 +702,46 @@ fn invalid_reason(
 ///
 /// Leading `@` is deliberately absent here: it is a parser concern — unquoted `@@` is already
 /// rejected by the parser, and quoted `"@logo.svg"` is a legal filesystem component.
-fn invalid_components_diagnostic(
+fn invalid_components_failure(
     components: &[String],
     authored_path: PathId,
-    source_span: Option<SourceSpan>,
-) -> Option<CompilerDiagnostic> {
+    span: SourceSpan,
+) -> Option<ResolvedFileReferenceFailure> {
     for component in components {
         if component == "." {
-            return Some(CompilerDiagnostic::invalid_compile_time_path(
-                authored_path,
-                InvalidCompileTimePathReason::CurrentDirectorySegment,
-                source_span,
-            ));
+            return Some(ResolvedFileReferenceFailure::InvalidCompileTimePath {
+                path: authored_path,
+                reason: InvalidCompileTimePathReason::CurrentDirectorySegment,
+                span,
+            });
         }
         if component == ".." {
-            return Some(CompilerDiagnostic::invalid_compile_time_path(
-                authored_path,
-                InvalidCompileTimePathReason::ParentDirectorySegment,
-                source_span,
-            ));
+            return Some(ResolvedFileReferenceFailure::InvalidCompileTimePath {
+                path: authored_path,
+                reason: InvalidCompileTimePathReason::ParentDirectorySegment,
+                span,
+            });
         }
         let path = Path::new(component);
         if path.is_absolute() {
-            return Some(CompilerDiagnostic::invalid_path(
-                PathKind::InvalidComponent,
-                source_span,
-            ));
+            return Some(ResolvedFileReferenceFailure::InvalidComponent { span });
         }
     }
 
     None
 }
 
-/// One retained invalid-path diagnostic for a synthesized single-file reference.
+/// One retained invalid-path failure for a synthesized single-file reference.
 fn invalid_path_outcome(
     authored_path: PathId,
     reason: InvalidCompileTimePathReason,
     reference: &PreparedFileReference,
 ) -> SingleFileReferenceOutcome {
-    let mut diagnostic =
-        CompilerDiagnostic::invalid_compile_time_path(authored_path, reason, Some(reference.span));
-    set_primary_span_from_reference(&mut diagnostic, reference);
-    SingleFileReferenceOutcome::Diagnostic(diagnostic)
+    SingleFileReferenceOutcome::Diagnostic(ResolvedFileReferenceFailure::InvalidCompileTimePath {
+        path: authored_path,
+        reason,
+        span: reference.span,
+    })
 }
 
 /// A Stage 0 outcome retained while synthetic single-file discovery is still assembling its
@@ -778,7 +765,7 @@ pub(crate) enum SingleFileReferenceOutcome {
         source: ResourceSourceId,
         owner_relative_path: PortableResourcePath,
     },
-    Diagnostic(CompilerDiagnostic),
+    Diagnostic(ResolvedFileReferenceFailure),
 }
 
 /// Physical resolver for synthetic single-file discovery.
@@ -852,12 +839,11 @@ impl<'a> SingleFileReferenceResolver<'a> {
             .iter()
             .map(|component| string_table.resolve(*component).to_owned())
             .collect::<Vec<_>>();
-        if let Some(mut diagnostic) =
-            invalid_components_diagnostic(&authored_components, authored_path, Some(reference.span))
+        if let Some(failure) =
+            invalid_components_failure(&authored_components, authored_path, reference.span)
         {
-            set_primary_span_from_reference(&mut diagnostic, reference);
             return Ok(SingleFileResolvedReference {
-                outcome: SingleFileReferenceOutcome::Diagnostic(diagnostic),
+                outcome: SingleFileReferenceOutcome::Diagnostic(failure),
                 ..result
             });
         }
@@ -950,15 +936,13 @@ impl<'a> SingleFileReferenceResolver<'a> {
                 .supports_recognized_extension(extension)
             {
                 return Ok(SingleFileResolvedReference {
-                    outcome: {
-                        let mut diagnostic = CompilerDiagnostic::unsupported_source_file_kind(
-                            authored_path,
-                            string_table.intern(extension),
-                            Some(reference.span),
-                        );
-                        set_primary_span_from_reference(&mut diagnostic, reference);
-                        SingleFileReferenceOutcome::Diagnostic(diagnostic)
-                    },
+                    outcome: SingleFileReferenceOutcome::Diagnostic(
+                        ResolvedFileReferenceFailure::UnsupportedSourceFileKind {
+                            path: authored_path,
+                            extension: string_table.intern(extension),
+                            span: reference.span,
+                        },
+                    ),
                     ..result
                 });
             }

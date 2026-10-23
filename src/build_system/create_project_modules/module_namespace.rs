@@ -27,9 +27,9 @@ use super::source_tree_index::{
 };
 
 use crate::builder_surface::SourceFileKind;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidImportPathReason, PreparedFailure,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
+use crate::compiler_frontend::compiler_messages::{InvalidImportPathReason, PreparedFailure};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -249,7 +249,7 @@ impl<'a> DirectoryDependencyResolution<'a> {
         provider: &RetainedDependencyPath,
         declaring_canonical_path: &Path,
         string_table: &mut StringTable,
-    ) -> Result<ResolvedDependency, CompilerDiagnostic> {
+    ) -> Result<ResolvedDependency, DiagnosticDraft> {
         self.namespace_set.resolve_dependency(
             provider,
             declaring_canonical_path,
@@ -282,7 +282,7 @@ impl<'a> DirectoryDependencyResolution<'a> {
         declaring_canonical_path: &Path,
         dependency_span: Option<SourceSpan>,
         string_table: &mut StringTable,
-    ) -> Result<PathBuf, CompilerDiagnostic> {
+    ) -> Result<PathBuf, DiagnosticDraft> {
         self.namespace_set.resolve_provider_target(
             provider_path,
             declaring_canonical_path,
@@ -385,7 +385,7 @@ impl ModuleNamespaceSet {
         package_prefix: Option<&str>,
         string_table: &mut StringTable,
         path_fork: &PathInternerFork,
-    ) -> Result<ResolvedDependency, CompilerDiagnostic> {
+    ) -> Result<ResolvedDependency, DiagnosticDraft> {
         let dependency_path = provider.path;
         let dependency_span = Some(provider.span);
         reject_invalid_path_components(dependency_path, dependency_span, string_table, path_fork)?;
@@ -401,13 +401,11 @@ impl ModuleNamespaceSet {
         let prefix_components = path_fork.resolve_components(dependency_path, &mut scratch);
         let source_index = source_tree_index
             .source_index_for_canonical_path(declaring_canonical_path)
-            .ok_or_else(|| {
-                CompilerDiagnostic::missing_import_target(dependency_path, dependency_span)
-            })?;
+            .ok_or_else(|| imports::missing_import_target(dependency_path, dependency_span))?;
         let SourceOwnership::Owned(consumer_module_id) =
             source_tree_index.source(source_index).ownership()
         else {
-            return Err(CompilerDiagnostic::missing_import_target(
+            return Err(imports::missing_import_target(
                 dependency_path,
                 dependency_span,
             ));
@@ -426,7 +424,7 @@ impl ModuleNamespaceSet {
         let key = portable_dependency_key(prefix_components, string_table);
 
         if namespace.is_ambiguous(&key) {
-            return Err(CompilerDiagnostic::ambiguous_import_target(
+            return Err(imports::ambiguous_import_target(
                 dependency_path,
                 dependency_span,
             ));
@@ -453,13 +451,13 @@ impl ModuleNamespaceSet {
         }
 
         if find_module_bypass_prefix(&namespace.entries, &key).is_some() {
-            return Err(CompilerDiagnostic::cross_module_import_not_exported(
+            return Err(imports::cross_module_import_not_exported(
                 dependency_path,
                 dependency_span,
             ));
         }
 
-        Err(CompilerDiagnostic::missing_import_target(
+        Err(imports::missing_import_target(
             dependency_path,
             dependency_span,
         ))
@@ -498,9 +496,9 @@ impl ModuleNamespaceSet {
         dependency_span: Option<SourceSpan>,
         resolution: &DirectoryDependencyResolution<'_>,
         string_table: &mut StringTable,
-    ) -> Result<PathBuf, CompilerDiagnostic> {
+    ) -> Result<PathBuf, DiagnosticDraft> {
         if path_contains_dotdot(provider_path, resolution.path_fork, string_table) {
-            return Err(CompilerDiagnostic::invalid_import_path(
+            return Err(imports::invalid_import_path(
                 provider_path,
                 InvalidImportPathReason::ParentDirectorySegment,
                 dependency_span,
@@ -509,15 +507,13 @@ impl ModuleNamespaceSet {
         let source_index = resolution
             .source_tree_index
             .source_index_for_canonical_path(declaring_canonical_path)
-            .ok_or_else(|| {
-                CompilerDiagnostic::missing_import_target(provider_path, dependency_span)
-            })?;
+            .ok_or_else(|| imports::missing_import_target(provider_path, dependency_span))?;
         let SourceOwnership::Owned(module_id) = resolution
             .source_tree_index
             .source(source_index)
             .ownership()
         else {
-            return Err(CompilerDiagnostic::missing_import_target(
+            return Err(imports::missing_import_target(
                 provider_path,
                 dependency_span,
             ));
@@ -544,7 +540,7 @@ impl ModuleNamespaceSet {
             string_table,
         );
         if namespace.is_ambiguous(&key) {
-            return Err(CompilerDiagnostic::ambiguous_import_target(
+            return Err(imports::ambiguous_import_target(
                 provider_path,
                 dependency_span,
             ));
@@ -557,19 +553,13 @@ impl ModuleNamespaceSet {
                 .canonical_path()
                 .to_path_buf()),
             Some(NamespaceEntry::CrossModule { .. })
-            | Some(NamespaceEntry::SameModuleSource { .. }) => {
-                Err(CompilerDiagnostic::cross_module_import_not_exported(
-                    provider_path,
-                    dependency_span,
-                ))
-            }
-            None if find_module_bypass_prefix(&namespace.entries, &key).is_some() => {
-                Err(CompilerDiagnostic::cross_module_import_not_exported(
-                    provider_path,
-                    dependency_span,
-                ))
-            }
-            None => Err(CompilerDiagnostic::missing_import_target(
+            | Some(NamespaceEntry::SameModuleSource { .. }) => Err(
+                imports::cross_module_import_not_exported(provider_path, dependency_span),
+            ),
+            None if find_module_bypass_prefix(&namespace.entries, &key).is_some() => Err(
+                imports::cross_module_import_not_exported(provider_path, dependency_span),
+            ),
+            None => Err(imports::missing_import_target(
                 provider_path,
                 dependency_span,
             )),
@@ -585,7 +575,7 @@ impl ModuleNamespaceSet {
         project_path_resolver: &ProjectPathResolver,
         string_table: &mut StringTable,
         path_fork: &PathInternerFork,
-    ) -> Result<Option<ResolvedDependency>, CompilerDiagnostic> {
+    ) -> Result<Option<ResolvedDependency>, DiagnosticDraft> {
         let dependency_span = Some(provider.span);
         reject_invalid_path_components(provider.path, dependency_span, string_table, path_fork)?;
         reject_direct_special_file_dependency(provider, string_table, path_fork)?;
@@ -612,14 +602,14 @@ impl ModuleNamespaceSet {
         consumer_module_id: ModuleId,
         local_dependency_keys: impl Iterator<Item = &'a str>,
         key: &str,
-    ) -> Result<Option<ResolvedDependency>, CompilerDiagnostic> {
+    ) -> Result<Option<ResolvedDependency>, DiagnosticDraft> {
         let dependency_path = provider.path;
         let dependency_span = Some(provider.span);
         let source_package_surface = self.find_source_package_surface(key);
         let binding_package_prefix = self.binding_package_prefix_for_key(key);
 
         if source_package_surface.is_some() && binding_package_prefix.is_some() {
-            return Err(CompilerDiagnostic::ambiguous_import_target(
+            return Err(imports::ambiguous_import_target(
                 dependency_path,
                 dependency_span,
             ));
@@ -627,7 +617,7 @@ impl ModuleNamespaceSet {
 
         if let Some(binding_prefix) = binding_package_prefix {
             if namespace_conflicts_with_package_prefix(local_dependency_keys, binding_prefix) {
-                return Err(CompilerDiagnostic::ambiguous_import_target(
+                return Err(imports::ambiguous_import_target(
                     dependency_path,
                     dependency_span,
                 ));
@@ -638,7 +628,7 @@ impl ModuleNamespaceSet {
 
         if let Some((dependency_prefix, _root_file)) = source_package_surface {
             if namespace_conflicts_with_package_prefix(local_dependency_keys, key) {
-                return Err(CompilerDiagnostic::ambiguous_import_target(
+                return Err(imports::ambiguous_import_target(
                     dependency_path,
                     dependency_span,
                 ));
@@ -653,7 +643,7 @@ impl ModuleNamespaceSet {
         }
 
         if self.is_source_package_private_path(key) {
-            return Err(CompilerDiagnostic::cross_module_import_not_exported(
+            return Err(imports::cross_module_import_not_exported(
                 dependency_path,
                 dependency_span,
             ));
@@ -934,7 +924,7 @@ fn resolve_entry(
     dependency_path: PathId,
     dependency_span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> Result<ResolvedDependency, CompilerDiagnostic> {
+) -> Result<ResolvedDependency, DiagnosticDraft> {
     match entry {
         NamespaceEntry::SameModuleSource {
             source_index,
@@ -943,7 +933,7 @@ fn resolve_entry(
             let record = index.source(*source_index);
             if !record.supported() {
                 let extension_id = string_table.intern(source_kind.extension());
-                return Err(CompilerDiagnostic::unsupported_source_file_kind(
+                return Err(imports::unsupported_source_file_kind(
                     dependency_path,
                     extension_id,
                     dependency_span,
@@ -968,9 +958,10 @@ fn resolve_entry(
                 root_file,
             })
         }
-        NamespaceEntry::SameModuleProvider { .. } => Err(
-            CompilerDiagnostic::missing_import_target(dependency_path, dependency_span),
-        ),
+        NamespaceEntry::SameModuleProvider { .. } => Err(imports::missing_import_target(
+            dependency_path,
+            dependency_span,
+        )),
     }
 }
 
@@ -979,7 +970,7 @@ fn reject_direct_special_file_dependency(
     provider: &RetainedDependencyPath,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> Result<(), CompilerDiagnostic> {
+) -> Result<(), DiagnosticDraft> {
     let source_component = path_fork
         .component(provider.path)
         .map(|component| string_table.resolve(component));
@@ -991,7 +982,7 @@ fn reject_direct_special_file_dependency(
                 && component.ends_with(".moth")
                 && component.len() > "+.moth".len())
     }) {
-        return Err(CompilerDiagnostic::direct_special_file_import(
+        return Err(imports::direct_special_file_import(
             provider.path,
             Some(provider.span),
         ));
@@ -1006,14 +997,14 @@ fn reject_invalid_path_components(
     dependency_span: Option<SourceSpan>,
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
-) -> Result<(), CompilerDiagnostic> {
+) -> Result<(), DiagnosticDraft> {
     let mut scratch = Vec::new();
     let components = path_fork.resolve_components(dependency_path, &mut scratch);
     if components
         .iter()
         .any(|component| string_table.resolve(*component) == "..")
     {
-        return Err(CompilerDiagnostic::invalid_import_path(
+        return Err(imports::invalid_import_path(
             dependency_path,
             InvalidImportPathReason::ParentDirectorySegment,
             dependency_span,
@@ -1025,10 +1016,7 @@ fn reject_invalid_path_components(
         .map(|component| string_table.resolve(*component))
         .is_some_and(|component| component == "." || component == "..")
     {
-        return Err(CompilerDiagnostic::bare_file_import(
-            dependency_path,
-            dependency_span,
-        ));
+        return Err(imports::bare_file_import(dependency_path, dependency_span));
     }
 
     Ok(())
@@ -1040,17 +1028,13 @@ fn reject_explicit_source_extension(
     dependency_span: Option<SourceSpan>,
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
-) -> Result<(), CompilerDiagnostic> {
+) -> Result<(), DiagnosticDraft> {
     if let Some(extension) = explicit_source_extension(dependency_path, string_table, path_fork) {
         let diagnostic = if extension == SourceFileKind::Moth.extension() {
-            CompilerDiagnostic::explicit_moth_extension(dependency_path, dependency_span)
+            imports::explicit_moth_extension(dependency_path, dependency_span)
         } else {
             let extension_id = string_table.intern(&extension);
-            CompilerDiagnostic::explicit_source_extension(
-                dependency_path,
-                extension_id,
-                dependency_span,
-            )
+            imports::explicit_source_extension(dependency_path, extension_id, dependency_span)
         };
         return Err(diagnostic);
     }

@@ -5,7 +5,7 @@
 //! in its independent Stage 0 boundary. Directory projects prepare
 //! owned `SourceId`s through the direct-input helper in this module. Both paths assemble
 //! `PreparedSourceInput` values for downstream compilation stages.
-//! Stage 0 returns move-only typed failures in `SourceDiscoveryError`: a plain `CompilerDiagnostic`
+//! Stage 0 returns move-only typed failures in `SourceDiscoveryError`: a plain `DiagnosticDraft`
 //! for diagnosed input and a typed `CompilerError` for infrastructure failures, plus a finalized
 //! form pairing a `PreparedFailure` with its finished `SourceDatabase`. The final boundary appends
 //! that failure with its source owner directly to the accumulator.
@@ -19,8 +19,9 @@ use crate::builder_surface::external_import_providers::registry::ExternalImportP
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DependencyClauseKind, InvalidDependencyClauseReason, PreparedFailure,
+    DependencyClauseKind, InvalidDependencyClauseReason, PreparedFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;

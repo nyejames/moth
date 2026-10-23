@@ -13,10 +13,10 @@ use crate::compiler_frontend::builtins::casts::targets::{
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
+use crate::compiler_frontend::compiler_messages::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::UnsupportedBackendFeatureReason;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, UnsupportedBackendFeatureReason,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantPayloadDefinition, TypeDefinition,
 };
@@ -52,7 +52,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// WHAT: either a user-facing diagnostic for an unsupported selected operation, or an
 /// infrastructure error if supplied compiler metadata is inconsistent.
 pub enum BackendFeatureValidationError {
-    Diagnostic(CompilerDiagnostic),
+    Diagnostic(DiagnosticDraft),
     Infrastructure(Box<CompilerError>),
 }
 
@@ -237,7 +237,7 @@ fn validate_fixed_width_scalar_values(
         return Ok(());
     };
 
-    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+    let diagnostic = types_borrows_targets::unsupported_backend_feature(
         string_table.intern(target.as_str()),
         UnsupportedBackendFeatureReason::FixedWidthScalarValues,
         occurrence.span,
@@ -284,7 +284,7 @@ fn validate_wasm_number_values(
         return Ok(());
     };
 
-    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+    let diagnostic = types_borrows_targets::unsupported_backend_feature(
         string_table.intern(target.as_str()),
         UnsupportedBackendFeatureReason::NumberValues,
         occurrence.span,
@@ -326,7 +326,7 @@ fn validate_runtime_assertion_messages(
         return Ok(());
     };
 
-    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+    let diagnostic = types_borrows_targets::unsupported_backend_feature(
         string_table.intern(target.as_str()),
         UnsupportedBackendFeatureReason::RuntimeAssertionMessages,
         message.span,
@@ -380,7 +380,7 @@ fn validate_wasm_cross_module_calls(
         BackendTarget::Wasm => "Wasm",
         BackendTarget::Js => "JavaScript",
     });
-    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+    let diagnostic = types_borrows_targets::unsupported_backend_feature(
         backend_name,
         UnsupportedBackendFeatureReason::CrossModuleCalls,
         span,
@@ -403,7 +403,7 @@ fn validate_wasm_constructor_routes(
         BackendTarget::Wasm => "Wasm",
         BackendTarget::Js => "JavaScript",
     });
-    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+    let diagnostic = types_borrows_targets::unsupported_backend_feature(
         backend_name,
         UnsupportedBackendFeatureReason::ConstructorRoutes,
         occurrence.span,
@@ -433,7 +433,7 @@ fn validate_wasm_maps(
 
     // Only the first reachable unsupported operation is reported. Unreachable helpers remain
     // valid typed HIR and do not block the build.
-    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+    let diagnostic = types_borrows_targets::unsupported_backend_feature(
         string_table.intern(target.as_str()),
         reason,
         map_use.span,
@@ -461,7 +461,7 @@ fn validate_wasm_runtime_casts(
         return Ok(());
     };
 
-    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+    let diagnostic = types_borrows_targets::unsupported_backend_feature(
         string_table.intern(target.as_str()),
         UnsupportedBackendFeatureReason::RuntimeCasts,
         runtime_cast.span,
@@ -561,7 +561,7 @@ fn validate_wasm_checked_numeric_ops(
         return Ok(());
     };
 
-    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+    let diagnostic = types_borrows_targets::unsupported_backend_feature(
         string_table.intern(target.as_str()),
         reason,
         numeric_op.span,
@@ -642,7 +642,7 @@ fn validate_wasm_float_statements(
         }
     };
 
-    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+    let diagnostic = types_borrows_targets::unsupported_backend_feature(
         string_table.intern(target.as_str()),
         reason,
         float_statement.span,
@@ -664,7 +664,7 @@ fn validate_wasm_range_step_failures(
         return Ok(());
     };
 
-    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+    let diagnostic = types_borrows_targets::unsupported_backend_feature(
         string_table.intern(target.as_str()),
         UnsupportedBackendFeatureReason::RecoverableNumericFailure,
         failure.span,
@@ -701,7 +701,7 @@ fn validate_wasm_generic_runtime_values(
         return Ok(());
     };
 
-    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+    let diagnostic = types_borrows_targets::unsupported_backend_feature(
         string_table.intern(target.as_str()),
         UnsupportedBackendFeatureReason::GenericRuntimeValues,
         occurrence.span,
@@ -752,7 +752,7 @@ fn validate_wasm_error_values(
         return Ok(());
     };
 
-    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+    let diagnostic = types_borrows_targets::unsupported_backend_feature(
         string_table.intern(target.as_str()),
         UnsupportedBackendFeatureReason::ErrorValues,
         occurrence.span,
@@ -819,7 +819,7 @@ fn validate_wasm_fallible_control_flow(
         return Ok(());
     };
 
-    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+    let diagnostic = types_borrows_targets::unsupported_backend_feature(
         string_table.intern(target.as_str()),
         UnsupportedBackendFeatureReason::FallibleControlFlow,
         occurrence.span,
@@ -890,7 +890,7 @@ fn validate_wasm_mutable_function_parameters(
             }
 
             if let Some(span) = parameter.span {
-                let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+                let diagnostic = types_borrows_targets::unsupported_backend_feature(
                     string_table.intern(target.as_str()),
                     UnsupportedBackendFeatureReason::MutableFunctionParameters,
                     Some(span),
@@ -903,7 +903,7 @@ fn validate_wasm_mutable_function_parameters(
     }
 
     if has_spanless_mutable_parameter {
-        let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+        let diagnostic = types_borrows_targets::unsupported_backend_feature(
             string_table.intern(target.as_str()),
             UnsupportedBackendFeatureReason::MutableFunctionParameters,
             None,
@@ -997,7 +997,7 @@ fn validate_wasm_mutable_local_aliases(
                 }
 
                 if let Some(span) = statement.span.or(expression.span) {
-                    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+                    let diagnostic = types_borrows_targets::unsupported_backend_feature(
                         string_table.intern(target.as_str()),
                         UnsupportedBackendFeatureReason::MutableLocalBindingAliases,
                         Some(span),
@@ -1011,7 +1011,7 @@ fn validate_wasm_mutable_local_aliases(
     }
 
     if spanless_alias {
-        let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+        let diagnostic = types_borrows_targets::unsupported_backend_feature(
             string_table.intern(target.as_str()),
             UnsupportedBackendFeatureReason::MutableLocalBindingAliases,
             None,

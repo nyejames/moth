@@ -548,5 +548,5 @@ fn dead_local_access_reports_borrow_error() {
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("dead local access should fail");
-    assert_borrow_error_kind(&error, BorrowDiagnosticKind::UseOfUninitializedLocal);
+    assert_borrow_error_kind(error, BorrowDiagnosticKind::UseOfUninitializedLocal);
 }

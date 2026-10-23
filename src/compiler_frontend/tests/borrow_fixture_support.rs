@@ -8,8 +8,12 @@ use crate::compiler_frontend::analysis::borrow_checker::{
     BorrowCheckError, BorrowCheckReport, check_borrows,
 };
 use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::InvalidMutableAccessView;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::{
+    CompactDiagnosticBagForTest, compact_bag_for_test,
+};
 use crate::compiler_frontend::compiler_messages::{
-    BorrowDiagnosticKind, DiagnosticKind, DiagnosticPayload, InvalidMutableAccessReason,
+    BorrowDiagnosticKind, DiagnosticBag, DiagnosticKind, InvalidMutableAccessReason,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::module::HirModule;
@@ -26,28 +30,37 @@ pub(crate) fn run_borrow_checker(
 }
 
 pub(crate) fn assert_borrow_error_kind(
-    error: &BorrowCheckError,
+    error: BorrowCheckError,
     expected: BorrowDiagnosticKind,
-) -> &DiagnosticPayload {
+) -> CompactDiagnosticBagForTest {
     let diagnostic = error
-        .diagnostic()
+        .into_draft_or_infrastructure()
         .expect("borrow user failure should remain a typed diagnostic");
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let view = compact
+        .first()
+        .expect("borrow user failure should compact to a typed diagnostic");
 
-    assert_eq!(diagnostic.kind, DiagnosticKind::Borrow(expected));
-
-    &diagnostic.payload
+    assert_eq!(
+        view.descriptor().code,
+        DiagnosticKind::Borrow(expected).descriptor().code
+    );
+    compact
 }
 
 pub(crate) fn assert_invalid_mutable_access_reason(
-    error: &BorrowCheckError,
+    error: BorrowCheckError,
     expected: InvalidMutableAccessReason,
 ) {
-    let payload = assert_borrow_error_kind(error, BorrowDiagnosticKind::InvalidMutableAccess);
-    let DiagnosticPayload::InvalidMutableAccess { reason, .. } = payload else {
-        panic!("expected invalid mutable access payload, found {payload:?}");
-    };
+    let compact = assert_borrow_error_kind(error, BorrowDiagnosticKind::InvalidMutableAccess);
+    let view = compact
+        .first()
+        .expect("invalid mutable access should compact to a typed diagnostic");
+    let facts = view
+        .family_view::<InvalidMutableAccessView>()
+        .expect("invalid mutable access should retain its typed family facts");
 
-    assert_eq!(*reason, expected);
+    assert_eq!(facts.reason, expected);
 }
 
 pub(crate) fn assert_infrastructure_error_contains(

@@ -14,9 +14,10 @@ use crate::compiler_frontend::build_config::BuildConfigInputSet;
 #[cfg(feature = "timers")]
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, NamingConvention,
+    DiagnosticBag, DiagnosticDraft, NamingConvention,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
@@ -40,7 +41,7 @@ fn write_directory_project(root: &Path, page_source: &str) {
 }
 
 fn build_result_with_warnings(
-    warnings: Vec<CompilerDiagnostic>,
+    warnings: Vec<DiagnosticDraft>,
     string_table: StringTable,
 ) -> BuildResult {
     let batch = PreparedDiagnosticBatch::capture_from_bag(
@@ -127,7 +128,7 @@ fn successful_build_preserves_warning_diagnostics() {
     let mut strings = StringTable::new();
     let name = strings.intern("unused_value");
     let warning =
-        CompilerDiagnostic::identifier_naming_convention(name, NamingConvention::CamelCase, None);
+        names_declarations::identifier_naming_convention(name, NamingConvention::CamelCase, None);
     let temp = tempfile::tempdir().expect("should create output directory");
     let mut build_result = build_result_with_warnings(vec![warning], strings);
     let outcome = write_build_outputs_with_plan(&mut build_result, |result| {

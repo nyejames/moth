@@ -68,6 +68,10 @@ pub enum DiagnosticLabelStyle {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum DiagnosticLabelMessage {
     PreviousDeclaration,
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     ConflictingAccess,
     ValueMovedHere,
     /// Identifies the retained resolver for a source `#Config` input used by a failed operation.

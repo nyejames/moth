@@ -18,10 +18,11 @@ use crate::compiler_frontend::build_config::{
 };
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, PreparedFailure, SourceSpanCapacityResource,
+    DiagnosticBag, PreparedFailure, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
@@ -157,8 +158,11 @@ pub(super) fn publish_compiled_module(
         .map_err(|error| match error {
             crate::compiler_frontend::symbols::path_interner::PathInternError::TableFull => {
                 let batch = PreparedDiagnosticBatch::capture_from_bag(
-                    DiagnosticBag::from(CompilerDiagnostic::source_table_capacity(
+                    DiagnosticBag::from(token_lexical::source_span_capacity(
+                        0,
+                        u32::MAX,
                         SourceSpanCapacityResource::LogicalPath,
+                        None,
                     )),
                     std::mem::take(string_table),
                     None,
@@ -381,8 +385,11 @@ impl From<SourceDatabaseError> for BoundaryPremergeFailure {
         match error {
             SourceDatabaseError::Capacity(capacity) => {
                 let batch = PreparedDiagnosticBatch::capture_from_bag(
-                    DiagnosticBag::from(CompilerDiagnostic::source_table_capacity(
+                    DiagnosticBag::from(token_lexical::source_span_capacity(
+                        0,
+                        u32::MAX,
                         capacity.resource(),
+                        None,
                     )),
                     StringTable::new(),
                     None,

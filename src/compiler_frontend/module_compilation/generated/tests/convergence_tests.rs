@@ -9,14 +9,19 @@ use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
+use crate::compiler_frontend::compiler_messages::TypeMismatchContext;
 use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::TypeMismatchView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::InvalidFallibleHandlingView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
+    TypeMismatchView, type_mismatch,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, TypeMismatchContext};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::blocks::HirBlock;
@@ -819,28 +824,93 @@ fn failure_witness_span(index: u32) -> Option<SourceSpan> {
     ))
 }
 
-fn exported_failure_witness(hir: &HirModule, report: &BorrowCheckReport) -> BuiltinFailureWitness {
-    let diagnostic = builtin_failure_diagnostic(hir, report, FunctionId(0))
+#[derive(Debug, PartialEq, Eq)]
+enum ExportedFailureOrigin {
+    Operation,
+    CompoundWriteBack { rendered_target: String },
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ExportedFailureWitness {
+    call_spans: Vec<Option<SourceSpan>>,
+    origin_span: Option<SourceSpan>,
+    origin: ExportedFailureOrigin,
+    elided_call_hops: u32,
+}
+
+fn exported_failure_witness(hir: &HirModule, report: &BorrowCheckReport) -> ExportedFailureWitness {
+    let draft = builtin_failure_diagnostic(hir, report, FunctionId(0))
         .unwrap()
         .unwrap();
-    assert_eq!(diagnostic.primary_span, failure_witness_span(0));
-    let DiagnosticPayload::InvalidFallibleHandling {
-        reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness },
-    } = diagnostic.payload
-    else {
-        panic!("expected exported builtin failure reason");
-    };
-    let mut spans: Vec<_> = witness.call_spans.iter().copied().flatten().collect();
-    spans.extend(witness.origin_span);
+    let diagnostics = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let diagnostic = diagnostics
+        .first()
+        .expect("the exported failure draft should compact");
     assert_eq!(
-        diagnostic
-            .labels
-            .iter()
-            .filter_map(|label| label.span)
-            .collect::<Vec<_>>(),
-        spans
+        diagnostic.descriptor().code,
+        "MOTH-RULE-0051",
+        "the witness remains an invalid fallible-handling diagnostic"
     );
-    *witness
+    assert!(matches!(
+        diagnostic.primary_site(),
+        SiteRef::Local(span) if Some(span) == failure_witness_span(0)
+    ));
+    assert_eq!(
+        diagnostic.reason_key(),
+        Some("invalid_fallible_handling.unhandled_builtin_failure_in_exported_function")
+    );
+    let facts = diagnostic
+        .family_view::<InvalidFallibleHandlingView>()
+        .expect("the exported failure should retain typed fallible-handling facts");
+    let elided_call_hops = u32::try_from(
+        facts
+            .count
+            .expect("the exported failure view retains its elided-hop count"),
+    )
+    .expect("the diagnostic count originated as a u32 witness value");
+
+    let mut call_spans = Vec::new();
+    let mut label_positions = Vec::new();
+    let mut origin_span = None;
+    let mut origin = ExportedFailureOrigin::Operation;
+    let string_table = StringTable::new();
+    for label in diagnostic.durable_labels() {
+        let span = match label.site {
+            SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
+            SiteRef::Absent => None,
+        };
+        if let Some(span) = span {
+            label_positions.push(span);
+        }
+        match label.message {
+            DurableLabelMessage::BuiltinFailureCall => call_spans.push(span),
+            DurableLabelMessage::BuiltinFailureOrigin => {
+                origin_span = span;
+                origin = ExportedFailureOrigin::Operation;
+            }
+            DurableLabelMessage::BuiltinWriteBackOrigin { target_type } => {
+                origin_span = span;
+                origin = ExportedFailureOrigin::CompoundWriteBack {
+                    rendered_target: diagnostic.types().display_for_render(
+                        target_type,
+                        &string_table,
+                        None,
+                    ),
+                };
+            }
+            _ => panic!("unexpected label role on builtin failure witness"),
+        }
+    }
+    let mut expected_label_positions: Vec<_> = call_spans.iter().copied().flatten().collect();
+    expected_label_positions.extend(origin_span);
+    assert_eq!(label_positions, expected_label_positions);
+
+    ExportedFailureWitness {
+        call_spans,
+        origin_span,
+        origin,
+        elided_call_hops,
+    }
 }
 
 #[test]
@@ -902,10 +972,6 @@ fn builtin_failure_witness_resolves_local_private_and_generated_hops_in_order() 
         (4..7).map(failure_witness_span).collect::<Vec<_>>()
     );
     assert_eq!(witness.origin_span, failure_witness_span(7));
-    assert_eq!(
-        witness.codes,
-        hir.function_failure_facts[&FunctionId(3)].contributors[0].codes
-    );
     assert_eq!(witness.elided_call_hops, 0);
 }
 
@@ -947,7 +1013,6 @@ fn builtin_failure_witness_keeps_three_calls_and_origin_after_elided_middle_hops
         (6..9).map(failure_witness_span).collect::<Vec<_>>()
     );
     assert_eq!(witness.origin_span, failure_witness_span(11));
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
     assert_eq!(witness.elided_call_hops, 2);
 }
 
@@ -987,7 +1052,6 @@ fn builtin_failure_witness_skips_recursive_back_edge_to_reach_later_origin() {
     let witness = exported_failure_witness(&hir, &report);
     assert_eq!(witness.call_spans, vec![failure_witness_span(2)]);
     assert_eq!(witness.origin_span, failure_witness_span(4));
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
     assert_eq!(witness.elided_call_hops, 0);
 }
 
@@ -1038,7 +1102,6 @@ fn builtin_failure_witness_skips_mutual_recursion_to_reach_later_origin() {
     let witness = exported_failure_witness(&hir, &report);
     assert_eq!(witness.call_spans, vec![failure_witness_span(2)]);
     assert_eq!(witness.origin_span, failure_witness_span(4));
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
     assert_eq!(witness.elided_call_hops, 0);
 }
 
@@ -1092,9 +1155,12 @@ fn builtin_failure_witness_expands_each_recursive_body_once_before_late_origin()
     assert_eq!(entered.len(), BODY_COUNT as usize + 1);
     assert_eq!(witness.call_spans, vec![failure_witness_span(1)]);
     assert_eq!(witness.origin_span, failure_witness_span(2));
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
     assert_eq!(witness.elided_call_hops, 0);
-    assert_eq!(exported_failure_witness(&hir, &report), witness);
+    let exported = exported_failure_witness(&hir, &report);
+    assert_eq!(exported.call_spans, witness.call_spans);
+    assert_eq!(exported.origin_span, witness.origin_span);
+    assert_eq!(exported.origin, ExportedFailureOrigin::Operation);
+    assert_eq!(exported.elided_call_hops, witness.elided_call_hops);
 }
 
 #[test]
@@ -1144,7 +1210,6 @@ fn builtin_failure_witness_never_classifies_candidates_after_an_early_terminal_l
         vec![failure_witness_span(1), failure_witness_span(2)]
     );
     assert_eq!(witness.origin_span, None);
-    assert!(witness.codes.is_empty());
 }
 
 #[test]
@@ -1207,7 +1272,6 @@ fn builtin_failure_witness_stops_at_cross_module_summary_and_requires_that_summa
     let witness = exported_failure_witness(&hir, &report);
     assert_eq!(witness.call_spans, vec![failure_witness_span(1)]);
     assert_eq!(witness.origin_span, None);
-    assert!(witness.codes.is_empty());
     assert_eq!(witness.elided_call_hops, 0);
 
     hir.imported_call_summaries.remove(&foreign);
@@ -1257,7 +1321,6 @@ fn builtin_failure_witness_stops_at_unavailable_call_before_later_origin() {
         vec![failure_witness_span(2), failure_witness_span(3)]
     );
     assert_eq!(witness.origin_span, None);
-    assert!(witness.codes.is_empty());
     assert_eq!(witness.elided_call_hops, 0);
 }
 
@@ -1614,9 +1677,11 @@ fn builtin_failure_witness_writeback_priority_is_local_to_its_arithmetic_at_each
             assert_eq!(
                 witness.origin,
                 if earlier {
-                    BuiltinFailureOriginKind::Operation
+                    ExportedFailureOrigin::Operation
                 } else {
-                    BuiltinFailureOriginKind::CompoundWriteBack { target: TypeId(8) }
+                    ExportedFailureOrigin::CompoundWriteBack {
+                        rendered_target: "TypeId(8)".to_owned(),
+                    }
                 }
             );
             assert_eq!(witness.call_spans.len(), usize::from(private_hop));
@@ -1669,13 +1734,15 @@ fn builtin_failure_witness_skipped_back_edge_keeps_writeback_origin() {
     assert_eq!(witness.origin_span, failure_witness_span(6));
     assert_eq!(
         witness.origin,
-        BuiltinFailureOriginKind::CompoundWriteBack { target: TypeId(8) }
+        ExportedFailureOrigin::CompoundWriteBack {
+            rendered_target: "TypeId(8)".to_owned(),
+        }
     );
     assert_eq!(witness.elided_call_hops, 0);
 }
 // `builtin_failure_witness_keeps_three_calls_and_origin_after_elided_middle_hops`
 // above owns the exact synthetic witness assertions (ordered call spans, origin
-// span, typed codes, elided count). D02 determinism over real source lives with
+// span, and elided count). D02 determinism over real source lives with
 // the frontend pipeline owner in
 // `src/build_system/tests/compile_project_frontend_tests/package_materialisation_tests.rs`
 // (`exported_private_chain_witness_rendering_is_stable_across_repeated_compilation`),
@@ -1900,7 +1967,6 @@ fn module_and_single_file_results_reconverge_recursive_failure_facts_after_servi
                 .span)
         );
         assert_eq!(witness.origin_span, Some(origin_span));
-        assert_eq!(witness.codes, [BuiltinErrorCode::IntOverflow]);
         assert_eq!(witness.elided_call_hops, 1);
         assert!(!witness.call_spans.contains(&Some(recursive_span)));
 
@@ -1937,7 +2003,7 @@ fn module_and_single_file_results_reconverge_recursive_failure_facts_after_servi
             .expect("the typed producer survives the service")
             .error_return
             .expect("load retains its custom failure channel");
-        let diagnostic = CompilerDiagnostic::type_mismatch(
+        let diagnostic = type_mismatch(
             custom_type,
             custom_type,
             TypeMismatchContext::Assignment,

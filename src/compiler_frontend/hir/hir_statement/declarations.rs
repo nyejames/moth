@@ -8,7 +8,7 @@
 //!
 //! `CompilerError` / `return_hir_transformation_error!` in this module means an internal
 //! HIR transformation or lowering invariant failure only. Normal user-facing source failures
-//! must be emitted as `CompilerDiagnostic` from AST or earlier stages.
+//! must be emitted during AST processing or earlier.
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::source::SourceSpan;
 

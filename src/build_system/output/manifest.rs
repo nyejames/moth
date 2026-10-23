@@ -11,10 +11,10 @@ use crate::build_system::utils::{
     file_error, file_error_with_rejection_reason, should_skip_unchanged_write,
 };
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, InvalidConfigReason, InvalidOutputFolderReason,
-    PreparedFailure,
+    DiagnosticBag, InvalidConfigReason, InvalidOutputFolderReason, PreparedFailure,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -858,7 +858,7 @@ fn manifest_owner_conflict_failure(
         active_builder: root_string_table.intern(active_owner.builder.manifest_name()),
         active_profile: root_string_table.intern(build_profile_manifest_name(active_owner.profile)),
     };
-    let diagnostic = CompilerDiagnostic::invalid_config_reason(None, reason, setting_span);
+    let diagnostic = project_config::invalid_config_reason(None, reason, setting_span);
     PreparedDiagnosticBatch::capture_from_root_string_table(
         DiagnosticBag::from(diagnostic),
         root_string_table,

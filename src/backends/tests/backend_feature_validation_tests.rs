@@ -14,8 +14,12 @@ use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::UnsupportedBackendFeatureView;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::{
+    CompactDiagnosticBagForTest, compact_bag_for_test,
+};
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticPayload, RuleDiagnosticKind, UnsupportedBackendFeatureReason,
+    DiagnosticBag, DiagnosticDraft, UnsupportedBackendFeatureReason,
 };
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
@@ -143,6 +147,7 @@ fn wasm_feature_validation_matches_explicit_numeric_cast_cases() {
                 panic!("cast gate returned an infrastructure error: {error:?}")
             }
             (Some(reason), Err(BackendFeatureValidationError::Diagnostic(diagnostic))) => {
+                let diagnostic = compact_backend_diagnostic(diagnostic);
                 assert_unsupported_feature(&diagnostic, &mut string_table, reason);
             }
             (Some(reason), Ok(())) => {
@@ -183,6 +188,7 @@ fn wasm_feature_validation_rejects_reachable_mutable_parameters() {
     let BackendFeatureValidationError::Diagnostic(diagnostic) = error else {
         panic!("mutable-parameter gate returned an infrastructure error");
     };
+    let diagnostic = compact_backend_diagnostic(diagnostic);
     assert_unsupported_feature(
         &diagnostic,
         &mut string_table,
@@ -2077,7 +2083,9 @@ fn backend_feature_validation_rejects_fixed_width_scalars_only_for_wasm() {
                         "Wasm should reject a reachable optional collection of fixed-width values",
                     );
                     let diagnostic = match error {
-                        BackendFeatureValidationError::Diagnostic(diagnostic) => diagnostic,
+                        BackendFeatureValidationError::Diagnostic(diagnostic) => {
+                            compact_backend_diagnostic(diagnostic)
+                        }
                         BackendFeatureValidationError::Infrastructure(_) => {
                             panic!("expected a user-facing Wasm Rule diagnostic")
                         }
@@ -2454,7 +2462,9 @@ fn wasm_gate_rejects_reachable_runtime_assertion_messages() {
         },
         &mut string_table,
     ) {
-        Err(BackendFeatureValidationError::Diagnostic(diagnostic)) => diagnostic,
+        Err(BackendFeatureValidationError::Diagnostic(diagnostic)) => {
+            compact_backend_diagnostic(diagnostic)
+        }
         Err(BackendFeatureValidationError::Infrastructure(error)) => {
             panic!("expected a target diagnostic, got infrastructure error: {error:?}")
         }
@@ -2548,12 +2558,37 @@ fn wasm_feature_validation_ignores_unreachable_runtime_assertion_messages() {
     );
 }
 
+struct BackendFeatureDiagnostic {
+    compact: CompactDiagnosticBagForTest,
+    primary_span: Option<SourceSpan>,
+}
+
+fn compact_backend_diagnostic(diagnostic: DiagnosticDraft) -> BackendFeatureDiagnostic {
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let primary_span = match compact
+        .first()
+        .expect("unsupported-feature diagnostic should be compacted")
+        .primary_site()
+    {
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent => None,
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Local(span)
+        | crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
+            span,
+            ..
+        } => Some(span),
+    };
+    BackendFeatureDiagnostic {
+        compact,
+        primary_span,
+    }
+}
+
 fn wasm_feature_validation_diagnostic(
     module: &HirModule,
     type_environment: &TypeEnvironment,
     string_table: &mut StringTable,
     expectation: &str,
-) -> crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
+) -> BackendFeatureDiagnostic {
     feature_validation_diagnostic(
         module,
         type_environment,
@@ -2569,7 +2604,7 @@ fn feature_validation_diagnostic(
     string_table: &mut StringTable,
     target: BackendTarget,
     expectation: &str,
-) -> crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
+) -> BackendFeatureDiagnostic {
     let reachability = test_reachability(module);
     let error = validate_hir_backend_feature_support(
         BackendFeatureValidationInput {
@@ -2583,7 +2618,9 @@ fn feature_validation_diagnostic(
     .expect_err(expectation);
 
     match error {
-        BackendFeatureValidationError::Diagnostic(diagnostic) => diagnostic,
+        BackendFeatureValidationError::Diagnostic(diagnostic) => {
+            compact_backend_diagnostic(diagnostic)
+        }
         BackendFeatureValidationError::Infrastructure(_) => {
             panic!("expected a user-facing Rule diagnostic, not an infrastructure error")
         }
@@ -2605,7 +2642,7 @@ fn test_reachability(
 }
 
 fn assert_unsupported_feature(
-    diagnostic: &crate::compiler_frontend::compiler_messages::CompilerDiagnostic,
+    diagnostic: &BackendFeatureDiagnostic,
     string_table: &mut StringTable,
     expected_reason: UnsupportedBackendFeatureReason,
 ) {
@@ -2618,26 +2655,21 @@ fn assert_unsupported_feature(
 }
 
 fn assert_unsupported_feature_for_target(
-    diagnostic: &crate::compiler_frontend::compiler_messages::CompilerDiagnostic,
+    diagnostic: &BackendFeatureDiagnostic,
     string_table: &mut StringTable,
     target: BackendTarget,
     expected_reason: UnsupportedBackendFeatureReason,
 ) {
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnsupportedBackendFeature)
-    );
-
-    let DiagnosticPayload::UnsupportedBackendFeature {
-        backend_name,
-        reason,
-    } = &diagnostic.payload
-    else {
-        panic!("expected UnsupportedBackendFeature payload");
-    };
-
-    assert_eq!(*backend_name, string_table.intern(target.as_str()));
-    assert_eq!(*reason, expected_reason);
+    let diagnostic = diagnostic
+        .compact
+        .first()
+        .expect("unsupported-feature diagnostic should be compacted");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0064");
+    let facts = diagnostic
+        .family_view::<UnsupportedBackendFeatureView>()
+        .expect("unsupported-feature diagnostic should retain typed facts");
+    assert_eq!(facts.backend_name, string_table.intern(target.as_str()));
+    assert_eq!(facts.reason, expected_reason);
 }
 
 fn assertion_message_module(

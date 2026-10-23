@@ -108,9 +108,14 @@ ACTIVE_PLAN:
 - Execution order: Phase 4 runs as the steps in `PHASE_4_EXECUTION_ORDER` below. The slice
   checklists remain the acceptance contract. Only their order and grouping changed, under the
   architecture document's repository-discovered corrections rule.
-- NEXT_SUBSTEP: P4.6b, the producer sweep: producer groups construct family drafts directly,
-  top-down (consumers before callees), at most two compile-heavy groups at once, then P4.6z
-  deletes the legacy model, adapter and docs remnants (4I). P4.6a is accepted in "Phase 4 P4.6a:
+- NEXT_SUBSTEP: P4.6b wave W2 (AST: `compiler_frontend/ast/**`), then W3 (headers,
+  declaration syntax, `builtins`, `traits`, `type_coercion`, `utilities`, `datatypes`, tokenizer,
+  paths, source, symbols and the remaining leaves), then P4.6z deletes the legacy model, adapter
+  and docs remnants (4I). W1 is accepted in "Phase 4 P4.6b W1: build, backend, project and
+  module-compilation producers construct drafts": those producers and the integration-test roots
+  build family drafts; Stage 0 file-reference rows store small semantic failure facts and the AST
+  emits the diagnostic per read; the never-read `ResolvedExternalImport.diagnostics` and the
+  never-read `BuiltinFailureWitness::codes` are deleted. P4.6a is accepted in "Phase 4 P4.6a:
   draft-only diagnostic bag": `DiagnosticBag` stores only move-only `DiagnosticDraft`s; the only
   legacy ingress is the temporary consuming `From<CompilerDiagnostic> for DiagnosticDraft` in
   `legacy_adapter.rs`, so `?` and `push` convert not-yet-migrated producers; family constructors
@@ -253,11 +258,11 @@ PHASE_4_MIGRATION_STATE:
   parity test and `diagnostics/tests/family_inventory_tests.rs` compare them with the schema, and
   P4.6 deletes all of them with the kind inventory.
 - Legacy data with no compact home: rows keep every legacy field that fits in four words plus one
-  extra. The exceptions are `BuiltinFailureWitness::codes` (never rendered), the
-  `InvalidAssignmentTarget` `target_type` and the unread outer key and folder of some
-  `InvalidConfig` reasons (dropped under the overflow rule). P4.6's producer sweep does not move
-  them into drafts; it deletes a field only where the legacy payload was its last reader
-  (failure classification still reads the witness codes).
+  extra. The exceptions are the `InvalidAssignmentTarget` `target_type` and the unread outer key
+  and folder of some `InvalidConfig` reasons (dropped under the overflow rule). P4.6's producer
+  sweep does not move them into drafts; it deletes a field only where the legacy payload was its
+  last reader. `BuiltinFailureWitness::codes` was such a field and W1 deleted it; failure
+  classification reads `ImplicitFailureContributor::codes`.
 - Foreign-site contexts: the diagnostic store still keeps a deduplicated
   `Vec<FrozenIdentityHandle>` behind its 8-byte cold rows after P4.5; P4.6 replaces it with the
   report-owned context references of the frozen report.

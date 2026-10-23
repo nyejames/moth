@@ -8,7 +8,7 @@
 use super::compiler_errors::{CompilerError, InfrastructureErrors};
 use super::diagnostics::draft::DiagnosticDraft;
 use super::prepared_batch::PreparedDiagnosticBatch;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::symbols::path_interner::{PathIdRemap, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
@@ -135,7 +135,7 @@ impl PreparedFailure {
 
     /// Preserve prior warnings before a diagnosed failure, in their original production order.
     pub(crate) fn with_diagnostic_and_warnings<D>(
-        diagnostic: CompilerDiagnostic,
+        diagnostic: impl Into<DiagnosticDraft>,
         warning_drafts: Vec<D>,
         string_table: &StringTable,
         environment: Option<&TypeEnvironment>,

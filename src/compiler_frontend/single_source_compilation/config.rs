@@ -31,6 +31,9 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeIdentity, CanonicalTypeProjectionContext, NominalOriginResolver,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    names_declarations, project_config, token_lexical,
+};
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticBag, DiagnosticDraft, DiagnosticKind,
@@ -161,8 +164,11 @@ pub(crate) fn compile_config_source(
         Err(PathInternError::TableFull) => {
             return ConfigCompilationOutcome {
                 result: Err(PreparedFailure::capture_diagnosed(
-                    DiagnosticBag::from(CompilerDiagnostic::source_table_capacity(
+                    DiagnosticBag::from(token_lexical::source_span_capacity(
+                        0,
+                        u32::MAX,
                         SourceSpanCapacityResource::LogicalPath,
+                        None,
                     )),
                     string_table.clone(),
                     None,
@@ -607,7 +613,7 @@ fn project_authored_config_declarations(
                             InvalidConfigReason::ConfigQualifierFixedField,
                             direct_field_spans.get(index).copied().flatten(),
                         ),
-                        Vec::<CompilerDiagnostic>::new(),
+                        Vec::<DiagnosticDraft>::new(),
                         string_table,
                         None,
                         || None,
@@ -822,12 +828,11 @@ fn prepare_config_file(
         find_invalid_config_qualifier_spacing_in_cursor(cursor, string_table, span_builder)
     };
     if let Some(marker_span) = marker_span {
-        let mut diagnostic = CompilerDiagnostic::common_syntax_mistake(
+        let diagnostic = token_lexical::common_syntax_mistake(
             CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing,
             Some(marker_span),
         );
-        diagnostic
-            .capture_preparation_span(request.file_id)
+        validate_preparation_diagnostic_span(&diagnostic, request.file_id)
             .map_err(PreparedFailure::from)?;
         return Err(capture_config_diagnostics(
             DiagnosticBag::from(diagnostic),
@@ -868,24 +873,22 @@ fn prepare_config_file(
 
     let mut diagnosed = DiagnosticBag::new();
     for dependency_clause in &output.file_dependency_clauses {
-        let mut diagnostic = config_diagnostic(
+        let diagnostic = config_diagnostic(
             None,
             InvalidConfigReason::ConfigImportUnsupported,
             Some(dependency_clause.dependency.span),
         );
-        diagnostic
-            .capture_preparation_span(request.file_id)
+        validate_preparation_diagnostic_span(&diagnostic, request.file_id)
             .map_err(PreparedFailure::from)?;
         diagnosed.push(diagnostic);
     }
     for file_reference in output.structural_file_references.iter() {
-        let mut diagnostic = config_diagnostic(
+        let diagnostic = config_diagnostic(
             None,
             InvalidConfigReason::FileValuePathUnsupported,
             Some(file_reference.span),
         );
-        diagnostic
-            .capture_preparation_span(request.file_id)
+        validate_preparation_diagnostic_span(&diagnostic, request.file_id)
             .map_err(PreparedFailure::from)?;
         diagnosed.push(diagnostic);
     }
@@ -973,13 +976,12 @@ fn validate_authored_config_surface(
         };
 
         if let Some(reason) = reason {
-            let mut diagnostic = config_diagnostic(
+            let diagnostic = config_diagnostic(
                 path_fork.component(header.declaration_path),
                 reason,
                 header.name_span,
             );
-            diagnostic
-                .capture_preparation_span(authored_file_id)
+            validate_preparation_diagnostic_span(&diagnostic, authored_file_id)
                 .map_err(PreparedFailure::from)?;
             errors.push(diagnostic);
         }
@@ -1006,10 +1008,11 @@ fn classify_header_diagnostics(bag: DiagnosticBag, authored_file_id: SourceId) -
 }
 
 /// Config displays one key label for duplicates, retaining its captured authored span.
-fn config_duplicate_diagnostic(span: Option<SourceSpan>) -> CompilerDiagnostic {
+fn config_duplicate_diagnostic(span: Option<SourceSpan>) -> DiagnosticDraft {
     config_diagnostic(None, InvalidConfigReason::DuplicateKey, span)
 }
 
+/// Classifies the W2 header parser's legacy diagnostic before crossing into config draft ownership.
 fn is_duplicate_config_header_error(diagnostic: &CompilerDiagnostic) -> bool {
     matches!(
         diagnostic.kind,
@@ -1018,18 +1021,39 @@ fn is_duplicate_config_header_error(diagnostic: &CompilerDiagnostic) -> bool {
 }
 
 fn is_authored_config_duplicate(diagnostic: &DiagnosticDraft, authored_file_id: SourceId) -> bool {
-    diagnostic.code() == DiagnosticKind::Rule(RuleDiagnosticKind::DuplicateDeclaration).code()
+    diagnostic.code() == names_declarations::DUPLICATE_DECLARATION.descriptor().code
         && diagnostic
             .primary_span()
             .is_some_and(|span| span.source() == authored_file_id)
+}
+
+fn validate_preparation_diagnostic_span(
+    diagnostic: &DiagnosticDraft,
+    source: SourceId,
+) -> Result<(), CompilerError> {
+    let foreign_primary = diagnostic
+        .primary_span()
+        .is_some_and(|span| span.source() != source);
+    let foreign_label = (0..diagnostic.label_count()).any(|index| {
+        diagnostic
+            .label_span(index)
+            .is_some_and(|span| span.source() != source)
+    });
+    if foreign_primary || foreign_label {
+        Err(CompilerError::compiler_error(
+            "preparation diagnostic changed source domains",
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 fn config_diagnostic(
     key: Option<StringId>,
     reason: InvalidConfigReason,
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_config_reason(key, reason, span)
+) -> DiagnosticDraft {
+    project_config::invalid_config_reason(key, reason, span)
 }
 
 #[cfg(test)]

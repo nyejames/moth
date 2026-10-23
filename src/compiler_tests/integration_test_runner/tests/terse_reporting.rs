@@ -20,11 +20,14 @@ use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
 use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, names_declarations,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
-    NameNamespace, NamingConvention, RuleDiagnosticKind,
+    DiagnosticBag, DiagnosticSeverity, NamingConvention,
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
@@ -173,24 +176,9 @@ fn format_single_case(
 fn error_and_warning_messages() -> BoundaryFailure {
     let mut string_table = StringTable::new();
     let name = string_table.intern("missing_name");
-    let error_diag = CompilerDiagnostic::with_severity(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownValueName),
-        DiagnosticSeverity::Error,
-        None,
-        DiagnosticPayload::UnknownName {
-            name,
-            namespace: NameNamespace::Value,
-        },
-    );
-    let warning_diag = CompilerDiagnostic::with_severity(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownValueName),
-        DiagnosticSeverity::Warning,
-        None,
-        DiagnosticPayload::UnknownName {
-            name,
-            namespace: NameNamespace::Value,
-        },
-    );
+    let error_diag = names_declarations::unknown_value_name(name, None);
+    let warning_diag = names_declarations::unknown_value_name(name, None)
+        .with_severity(DiagnosticSeverity::Warning);
     let batch = PreparedDiagnosticBatch::capture_from_bag(
         DiagnosticBag::from_diagnostics(vec![error_diag, warning_diag]),
         string_table,
@@ -203,10 +191,7 @@ fn error_and_warning_messages() -> BoundaryFailure {
     accumulator.finish(InstallMode::Frozen)
 }
 
-fn build_result_with_warning(
-    warning: CompilerDiagnostic,
-    string_table: StringTable,
-) -> BuildResult {
+fn build_result_with_warning(warning: DiagnosticDraft, string_table: StringTable) -> BuildResult {
     BuildResult {
         project: Project {
             output_files: vec![OutputFile::new(
@@ -298,7 +283,7 @@ fn terse_build_result_warning_uses_donor_context_after_terminal_finalization() {
     let mut span_builder = ExtendedSpanBuilder::new();
     let local_span =
         LocalSpan::exact(0, 1, &mut span_builder).expect("warning span should fit inline");
-    let warning = CompilerDiagnostic::unreachable_match_arm(Some(SourceSpan::new(
+    let warning = choices_control_flow::unreachable_match_arm(Some(SourceSpan::new(
         package_source_id,
         local_span,
     )))
@@ -469,7 +454,7 @@ fn terse_build_result_warnings_render_when_show_warnings() {
     let mut string_table = StringTable::new();
     let name = string_table.intern("unused_value");
     let warning =
-        CompilerDiagnostic::identifier_naming_convention(name, NamingConvention::CamelCase, None);
+        names_declarations::identifier_naming_convention(name, NamingConvention::CamelCase, None);
     let build_result = build_result_with_warning(warning, string_table);
 
     let case = expected_failure_case("unexpected_build", BackendId::Html);

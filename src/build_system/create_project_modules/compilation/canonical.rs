@@ -13,9 +13,11 @@ use crate::compiler_frontend::build_config::{
     BuilderConfigGlobalSet, ResolvedBuildConfigMap,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, InvalidDependencyClauseReason, PreparedFailure,
+    DiagnosticBag, InvalidDependencyClauseReason, PreparedFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
@@ -236,7 +238,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
 /// provider binding or AST reachability, enforces the package boundary for every declaration.
 fn facade_project_globals_dependency(
     prepared: &PreparedModule,
-) -> Result<Option<CompilerDiagnostic>, CompilerError> {
+) -> Result<Option<DiagnosticDraft>, CompilerError> {
     let active_origin = prepared
         .semantic
         .source_module_origins
@@ -263,7 +265,7 @@ fn facade_project_globals_dependency(
                 &prepared.semantic.path_fork,
                 &prepared.semantic.string_table,
             ) {
-                let diagnostic = CompilerDiagnostic::invalid_dependency_clause(
+                let diagnostic = project_config::invalid_dependency_clause(
                     clause.binding.clause_kind(),
                     InvalidDependencyClauseReason::ProjectGlobalsFacadeDependencyNotAllowed,
                     Some(clause.dependency.span),

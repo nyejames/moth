@@ -20,9 +20,9 @@ use crate::builder_surface::config_schema::{
 };
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticLabel, InvalidConfigReason, InvalidOutputFolderReason,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::{InvalidConfigReason, InvalidOutputFolderReason};
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, PublicConstTemplate, PublicConstTemplateKind, PublicConstTemplatePiece,
     PublicFoldedField, PublicFoldedValue,
@@ -45,7 +45,7 @@ use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug)]
 pub(super) enum ConfigApplyError {
-    Diagnostics(Vec<CompilerDiagnostic>),
+    Diagnostics(Vec<DiagnosticDraft>),
     Compiler(CompilerError),
 }
 
@@ -226,7 +226,7 @@ fn validate_and_apply_project_record(
     project_schema: &ConfigSchema,
     field_indexes: &SchemaFieldIndexes,
     string_table: &mut StringTable,
-    errors: &mut Vec<CompilerDiagnostic>,
+    errors: &mut Vec<DiagnosticDraft>,
 ) {
     let span = declaration.span;
     let view = ConfigSchemaView {
@@ -255,7 +255,7 @@ fn apply_project_record_fields(
     config: &mut Config,
     fields: Vec<ValidatedRecordField>,
     string_table: &mut StringTable,
-) -> Result<(), Vec<CompilerDiagnostic>> {
+) -> Result<(), Vec<DiagnosticDraft>> {
     let mut errors = Vec::new();
     config.extra_project_fields.clear();
 
@@ -339,7 +339,7 @@ fn assign_project_name(
     value: String,
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> Result<(), CompilerDiagnostic> {
+) -> Result<(), DiagnosticDraft> {
     if value.is_empty() || !is_identifier(&value) {
         return Err(config_diagnostic(
             Some(string_table.intern("name")),
@@ -365,7 +365,7 @@ fn validate_and_apply_named_section(
     section: &NamedConfigSectionSchema,
     field_indexes: &SchemaFieldIndexes,
     string_table: &mut StringTable,
-    errors: &mut Vec<CompilerDiagnostic>,
+    errors: &mut Vec<DiagnosticDraft>,
 ) -> Result<(), CompilerError> {
     let span = declaration.span;
     let view = ConfigSchemaView {
@@ -499,7 +499,7 @@ struct ConfigSchemaView<'a> {
 struct ValueDiagnosticContext<'a> {
     span: Option<SourceSpan>,
     string_table: &'a mut StringTable,
-    errors: &'a mut Vec<CompilerDiagnostic>,
+    errors: &'a mut Vec<DiagnosticDraft>,
 }
 
 /// A config value that has been validated against its schema field.
@@ -999,7 +999,7 @@ fn validate_template_const_loop_iteration_limit(
     value: FixedScalarValue,
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> Result<usize, Vec<CompilerDiagnostic>> {
+) -> Result<usize, Vec<DiagnosticDraft>> {
     // The project schema guarantees an exact I32 before applying the resource bound.
     debug_assert_eq!(value.scalar(), FixedScalar::I32);
     let value = value
@@ -1036,8 +1036,8 @@ fn config_diagnostic(
     key: Option<StringId>,
     reason: InvalidConfigReason,
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_config_reason(key, reason, span)
+) -> DiagnosticDraft {
+    project_config::invalid_config_reason(key, reason, span)
 }
 
 // -------------------------
@@ -1055,7 +1055,7 @@ fn config_diagnostic(
 pub(crate) fn validate_directory_output_settings(
     config: &Config,
     string_table: &mut StringTable,
-) -> Result<ValidatedDirectoryOutputSettings, Vec<CompilerDiagnostic>> {
+) -> Result<ValidatedDirectoryOutputSettings, Vec<DiagnosticDraft>> {
     let mut errors = Vec::new();
 
     let project_root = &config.entry_dir;
@@ -1160,7 +1160,7 @@ fn validate_one_output_folder(
     resolved_entry_root: Option<&Path>,
     config: &Config,
     string_table: &mut StringTable,
-    errors: &mut Vec<CompilerDiagnostic>,
+    errors: &mut Vec<DiagnosticDraft>,
 ) -> Option<ValidatedOutputFolder> {
     let span = config.setting_span(key);
 
@@ -1205,7 +1205,7 @@ fn validate_output_folders_distinct(
     release_setting: &EffectiveOutputSetting,
     config: &Config,
     string_table: &mut StringTable,
-    errors: &mut Vec<CompilerDiagnostic>,
+    errors: &mut Vec<DiagnosticDraft>,
 ) {
     // Both folders passed classification, so their relative paths are guaranteed valid.
     let dev_identity = output_path_identity(&dev.relative_path)
@@ -1219,7 +1219,7 @@ fn validate_output_folders_distinct(
         .is_some_and(|(dev_root, release_root)| dev_root == release_root);
 
     if dev_identity == release_identity || canonical_roots_match {
-        let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
+        let mut diagnostic = project_config::invalid_config_reason(
             Some(string_table.intern(dev_setting.key)),
             InvalidConfigReason::OutputFoldersNotDistinct {
                 dev_folder: string_table.intern(&dev_setting.folder.to_string_lossy()),
@@ -1228,9 +1228,7 @@ fn validate_output_folders_distinct(
             config.setting_span(dev_setting.key),
         );
         if let Some(release_span) = config.setting_span(release_setting.key) {
-            diagnostic
-                .labels
-                .push(DiagnosticLabel::secondary(Some(release_span), None));
+            diagnostic = diagnostic.with_label(Some(release_span), None);
         }
         errors.push(diagnostic);
     }
@@ -1241,7 +1239,7 @@ fn assign_entry_root(
     value: String,
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> Result<(), Vec<CompilerDiagnostic>> {
+) -> Result<(), Vec<DiagnosticDraft>> {
     if entry_root_escapes_project(&value, &config.entry_dir) {
         return Err(vec![config_diagnostic(
             Some(string_table.intern("entry_root")),
@@ -1301,8 +1299,8 @@ fn output_folder_diagnostic(
     reason: InvalidOutputFolderReason,
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_config_reason(
+) -> DiagnosticDraft {
+    project_config::invalid_config_reason(
         Some(string_table.intern(key)),
         InvalidConfigReason::InvalidOutputFolder { folder, reason },
         span,

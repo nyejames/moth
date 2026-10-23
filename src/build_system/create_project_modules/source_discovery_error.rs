@@ -12,10 +12,10 @@
 //! accumulator and freezes the report once.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, PreparedFailure,
-};
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PreparedFailure};
 use crate::compiler_frontend::paths::dependency_resolution::DependencyPathResolutionError;
 use crate::compiler_frontend::source::{SourceDatabase, SourceDatabaseError};
 use crate::compiler_frontend::symbols::path_interner::PathTable;
@@ -50,7 +50,7 @@ impl FinalizedDiscoveryFailure {
 
 /// Stage 0 source discovery failure.
 pub(crate) enum SourceDiscoveryError {
-    Diagnostic(CompilerDiagnostic),
+    Diagnostic(DiagnosticDraft),
     /// Diagnostics captured by their producer, including external import providers.
     Premerge(PreparedFailure),
     Finalized(Box<FinalizedDiscoveryFailure>),
@@ -112,9 +112,8 @@ impl SourceDiscoveryError {
         }
     }
 }
-
-impl From<CompilerDiagnostic> for SourceDiscoveryError {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
+impl From<DiagnosticDraft> for SourceDiscoveryError {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
         SourceDiscoveryError::Diagnostic(diagnostic)
     }
 }
@@ -129,7 +128,7 @@ impl From<SourceDatabaseError> for SourceDiscoveryError {
     fn from(error: SourceDatabaseError) -> Self {
         match error {
             SourceDatabaseError::Capacity(capacity) => SourceDiscoveryError::Diagnostic(
-                CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                token_lexical::source_span_capacity(0, u32::MAX, capacity.resource(), None),
             ),
             SourceDatabaseError::Infrastructure(error) => {
                 SourceDiscoveryError::Infrastructure(error)
@@ -142,7 +141,7 @@ impl From<DependencyPathResolutionError> for SourceDiscoveryError {
     fn from(error: DependencyPathResolutionError) -> Self {
         match error {
             DependencyPathResolutionError::Diagnostic(diagnostic) => {
-                SourceDiscoveryError::Diagnostic(diagnostic)
+                SourceDiscoveryError::Diagnostic(diagnostic.into())
             }
             DependencyPathResolutionError::Infrastructure(error) => {
                 SourceDiscoveryError::Infrastructure(error)

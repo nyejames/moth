@@ -17,10 +17,14 @@ use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    project_config, token_lexical,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, InvalidConfigReason, PreparedFailure,
+    DiagnosticBag, InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::single_source_compilation::{
     CompiledConfigSource, ConfigCompilationOutcome, ConfigCompilationRequest, compile_config_source,
@@ -46,7 +50,7 @@ impl From<PreparedFailure> for ProjectConfigFailure {
 }
 
 fn capture_root_diagnostics(
-    diagnostics: Vec<CompilerDiagnostic>,
+    diagnostics: Vec<DiagnosticDraft>,
     root_string_table: &StringTable,
 ) -> PreparedFailure {
     match PreparedDiagnosticBatch::capture_from_root_string_table(
@@ -104,7 +108,7 @@ pub fn load_project_config(
         config.extra_project_fields.clear();
         if config.entry_dir.is_dir() {
             return Err(ProjectConfigFailure::Prepared(capture_root_diagnostics(
-                vec![CompilerDiagnostic::invalid_config_reason(
+                vec![project_config::invalid_config_reason(
                     Some(string_table.intern("config.moth")),
                     InvalidConfigReason::MissingConfigFile,
                     None,
@@ -179,8 +183,11 @@ pub(crate) fn compile_project_config_file(
         )
         .map_err(|error| match error {
             SourceDatabaseError::Capacity(capacity) => capture_root_diagnostics(
-                vec![CompilerDiagnostic::source_table_capacity(
+                vec![token_lexical::source_span_capacity(
+                    0,
+                    u32::MAX,
                     capacity.resource(),
+                    None,
                 )],
                 string_table,
             ),

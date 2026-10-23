@@ -443,7 +443,6 @@ impl AstBuiltinFailureSummaries {
         entered: &mut HashSet<PathId>,
     ) -> BuiltinFailureWitness {
         let mut witness = BuiltinFailureWitness {
-            codes: Vec::new(),
             call_spans: Vec::new(),
             origin_span: None,
             origin: BuiltinFailureOriginKind::Operation,
@@ -457,13 +456,11 @@ impl AstBuiltinFailureSummaries {
                 match contributor.source {
                     ImplicitFailureSource::NumericOperation
                     | ImplicitFailureSource::AuthoredCastConversion => {
-                        witness.codes.extend_from_slice(contributor.codes);
                         witness.origin_span = contributor.span;
                         witness.origin = BuiltinFailureOriginKind::Operation;
                         break;
                     }
                     ImplicitFailureSource::CompoundWriteBack { target, .. } => {
-                        witness.codes.extend_from_slice(contributor.codes);
                         witness.origin_span = contributor.span;
                         witness.origin = BuiltinFailureOriginKind::CompoundWriteBack { target };
                         break;
