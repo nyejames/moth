@@ -30,13 +30,11 @@ use crate::compiler_frontend::build_config::{
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeIdentity, CanonicalTypeProjectionContext, NominalOriginResolver,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::prepared_batch::{
-    AstDiagnosticFailure, PreparedDiagnosticBatch,
-};
+use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticBag, DiagnosticKind,
-    InvalidConfigReason, PremergeFailure, RuleDiagnosticKind, SourceSpanCapacityResource,
+    InvalidConfigReason, PreparedFailure, RuleDiagnosticKind, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
@@ -105,37 +103,12 @@ pub(crate) struct CompiledConfigSource {
     pub(crate) project_field_dependencies: Vec<FoldedConfigProjectFieldDependency>,
 }
 
-/// A config failure may be owned by the legacy boundary, an AST stage, or a prepared premerge stage.
-#[derive(Debug)]
-pub(crate) enum ConfigCompilationFailure {
-    Legacy(CompilerMessages),
-    Ast(AstDiagnosticFailure),
-    Premerge(PremergeFailure),
-}
-
-impl From<CompilerMessages> for ConfigCompilationFailure {
-    fn from(messages: CompilerMessages) -> Self {
-        Self::Legacy(messages)
-    }
-}
-
-impl From<AstDiagnosticFailure> for ConfigCompilationFailure {
-    fn from(failure: AstDiagnosticFailure) -> Self {
-        Self::Ast(failure)
-    }
-}
-
-impl From<PremergeFailure> for ConfigCompilationFailure {
-    fn from(failure: PremergeFailure) -> Self {
-        Self::Premerge(failure)
-    }
-}
 /// The semantic config result plus the source-local span owner produced while compiling it.
 ///
 /// The build caller retains the original builder through config validation and installs its
 /// frozen table only after the last producer, including diagnosed and infrastructure outcomes.
 pub(crate) struct ConfigCompilationOutcome {
-    pub(crate) result: Result<CompiledConfigSource, ConfigCompilationFailure>,
+    pub(crate) result: Result<CompiledConfigSource, PreparedFailure>,
     pub(crate) file_id: SourceId,
     pub(crate) span_builder: ExtendedSpanBuilder,
 }
@@ -174,47 +147,37 @@ pub(crate) fn compile_config_source(
         Ok(scope) => scope,
         Err(PathInternError::NonUtf8(non_utf8)) => {
             return ConfigCompilationOutcome {
-                result: Err(
-                    CompilerMessages::from_error(
-                        CompilerError::file_error(
-                            &non_utf8.path,
-                            format!(
-                                "Config path {:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths.",
-                                non_utf8.path
-                            ),
-                        ),
-                        string_table.clone(),
-                    )
-                    .into(),
-                ),
+                result: Err(PreparedFailure::from(CompilerError::file_error(
+                    &non_utf8.path,
+                    format!(
+                        "Config path {:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths.",
+                        non_utf8.path
+                    ),
+                ))),
                 file_id,
                 span_builder: ExtendedSpanBuilder::new(),
             };
         }
         Err(PathInternError::TableFull) => {
             return ConfigCompilationOutcome {
-                result: Err(CompilerMessages::from_diagnostic(
-                    CompilerDiagnostic::source_table_capacity(
+                result: Err(PreparedFailure::capture_diagnosed(
+                    DiagnosticBag::from(CompilerDiagnostic::source_table_capacity(
                         SourceSpanCapacityResource::LogicalPath,
-                    ),
+                    )),
                     string_table.clone(),
-                )
-                .into()),
+                    None,
+                    false,
+                    None,
+                )),
                 file_id,
                 span_builder: ExtendedSpanBuilder::new(),
             };
         }
         Err(PathInternError::BaseMismatch { .. }) => {
             return ConfigCompilationOutcome {
-                result: Err(
-                    CompilerMessages::from_error(
-                        CompilerError::compiler_error(
-                            "logical path merge base is not a structural prefix of the destination table",
-                        ),
-                        string_table.clone(),
-                    )
-                    .into(),
-                ),
+                result: Err(PreparedFailure::from(CompilerError::compiler_error(
+                    "logical path merge base is not a structural prefix of the destination table",
+                ))),
                 file_id,
                 span_builder: ExtendedSpanBuilder::new(),
             };
@@ -243,15 +206,8 @@ pub(crate) fn compile_config_source(
                 span_builder,
             }
         }
-        Err(ConfigPreparationFailure::Diagnosed(diagnostics)) => ConfigCompilationOutcome {
-            result: Err(
-                CompilerMessages::from_diagnostics(diagnostics, string_table.clone()).into(),
-            ),
-            file_id,
-            span_builder,
-        },
-        Err(ConfigPreparationFailure::Infrastructure(error)) => ConfigCompilationOutcome {
-            result: Err(CompilerMessages::from_error_ref(error, string_table).into()),
+        Err(failure) => ConfigCompilationOutcome {
+            result: Err(failure),
             file_id,
             span_builder,
         },
@@ -267,7 +223,7 @@ fn compile_prepared_config_source(
     prepared_file: &mut FileFrontendPrepareOutput,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<CompiledConfigSource, ConfigCompilationFailure> {
+) -> Result<CompiledConfigSource, PreparedFailure> {
     let prepared = prepare_header_syntax(
         std::slice::from_mut(prepared_file),
         string_table,
@@ -282,22 +238,12 @@ fn compile_prepared_config_source(
         path_fork,
     )
     .map_err(|failure| match failure {
-        HeaderPreparationFailure::Diagnosed(bag) => {
-            match PreparedDiagnosticBatch::capture_with_required_paths(
-                DiagnosticBag::from_diagnostics(classify_header_diagnostics(bag, request.file_id)),
-                string_table.clone(),
-                None,
-                || Some(std::sync::Arc::new(path_fork.snapshot_table())),
-            ) {
-                Ok(batch) => ConfigCompilationFailure::Ast(AstDiagnosticFailure::Prepared(batch)),
-                Err(error) => ConfigCompilationFailure::Ast(AstDiagnosticFailure::Infrastructure(
-                    error.into(),
-                )),
-            }
-        }
-        HeaderPreparationFailure::Infrastructure(errors) => {
-            ConfigCompilationFailure::Ast(AstDiagnosticFailure::Infrastructure(errors))
-        }
+        HeaderPreparationFailure::Diagnosed(bag) => capture_header_diagnostics(
+            DiagnosticBag::from_diagnostics(classify_header_diagnostics(bag, request.file_id)),
+            string_table,
+            path_fork,
+        ),
+        HeaderPreparationFailure::Infrastructure(errors) => PreparedFailure::Infrastructure(errors),
     })?;
     let bound_headers = bind_module_headers(
         prepared,
@@ -310,22 +256,12 @@ fn compile_prepared_config_source(
         path_fork,
     )
     .map_err(|failure| match failure {
-        HeaderPreparationFailure::Diagnosed(bag) => {
-            match PreparedDiagnosticBatch::capture_with_required_paths(
-                DiagnosticBag::from_diagnostics(classify_header_diagnostics(bag, request.file_id)),
-                string_table.clone(),
-                None,
-                || Some(std::sync::Arc::new(path_fork.snapshot_table())),
-            ) {
-                Ok(batch) => ConfigCompilationFailure::Ast(AstDiagnosticFailure::Prepared(batch)),
-                Err(error) => ConfigCompilationFailure::Ast(AstDiagnosticFailure::Infrastructure(
-                    error.into(),
-                )),
-            }
-        }
-        HeaderPreparationFailure::Infrastructure(errors) => {
-            ConfigCompilationFailure::Ast(AstDiagnosticFailure::Infrastructure(errors))
-        }
+        HeaderPreparationFailure::Diagnosed(bag) => capture_header_diagnostics(
+            DiagnosticBag::from_diagnostics(classify_header_diagnostics(bag, request.file_id)),
+            string_table,
+            path_fork,
+        ),
+        HeaderPreparationFailure::Infrastructure(errors) => PreparedFailure::Infrastructure(errors),
     })?;
 
     // Order local declarations.
@@ -334,8 +270,7 @@ fn compile_prepared_config_source(
         &ContentSourceTargets::empty(),
         string_table,
         path_fork,
-    )
-    .map_err(ConfigCompilationFailure::from)?;
+    )?;
 
     // Preserve key-name spans before AST consumes the headers. The full header path becomes the
     // declaration ID, so every folded declaration can carry its exact authored name span.
@@ -387,9 +322,10 @@ fn compile_prepared_config_source(
     let config_rejections =
         reject_authored_config_dialect(&ast, authored_scope, path_fork, string_table);
     if !config_rejections.is_empty() {
-        return Err(
-            CompilerMessages::from_diagnostics(config_rejections, string_table.clone()).into(),
-        );
+        return Err(capture_config_diagnostics(
+            DiagnosticBag::from_diagnostics(config_rejections),
+            string_table,
+        ));
     }
 
     let declarations = project_authored_config_declarations(
@@ -419,7 +355,7 @@ fn compile_prepared_config_source(
 fn project_config_field_dependencies(
     declarations: &[FoldedConfigDeclaration],
     string_table: &mut StringTable,
-) -> Result<Vec<FoldedConfigProjectFieldDependency>, CompilerMessages> {
+) -> Result<Vec<FoldedConfigProjectFieldDependency>, CompilerError> {
     let Some(project) = declarations
         .iter()
         .find(|declaration| string_table.resolve(declaration.name) == "project")
@@ -434,19 +370,13 @@ fn project_config_field_dependencies(
         {
             return Ok(Vec::new());
         }
-        return Err(CompilerMessages::from_error(
-            CompilerError::compiler_error(
-                "config project-field dependency was recorded for a non-record project value",
-            ),
-            string_table.clone(),
+        return Err(CompilerError::compiler_error(
+            "config project-field dependency was recorded for a non-record project value",
         ));
     };
     if project.direct_field_dependencies.len() != fields.len() {
-        return Err(CompilerMessages::from_error(
-            CompilerError::compiler_error(
-                "config field provenance must align with folded record fields",
-            ),
-            string_table.clone(),
+        return Err(CompilerError::compiler_error(
+            "config field provenance must align with folded record fields",
         ));
     }
 
@@ -607,7 +537,7 @@ fn project_authored_config_declarations(
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
     config_resolution: &ConfigResolutionServices,
-) -> Result<Vec<FoldedConfigDeclaration>, CompilerMessages> {
+) -> Result<Vec<FoldedConfigDeclaration>, PreparedFailure> {
     let nominal_origins = ConfigNominalOriginResolver {
         type_environment: &ast.type_environment,
     };
@@ -639,31 +569,27 @@ fn project_authored_config_declarations(
             continue;
         };
 
-        let value =
-            convert_const_value_to_folded_value(&ast.const_values, value_id, &folded_value_context)
-                .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
-        let direct_field_spans = project_direct_field_spans(&ast.const_values, value_id)
-            .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+        let value = convert_const_value_to_folded_value(
+            &ast.const_values,
+            value_id,
+            &folded_value_context,
+        )?;
+        let direct_field_spans = project_direct_field_spans(&ast.const_values, value_id)?;
         if let PublicFoldedValue::Record(fields) = &value {
             if fields.len() != direct_field_spans.len() {
-                return Err(CompilerMessages::from_error(
-                    CompilerError::compiler_error(
-                        "config field provenance must align with folded record fields",
-                    ),
-                    string_table.clone(),
-                ));
+                return Err(CompilerError::compiler_error(
+                    "config field provenance must align with folded record fields",
+                )
+                .into());
             }
         } else if !direct_field_spans.is_empty() {
-            return Err(CompilerMessages::from_error(
-                CompilerError::compiler_error(
-                    "config field provenance was projected for a non-record value",
-                ),
-                string_table.clone(),
-            ));
+            return Err(CompilerError::compiler_error(
+                "config field provenance was projected for a non-record value",
+            )
+            .into());
         }
         let direct_field_dependencies =
-            project_direct_field_dependencies(&ast.const_values, value_id, config_resolution)
-                .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+            project_direct_field_dependencies(&ast.const_values, value_id, config_resolution)?;
         if string_table.resolve(name) == "project"
             && let PublicFoldedValue::Record(fields) = &value
         {
@@ -678,13 +604,16 @@ fn project_authored_config_declarations(
                     == ProjectFieldConfigPolicy::FixedOnly
                 {
                     let field_name = string_table.intern(&field.name);
-                    return Err(CompilerMessages::from_diagnostic(
+                    return Err(PreparedFailure::with_diagnostic_and_warnings(
                         config_diagnostic(
                             Some(field_name),
                             InvalidConfigReason::ConfigQualifierFixedField,
                             direct_field_spans.get(index).copied().flatten(),
                         ),
-                        string_table.clone(),
+                        Vec::new(),
+                        string_table,
+                        None,
+                        || None,
                     ));
                 }
             }
@@ -805,9 +734,35 @@ impl NominalOriginResolver for ConfigNominalOriginResolver<'_> {
     }
 }
 
-enum ConfigPreparationFailure {
-    Diagnosed(Vec<CompilerDiagnostic>),
-    Infrastructure(CompilerError),
+/// Capture config-stage diagnostics that never attached a path or type snapshot.
+///
+/// WHY: the config preparation and dialect-rejection lanes captured without a snapshot, so their
+///      rendering domain stays exactly as before.
+fn capture_config_diagnostics(
+    diagnostics: DiagnosticBag,
+    string_table: &StringTable,
+) -> PreparedFailure {
+    PreparedFailure::capture_diagnosed(diagnostics, string_table.clone(), None, false, None)
+}
+
+/// Capture header-stage diagnostics, copying the path table only when a payload renders a path.
+///
+/// WHY: the path snapshot is taken lazily, so diagnostics whose payloads name no path never pay
+///      for a copy of the path table.
+fn capture_header_diagnostics(
+    diagnostics: DiagnosticBag,
+    string_table: &StringTable,
+    path_fork: &PathInternerFork,
+) -> PreparedFailure {
+    match PreparedDiagnosticBatch::capture_with_required_paths(
+        diagnostics,
+        string_table.clone(),
+        None,
+        || Some(std::sync::Arc::new(path_fork.snapshot_table())),
+    ) {
+        Ok(batch) => PreparedFailure::from(batch),
+        Err(error) => PreparedFailure::from(error),
+    }
 }
 
 // -------------------------
@@ -825,9 +780,7 @@ fn prepare_config_file(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     span_builder: &mut ExtendedSpanBuilder,
-) -> Result<FileFrontendPrepareOutput, ConfigPreparationFailure> {
-    let mut diagnostics = Vec::new();
-
+) -> Result<FileFrontendPrepareOutput, PreparedFailure> {
     let lexed = match tokenize(
         request.source_code,
         authored_scope,
@@ -840,19 +793,19 @@ fn prepare_config_file(
     ) {
         Ok(output) => output,
         Err(TokenizeFailure::Diagnosed(diagnostic)) => {
-            diagnostics.push(diagnostic);
-            return Err(ConfigPreparationFailure::Diagnosed(diagnostics));
+            return Err(capture_config_diagnostics(
+                DiagnosticBag::from(diagnostic),
+                string_table,
+            ));
         }
         Err(TokenizeFailure::Infrastructure(error)) => {
-            return Err(ConfigPreparationFailure::Infrastructure(error));
+            return Err(PreparedFailure::from(error));
         }
     };
     if lexed.logical_path != authored_scope || lexed.file_id != request.file_id {
-        return Err(ConfigPreparationFailure::Infrastructure(
-            CompilerError::compiler_error(
-                "lexer source identity does not match its config preparation identity",
-            ),
-        ));
+        return Err(PreparedFailure::from(CompilerError::compiler_error(
+            "lexer source identity does not match its config preparation identity",
+        )));
     }
     let owner = SourceTokenOwner::new(lexed.tokens);
     let path_syntax = lexed.path_syntax;
@@ -860,12 +813,12 @@ fn prepare_config_file(
     let marker_span = {
         let canonical = owner.tokens_ref();
         let full_range = canonical.full_range().map_err(|error| {
-            ConfigPreparationFailure::Infrastructure(CompilerError::compiler_error(format!(
+            PreparedFailure::from(CompilerError::compiler_error(format!(
                 "config qualifier scan range is invalid: {error:?}"
             )))
         })?;
         let cursor = canonical.cursor(full_range).map_err(|error| {
-            ConfigPreparationFailure::Infrastructure(CompilerError::compiler_error(format!(
+            PreparedFailure::from(CompilerError::compiler_error(format!(
                 "config qualifier scan cursor is invalid: {error:?}"
             )))
         })?;
@@ -878,11 +831,12 @@ fn prepare_config_file(
         );
         diagnostic
             .capture_preparation_span(request.file_id)
-            .map_err(ConfigPreparationFailure::Infrastructure)?;
-        diagnostics.push(diagnostic);
-        return Err(ConfigPreparationFailure::Diagnosed(diagnostics));
+            .map_err(PreparedFailure::from)?;
+        return Err(capture_config_diagnostics(
+            DiagnosticBag::from(diagnostic),
+            string_table,
+        ));
     }
-
     let output = match prepare_file_from_tokens(
         owner,
         authored_scope,
@@ -902,48 +856,51 @@ fn prepare_config_file(
                 diagnostic,
                 ..
             } = error;
-            diagnostics.extend(warnings);
+            let mut diagnostics = warnings;
             if is_duplicate_config_header_error(&diagnostic) {
                 diagnostics.push(config_duplicate_diagnostic(diagnostic));
             } else {
                 diagnostics.push(diagnostic);
             }
-            return Err(ConfigPreparationFailure::Diagnosed(diagnostics));
+            return Err(capture_config_diagnostics(diagnostics, string_table));
         }
         Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
-            return Err(ConfigPreparationFailure::Infrastructure(error));
+            return Err(PreparedFailure::from(error));
         }
     };
 
+    let mut diagnosed = Vec::new();
     for dependency_clause in &output.file_dependency_clauses {
-        diagnostics.push(config_diagnostic(
+        diagnosed.push(config_diagnostic(
             None,
             InvalidConfigReason::ConfigImportUnsupported,
             Some(dependency_clause.dependency.span),
         ));
     }
     for file_reference in output.structural_file_references.iter() {
-        diagnostics.push(config_diagnostic(
+        diagnosed.push(config_diagnostic(
             None,
             InvalidConfigReason::FileValuePathUnsupported,
             Some(file_reference.span),
         ));
     }
-    diagnostics.extend(validate_authored_config_surface(
+    diagnosed.extend(validate_authored_config_surface(
         &output.headers,
         path_fork,
         string_table,
     ));
-    for diagnostic in &mut diagnostics {
+    for diagnostic in &mut diagnosed {
         diagnostic
             .capture_preparation_span(request.file_id)
-            .map_err(ConfigPreparationFailure::Infrastructure)?;
+            .map_err(PreparedFailure::from)?;
     }
-
-    if diagnostics.is_empty() {
+    if diagnosed.is_empty() {
         Ok(output)
     } else {
-        Err(ConfigPreparationFailure::Diagnosed(diagnostics))
+        Err(capture_config_diagnostics(
+            DiagnosticBag::from_diagnostics(diagnosed),
+            string_table,
+        ))
     }
 }
 

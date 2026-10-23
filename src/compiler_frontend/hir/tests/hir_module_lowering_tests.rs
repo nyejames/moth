@@ -19,7 +19,7 @@ use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff,
 };
 use crate::compiler_frontend::ast::{AstDocFragment, AstDocFragmentKind};
-use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -549,8 +549,8 @@ fn rejects_unmaterialized_template_constants_in_hir_module_constant_lowering() {
     )
     .expect_err("template constants should fail in HIR");
     let error = match error {
-        AstDiagnosticFailure::Infrastructure(errors) => errors.primary,
-        AstDiagnosticFailure::Prepared(_) => {
+        PreparedFailure::Infrastructure(errors) => errors.primary,
+        PreparedFailure::Diagnosed(_) | PreparedFailure::Mixed { .. } => {
             panic!("HIR lowering failure should be infrastructure")
         }
     };
@@ -623,8 +623,8 @@ fn rejects_nested_unmaterialized_template_constants_in_hir_module_constant_lower
     )
     .expect_err("nested template constants should fail");
     let error = match error {
-        AstDiagnosticFailure::Infrastructure(errors) => errors.primary,
-        AstDiagnosticFailure::Prepared(_) => {
+        PreparedFailure::Infrastructure(errors) => errors.primary,
+        PreparedFailure::Diagnosed(_) | PreparedFailure::Mixed { .. } => {
             panic!("HIR lowering failure should be infrastructure")
         }
     };

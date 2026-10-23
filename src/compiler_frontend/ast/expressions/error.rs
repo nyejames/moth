@@ -171,16 +171,19 @@ impl ExpressionParseError {
     pub(crate) fn at_boundary_without_numeric_retention(
         self,
         boundary: &str,
-    ) -> Result<CompilerDiagnostic, Box<InfrastructureErrors>> {
+    ) -> Result<CompilerDiagnostic, ExpressionParseError> {
         match self {
             ExpressionParseError::Diagnostic(diagnostic) => Ok(diagnostic),
-            ExpressionParseError::Infrastructure(error) => Err(error),
-            ExpressionParseError::NumericDeferral(_) => {
-                Err(CompilerError::compiler_error(format!(
+            ExpressionParseError::Infrastructure(error) => {
+                Err(ExpressionParseError::Infrastructure(error))
+            }
+            ExpressionParseError::NumericDeferral(_) => Err(ExpressionParseError::Infrastructure(
+                CompilerError::compiler_error(format!(
                     "a numeric-dependent expression fragment reached {boundary}, which cannot retain \
                  or complete it before the body root"
-                )).into())
-            }
+                ))
+                .into(),
+            )),
         }
     }
 
@@ -196,7 +199,7 @@ impl ExpressionParseError {
     ) -> ExpressionParseError {
         match self.at_boundary_without_numeric_retention(boundary) {
             Ok(diagnostic) => ExpressionParseError::Diagnostic(diagnostic),
-            Err(error) => ExpressionParseError::Infrastructure(error),
+            Err(error) => error,
         }
     }
 }

@@ -7,9 +7,7 @@ use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::Ast;
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, prepared_batch::AstDiagnosticFailure,
-};
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PreparedFailure};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::module::HirModule;
@@ -30,7 +28,7 @@ pub(in crate::compiler_frontend::module_compilation) fn lower_hir(
     module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
     frozen_identity_handle: Option<&FrozenIdentityHandle>,
     capacity_estimate: FrontendArenaCapacityEstimate,
-) -> Result<HirLoweringResult, AstDiagnosticFailure> {
+) -> Result<HirLoweringResult, PreparedFailure> {
     compiler.generate_hir_with_owner(
         module_ast,
         function_origin_lookup,
@@ -47,7 +45,7 @@ pub(in crate::compiler_frontend::module_compilation) fn check_borrows(
     type_environment: &TypeEnvironment,
     warnings: &mut DiagnosticBag,
     frozen_identity_handle: Option<&FrozenIdentityHandle>,
-) -> Result<BorrowCheckReport, AstDiagnosticFailure> {
+) -> Result<BorrowCheckReport, PreparedFailure> {
     compiler.check_borrows_premerge(
         hir_module,
         type_environment,

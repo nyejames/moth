@@ -6,8 +6,9 @@ use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidDependencyClauseView;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidDependencyClauseReason,
+    DiagnosticPayload, DiagnosticSeverity, InvalidDependencyClauseReason,
 };
 #[cfg(unix)]
 use crate::compiler_frontend::compiler_messages::{InvalidConfigReason, InvalidOutputFolderReason};
@@ -269,21 +270,22 @@ fn resolve_dev_runtime_paths_return_config_load_failures() {
     let builder = ProjectBuilder::new(NoopBuilder);
     let failure = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new())
         .expect_err("bad config should fail directory bootstrap");
-    let crate::build_system::build::BootstrapFailure::Legacy(messages) = failure else {
-        panic!("header parse failures should retain their legacy diagnostic carrier");
+    let crate::build_system::build::BootstrapFailure::Boundary(failure) = failure else {
+        panic!("header parse failures should retain their prepared boundary carrier");
     };
-    let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
-    assert_eq!(diagnostics.len(), 1);
+    let errors = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
+    assert_eq!(errors.len(), 1);
+    let facts = errors[0]
+        .1
+        .family_view::<InvalidDependencyClauseView>()
+        .expect("header parse failure should retain typed dependency-clause facts");
     assert!(
-        matches!(
-            &diagnostics[0].payload,
-            DiagnosticPayload::InvalidDependencyClause {
-                reason: InvalidDependencyClauseReason::DependencyClauseNotAllowed,
-                ..
-            }
-        ),
-        "unexpected diagnostic payload: {:?}",
-        diagnostics[0].payload
+        facts.reason == InvalidDependencyClauseReason::DependencyClauseNotAllowed,
+        "unexpected dependency clause reason: {:?}",
+        facts.reason
     );
 }
 

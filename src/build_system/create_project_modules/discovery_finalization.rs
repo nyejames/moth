@@ -55,7 +55,7 @@ pub(super) fn finalize_failed_discovery(
                 file.path.display()
             ));
             return finish_discovery_source_owner(
-                PremergeFailure::Infrastructure(error.into()),
+                PreparedFailure::Infrastructure(error.into()),
                 source_builder,
             );
         }
@@ -65,26 +65,28 @@ pub(super) fn finalize_failed_discovery(
             result,
         } = prepared.prepared_output;
         match result {
-            Ok(mut output) => {
-                if let Err(error) = rebind_discovery_diagnostics(&mut output.warnings, source_ids) {
+            Ok(output) => {
+                let mut file_warnings = output.warnings.into_diagnostics();
+                if let Err(error) = rebind_discovery_diagnostics(&mut file_warnings, source_ids) {
                     return finish_discovery_source_owner(
-                        PremergeFailure::Infrastructure(error.into()),
+                        PreparedFailure::Infrastructure(error.into()),
                         source_builder,
                     );
                 }
-                warnings.append(&mut output.warnings);
+                warnings.append(&mut file_warnings);
             }
 
-            Err(FileFrontendPrepareFailure::Diagnosed(mut error)) => {
+            Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
+                let mut file_warnings = error.warnings.into_diagnostics();
                 if let Err(remap_error) =
-                    rebind_discovery_diagnostics(&mut error.warnings, source_ids)
+                    rebind_discovery_diagnostics(&mut file_warnings, source_ids)
                 {
                     return finish_discovery_source_owner(
-                        PremergeFailure::Infrastructure(remap_error.into()),
+                        PreparedFailure::Infrastructure(remap_error.into()),
                         source_builder,
                     );
                 }
-                warnings.extend(error.warnings);
+                warnings.extend(file_warnings);
                 preparation_failure = Some(SourceDiscoveryError::Diagnostic(error.diagnostic));
             }
 
@@ -103,7 +105,7 @@ pub(super) fn finalize_failed_discovery(
         Ok(error) => error,
         Err(error) => {
             return finish_discovery_source_owner(
-                PremergeFailure::Infrastructure(error.into()),
+                PreparedFailure::Infrastructure(error.into()),
                 source_builder,
             );
         }
@@ -122,24 +124,24 @@ pub(super) fn finalize_failed_discovery(
                 Ok(batch) => batch,
                 Err(error) => {
                     return finish_discovery_source_owner(
-                        PremergeFailure::Infrastructure(error.into()),
+                        PreparedFailure::Infrastructure(error.into()),
                         source_builder,
                     );
                 }
             };
-            PremergeFailure::Diagnosed(batch)
+            PreparedFailure::Diagnosed(batch)
         }
         SourceDiscoveryError::Premerge(mut failure) => {
             match &mut failure {
-                PremergeFailure::Diagnosed(batch) | PremergeFailure::Mixed { batch, .. } => {
+                PreparedFailure::Diagnosed(batch) | PreparedFailure::Mixed { batch, .. } => {
                     batch.prepend_diagnostics(warnings);
                 }
-                PremergeFailure::Infrastructure(_) => {}
+                PreparedFailure::Infrastructure(_) => {}
             }
             failure
         }
         SourceDiscoveryError::Infrastructure(error) => {
-            PremergeFailure::Infrastructure(error.into())
+            PreparedFailure::Infrastructure(error.into())
         }
         SourceDiscoveryError::Finalized(_) => {
             unreachable!("discovery failure cannot already carry a finalized source owner")
@@ -159,7 +161,7 @@ pub(super) fn finalize_failed_discovery(
 /// WHY: the finalized failure must never drop the finished owner, and no intermediate
 ///      vessel may be constructed before the parent final boundary.
 pub(super) fn finish_discovery_source_owner(
-    failure: PremergeFailure,
+    failure: PreparedFailure,
     source_builder: SourceDatabaseBuilder,
 ) -> SourceDiscoveryError {
     match source_builder.finish() {
@@ -179,7 +181,7 @@ pub(super) fn discovery_finalization_error(
     source_builder: SourceDatabaseBuilder,
 ) -> SourceDiscoveryError {
     finish_discovery_source_owner(
-        PremergeFailure::Infrastructure(error.into()),
+        PreparedFailure::Infrastructure(error.into()),
         source_builder,
     )
 }

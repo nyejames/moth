@@ -18,7 +18,7 @@
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, PremergeFailure,
+    CompilerDiagnostic, DiagnosticBag, PreparedFailure,
 };
 use crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment;
 use crate::compiler_frontend::headers::module_symbols::{ModuleSymbols, PublicExportEntry};
@@ -504,7 +504,7 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
     content_source_targets: &ContentSourceTargets,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<SortedHeaders, PremergeFailure> {
+) -> Result<SortedHeaders, PreparedFailure> {
     let BoundModuleHeaders {
         headers,
         source_token_owners,
@@ -579,13 +579,13 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
                                 None,
                                 || Some(std::sync::Arc::new(path_fork.snapshot_table())),
                             )
-                            .map_err(PremergeFailure::from)?;
-                            PremergeFailure::Mixed {
+                            .map_err(PreparedFailure::from)?;
+                            PreparedFailure::Mixed {
                                 batch,
                                 error: error.into(),
                             }
                         } else {
-                            PremergeFailure::from(error)
+                            PreparedFailure::from(error)
                         };
                         return Err(failure);
                     }
@@ -602,8 +602,8 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
                 None,
                 || Some(std::sync::Arc::new(path_fork.snapshot_table())),
             )
-            .map_err(PremergeFailure::from)?;
-            return Err(PremergeFailure::Diagnosed(batch));
+            .map_err(PreparedFailure::from)?;
+            return Err(PreparedFailure::Diagnosed(batch));
         }
 
         (sorted, tracker.visit_count)

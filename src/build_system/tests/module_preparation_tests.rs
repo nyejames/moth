@@ -1928,7 +1928,7 @@ fn assert_malformed_chunks_rejected(
     module_file_count: usize,
     expected_fragment: &str,
 ) {
-    use crate::compiler_frontend::compiler_messages::PremergeFailure;
+    use crate::compiler_frontend::compiler_messages::PreparedFailure;
 
     let mut string_table = StringTable::new();
     let error = match super::ModulePreparationContext::merge_file_preparation_chunks(
@@ -1938,9 +1938,9 @@ fn assert_malformed_chunks_rejected(
         module_file_count,
         0,
     ) {
-        Err(PremergeFailure::Infrastructure(error)) => error,
-        Err(PremergeFailure::Mixed { error, .. }) => error,
-        Err(PremergeFailure::Diagnosed(_)) => {
+        Err(PreparedFailure::Infrastructure(error)) => error,
+        Err(PreparedFailure::Mixed { error, .. }) => error,
+        Err(PreparedFailure::Diagnosed(_)) => {
             panic!("malformed chunk payload should be an infrastructure failure, not diagnostics")
         }
         Ok(_) => panic!("malformed chunk payload should be rejected, but merge succeeded"),
@@ -2034,7 +2034,7 @@ fn merge_rejects_chunk_forked_from_a_foreign_path_base() {
         .expect("fixture chunks should prepare against the fixture path fork")
     };
 
-    use crate::compiler_frontend::compiler_messages::PremergeFailure;
+    use crate::compiler_frontend::compiler_messages::PreparedFailure;
 
     let mut string_table = fixture
         .frontend
@@ -2053,11 +2053,11 @@ fn merge_rejects_chunk_forked_from_a_foreign_path_base() {
         input_file_count,
         fork_source.base_len(),
     ) {
-        Err(PremergeFailure::Infrastructure(_)) => {}
-        Err(PremergeFailure::Mixed { .. }) => {
+        Err(PreparedFailure::Infrastructure(_)) => {}
+        Err(PreparedFailure::Mixed { .. }) => {
             panic!("a foreign merge base must be an infrastructure failure, not diagnostics")
         }
-        Err(PremergeFailure::Diagnosed(_)) => {
+        Err(PreparedFailure::Diagnosed(_)) => {
             panic!("a foreign merge base must be an infrastructure failure, not diagnostics")
         }
         Ok(_) => panic!("a foreign merge base must be rejected, but merge succeeded"),
@@ -2429,7 +2429,7 @@ fn assert_counter_value(
 #[test]
 fn forced_path_exhaustion_during_chunk_merge_reports_capacity_diagnostic() {
     use crate::compiler_frontend::compiler_messages::{
-        DiagnosticSeverity, PremergeFailure, SourceSpanCapacityResource,
+        DiagnosticSeverity, PreparedFailure, SourceSpanCapacityResource,
         diagnostics::{
             families::token_lexical::SourceSpanCapacityView, freeze::InstallMode,
             legacy_adapter::BoundaryAccumulator,
@@ -2459,7 +2459,7 @@ fn forced_path_exhaustion_during_chunk_merge_reports_capacity_diagnostic() {
         Ok(_) => panic!("authored path exhaustion must fail the chunk merge"),
     };
 
-    let PremergeFailure::Diagnosed(batch) = error else {
+    let PreparedFailure::Diagnosed(batch) = error else {
         panic!("authored chunk-merge exhaustion must produce the diagnosed capacity lane");
     };
     let mut accumulator = BoundaryAccumulator::new();

@@ -5,7 +5,7 @@
 //! WHY: keeps the provider API general so JS, WIT, Rust, and host-manifest providers all
 //!      fit the same shape without leaking JS-specific concepts into the trait.
 
-use crate::compiler_frontend::compiler_messages::PremergeFailure;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
@@ -124,15 +124,15 @@ impl ExternalImportProviderContext<'_> {
     ///
     /// Provider failures cross Stage 0 as prepared batches, so path-bearing diagnostics must
     /// snapshot the caller's fork before the provider context is dropped.
-    pub(crate) fn capture_diagnostic_failure(&self, diagnostics: DiagnosticBag) -> PremergeFailure {
+    pub(crate) fn capture_diagnostic_failure(&self, diagnostics: DiagnosticBag) -> PreparedFailure {
         match PreparedDiagnosticBatch::capture_with_required_paths(
             diagnostics,
             self.string_table.clone(),
             None,
             || Some(Arc::new(self.path_fork.snapshot_table())),
         ) {
-            Ok(batch) => PremergeFailure::Diagnosed(batch),
-            Err(error) => PremergeFailure::Infrastructure(error.into()),
+            Ok(batch) => PreparedFailure::Diagnosed(batch),
+            Err(error) => PreparedFailure::Infrastructure(error.into()),
         }
     }
 }
@@ -171,7 +171,7 @@ pub trait ExternalImportProvider: Send + Sync + std::fmt::Debug {
         &self,
         request: ExternalImportRequest,
         context: &mut ExternalImportProviderContext,
-    ) -> Result<Option<ResolvedExternalImport>, PremergeFailure>;
+    ) -> Result<Option<ResolvedExternalImport>, PreparedFailure>;
 }
 
 /// Identity for a runtime asset that the backend must emit.

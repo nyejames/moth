@@ -1,6 +1,6 @@
 use super::*;
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
-use crate::compiler_frontend::compiler_messages::PremergeFailure;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
     InvalidConfigCode, InvalidConfigView,
 };
@@ -9,8 +9,8 @@ use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::Bo
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReport;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 
-fn diagnosed_boundary(failure: PremergeFailure) -> BoundaryFailure {
-    let PremergeFailure::Diagnosed(batch) = failure else {
+fn diagnosed_boundary(failure: PreparedFailure) -> BoundaryFailure {
+    let PreparedFailure::Diagnosed(batch) = failure else {
         panic!("expected a diagnosed source-tree failure, got {failure:?}");
     };
     let mut accumulator = BoundaryAccumulator::new();
@@ -31,7 +31,7 @@ fn first_invalid_config(failure: &BoundaryFailure) -> (&DiagnosticReport, Diagno
     (report, diagnostic)
 }
 
-fn assert_source_file_folder_collision(failure: PremergeFailure) {
+fn assert_source_file_folder_collision(failure: PreparedFailure) {
     let boundary = diagnosed_boundary(failure);
     let (_, diagnostic) = first_invalid_config(&boundary);
     assert_eq!(
@@ -43,7 +43,7 @@ fn assert_source_file_folder_collision(failure: PremergeFailure) {
     );
 }
 
-fn assert_multiple_module_roots(failure: PremergeFailure, expected_directory: &Path) {
+fn assert_multiple_module_roots(failure: PreparedFailure, expected_directory: &Path) {
     let boundary = diagnosed_boundary(failure);
     let (report, diagnostic) = first_invalid_config(&boundary);
     let facts = diagnostic

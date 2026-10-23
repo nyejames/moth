@@ -7,6 +7,7 @@
 //!      durable `Template` value and the shared vocabulary used by parsing,
 //!      folding, slot routing, and runtime-handoff preparation.
 
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterInput, FormatterOutput,
 };
@@ -14,8 +15,7 @@ use crate::compiler_frontend::ast::templates::styles::whitespace::TemplateWhites
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateTirReference, TemplateWrapperReference,
 };
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
@@ -160,12 +160,12 @@ pub enum TemplateSegmentOrigin {
 ///
 /// Formatters are stored in style directive registries, which are shared read-only across parallel
 /// tokenization/header parsing workers.
-pub trait TemplateFormatter: Send + Sync {
+pub(crate) trait TemplateFormatter: Send + Sync {
     fn format(
         &self,
         input: FormatterInput,
         string_table: &mut StringTable,
-    ) -> Result<FormatterResult, CompilerMessages>;
+    ) -> Result<FormatterResult, TemplateError>;
 }
 
 impl std::fmt::Debug for dyn TemplateFormatter {
@@ -184,7 +184,7 @@ pub struct Formatter {
 
     /// Shared ownership keeps formatters cheap to clone when template styles are
     /// copied or explicitly inherited during AST construction.
-    pub formatter: Arc<dyn TemplateFormatter>,
+    pub(crate) formatter: Arc<dyn TemplateFormatter>,
 
     /// Post-format passes run after formatter output is generated.
     pub(crate) post_format_whitespace_passes: Vec<TemplateWhitespacePassProfile>,
@@ -201,10 +201,10 @@ pub enum BodyWhitespacePolicy {
 }
 
 /// Result of a successful formatting pass.
-#[derive(Clone, Debug)]
-pub struct FormatterResult {
+#[derive(Debug)]
+pub(crate) struct FormatterResult {
     pub output: FormatterOutput,
-    pub warnings: Vec<CompilerDiagnostic>,
+    pub warnings: DiagnosticBag,
 }
 
 // -------------------------
@@ -227,7 +227,7 @@ pub struct Style {
 
     /// A callback function for how the string content of the template should be parsed
     /// If at all. Compiler will determine if this can be run at compile-time, or need a runtime call.
-    pub formatter: Option<Formatter>,
+    pub(crate) formatter: Option<Formatter>,
 
     /// When true, nested child templates skip the parent-applied `$children(..)`
     /// wrappers while still allowing wrappers declared on the child itself.

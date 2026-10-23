@@ -8,6 +8,7 @@
 
 use crate::compiler_frontend::arena::TokenStats;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::headers::synthetic_content_header::{
     SyntheticContentHeaderInput, synthetic_content_header,
 };
@@ -73,7 +74,7 @@ pub(crate) fn prepare_plain_markdown_file(
         const_template_count: 0,
         runtime_fragment_count: 0,
         has_non_trivial_root_body: false,
-        warnings: Vec::new(),
+        warnings: DiagnosticBag::new(),
     })
 }
 

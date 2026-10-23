@@ -8,12 +8,11 @@
 //!       state and no filesystem access to produce the values Stage 0 applies, and that its
 //!       dialect rejections happen inside the service before any declaration is handed back.
 
-use super::{
-    CompiledConfigSource, ConfigCompilationFailure, ConfigCompilationRequest, compile_config_source,
-};
+use super::{CompiledConfigSource, ConfigCompilationRequest, compile_config_source};
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
-use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::compiler_messages::TypeAnnotationContext;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
     InvalidTypeAnnotationView, UnknownValueNameView,
@@ -24,7 +23,8 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::project_
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
     InvalidNumberLiteralView, NumberLiteralCode,
 };
-use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
 use crate::compiler_frontend::source::ExtendedSpanBuilder;
@@ -42,7 +42,7 @@ fn compile_project_source(
     source_code: &str,
     inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet,
     globals: &crate::compiler_frontend::build_config::BuilderConfigGlobalSet,
-) -> Result<(CompiledConfigSource, StringTable), ConfigCompilationFailure> {
+) -> Result<(CompiledConfigSource, StringTable), PreparedFailure> {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let surface = BuilderSurface::with_mandatory_core();
@@ -66,61 +66,21 @@ fn compile_project_source(
     Ok((outcome.result?, string_table))
 }
 
-fn config_failure_boundary(failure: ConfigCompilationFailure) -> BoundaryFailure {
+fn config_failure_boundary(failure: PreparedFailure) -> BoundaryFailure {
+    let mut accumulator = BoundaryAccumulator::new();
     match failure {
-        ConfigCompilationFailure::Legacy(messages) => {
-            crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure(
-                messages,
-            )
-        }
-        ConfigCompilationFailure::Ast(AstDiagnosticFailure::Prepared(batch)) => {
-            let mut accumulator =
-                crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator::new();
+        PreparedFailure::Diagnosed(batch) => accumulator.append_prepared(batch, None),
+        PreparedFailure::Infrastructure(errors) => accumulator.append_infrastructure(errors, None),
+        PreparedFailure::Mixed { batch, error } => {
             accumulator.append_prepared(batch, None);
-            accumulator.finish(
-                crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode::Unfrozen,
-            )
-        }
-        ConfigCompilationFailure::Ast(AstDiagnosticFailure::Infrastructure(errors)) => {
-            let mut messages = CompilerMessages::empty(StringTable::new());
-            messages.append_infrastructure_errors(errors);
-            crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure(
-                messages,
-            )
-        }
-        ConfigCompilationFailure::Premerge(failure) => {
-            let mut accumulator =
-                crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator::new();
-            match failure {
-                crate::compiler_frontend::compiler_messages::PremergeFailure::Diagnosed(batch) => {
-                    accumulator.append_prepared(batch, None);
-                }
-                crate::compiler_frontend::compiler_messages::PremergeFailure::Infrastructure(
-                    errors,
-                ) => {
-                    let mut messages = CompilerMessages::empty(StringTable::new());
-                    messages.append_infrastructure_errors(errors);
-                    accumulator.append(messages);
-                }
-                crate::compiler_frontend::compiler_messages::PremergeFailure::Mixed {
-                    batch,
-                    error,
-                } => {
-                    accumulator.append_prepared(batch, None);
-                    let mut messages = CompilerMessages::empty(StringTable::new());
-                    messages.append_infrastructure_errors(error);
-                    accumulator.append(messages);
-                }
-            }
-            accumulator.finish(
-                crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode::Unfrozen,
-            )
+            accumulator.append_infrastructure(error, None);
         }
     }
+    accumulator.finish(InstallMode::Unfrozen)
 }
 
 fn assert_config_failure_identity(
-    failure: ConfigCompilationFailure,
+    failure: PreparedFailure,
     expected_code: &str,
     expected_reason_key: Option<&str>,
 ) {

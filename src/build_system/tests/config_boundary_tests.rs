@@ -14,7 +14,7 @@ use crate::compiler_frontend::build_config::{
 };
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
-use crate::compiler_frontend::compiler_messages::PremergeFailure;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::{
     families::project_config::{InvalidConfigCode, InvalidConfigView},
     foreign::SiteRef,
@@ -55,8 +55,8 @@ fn i32_value(value: i64) -> PrimitiveBuildValue {
     PrimitiveBuildValue::Fixed(fixed.expect("test integer should fit I32"))
 }
 
-fn diagnosed_boundary_failure(failure: PremergeFailure) -> BoundaryFailure {
-    let PremergeFailure::Diagnosed(batch) = failure else {
+fn diagnosed_boundary_failure(failure: PreparedFailure) -> BoundaryFailure {
+    let PreparedFailure::Diagnosed(batch) = failure else {
         panic!("mapped config failure should be diagnosed, not infrastructure");
     };
     let mut accumulator = BoundaryAccumulator::new();

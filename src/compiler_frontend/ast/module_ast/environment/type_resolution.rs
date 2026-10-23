@@ -28,10 +28,10 @@ use crate::compiler_frontend::ast::type_resolution::{
     validate_generic_parameters_used, validate_no_recursive_generic_type,
     validate_no_recursive_runtime_structs,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticLabel, DiagnosticPayload,
-    PublicGenericOwnerKind, TypeMismatchContext,
+    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticBag, DiagnosticLabel,
+    DiagnosticPayload, PublicGenericOwnerKind, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition,
@@ -121,12 +121,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         &mut self,
         declaration_lanes: &DeclarationPassLanes,
         sorted_headers: &[Header],
-        string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), CompilerError> {
         for &declaration_id in &declaration_lanes.nominals {
-            let header = declaration_lanes
-                .header(declaration_id, sorted_headers)
-                .map_err(|error| self.error_messages(error, string_table))?;
+            let header = declaration_lanes.header(declaration_id, sorted_headers)?;
             match &header.kind {
                 HeaderKind::Struct {
                     generic_parameters, ..
@@ -170,8 +167,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             binding_span: header.name_span,
                             config_qualifier: None,
                         },
-                    )
-                    .map_err(|error| self.error_messages(error, string_table))?;
+                    )?;
                 }
                 HeaderKind::Choice {
                     generic_parameters, ..
@@ -214,8 +210,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             binding_span: header.name_span,
                             config_qualifier: None,
                         },
-                    )
-                    .map_err(|error| self.error_messages(error, string_table))?;
+                    )?;
                 }
                 _ => {}
             }
@@ -236,11 +231,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         declaration_lanes: &DeclarationPassLanes,
         sorted_headers: &[Header],
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), ExpressionParseError> {
         for &declaration_id in &declaration_lanes.nominals {
-            let header = declaration_lanes
-                .header(declaration_id, sorted_headers)
-                .map_err(|error| self.error_messages(error, string_table))?;
+            let header = declaration_lanes.header(declaration_id, sorted_headers)?;
             self.prepare_nominal_member_shell(
                 header,
                 SignatureDefaultMode::KeepAuthored,
@@ -263,7 +256,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         header: &Header,
         default_mode: SignatureDefaultMode,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), ExpressionParseError> {
         match &header.kind {
             HeaderKind::Struct { fields, .. } => {
                 let (unresolved_fields, _) = self.unresolved_member_syntax_to_declarations(
@@ -309,7 +302,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         trait_environment: &TraitEnvironment,
         aliases_waiting_for_constants: &FxHashSet<PathId>,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), ExpressionParseError> {
         // Constructor scaffolds are built inside the Stage 3 walk below, so each nominal's
         // shells follow the aliases and capacity constants its members use.
 
@@ -341,9 +334,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         //  Resolve struct field types
         // ----------------------------
         for &declaration_id in &declaration_lanes.structs {
-            let header = declaration_lanes
-                .header(declaration_id, sorted_headers)
-                .map_err(|error| self.error_messages(error, string_table))?;
+            let header = declaration_lanes.header(declaration_id, sorted_headers)?;
             let HeaderKind::Struct {
                 generic_parameters,
                 fields,
@@ -352,7 +343,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             };
 
-            let visibility = self.header_visibility(header, string_table)?;
+            let visibility = self.header_visibility(header)?;
 
             let source_file_scope = self.header_source_path(header);
             let generic_parameter_scope = self.generic_parameter_scope_for_header(
@@ -392,10 +383,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 )
                 .map_err(|error| match error {
                     StructFieldResolutionError::Diagnostic(diagnostic) => {
-                        self.diagnostic_messages(diagnostic, string_table)
+                        ExpressionParseError::Diagnostic(diagnostic)
                     }
                     StructFieldResolutionError::Infrastructure(error) => {
-                        self.error_messages(*error, string_table)
+                        ExpressionParseError::from(*error)
                     }
                 })?
             };
@@ -436,8 +427,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 &used_parameters,
                 &header.declaration_path,
                 header.name_span,
-            )
-            .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
+            )?;
 
             // Generic structs must not contain recursive field types that reference
             // the struct itself through generic parameters.
@@ -448,8 +438,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         field.type_id,
                         &self.type_environment,
                         field.binding_span,
-                    )
-                    .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
+                    )?;
                 }
             }
 
@@ -464,9 +453,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         //  Resolve choice variant payload types
         // --------------------------------------
         for &declaration_id in &declaration_lanes.choices {
-            let header = declaration_lanes
-                .header(declaration_id, sorted_headers)
-                .map_err(|error| self.error_messages(error, string_table))?;
+            let header = declaration_lanes.header(declaration_id, sorted_headers)?;
             let HeaderKind::Choice {
                 generic_parameters,
                 variants,
@@ -476,7 +463,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             };
 
             let source_file_scope = self.header_source_path(header);
-            let visibility = self.header_visibility(header, string_table)?;
+            let visibility = self.header_visibility(header)?;
 
             let generic_parameter_scope = self.generic_parameter_scope_for_header(
                 header,
@@ -507,8 +494,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     &mut type_resolution_context,
                     string_table,
                     payload_context.as_ref(),
-                )
-                .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?
+                )?
             };
 
             // Every generic parameter declared on the choice must appear in at least one
@@ -531,8 +517,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 &used_parameters,
                 &header.declaration_path,
                 header.name_span,
-            )
-            .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
+            )?;
 
             // Generic choices must not contain recursive payload types that reference
             // the choice itself through generic parameters.
@@ -545,10 +530,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 field.type_id,
                                 &self.type_environment,
                                 field.binding_span,
-                            )
-                            .map_err(|diagnostic| {
-                                self.diagnostic_messages(diagnostic, string_table)
-                            })?;
+                            )?;
                         }
                     }
                 }
@@ -586,7 +568,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         &mut Vec::new(),
                     )
                 ));
-                return Err(self.error_messages(error, string_table));
+                return Err(error.into());
             };
 
             self.type_environment
@@ -615,8 +597,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     binding_span: header.name_span,
                     config_qualifier: None,
                 },
-            )
-            .map_err(|error| self.error_messages(error, string_table))?;
+            )?;
         }
 
         // ----------------------------
@@ -628,8 +609,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             &self.resolved_struct_fields_by_path,
             &self.type_environment,
             &*self.path_fork,
-        )
-        .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
+        )?;
 
         Ok(())
     }
@@ -646,11 +626,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         sorted_headers: &[Header],
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), ExpressionParseError> {
         for &declaration_id in &declaration_lanes.nominals {
-            let header = declaration_lanes
-                .header(declaration_id, sorted_headers)
-                .map_err(|error| self.error_messages(error, string_table))?;
+            let header = declaration_lanes.header(declaration_id, sorted_headers)?;
             let (generic_parameters, owner_kind) = match &header.kind {
                 HeaderKind::Struct {
                     generic_parameters, ..
@@ -666,7 +644,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             }
 
-            let visibility = self.header_visibility(header, string_table)?;
+            let visibility = self.header_visibility(header)?;
             let resolved_bounds_by_local = self.resolve_generic_parameter_bounds(
                 generic_parameters,
                 &visibility,
@@ -686,7 +664,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     generic_parameters,
                     &resolved_bounds_by_local,
                     trait_environment,
-                    string_table,
                 )?;
             }
 
@@ -717,12 +694,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         sorted_headers: &[Header],
         trait_environment: &TraitEnvironment,
         trait_evidence_environment: &TraitEvidenceEnvironment,
-        string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), ExpressionParseError> {
         for &declaration_id in &declaration_lanes.ordered {
-            let header = declaration_lanes
-                .header(declaration_id, sorted_headers)
-                .map_err(|error| self.error_messages(error, string_table))?;
+            let header = declaration_lanes.header(declaration_id, sorted_headers)?;
             let validation_context = NominalBoundSurfaceValidationContext {
                 trait_environment,
                 trait_evidence_environment,
@@ -742,7 +716,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         type_id,
                         header.name_span,
                         &validation_context,
-                        string_table,
                     )?;
                 }
 
@@ -754,7 +727,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         declaration.type_id,
                         declaration.binding_span,
                         &validation_context,
-                        string_table,
                     )?;
                 }
 
@@ -770,7 +742,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             field.type_id,
                             field.binding_span,
                             &validation_context,
-                            string_table,
                         )?;
                     }
                 }
@@ -789,7 +760,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                     field.type_id,
                                     field.binding_span,
                                     &validation_context,
-                                    string_table,
                                 )?;
                             }
                         }
@@ -810,7 +780,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             parameter.type_id,
                             parameter.binding_span,
                             &validation_context,
-                            string_table,
                         )?;
                     }
 
@@ -820,7 +789,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 type_id,
                                 header.name_span,
                                 &validation_context,
-                                string_table,
                             )?;
                         }
                     }
@@ -838,8 +806,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         type_id: TypeId,
         span: Option<SourceSpan>,
         validation_context: &NominalBoundSurfaceValidationContext<'_>,
-        string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), ExpressionParseError> {
         let evidence_context = GenericBoundEvidenceContext {
             type_environment: &self.type_environment,
             trait_environment: Some(validation_context.trait_environment),
@@ -851,7 +818,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .nominal_path(type_id)
             .and_then(|path| self.path_fork.component(*path));
         validate_nominal_generic_bound_evidence(type_id, instance_name, span, &evidence_context)
-            .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))
+            .map_err(ExpressionParseError::from)
     }
 
     /// Resolve struct field and choice variant types needed for constant constructor parsing.
@@ -866,13 +833,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         header: &Header,
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), ExpressionParseError> {
         {
             match &header.kind {
                 HeaderKind::Struct {
                     generic_parameters, ..
                 } => {
-                    let visibility = self.header_visibility(header, string_table)?;
+                    let visibility = self.header_visibility(header)?;
 
                     let generic_parameter_scope = self.generic_parameter_scope_for_header(
                         header,
@@ -886,11 +853,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         .get(&header.declaration_path)
                         .cloned()
                         .ok_or_else(|| {
-                            self.error_messages(
-                                CompilerError::compiler_error(
-                                    "Struct constructor shells were not registered before constant resolution.",
-                                ),
-                                string_table,
+                            CompilerError::compiler_error(
+                                "Struct constructor shells were not registered before constant resolution.",
                             )
                         })?;
                     let resolved_fields = {
@@ -924,10 +888,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     }
                     .map_err(|error| match error {
                         StructFieldResolutionError::Diagnostic(diagnostic) => {
-                            self.diagnostic_messages(diagnostic, string_table)
+                            ExpressionParseError::Diagnostic(diagnostic)
                         }
                         StructFieldResolutionError::Infrastructure(error) => {
-                            self.error_messages(*error, string_table)
+                            ExpressionParseError::from(*error)
                         }
                     })?;
 
@@ -953,7 +917,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 HeaderKind::Choice {
                     generic_parameters, ..
                 } => {
-                    let visibility = self.header_visibility(header, string_table)?;
+                    let visibility = self.header_visibility(header)?;
 
                     let generic_parameter_scope = self.generic_parameter_scope_for_header(
                         header,
@@ -967,11 +931,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         .get(&header.declaration_path)
                         .cloned()
                         .ok_or_else(|| {
-                            self.error_messages(
-                                CompilerError::compiler_error(
-                                    "Choice variant shells were not registered before constant resolution.",
-                                ),
-                                string_table,
+                            CompilerError::compiler_error(
+                                "Choice variant shells were not registered before constant resolution.",
                             )
                         })?;
                     let resolved_variants = {
@@ -999,8 +960,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             string_table,
                             Some(&scope_context),
                         )
-                    }
-                    .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
+                    }?;
 
                     // Publish the completed payload signature before a constant annotation can
                     // intern a generic choice instance.  As with structs, the canonical
@@ -1061,7 +1021,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         core_traits: &TraitEnvironment,
         aliases_waiting_for_constants: &FxHashSet<PathId>,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), ExpressionParseError> {
         if aliases_waiting_for_constants.is_empty() {
             return Ok(());
         }
@@ -1101,7 +1061,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         trait_environment: &TraitEnvironment,
         aliases_waiting_for_constants: &FxHashSet<PathId>,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), ExpressionParseError> {
         if declaration_lanes.constants.is_empty() && aliases_waiting_for_constants.is_empty() {
             return Ok(());
         }
@@ -1127,9 +1087,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let mut aliases_left = aliases_waiting_for_constants.len();
 
         for &declaration_id in &declaration_lanes.ordered {
-            let header = declaration_lanes
-                .header(declaration_id, sorted_headers)
-                .map_err(|error| self.error_messages(error, string_table))?;
+            let header = declaration_lanes.header(declaration_id, sorted_headers)?;
 
             match &header.kind {
                 HeaderKind::TypeAlias { .. }
@@ -1168,44 +1126,36 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         .module_symbols
                         .source_path_for_header(header)
                         .ok_or_else(|| {
-                            self.error_messages(
-                                CompilerError::compiler_error(
-                                    "header body range has no prepared source-path identity",
-                                ),
-                                string_table,
+                            CompilerError::compiler_error(
+                                "header body range has no prepared source-path identity",
                             )
                         })?;
-                    let visibility = self.header_visibility(header, string_table)?;
+                    let visibility = self.header_visibility(header)?;
 
-                    let declaration = session
-                        .resolve_constant_header(
-                            header,
-                            ConstantHeaderInput {
-                                top_level_declarations: Rc::clone(&self.declaration_table),
-                                resolved_constants: Rc::clone(&self.resolved_module_constants),
-                                resolved_type_aliases: Rc::clone(
-                                    &self.resolved_type_aliases_by_path,
-                                ),
-                                resolved_struct_fields_by_path: Rc::clone(
-                                    &self.resolved_struct_fields_by_path,
-                                ),
-                                choice_variant_shells_by_path: Rc::clone(
-                                    &self.choice_variant_shells_by_path,
-                                ),
-                                file_visibility: &visibility,
-                                source_file_scope,
-                                type_environment: &mut self.type_environment,
-                                expression_builder: &mut self.context.expression_builder,
-                                const_values: &mut self.context.const_values,
-                                warnings: &mut self.warnings,
-                                path_fork: self.path_fork,
-                            },
-                            string_table,
-                        )
-                        .map_err(|error| self.expression_error_messages(error, string_table))?;
+                    let declaration = session.resolve_constant_header(
+                        header,
+                        ConstantHeaderInput {
+                            top_level_declarations: Rc::clone(&self.declaration_table),
+                            resolved_constants: Rc::clone(&self.resolved_module_constants),
+                            resolved_type_aliases: Rc::clone(&self.resolved_type_aliases_by_path),
+                            resolved_struct_fields_by_path: Rc::clone(
+                                &self.resolved_struct_fields_by_path,
+                            ),
+                            choice_variant_shells_by_path: Rc::clone(
+                                &self.choice_variant_shells_by_path,
+                            ),
+                            file_visibility: &visibility,
+                            source_file_scope,
+                            type_environment: &mut self.type_environment,
+                            expression_builder: &mut self.context.expression_builder,
+                            const_values: &mut self.context.const_values,
+                            warnings: &mut self.warnings,
+                            path_fork: self.path_fork,
+                        },
+                        string_table,
+                    )?;
 
-                    self.replace_declaration(declaration_id, declaration)
-                        .map_err(|error| self.error_messages(error, string_table))?;
+                    self.replace_declaration(declaration_id, declaration)?;
                     self.publish_resolved_module_constant(declaration_id);
                 }
                 _ => {}
@@ -1234,8 +1184,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         fallback_policy: SignatureTypeFallbackPolicy,
         default_mode: SignatureDefaultMode,
         emit_warnings: bool,
-    ) -> Result<(Vec<Declaration>, ScopeContext), CompilerMessages> {
-        let visibility = self.header_visibility(header, string_table)?;
+    ) -> Result<(Vec<Declaration>, ScopeContext), ExpressionParseError> {
+        let visibility = self.header_visibility(header)?;
 
         let field_context = self
             .environment_header_scope(header, string_table)
@@ -1302,7 +1252,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         Ok(diagnostic) => ExpressionParseError::Diagnostic(
                             member_shell_diagnostic_for_context(diagnostic, member_context),
                         ),
-                        Err(error) => ExpressionParseError::Infrastructure(error),
+                        Err(error) => error,
                     }
                 })?;
                 declarations.push(declaration);
@@ -1311,11 +1261,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             Ok(declarations)
         })();
 
-        let declarations = conversion_result
-            .map_err(|error| self.expression_error_messages(error, string_table))?;
+        let declarations = conversion_result?;
 
         if emit_warnings {
-            self.warnings.extend(field_context.take_emitted_warnings());
+            for warning in field_context.take_emitted_warnings() {
+                self.warnings.push(warning);
+            }
         }
 
         Ok((declarations, field_context))
@@ -1335,7 +1286,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         fallback_policy: SignatureTypeFallbackPolicy,
         default_mode: SignatureDefaultMode,
         emit_warnings: bool,
-    ) -> Result<(Vec<ChoiceVariant>, Option<ScopeContext>), CompilerMessages> {
+    ) -> Result<(Vec<ChoiceVariant>, Option<ScopeContext>), ExpressionParseError> {
         let mut resolved_variants = Vec::with_capacity(variants.len());
         let mut type_resolution_scope = None;
 
@@ -1354,21 +1305,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             default_mode,
                             emit_warnings,
                         )
-                        .map_err(|mut messages| {
-                            let variant_span = variant.span;
-                            for diagnostic in &mut messages.diagnostics {
-                                if diagnostic
-                                    .labels
-                                    .iter()
-                                    .any(|label| label.span == variant_span)
-                                {
-                                    continue;
-                                }
-                                let label = DiagnosticLabel::secondary(variant_span, None);
-                                diagnostic.labels.push(label);
-                            }
-                            messages
-                        })?;
+                        .map_err(|error| self.label_choice_payload_failure(error, variant.span))?;
                     if type_resolution_scope.is_none() {
                         type_resolution_scope = Some(field_context);
                     }
@@ -1386,5 +1323,38 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         }
 
         Ok((resolved_variants, type_resolution_scope))
+    }
+
+    /// Label one choice payload failure at its variant span.
+    ///
+    /// WHAT: adds a secondary label at `variant_span` to the failing diagnostic and to every
+    /// warning already collected, skipping any diagnostic that already has that label.
+    /// WHY: a payload failure is reported against the variant that owns it, so the variant is
+    /// named even when the offending field sits elsewhere in the source.
+    fn label_choice_payload_failure(
+        &mut self,
+        error: ExpressionParseError,
+        variant_span: Option<SourceSpan>,
+    ) -> ExpressionParseError {
+        let mut failure = match error {
+            ExpressionParseError::Diagnostic(diagnostic) => diagnostic,
+            other => return other,
+        };
+
+        let mut warnings = self.warnings.take_diagnostics();
+        for diagnostic in warnings.iter_mut().chain(std::iter::once(&mut failure)) {
+            if diagnostic
+                .labels
+                .iter()
+                .any(|label| label.span == variant_span)
+            {
+                continue;
+            }
+            let label = DiagnosticLabel::secondary(variant_span, None);
+            diagnostic.labels.push(label);
+        }
+        self.warnings = DiagnosticBag::from_diagnostics(warnings);
+
+        ExpressionParseError::Diagnostic(failure)
     }
 }

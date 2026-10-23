@@ -21,6 +21,7 @@
 //! template-frame stack keeps Moth template bodies as plain authored text around their highlighted
 //! heads and `[...]` interpolations.
 
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterInput, FormatterInputPiece, FormatterOutput, FormatterOutputPiece,
 };
@@ -28,7 +29,7 @@ use crate::compiler_frontend::ast::templates::styles::whitespace::TemplateWhites
 use crate::compiler_frontend::ast::templates::template::{
     Formatter, FormatterResult, TemplateFormatter,
 };
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::style_directives::StyleDirectiveArgumentValue;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::styles::escape_html::push_escaped_html_text;
@@ -132,7 +133,7 @@ impl TemplateFormatter for CodeTemplateFormatter {
         &self,
         input: FormatterInput,
         string_table: &mut StringTable,
-    ) -> Result<FormatterResult, CompilerMessages> {
+    ) -> Result<FormatterResult, TemplateError> {
         // Process each text piece through syntax highlighting. Opaque anchors (child
         // templates, dynamic expressions) pass through without highlighting. The
         // <code> wrapper is emitted as explicit boundary pieces so sealed anchors
@@ -171,7 +172,7 @@ impl TemplateFormatter for CodeTemplateFormatter {
             output: FormatterOutput {
                 pieces: output_pieces,
             },
-            warnings: Vec::new(),
+            warnings: DiagnosticBag::new(),
         })
     }
 }

@@ -8,14 +8,14 @@
 //! syntax bucket while still allowing real file errors to stay on `CompilerError`.
 //!
 //! Finalized failures additionally preserve the finished [`SourceDatabase`] beside the typed
-//! [`PremergeFailure`] so the single-file final boundary can convert once with source context
+//! [`PreparedFailure`] so the single-file final boundary can convert once with source context
 //! attached. Production discovery never constructs [`CompilerMessages`]; that vessel is built
 //! exactly once by the final render-test tails and the parent single-file boundary.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, PremergeFailure,
+    CompilerDiagnostic, DiagnosticBag, PreparedFailure,
 };
 use crate::compiler_frontend::paths::dependency_resolution::DependencyPathResolutionError;
 use crate::compiler_frontend::source::{SourceDatabase, SourceDatabaseError};
@@ -29,22 +29,22 @@ use std::sync::Arc;
 /// WHY: discovery finalization moves every retained snapshot and original span builder into
 ///      the final owner before any fallible identity transformation, so a terminal failure
 ///      must not drop that owner. The parent single-file/test tail converts the inner
-///      [`PremergeFailure`] once and attaches this database as the render source context.
+///      [`PreparedFailure`] once and attaches this database as the render source context.
 #[derive(Debug)]
 pub(crate) struct FinalizedDiscoveryFailure {
-    pub(crate) failure: PremergeFailure,
+    pub(crate) failure: PreparedFailure,
     pub(crate) source_database: SourceDatabase,
 }
 
 impl FinalizedDiscoveryFailure {
-    pub(crate) fn new(failure: PremergeFailure, source_database: SourceDatabase) -> Self {
+    pub(crate) fn new(failure: PreparedFailure, source_database: SourceDatabase) -> Self {
         Self {
             failure,
             source_database,
         }
     }
 
-    pub(crate) fn into_parts(self) -> (PremergeFailure, SourceDatabase) {
+    pub(crate) fn into_parts(self) -> (PreparedFailure, SourceDatabase) {
         (self.failure, self.source_database)
     }
 }
@@ -53,14 +53,14 @@ impl FinalizedDiscoveryFailure {
 pub(crate) enum SourceDiscoveryError {
     Diagnostic(CompilerDiagnostic),
     /// Diagnostics captured by their producer, including external import providers.
-    Premerge(PremergeFailure),
+    Premerge(PreparedFailure),
     Finalized(Box<FinalizedDiscoveryFailure>),
     Infrastructure(CompilerError),
 }
 
 impl SourceDiscoveryError {
     /// Finalized constructor for failures that already own a finished source database.
-    pub(crate) fn finalized(failure: PremergeFailure, source_database: SourceDatabase) -> Self {
+    pub(crate) fn finalized(failure: PreparedFailure, source_database: SourceDatabase) -> Self {
         SourceDiscoveryError::Finalized(Box::new(FinalizedDiscoveryFailure::new(
             failure,
             source_database,
@@ -77,7 +77,7 @@ impl SourceDiscoveryError {
     ///      discovery owner, so the batch becomes the sole table owner. The final boundary owns
     ///      the single render conversion.
     /// A finalized failure already owns a finished source database this lane cannot carry:
-    /// [`PremergeFailure`] has no source owner, so converting here would drop the finished owner.
+    /// [`PreparedFailure`] has no source owner, so converting here would drop the finished owner.
     /// Finalized failures must be matched explicitly and split with
     /// [`FinalizedDiscoveryFailure::into_parts`] (see `collect_reachable_input_files`);
     /// reaching this converter with one is a caller bug and fails loudly in all builds
@@ -86,7 +86,7 @@ impl SourceDiscoveryError {
         self,
         string_table: &mut StringTable,
         path_table: Arc<PathTable>,
-    ) -> PremergeFailure {
+    ) -> PreparedFailure {
         match self {
             SourceDiscoveryError::Diagnostic(diagnostic) => {
                 let table = std::mem::take(string_table);
@@ -96,8 +96,8 @@ impl SourceDiscoveryError {
                     None,
                     || Some(path_table),
                 ) {
-                    Ok(batch) => PremergeFailure::Diagnosed(batch),
-                    Err(error) => PremergeFailure::Infrastructure(error.into()),
+                    Ok(batch) => PreparedFailure::Diagnosed(batch),
+                    Err(error) => PreparedFailure::Infrastructure(error.into()),
                 }
             }
             SourceDiscoveryError::Premerge(failure) => failure,
@@ -108,7 +108,7 @@ impl SourceDiscoveryError {
                 )
             }
             SourceDiscoveryError::Infrastructure(error) => {
-                PremergeFailure::Infrastructure(error.into())
+                PreparedFailure::Infrastructure(error.into())
             }
         }
     }

@@ -9,7 +9,7 @@
 
 use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terminal};
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticLabelMessage, DiagnosticLabelStyle, DiagnosticPayload,
+    DiagnosticBag, DiagnosticKind, DiagnosticLabelMessage, DiagnosticLabelStyle, DiagnosticPayload,
     RuleDiagnosticKind,
 };
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
@@ -191,7 +191,7 @@ fn duplicate_function_parameters_rejected_by_shared_parser() {
         &mut span_builder,
     );
     let function_path = owner_path(&mut path_fork, &mut string_table);
-    let mut warnings = Vec::new();
+    let mut warnings = DiagnosticBag::new();
     let (expected_first_span, expected_duplicate_span) =
         duplicate_member_spans(&token_stream, &mut string_table, "value");
     let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream))
@@ -226,7 +226,7 @@ fn duplicate_struct_fields_rejected_by_shared_parser() {
         &mut span_builder,
     );
     let struct_path = owner_path(&mut path_fork, &mut string_table);
-    let mut warnings = Vec::new();
+    let mut warnings = DiagnosticBag::new();
     let (expected_first_span, expected_duplicate_span) =
         duplicate_member_spans(&token_stream, &mut string_table, "value");
     let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream))
@@ -262,7 +262,7 @@ fn duplicate_choice_payload_fields_rejected_by_shared_parser() {
         &mut span_builder,
     );
     let choice_path = owner_path(&mut path_fork, &mut string_table);
-    let mut warnings = Vec::new();
+    let mut warnings = DiagnosticBag::new();
     let (expected_first_span, expected_duplicate_span) =
         duplicate_member_spans(&token_stream, &mut string_table, "message");
     let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream))
@@ -298,7 +298,7 @@ fn duplicate_trait_requirement_parameters_rejected_by_shared_parser() {
         &mut span_builder,
     );
     let method_path = owner_path(&mut path_fork, &mut string_table);
-    let mut warnings = Vec::new();
+    let mut warnings = DiagnosticBag::new();
     let (expected_first_span, expected_duplicate_span) =
         duplicate_member_spans(&token_stream, &mut string_table, "value");
     let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream))
@@ -333,7 +333,7 @@ fn distinct_members_parse_successfully_through_shared_parser() {
         &mut span_builder,
     );
     let struct_path = owner_path(&mut path_fork, &mut string_table);
-    let mut warnings = Vec::new();
+    let mut warnings = DiagnosticBag::new();
     let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream))
         .expect("test token stream must expose canonical tokens");
     let fields = parse_record_body(

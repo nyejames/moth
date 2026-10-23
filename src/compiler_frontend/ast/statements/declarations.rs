@@ -49,7 +49,7 @@ use crate::compiler_frontend::ast::{
 use crate::compiler_frontend::builtins::error_type::is_reserved_builtin_symbol;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticToken,
+    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticBag, DiagnosticToken,
     InvalidCollectionTypeReason, InvalidConfigReason, InvalidDeclarationReason,
     InvalidFallibleHandlingReason, TypeMismatchContext, ValueReceiverContext,
 };
@@ -767,7 +767,7 @@ pub fn resolve_declaration_syntax(
             // Struct field defaults must be compile-time foldable, so they are parsed
             // in a dedicated constant context.
             let constant_context = ScopeContext::new_constant(qualified_name, context);
-            let mut field_warnings = Vec::new();
+            let mut field_warnings = DiagnosticBag::new();
             let field_syntax = {
                 let (field_syntax, next_index) = {
                     let mut declaration_cursor = initializer_stream.declaration_cursor()?;
@@ -783,7 +783,7 @@ pub fn resolve_declaration_syntax(
                 initializer_stream.set_position(next_index)?;
                 field_syntax
             };
-            for warning in field_warnings {
+            for warning in field_warnings.into_diagnostics() {
                 context.emit_warning(warning);
             }
             let source_owner = source_owner.ok_or_else(|| {

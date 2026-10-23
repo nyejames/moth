@@ -25,7 +25,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(in crate::compiler_frontend::ast::module_ast::environment::builder) fn project_imported_function_declarations(
         &mut self,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), Box<InfrastructureErrors>> {
         let imported = self
             .binding_environment
             .imported_declarations_by_local_path
@@ -51,8 +51,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .register_imported_generic_parameters(
                         &descriptor.generic_parameters,
                         string_table,
-                    )
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
+                    )?,
             };
 
             let MaterialisedFunctionSignature {
@@ -60,15 +59,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 function_type_id,
                 success_return_type_ids: returns,
                 error_return_type_id: error_return,
-            } = self
-                .project_imported_callable_signature(
-                    &local_path,
-                    &function.parameters,
-                    &function.returns,
-                    function.error_return.as_ref(),
-                    string_table,
-                )
-                .map_err(|error| self.error_messages(error, string_table))?;
+            } = self.project_imported_callable_signature(
+                &local_path,
+                &function.parameters,
+                &function.returns,
+                function.error_return.as_ref(),
+                string_table,
+            )?;
             let declaration = Declaration {
                 id: local_path,
                 type_id: function_type_id,
@@ -81,11 +78,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             Rc::make_mut(&mut self.declaration_table)
                 .append_for_construction(declaration, self.path_fork)
                 .ok_or_else(|| {
-                    CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(
-                            "Imported function declaration path was registered more than once",
-                        ),
-                        string_table,
+                    CompilerError::compiler_error(
+                        "Imported function declaration path was registered more than once",
                     )
                 })?;
             self.resolved_function_signatures_by_path.insert(
@@ -98,24 +92,18 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
             if let PublicFunctionCategory::GenericTemplate(_) = &function.category {
                 let OriginDeclarationId::Function(origin) = origin else {
-                    return Err(CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(
-                            "Imported generic function declaration has no function origin",
-                        ),
-                        string_table,
-                    ));
+                    return Err(CompilerError::compiler_error(
+                        "Imported generic function declaration has no function origin",
+                    )
+                    .into());
                 };
                 let generic_parameter_list_id = generic_parameter_list_id.ok_or_else(|| {
-                    CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(
-                            "Imported generic function declaration has no projected parameter list",
-                        ),
-                        string_table,
+                    CompilerError::compiler_error(
+                        "Imported generic function declaration has no projected parameter list",
                     )
                 })?;
                 let generic_parameter_owner =
-                    GenericDeclarationOrigin::free_function(origin.clone())
-                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                    GenericDeclarationOrigin::free_function(origin.clone())?;
 
                 self.generic_function_templates_by_path.insert(
                     local_path,
@@ -140,11 +128,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .imported_functions_by_local_path
                 .get(&local_path)
                 .ok_or_else(|| {
-                    CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(
-                            "Imported concrete function declaration has no header-stage call contract",
-                        ),
-                        string_table,
+                    CompilerError::compiler_error(
+                        "Imported concrete function declaration has no header-stage call contract",
                     )
                 })?;
             self.projected_imported_functions_by_local_path.insert(
@@ -154,16 +139,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     summary: self
                         .binding_environment
                         .imported_call_summaries_by_origin
-                        .get(summary_origin(header_contract).map_err(|error| {
-                            CompilerMessages::from_error_ref(error, string_table)
-                        })?)
+                        .get(summary_origin(header_contract)?)
                         .cloned()
                         .ok_or_else(|| {
-                            CompilerMessages::from_error_ref(
-                                CompilerError::compiler_error(
-                                    "Imported concrete function has no shared call summary",
-                                ),
-                                string_table,
+                            CompilerError::compiler_error(
+                                "Imported concrete function has no shared call summary",
                             )
                         })?,
                     returns,
@@ -178,7 +158,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(in crate::compiler_frontend::ast::module_ast::environment::builder) fn project_imported_receiver_method_declarations(
         &mut self,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), Box<InfrastructureErrors>> {
         let imported = self
             .binding_environment
             .imported_declarations_by_local_path
@@ -247,11 +227,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         .type_environment
                         .struct_definition_for(receiver_type_id)
                         .ok_or_else(|| {
-                            CompilerMessages::from_error_ref(
-                                CompilerError::compiler_error(
-                                    "Imported receiver struct has no registered nominal definition",
-                                ),
-                                string_table,
+                            CompilerError::compiler_error(
+                                "Imported receiver struct has no registered nominal definition",
                             )
                         })?
                         .path;
@@ -262,11 +239,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         .type_environment
                         .choice_definition_for(receiver_type_id)
                         .ok_or_else(|| {
-                            CompilerMessages::from_error_ref(
-                                CompilerError::compiler_error(
-                                    "Imported receiver choice has no registered nominal definition",
-                                ),
-                                string_table,
+                            CompilerError::compiler_error(
+                                "Imported receiver choice has no registered nominal definition",
                             )
                         })?
                         .path;
@@ -278,8 +252,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             };
 
             let receiver_generic_parameter_list_id = self
-                .register_imported_generic_parameters(generic_parameter_surfaces, string_table)
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                .register_imported_generic_parameters(generic_parameter_surfaces, string_table)?;
 
             for method in methods {
                 let method_name = string_table.intern(method.method_origin.defining_name());
@@ -292,15 +265,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     success_return_type_ids: returns,
                     error_return_type_id: error_return,
                     ..
-                } = self
-                    .project_imported_callable_signature(
-                        &method_path,
-                        &method.parameters,
-                        &method.returns,
-                        method.error_return.as_ref(),
-                        string_table,
-                    )
-                    .map_err(|error| self.error_messages(error, string_table))?;
+                } = self.project_imported_callable_signature(
+                    &method_path,
+                    &method.parameters,
+                    &method.returns,
+                    method.error_return.as_ref(),
+                    string_table,
+                )?;
                 self.resolved_function_signatures_by_path.insert(
                     method_path,
                     ResolvedFunctionSignature {
@@ -316,12 +287,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         .insert(method_path, method.method_origin.clone())
                         .is_some()
                     {
-                        return Err(CompilerMessages::from_error_ref(
-                            CompilerError::compiler_error(
-                                "Imported receiver method path was projected more than once",
-                            ),
-                            string_table,
-                        ));
+                        return Err(CompilerError::compiler_error(
+                            "Imported receiver method path was projected more than once",
+                        )
+                        .into());
                     }
                     self.index_imported_receiver_method_path(
                         method.method_origin.clone(),
@@ -329,17 +298,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         string_table,
                     );
                     let owner_list_id = receiver_generic_parameter_list_id.ok_or_else(|| {
-                        CompilerMessages::from_error_ref(
-                            CompilerError::compiler_error(
-                                "Imported generic receiver method has no receiver generic parameter list",
-                            ),
-                            string_table,
+                        CompilerError::compiler_error(
+                            "Imported generic receiver method has no receiver generic parameter list",
                         )
                     })?;
-                    let generic_parameter_owner = GenericDeclarationOrigin::nominal_type(
-                        receiver_origin.clone(),
-                    )
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                    let generic_parameter_owner =
+                        GenericDeclarationOrigin::nominal_type(receiver_origin.clone())?;
                     let parameter_names = descriptor
                         .generic_parameters
                         .iter()
@@ -385,25 +349,21 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     continue;
                 }
 
-                let contract = self
-                    .projected_imported_receiver_method_contract(
-                        method_path,
-                        &method.method_origin,
-                        returns,
-                        error_return,
-                    )
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                let contract = self.projected_imported_receiver_method_contract(
+                    method_path,
+                    &method.method_origin,
+                    returns,
+                    error_return,
+                )?;
                 if self
                     .projected_imported_receiver_methods_by_local_path
                     .insert(method_path, method.method_origin.clone())
                     .is_some()
                 {
-                    return Err(CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(
-                            "Imported receiver method path was projected more than once",
-                        ),
-                        string_table,
-                    ));
+                    return Err(CompilerError::compiler_error(
+                        "Imported receiver method path was projected more than once",
+                    )
+                    .into());
                 }
                 self.index_imported_receiver_method_path(
                     method.method_origin.clone(),

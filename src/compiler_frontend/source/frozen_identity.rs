@@ -200,6 +200,12 @@ impl FrozenIdentityContext {
         self.sources.source_record(id)
     }
 
+    #[cfg(test)]
+    pub(crate) fn retained_text(&self, id: SourceId) -> Option<&str> {
+        self.sources.line_index(id)?;
+        Some(self.sources.source_record(id).text.as_ref())
+    }
+
     #[cfg(feature = "data_layout_memory_probe")]
     pub(crate) fn retention_metrics(&self) -> super::SourceDatabaseRetentionMetrics {
         self.sources.retention_metrics()

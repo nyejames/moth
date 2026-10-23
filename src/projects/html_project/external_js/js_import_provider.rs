@@ -15,7 +15,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticSeverity, InvalidExternalModuleReason, PremergeFailure, SourceSpanCapacityResource,
+    DiagnosticSeverity, InvalidExternalModuleReason, PreparedFailure, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
@@ -65,7 +65,7 @@ impl ExternalImportProvider for JsExternalImportProvider {
         &self,
         request: ExternalImportRequest,
         context: &mut ExternalImportProviderContext,
-    ) -> Result<Option<ResolvedExternalImport>, PremergeFailure> {
+    ) -> Result<Option<ResolvedExternalImport>, PreparedFailure> {
         let source = match std::fs::read_to_string(&request.canonical_source_path) {
             Ok(content) => content,
             Err(error) => {
@@ -145,10 +145,10 @@ impl ExternalImportProvider for JsExternalImportProvider {
                 &package_path,
                 crate::builder_surface::PackageOrigin::ProjectLocal,
             )
-            .map_err(PremergeFailure::from)?;
+            .map_err(PreparedFailure::from)?;
 
         let registered = register_parsed_js_module(package_id, &parsed, context.package_registry)
-            .map_err(PremergeFailure::from)?;
+            .map_err(PreparedFailure::from)?;
 
         let required_runtime_imports = required_runtime_imports_from_parsed(&parsed);
 
@@ -158,7 +158,7 @@ impl ExternalImportProvider for JsExternalImportProvider {
             request.canonical_source_path,
             request.source_span,
         )
-        .map_err(PremergeFailure::from)?;
+        .map_err(PreparedFailure::from)?;
 
         Ok(Some(ResolvedExternalImport {
             package_id,

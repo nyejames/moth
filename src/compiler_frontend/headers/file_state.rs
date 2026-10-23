@@ -6,7 +6,7 @@
 //! high-level header-state machine instead of a long list of unrelated vectors and counters.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticBag};
 use crate::compiler_frontend::headers::types::{
     DependencySelection, FileFrontendPrepareError, FileFrontendPrepareOutput, FileRole, Header,
     HeaderExportMode, HeaderKind, PreparedFilePathSyntax, RetainedDependencyClause,
@@ -30,7 +30,7 @@ use std::sync::Arc;
 /// WHY: these values are consumed together when building the per-file output, and keeping them
 /// together makes branch handlers explicit about which state they mutate.
 pub(super) struct HeaderFileParseState {
-    pub(super) warnings: Vec<CompilerDiagnostic>,
+    pub(super) warnings: DiagnosticBag,
     pub(super) headers: Vec<Header>,
     pub(super) encountered_symbols: HashMap<StringId, SourceSpan>,
     pub(super) start_body_symbols: HashSet<StringId>,
@@ -63,7 +63,7 @@ pub(super) struct HeaderFileParseState {
 impl HeaderFileParseState {
     pub(super) fn new(token_count: usize) -> Self {
         Self {
-            warnings: Vec::new(),
+            warnings: DiagnosticBag::new(),
             headers: Vec::with_capacity(token_count / TOKEN_TO_HEADER_RATIO),
             encountered_symbols: HashMap::with_capacity(
                 MINIMUM_LIKELY_DECLARATIONS + (token_count / TOKEN_TO_DECLARATION_RATIO),

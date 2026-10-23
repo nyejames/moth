@@ -107,25 +107,25 @@ pub(super) fn rebind_discovery_batch(
 }
 
 pub(super) fn rebind_discovery_failure(
-    failure: PremergeFailure,
+    failure: PreparedFailure,
     source_ids: &SourceIdentityMap,
-) -> Result<PremergeFailure, CompilerError> {
+) -> Result<PreparedFailure, CompilerError> {
     match failure {
-        PremergeFailure::Diagnosed(batch) => Ok(PremergeFailure::Diagnosed(
+        PreparedFailure::Diagnosed(batch) => Ok(PreparedFailure::Diagnosed(
             rebind_discovery_batch(batch, source_ids)?,
         )),
-        PremergeFailure::Infrastructure(mut error) => {
+        PreparedFailure::Infrastructure(mut error) => {
             for cause in error.unfrozen_iter_mut() {
                 rebind_discovery_compiler_error(cause, source_ids)?;
             }
-            Ok(PremergeFailure::Infrastructure(error))
+            Ok(PreparedFailure::Infrastructure(error))
         }
-        PremergeFailure::Mixed { batch, mut error } => {
+        PreparedFailure::Mixed { batch, mut error } => {
             let batch = rebind_discovery_batch(batch, source_ids)?;
             for cause in error.unfrozen_iter_mut() {
                 rebind_discovery_compiler_error(cause, source_ids)?;
             }
-            Ok(PremergeFailure::Mixed { batch, error })
+            Ok(PreparedFailure::Mixed { batch, error })
         }
     }
 }

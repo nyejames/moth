@@ -7,7 +7,9 @@
 
 use crate::compiler_frontend::arena::{HeaderStats, TokenStats};
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DependencyClauseKind};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DependencyClauseKind, DiagnosticBag,
+};
 use crate::compiler_frontend::datatypes::generic_parameters::GenericParameterList;
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::declaration_syntax::build_config_contract::SourceBuildConfigContract;
@@ -1515,7 +1517,7 @@ pub struct FileFrontendPrepareOutput {
     ///
     /// WHY: per-file preparation must be self-contained; warnings are merged into the caller's
     /// warning vector in deterministic file iteration order before module-wide aggregation.
-    pub warnings: Vec<CompilerDiagnostic>,
+    pub warnings: DiagnosticBag,
 }
 
 /// Lifecycle owner for one prepared source file's path syntax.
@@ -1586,7 +1588,7 @@ pub(crate) struct SourcePreparationDelta {
 /// Its source's live span builder belongs to the enclosing preparation owner.
 #[derive(Debug)]
 pub struct FileFrontendPrepareError {
-    pub warnings: Vec<CompilerDiagnostic>,
+    pub warnings: DiagnosticBag,
     pub diagnostic: CompilerDiagnostic,
 }
 impl FileFrontendPrepareError {
@@ -1600,9 +1602,7 @@ impl FileFrontendPrepareError {
             return;
         }
 
-        for warning in &mut self.warnings {
-            warning.remap_path_ids(remap);
-        }
+        self.warnings.remap_path_ids(remap);
         self.diagnostic.remap_path_ids(remap);
     }
 }
@@ -1624,7 +1624,7 @@ impl FileFrontendPrepareFailure {
     pub(crate) fn from_tokenization(failure: TokenizeFailure) -> Self {
         match failure {
             TokenizeFailure::Diagnosed(diagnostic) => Self::Diagnosed(FileFrontendPrepareError {
-                warnings: Vec::new(),
+                warnings: DiagnosticBag::new(),
                 diagnostic,
             }),
             TokenizeFailure::Infrastructure(error) => Self::Infrastructure(error),
@@ -1716,9 +1716,7 @@ impl FileFrontendPrepareOutput {
             fragment.remap_string_ids(remap);
         }
 
-        for warning in &mut self.warnings {
-            warning.remap_string_ids(remap);
-        }
+        self.warnings.remap_string_ids(remap);
 
         Ok(())
     }
@@ -1805,12 +1803,14 @@ impl FileFrontendPrepareOutput {
                 path_fork,
             )?;
         }
-        for warning in &mut self.warnings {
+        let mut warnings = self.warnings.take_diagnostics();
+        for warning in &mut warnings {
             rebind_source_span(&mut warning.primary_span, final_file_id);
             for label in &mut warning.labels {
                 rebind_source_span(&mut label.span, final_file_id);
             }
         }
+        self.warnings = DiagnosticBag::from_diagnostics(warnings);
 
         // The table remains private to this output until every retained header has had
         // its top-level source identity rebound. Update its path-location scopes exactly once.
@@ -2435,9 +2435,7 @@ impl FileFrontendPrepareError {
             return;
         }
 
-        for warning in &mut self.warnings {
-            warning.remap_string_ids(remap);
-        }
+        self.warnings.remap_string_ids(remap);
 
         self.diagnostic.remap_string_ids(remap);
     }
@@ -2469,7 +2467,7 @@ pub(super) struct HeaderParseContext<'a> {
 
 // Shared per-header builder inputs that stay stable while one declaration is classified.
 pub(super) struct HeaderBuildContext<'a> {
-    pub warnings: &'a mut Vec<CompilerDiagnostic>,
+    pub warnings: &'a mut DiagnosticBag,
     pub source_file: PathId,
     pub file_dependency_clauses: &'a [RetainedDependencyClause],
     pub dependency_selections: &'a [DependencySelection],

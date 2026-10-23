@@ -108,8 +108,14 @@ ACTIVE_PLAN:
 - Execution order: Phase 4 runs as the steps in `PHASE_4_EXECUTION_ORDER` below. The slice
   checklists remain the acceptance contract. Only their order and grouping changed, under the
   architecture document's repository-discovered corrections rule.
-- NEXT_SUBSTEP: P4.5 slice S7 of `PHASE_4_5_SEQUENCE`: delete `CompilerMessages`, the remaining
-  `Render*Context` types and boundary types; re-home build-result items, probes and metrics. S6
+- NEXT_SUBSTEP: P4.5 slice S7b of `PHASE_4_5_SEQUENCE`: migrate backends, output, build
+  orchestration and command exits off `CompilerMessages`, then delete it, the remaining
+  `Render*Context` producer API and legacy boundary types; re-home build-result items, probes and
+  metrics. S7a is accepted in "Phase 4 P4.5 S7a: frontend producers return PreparedFailure":
+  `PreparedFailure` (renamed from `PremergeFailure`, absorbing `AstDiagnosticFailure`) is the one
+  pre-freeze failure carrier, `ConfigCompilationFailure` is deleted, every frontend, header,
+  template and single-source producer is off the vessel, and `BoundaryAccumulator` gains
+  `append_infrastructure`; root-domain batches use `capture_from_root_string_table`. S6
   is complete. S6f2 is accepted in "Phase 4 P4.5 S6f2: diagnostics retain no type environment":
   `RenderTypeContext`, every retained or render-time type environment, `diagnostic_type_name` and
   `TypeDisplaySnapshot::unresolved_type_id` are deleted, and the builder keeps one memo. S6f1 is

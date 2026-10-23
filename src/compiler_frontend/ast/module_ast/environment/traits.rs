@@ -7,6 +7,7 @@
 
 use super::builder::{AstModuleEnvironmentBuilder, DeclarationPassLanes};
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::ast::statements::functions::{
     SignatureTypeFallbackPolicy, UnresolvedFunctionSignature,
@@ -23,7 +24,7 @@ use crate::compiler_frontend::builtins::casts::targets::{
 use crate::compiler_frontend::builtins::casts::traits::{
     BUILTIN_CAST_TRAIT_ROWS, builtin_cast_trait_name, core_cast_trait_for_target_and_fallibility,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTraitIncompatibilityReason,
 };
@@ -78,7 +79,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(in crate::compiler_frontend::ast) fn register_core_traits(
         &mut self,
         string_table: &mut StringTable,
-    ) -> Result<TraitEnvironment, CompilerMessages> {
+    ) -> Result<TraitEnvironment, CompilerError> {
         let mut trait_environment = TraitEnvironment::new();
         trait_environment.register_core_displayable(&mut self.type_environment, string_table);
         Self::register_core_cast_traits(
@@ -97,22 +98,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         sorted_headers: &[Header],
         mut trait_environment: TraitEnvironment,
         string_table: &mut StringTable,
-    ) -> Result<TraitEnvironment, CompilerMessages> {
-        self.project_imported_trait_declarations(&mut trait_environment, string_table)
-            .map_err(|error| self.error_messages(error, string_table))?;
+    ) -> Result<TraitEnvironment, ExpressionParseError> {
+        self.project_imported_trait_declarations(&mut trait_environment, string_table)?;
         let mut source_order_by_trait_id = FxHashMap::default();
 
         for &declaration_id in &declaration_lanes.traits {
-            let header = declaration_lanes
-                .header(declaration_id, sorted_headers)
-                .map_err(|error| self.error_messages(error, string_table))?;
+            let header = declaration_lanes.header(declaration_id, sorted_headers)?;
             let HeaderKind::Trait { declaration } = &header.kind else {
-                return Err(self.error_messages(
-                    CompilerError::compiler_error(
-                        "Trait declaration lane contained a different header kind.",
-                    ),
-                    string_table,
-                ));
+                return Err(CompilerError::compiler_error(
+                    "Trait declaration lane contained a different header kind.",
+                )
+                .into());
             };
 
             let definition = self.resolve_trait_definition(
@@ -128,14 +124,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     continue;
                 };
 
-                return Err(self.diagnostic_messages(
-                    CompilerDiagnostic::duplicate_declaration(
-                        declaration.name,
-                        existing_definition.declaration_span,
-                        source_span(header, declaration.name_span),
-                    ),
-                    string_table,
-                ));
+                let diagnostic = CompilerDiagnostic::duplicate_declaration(
+                    declaration.name,
+                    existing_definition.declaration_span,
+                    source_span(header, declaration.name_span),
+                );
+                return Err(diagnostic.into());
             }
 
             source_order_by_trait_id.insert(definition_id, declaration.source_order);
@@ -174,7 +168,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         type_environment: &mut crate::compiler_frontend::datatypes::environment::TypeEnvironment,
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), CompilerError> {
         for metadata in BUILTIN_CAST_TRAIT_ROWS {
             let Some(success_type) = type_id_for_builtin_target(
                 metadata.target,
@@ -182,11 +176,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 string_table,
                 path_fork,
             ) else {
-                return Err(CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(
-                        "Core cast trait target type was not registered before trait metadata.",
-                    ),
-                    string_table,
+                return Err(CompilerError::compiler_error(
+                    "Core cast trait target type was not registered before trait metadata.",
                 ));
             };
 
@@ -198,11 +189,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     string_table,
                     path_fork,
                 ) else {
-                    return Err(CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(
-                            "Builtin Error type was not registered before fallible core cast traits.",
-                        ),
-                        string_table,
+                    return Err(CompilerError::compiler_error(
+                        "Builtin Error type was not registered before fallible core cast traits.",
                     ));
                 };
                 Some(error_type)
@@ -281,7 +269,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         type_environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), CompilerError> {
         use crate::compiler_frontend::traits::evidence::environment::{
             TraitEvidenceDefinition, TraitEvidenceKind,
         };
@@ -291,30 +279,21 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let Some(trait_kind) =
                 core_cast_trait_for_target_and_fallibility(row.target, row.fallibility)
             else {
-                return Err(CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(
-                        "Builtin cast evidence row did not map to a registered core cast trait.",
-                    ),
-                    string_table,
+                return Err(CompilerError::compiler_error(
+                    "Builtin cast evidence row did not map to a registered core cast trait.",
                 ));
             };
             let trait_name = builtin_cast_trait_name(trait_kind);
             let Some(trait_id) = trait_environment.core_trait_id_for_static_name(trait_name) else {
-                return Err(CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(
-                        "Core cast trait was not registered before builtin evidence.",
-                    ),
-                    string_table,
+                return Err(CompilerError::compiler_error(
+                    "Core cast trait was not registered before builtin evidence.",
                 ));
             };
             let Some(source_type_id) =
                 type_id_for_builtin_target(source, type_environment, string_table, path_fork)
             else {
-                return Err(CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(
-                        "Builtin cast evidence source type was not registered.",
-                    ),
-                    string_table,
+                return Err(CompilerError::compiler_error(
+                    "Builtin cast evidence source type was not registered.",
                 ));
             };
 
@@ -339,8 +318,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         declaration: &TraitDeclarationSyntax,
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
-    ) -> Result<ResolvedTraitDefinition, CompilerMessages> {
-        let visibility = self.header_visibility(header, string_table)?;
+    ) -> Result<ResolvedTraitDefinition, ExpressionParseError> {
+        let visibility = self.header_visibility(header)?;
 
         let this_name = trait_this_name(string_table);
         let this_parameters =
@@ -357,12 +336,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .get(&TypeParameterId(0))
             .copied()
         else {
-            return Err(self.error_messages(
-                CompilerError::compiler_error(
-                    "Trait `This` synthetic type parameter was not registered.",
-                ),
-                string_table,
-            ));
+            return Err(CompilerError::compiler_error(
+                "Trait `This` synthetic type parameter was not registered.",
+            )
+            .into());
         };
         let this_type = self
             .type_environment
@@ -390,7 +367,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     first_span,
                     source_span(header, requirement.span),
                 );
-                return Err(self.diagnostic_messages(diagnostic, string_table));
+                return Err(diagnostic.into());
             }
 
             let resolved_requirement = self.resolve_trait_requirement(
@@ -415,7 +392,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 &requirements,
                 &self.header_source_path(header),
                 trait_environment,
-                string_table,
             )?;
         }
 
@@ -437,7 +413,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         &mut self,
         input: TraitRequirementResolutionInput<'_>,
         string_table: &mut StringTable,
-    ) -> Result<ResolvedTraitRequirement, CompilerMessages> {
+    ) -> Result<ResolvedTraitRequirement, ExpressionParseError> {
         let TraitRequirementResolutionInput {
             header,
             declaration,
@@ -448,7 +424,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             generic_parameter_scope,
         } = input;
 
-        let visibility = self.header_visibility(header, string_table)?;
+        let visibility = self.header_visibility(header)?;
         let requirement_span = source_span(header, requirement.span);
         let signature_syntax =
             signature_with_trait_this_as_parameter(&requirement.signature, this_name);
@@ -472,18 +448,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             unsafe { &*path_fork },
             string_table,
             Some(&signature_context),
-        )
-        .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
+        )?;
 
         let Some(first_parameter) = resolved_signature.signature.parameters.first() else {
-            return Err(self.diagnostic_messages(
-                CompilerDiagnostic::unsupported_trait_feature(
-                    declaration.name,
-                    string_table.intern("missing This receiver"),
-                    requirement_span,
-                ),
-                string_table,
-            ));
+            let diagnostic = CompilerDiagnostic::unsupported_trait_feature(
+                declaration.name,
+                string_table.intern("missing This receiver"),
+                requirement_span,
+            );
+            return Err(diagnostic.into());
         };
 
         let receiver = if first_parameter.value_mode.is_mutable() {
@@ -512,14 +485,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let mut returns = Vec::with_capacity(resolved_signature.signature.returns.len());
         for return_slot in &resolved_signature.signature.returns {
             let Some(type_id) = return_slot.type_id else {
-                return Err(self.diagnostic_messages(
-                    CompilerDiagnostic::unsupported_trait_feature(
-                        declaration.name,
-                        string_table.intern("unresolved requirement return"),
-                        requirement_span,
-                    ),
-                    string_table,
-                ));
+                let diagnostic = CompilerDiagnostic::unsupported_trait_feature(
+                    declaration.name,
+                    string_table.intern("unresolved requirement return"),
+                    requirement_span,
+                );
+                return Err(diagnostic.into());
             };
 
             returns.push(ResolvedTraitReturn {
@@ -546,7 +517,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         signature_syntax: &FunctionSignatureSyntax,
         visibility: &Arc<FileVisibility>,
         string_table: &mut StringTable,
-    ) -> Result<(UnresolvedFunctionSignature, ScopeContext), CompilerMessages> {
+    ) -> Result<(UnresolvedFunctionSignature, ScopeContext), ExpressionParseError> {
         // This parse is deliberately the permissive half of a two-step resolution: the caller
         // resolves retained syntax again with the generic parameter scope and trait environment.
         // Keep the same scope for constant-dependent capacities and file visibility.
@@ -555,11 +526,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .with_file_visibility(Arc::clone(visibility));
 
         let owner_tokens = self.token_owner(header.tokens.source()).ok_or_else(|| {
-            self.error_messages(
-                CompilerError::compiler_error(
-                    "trait requirement header has no prepared source token owner",
-                ),
-                string_table,
+            CompilerError::compiler_error(
+                "trait requirement header has no prepared source token owner",
             )
         })?;
         // Live parser state stays on the canonical source owner. The transient
@@ -567,20 +535,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // inside its bounds for this signature parse only. `from_source_tokens`
         // retains the canonical owner for later bounded expression handoffs.
         let full = owner_tokens.full_range().map_err(|error| {
-            self.error_messages(
-                CompilerError::compiler_error(format!(
-                    "trait requirement source range could not be constructed: {error:?}"
-                )),
-                string_table,
-            )
+            CompilerError::compiler_error(format!(
+                "trait requirement source range could not be constructed: {error:?}"
+            ))
         })?;
         let source_owner = AstCursor::from_source_tokens(&owner_tokens, full).map_err(|error| {
-            self.error_messages(
-                CompilerError::compiler_error(format!(
-                    "trait requirement source range is outside its source owner: {error:?}"
-                )),
-                string_table,
-            )
+            CompilerError::compiler_error(format!(
+                "trait requirement source range is outside its source owner: {error:?}"
+            ))
         })?;
         let mut compatibility_cache = TypeCompatibilityCache::new();
         let mut type_interner =
@@ -595,20 +557,18 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             string_table,
             SignatureTypeFallbackPolicy::StrictCapacity,
             self.path_fork,
-        )
-        .map_err(|error| self.expression_error_messages(error, string_table))?;
-        self.warnings
-            .extend(signature_context.take_emitted_warnings());
+        )?;
+        for warning in signature_context.take_emitted_warnings() {
+            self.warnings.push(warning);
+        }
 
         if signature.parameters.is_empty() {
-            return Err(self.diagnostic_messages(
-                CompilerDiagnostic::unsupported_trait_feature(
-                    declaration.name,
-                    string_table.intern("marker requirement"),
-                    source_span(header, declaration.name_span),
-                ),
-                string_table,
-            ));
+            let diagnostic = CompilerDiagnostic::unsupported_trait_feature(
+                declaration.name,
+                string_table.intern("marker requirement"),
+                source_span(header, declaration.name_span),
+            );
+            return Err(diagnostic.into());
         }
 
         Ok((signature, signature_context))
@@ -619,13 +579,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         sorted_headers: &[Header],
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), ExpressionParseError> {
         for header in sorted_headers {
             let HeaderKind::TraitConformance { conformance } = &header.kind else {
                 continue;
             };
 
-            let visibility = self.header_visibility(header, string_table)?;
+            let visibility = self.header_visibility(header)?;
 
             for trait_ref in &conformance.traits {
                 self.resolve_visible_trait_name(
@@ -634,13 +594,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     &visibility,
                     trait_environment,
                     string_table,
-                )
-                .map_err(|mut messages| {
-                    if let Some(diagnostic) = messages.diagnostics.first_mut() {
-                        diagnostic.primary_span = source_span(header, trait_ref.span);
-                    }
-                    messages
-                })?;
+                )?;
             }
         }
 
@@ -653,7 +607,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         source_order_by_trait_id: &FxHashMap<TraitId, usize>,
         trait_environment: &mut TraitEnvironment,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), ExpressionParseError> {
         let mut recorded_source_pairs: FxHashSet<(TraitId, TraitId)> = FxHashSet::default();
 
         for header in sorted_headers {
@@ -661,7 +615,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             };
 
-            let visibility = self.header_visibility(header, string_table)?;
+            let visibility = self.header_visibility(header)?;
 
             let subject_id = self.resolve_trait_incompatibility_reference(
                 header,
@@ -678,15 +632,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 source_order_by_trait_id,
                 trait_environment,
             ) {
-                return Err(self.diagnostic_messages(
-                    CompilerDiagnostic::invalid_trait_incompatibility(
-                        incompatibility.subject.name,
-                        Some(incompatibility.subject.name),
-                        InvalidTraitIncompatibilityReason::UnknownTrait,
-                        source_span(header, incompatibility.subject.span),
-                    ),
-                    string_table,
-                ));
+                let diagnostic = CompilerDiagnostic::invalid_trait_incompatibility(
+                    incompatibility.subject.name,
+                    Some(incompatibility.subject.name),
+                    InvalidTraitIncompatibilityReason::UnknownTrait,
+                    source_span(header, incompatibility.subject.span),
+                );
+                return Err(diagnostic.into());
             }
 
             for incompatible_trait in &incompatibility.incompatible_traits {
@@ -705,27 +657,23 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     source_order_by_trait_id,
                     trait_environment,
                 ) {
-                    return Err(self.diagnostic_messages(
-                        CompilerDiagnostic::invalid_trait_incompatibility(
-                            incompatibility.subject.name,
-                            Some(incompatible_trait.name),
-                            InvalidTraitIncompatibilityReason::UnknownTrait,
-                            source_span(header, incompatible_trait.span),
-                        ),
-                        string_table,
-                    ));
+                    let diagnostic = CompilerDiagnostic::invalid_trait_incompatibility(
+                        incompatibility.subject.name,
+                        Some(incompatible_trait.name),
+                        InvalidTraitIncompatibilityReason::UnknownTrait,
+                        source_span(header, incompatible_trait.span),
+                    );
+                    return Err(diagnostic.into());
                 }
 
                 if subject_id == incompatible_id {
-                    return Err(self.diagnostic_messages(
-                        CompilerDiagnostic::invalid_trait_incompatibility(
-                            incompatibility.subject.name,
-                            Some(incompatible_trait.name),
-                            InvalidTraitIncompatibilityReason::SelfIncompatible,
-                            source_span(header, incompatible_trait.span),
-                        ),
-                        string_table,
-                    ));
+                    let diagnostic = CompilerDiagnostic::invalid_trait_incompatibility(
+                        incompatibility.subject.name,
+                        Some(incompatible_trait.name),
+                        InvalidTraitIncompatibilityReason::SelfIncompatible,
+                        source_span(header, incompatible_trait.span),
+                    );
+                    return Err(diagnostic.into());
                 }
 
                 let normalized_pair = if subject_id.0 < incompatible_id.0 {
@@ -735,15 +683,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 };
 
                 if !recorded_source_pairs.insert(normalized_pair) {
-                    return Err(self.diagnostic_messages(
-                        CompilerDiagnostic::invalid_trait_incompatibility(
-                            incompatibility.subject.name,
-                            Some(incompatible_trait.name),
-                            InvalidTraitIncompatibilityReason::DuplicateRelation,
-                            source_span(header, incompatible_trait.span),
-                        ),
-                        string_table,
-                    ));
+                    let diagnostic = CompilerDiagnostic::invalid_trait_incompatibility(
+                        incompatibility.subject.name,
+                        Some(incompatible_trait.name),
+                        InvalidTraitIncompatibilityReason::DuplicateRelation,
+                        source_span(header, incompatible_trait.span),
+                    );
+                    return Err(diagnostic.into());
                 }
 
                 trait_environment.record_incompatible_traits(subject_id, incompatible_id);
@@ -772,7 +718,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         visibility: &FileVisibility,
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
-    ) -> Result<TraitId, CompilerMessages> {
+    ) -> Result<TraitId, ExpressionParseError> {
         let trait_id = if let Some(path) = visibility.visible_trait_names.get(&trait_ref.name) {
             trait_environment.id_for_path(path)
         } else {
@@ -780,15 +726,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         };
 
         let Some(trait_id) = trait_id else {
-            return Err(self.diagnostic_messages(
-                CompilerDiagnostic::invalid_trait_incompatibility(
-                    subject.name,
-                    Some(trait_ref.name),
-                    InvalidTraitIncompatibilityReason::UnknownTrait,
-                    source_span(header, trait_ref.span),
-                ),
-                string_table,
-            ));
+            let diagnostic = CompilerDiagnostic::invalid_trait_incompatibility(
+                subject.name,
+                Some(trait_ref.name),
+                InvalidTraitIncompatibilityReason::UnknownTrait,
+                source_span(header, trait_ref.span),
+            );
+            return Err(diagnostic.into());
         };
 
         Ok(trait_id)
@@ -801,7 +745,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         visibility: &FileVisibility,
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
-    ) -> Result<TraitId, CompilerMessages> {
+    ) -> Result<TraitId, ExpressionParseError> {
         if let Some(path) = visibility.visible_trait_names.get(&name)
             && let Some(id) = trait_environment.id_for_path(path)
         {
@@ -812,10 +756,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             return Ok(id);
         }
 
-        Err(self.diagnostic_messages(
-            CompilerDiagnostic::unknown_trait_name(name, span),
-            string_table,
-        ))
+        Err(CompilerDiagnostic::unknown_trait_name(name, span).into())
     }
 
     fn validate_exported_trait_surface(
@@ -824,8 +765,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         requirements: &[ResolvedTraitRequirement],
         public_root_file: &PathId,
         trait_environment: &TraitEnvironment,
-        string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), ExpressionParseError> {
         for requirement in requirements {
             for parameter in &requirement.parameters {
                 for type_id in parameter.semantic_type_ids() {
@@ -835,7 +775,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         public_root_file,
                         parameter.span,
                         trait_environment,
-                        string_table,
                     )?;
                 }
             }
@@ -847,7 +786,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     public_root_file,
                     return_slot.span,
                     trait_environment,
-                    string_table,
                 )?;
             }
         }
@@ -862,8 +800,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         public_root_file: &PathId,
         span: Option<SourceSpan>,
         trait_environment: &TraitEnvironment,
-        string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), ExpressionParseError> {
         let mut visited_types = FxHashSet::default();
         if self.public_type_id_is_nameable(
             type_id,
@@ -874,10 +811,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             return Ok(());
         }
 
-        Err(self.diagnostic_messages(
-            CompilerDiagnostic::trait_private_surface_leak(trait_name, type_id, span),
-            string_table,
-        ))
+        Err(CompilerDiagnostic::trait_private_surface_leak(trait_name, type_id, span).into())
     }
 }
 fn trait_reference_is_forward(

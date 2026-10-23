@@ -8,10 +8,8 @@
 //!       those cannot show is that folding a template is a compiler entry point needing no project
 //!       request, no builder and no filesystem.
 
-use super::{
-    FoldedMothTemplate, MothTemplateCompilationFailure, MothTemplateCompilationRequest,
-    compile_moth_template_source,
-};
+use super::{FoldedMothTemplate, MothTemplateCompilationRequest, compile_moth_template_source};
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidNumberLiteralView;
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_boundary_messages_html;
@@ -83,7 +81,7 @@ fn plain_text_content_uses_the_text_fast_path_and_moves_owned_text() {
         module_resources.origins().is_empty(),
         "a plain request has no file values, so no resource origin is interned"
     );
-    assert!(warnings.is_empty());
+    assert!(warnings.is_none());
 
     let source_id = source_database
         .get_by_canonical_path(Path::new("/templates/intro.mtf"))
@@ -108,7 +106,7 @@ fn standalone_preparation_diagnostic_retains_source_snapshot_context() {
     let source_path = Path::new("/templates/broken.mtf");
     let source_code = "]";
 
-    let messages = match compile_moth_template_source(
+    let failure = match compile_moth_template_source(
         MothTemplateCompilationRequest {
             source_path,
             source_code: Some(source_code.to_owned()),
@@ -118,14 +116,16 @@ fn standalone_preparation_diagnostic_retains_source_snapshot_context() {
         &mut string_table,
     ) {
         Ok(_) => panic!("an unescaped template close should be diagnosed during preparation"),
-        Err(MothTemplateCompilationFailure::Messages(messages)) => messages,
-        Err(MothTemplateCompilationFailure::Ast { .. }) => {
-            panic!("preparation diagnostics should remain on the legacy message path")
-        }
+        Err(failure) => failure,
     };
+    assert!(
+        matches!(failure.failure, PreparedFailure::Diagnosed(_)),
+        "preparation diagnostics should remain on the diagnosed path",
+    );
 
-    let source_database = messages
-        .source_database_for_diagnostic(0)
+    let source_database = failure
+        .source_database
+        .as_ref()
         .expect("preparation diagnostics should retain their source database");
     let source_id = source_database
         .get_by_canonical_path(source_path)
@@ -192,7 +192,7 @@ fn whole_interpolation_above_the_i32_default_is_diagnosed_not_folded() {
         .expect("the diagnosed direct source should be replaced");
 
     let mut accumulator = BoundaryAccumulator::new();
-    let install = failure.append_to_boundary(&mut accumulator, &string_table);
+    let install = failure.append_to_boundary(&mut accumulator);
     let failure = accumulator.finish(install);
     assert_eq!(
         failure
@@ -402,7 +402,7 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
             .any(|origin| origin.origin == expected_resource_origin),
         "the folded module's resource table must report the resolved origin as a source fact"
     );
-    assert!(warnings.is_empty());
+    assert!(warnings.is_none());
 
     let template_id = source_database
         .get_by_canonical_path(template_path)

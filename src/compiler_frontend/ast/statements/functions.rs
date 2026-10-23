@@ -23,7 +23,6 @@ use crate::compiler_frontend::ast::expressions::parse_expression::create_express
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources, ExpressionTrailingPolicy,
 };
-use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::{
@@ -595,15 +594,7 @@ fn fold_signature_default(
                         expressions,
                         constants,
                         Some(scope.external_package_registry.as_ref()),
-                    )
-                    .map_err(|error| match error {
-                        TemplateError::Diagnostic(diagnostic) => {
-                            ExpressionParseError::Diagnostic(diagnostic)
-                        }
-                        TemplateError::Infrastructure(error) => {
-                            ExpressionParseError::Infrastructure(error)
-                        }
-                    })?;
+                    )?;
                     if matches!(kind, TemplateConstValueKind::SlotInsertHelper) {
                         return Err(CompilerDiagnostic::invalid_template_structure(
                             InvalidTemplateStructureReason::HelperOutsideWrapperSlot,

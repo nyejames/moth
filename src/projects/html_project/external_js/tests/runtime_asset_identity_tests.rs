@@ -13,7 +13,7 @@ use crate::builder_surface::external_import_providers::cache::ExternalImportProv
 use crate::builder_surface::external_import_providers::provider::{
     ExternalImportProvider, ExternalImportProviderContext, ExternalImportRequest,
 };
-use crate::compiler_frontend::compiler_messages::PremergeFailure;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::paths::resource_identity::{
     PortableResourcePath, StableResourceOriginId,
@@ -43,7 +43,7 @@ fn resolve_widget_via_provider(
     logical_source_path: &str,
     canonical_source_path: PathBuf,
     string_table: &mut StringTable,
-) -> Result<ResolvedWidgetIdentity, PremergeFailure> {
+) -> Result<ResolvedWidgetIdentity, PreparedFailure> {
     let logical_source_path =
         PortableResourcePath::from_relative_logical_path(Path::new(logical_source_path))
             .expect("fixture logical JS path should be portable");

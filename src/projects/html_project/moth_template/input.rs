@@ -5,8 +5,10 @@
 //! owning filesystem traversal policy.
 
 use crate::builder_surface::SourceFileKind;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, SourceSpanCapacityResource};
+use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticBag, PreparedFailure, SourceSpanCapacityResource,
+};
 use crate::compiler_frontend::symbols::path_interner::{
     NonUtf8PathComponent, PathId, PathInternError, PathInternerFork,
 };
@@ -14,6 +16,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum MothTemplateInput {
@@ -40,18 +43,18 @@ impl MothTemplateInput {
         self,
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
-    ) -> Result<Vec<MothTemplateSourceUnit>, CompilerMessages> {
+    ) -> Result<Vec<MothTemplateSourceUnit>, PreparedFailure> {
         let units = match self {
-            MothTemplateInput::File(path) => vec![read_file_unit(path, None, string_table)?],
+            MothTemplateInput::File(path) => vec![read_file_unit(path, None)?],
 
             MothTemplateInput::Directory { path, recursive } => {
-                collect_directory_units(path, recursive, string_table)?
+                collect_directory_units(path, recursive)?
             }
 
             MothTemplateInput::Files(paths) => {
                 let mut units = Vec::with_capacity(paths.len());
                 for path in paths {
-                    units.push(read_file_unit(path, None, string_table)?);
+                    units.push(read_file_unit(path, None)?);
                 }
                 assign_common_ancestor_relative_paths(&mut units, string_table, path_fork)?;
                 units
@@ -80,11 +83,10 @@ impl MothTemplateInput {
 fn collect_directory_units(
     directory: PathBuf,
     recursive: bool,
-    string_table: &mut StringTable,
-) -> Result<Vec<MothTemplateSourceUnit>, CompilerMessages> {
-    let root = canonicalize_path(&directory, string_table)?;
+) -> Result<Vec<MothTemplateSourceUnit>, CompilerError> {
+    let root = canonicalize_path(&directory)?;
     let mut paths = Vec::new();
-    collect_moth_template_paths_in_directory(&root, recursive, &mut paths, string_table)?;
+    collect_moth_template_paths_in_directory(&root, recursive, &mut paths)?;
 
     paths.sort_by(|left, right| {
         normalized_relative_path(&root, left).cmp(&normalized_relative_path(&root, right))
@@ -93,7 +95,7 @@ fn collect_directory_units(
     let mut units = Vec::with_capacity(paths.len());
     for path in paths {
         let relative_path = normalized_relative_path(&root, &path);
-        units.push(read_file_unit(path, Some(relative_path), string_table)?);
+        units.push(read_file_unit(path, Some(relative_path))?);
     }
 
     Ok(units)
@@ -109,7 +111,7 @@ fn assign_common_ancestor_relative_paths(
     units: &mut [MothTemplateSourceUnit],
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), PreparedFailure> {
     if units.is_empty() {
         return Ok(());
     }
@@ -119,7 +121,7 @@ fn assign_common_ancestor_relative_paths(
         .map(|unit| unit.source_path.clone())
         .collect::<Vec<_>>();
     let Some(ancestor) = common_ancestor_directory(&canonical_paths) else {
-        return Err(no_common_ancestor_messages(
+        return Err(no_common_ancestor_failure(
             &canonical_paths[0],
             &canonical_paths[1],
             string_table,
@@ -144,7 +146,7 @@ fn assign_in_memory_relative_paths(
     units: &mut [MothTemplateSourceUnit],
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), PreparedFailure> {
     if units.is_empty() {
         return Ok(());
     }
@@ -156,7 +158,7 @@ fn assign_in_memory_relative_paths(
     {
         let first_path = units[0].source_path.clone();
         let mixed_path = units[mixed_index].source_path.clone();
-        return Err(no_common_ancestor_messages(
+        return Err(no_common_ancestor_failure(
             &first_path,
             &mixed_path,
             string_table,
@@ -179,7 +181,7 @@ fn assign_in_memory_relative_paths(
         .map(|unit| unit.source_path.clone())
         .collect::<Vec<_>>();
     let Some(ancestor) = common_ancestor_directory(&display_paths) else {
-        return Err(no_common_ancestor_messages(
+        return Err(no_common_ancestor_failure(
             &display_paths[0],
             &display_paths[1],
             string_table,
@@ -227,12 +229,12 @@ fn common_ancestor_directory(paths: &[PathBuf]) -> Option<PathBuf> {
 }
 
 /// Reject a request whose inputs cannot derive portable module identities.
-fn no_common_ancestor_messages(
+fn no_common_ancestor_failure(
     first_path: &Path,
     second_path: &Path,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> CompilerMessages {
+) -> PreparedFailure {
     let first_interned = intern_filesystem_path_identity(first_path, path_fork, string_table);
     let second_interned = intern_filesystem_path_identity(second_path, path_fork, string_table);
     let (first_interned, second_interned) = match (first_interned, second_interned) {
@@ -247,9 +249,14 @@ fn no_common_ancestor_messages(
         None,
     );
 
-    CompilerMessages::from_diagnostics(vec![diagnostic], string_table.clone())
+    PreparedFailure::capture_diagnosed(
+        DiagnosticBag::from(diagnostic),
+        string_table.clone(),
+        None,
+        true,
+        Some(Arc::new(path_fork.snapshot_table())),
+    )
 }
-
 /// Intern one filesystem path for user-facing identity, failing non-UTF-8 paths like the
 /// duplicate-input check does. Compact-table exhaustion is authored input rejection, so it maps
 /// to the typed source capacity diagnostic.
@@ -257,35 +264,33 @@ fn intern_filesystem_path_identity(
     path: &Path,
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
-) -> Result<PathId, CompilerMessages> {
-    let table = string_table.clone();
+) -> Result<PathId, PreparedFailure> {
     path_fork
         .try_intern_filesystem_path(path, string_table)
         .map_err(|error| match error {
             PathInternError::NonUtf8(NonUtf8PathComponent { path: bad_path }) => {
-                CompilerMessages::from_error(
-                    CompilerError::file_error(
-                        &bad_path,
-                        format!(
-                            "Moth template source path {bad_path:?} contains a non-UTF-8 component; Moth \
-                             identity requires UTF-8 paths."
-                        ),
+                CompilerError::file_error(
+                    &bad_path,
+                    format!(
+                        "Moth template source path {bad_path:?} contains a non-UTF-8 component; Moth \
+                         identity requires UTF-8 paths."
                     ),
-                    table,
                 )
+                .into()
             }
-            PathInternError::TableFull => CompilerMessages::from_diagnostic(
-                CompilerDiagnostic::source_table_capacity(
+            PathInternError::TableFull => PreparedFailure::capture_diagnosed(
+                DiagnosticBag::from(CompilerDiagnostic::source_table_capacity(
                     SourceSpanCapacityResource::LogicalPath,
-                ),
-                table,
+                )),
+                string_table.clone(),
+                None,
+                true,
+                Some(Arc::new(path_fork.snapshot_table())),
             ),
-            PathInternError::BaseMismatch { .. } => CompilerMessages::from_error(
-                CompilerError::compiler_error(
-                    "logical path merge base is not a structural prefix of the destination table",
-                ),
-                table,
-            ),
+            PathInternError::BaseMismatch { .. } => CompilerError::compiler_error(
+                "logical path merge base is not a structural prefix of the destination table",
+            )
+            .into(),
         })
 }
 
@@ -293,47 +298,41 @@ fn collect_moth_template_paths_in_directory(
     directory: &Path,
     recursive: bool,
     paths: &mut Vec<PathBuf>,
-    string_table: &mut StringTable,
-) -> Result<(), CompilerMessages> {
-    let entries = read_directory_sorted(directory, string_table)?;
+) -> Result<(), CompilerError> {
+    let entries = read_directory_sorted(directory)?;
 
     for entry in entries {
         let path = entry.path();
         if path.is_dir() && recursive {
-            collect_moth_template_paths_in_directory(&path, recursive, paths, string_table)?;
+            collect_moth_template_paths_in_directory(&path, recursive, paths)?;
         } else if path.is_file() && has_moth_template_extension(&path) {
-            paths.push(canonicalize_path(&path, string_table)?);
+            paths.push(canonicalize_path(&path)?);
         }
     }
 
     Ok(())
 }
 
-fn read_directory_sorted(
-    directory: &Path,
-    string_table: &mut StringTable,
-) -> Result<Vec<fs::DirEntry>, CompilerMessages> {
+fn read_directory_sorted(directory: &Path) -> Result<Vec<fs::DirEntry>, CompilerError> {
     let read_dir = fs::read_dir(directory).map_err(|error| {
-        CompilerMessages::file_error(
+        CompilerError::file_error(
             directory,
             format!(
                 "Failed to read Moth template directory '{}': {error}",
                 directory.display()
             ),
-            &string_table.clone(),
         )
     })?;
 
     let mut entries = Vec::new();
     for entry in read_dir {
         let entry = entry.map_err(|error| {
-            CompilerMessages::file_error(
+            CompilerError::file_error(
                 directory,
                 format!(
                     "Failed to inspect Moth template directory entry in '{}': {error}",
                     directory.display()
                 ),
-                &string_table.clone(),
             )
         })?;
         entries.push(entry);
@@ -346,17 +345,15 @@ fn read_directory_sorted(
 fn read_file_unit(
     path: PathBuf,
     relative_path: Option<PathBuf>,
-    string_table: &mut StringTable,
-) -> Result<MothTemplateSourceUnit, CompilerMessages> {
-    let source_path = canonicalize_path(&path, string_table)?;
+) -> Result<MothTemplateSourceUnit, CompilerError> {
+    let source_path = canonicalize_path(&path)?;
     let source_text = fs::read_to_string(&source_path).map_err(|error| {
-        CompilerMessages::file_error(
+        CompilerError::file_error(
             &source_path,
             format!(
                 "Failed to read Moth template source '{}': {error}",
                 source_path.display()
             ),
-            &string_table.clone(),
         )
     })?;
 
@@ -367,18 +364,14 @@ fn read_file_unit(
     })
 }
 
-fn canonicalize_path(
-    path: &Path,
-    string_table: &mut StringTable,
-) -> Result<PathBuf, CompilerMessages> {
+fn canonicalize_path(path: &Path) -> Result<PathBuf, CompilerError> {
     fs::canonicalize(path).map_err(|error| {
-        CompilerMessages::file_error(
+        CompilerError::file_error(
             path,
             format!(
                 "Failed to resolve Moth template path '{}': {error}",
                 path.display()
             ),
-            &string_table.clone(),
         )
     })
 }
@@ -387,7 +380,7 @@ fn reject_duplicate_source_paths(
     units: &[MothTemplateSourceUnit],
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), PreparedFailure> {
     let mut seen_paths = HashSet::new();
     let mut diagnostics = Vec::new();
 
@@ -405,9 +398,12 @@ fn reject_duplicate_source_paths(
     if diagnostics.is_empty() {
         Ok(())
     } else {
-        Err(CompilerMessages::from_diagnostics(
-            diagnostics,
+        Err(PreparedFailure::capture_diagnosed(
+            DiagnosticBag::from_diagnostics(diagnostics),
             string_table.clone(),
+            None,
+            true,
+            Some(Arc::new(path_fork.snapshot_table())),
         ))
     }
 }

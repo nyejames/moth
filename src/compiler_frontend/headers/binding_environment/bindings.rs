@@ -8,7 +8,7 @@
 
 use crate::compiler_frontend::canonical_type_identity::CanonicalEvidenceIdentity;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::public_interface::{PublicDeclarationRecord, PublicEvidenceRecord};
@@ -325,7 +325,7 @@ pub(crate) struct HeaderBindingEnvironment {
     /// summary payload per alias or receiver method.
     pub(crate) imported_call_summaries_by_origin: FxHashMap<OriginFunctionId, PublicCallSummary>,
     pub(crate) imported_functions_by_local_path: FxHashMap<PathId, ImportedFunctionContract>,
-    pub(crate) warnings: Vec<CompilerDiagnostic>,
+    pub(crate) warnings: DiagnosticBag,
 }
 
 #[derive(Clone, Debug)]

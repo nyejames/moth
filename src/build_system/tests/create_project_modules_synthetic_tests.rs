@@ -1,17 +1,17 @@
 use super::*;
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
-use crate::compiler_frontend::compiler_messages::PremergeFailure;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidDependencyClauseView;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 
 fn diagnosed_boundary_with_source(
-    failure: PremergeFailure,
+    failure: PreparedFailure,
     source_files: Arc<SourceDatabase>,
 ) -> BoundaryFailure {
-    let PremergeFailure::Diagnosed(batch) = failure else {
+    let PreparedFailure::Diagnosed(batch) = failure else {
         panic!("expected diagnosed synthetic preparation, got {failure:?}");
     };
     let mut accumulator = BoundaryAccumulator::new();

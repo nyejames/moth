@@ -142,7 +142,7 @@ pub(crate) struct BindingEnvironmentBuilder<'a> {
     pub(super) string_table: &'a mut StringTable,
     pub(super) path_fork: &'a mut PathInternerFork,
     pub(super) environment: HeaderBindingEnvironment,
-    pub(super) warnings: Vec<crate::compiler_frontend::compiler_messages::CompilerDiagnostic>,
+    pub(super) warnings: crate::compiler_frontend::compiler_messages::DiagnosticBag,
     /// Provider IDs whose closed semantics have already been imported into the module-wide
     /// header environment.
     ///

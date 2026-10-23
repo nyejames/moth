@@ -15,11 +15,9 @@ use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::AstBuildResult;
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
-use crate::compiler_frontend::compiler_messages::prepared_batch::{
-    AstDiagnosticFailure, PreparedDiagnosticBatch,
-};
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, PremergeFailure,
+    CompilerDiagnostic, DiagnosticBag, PreparedFailure,
 };
 #[cfg(feature = "boracle")]
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -48,9 +46,7 @@ use crate::compiler_frontend::module_compilation::generated::convergence::{
     install_exact_concrete_call_summaries, run_generated_summary_convergence,
 };
 use crate::compiler_frontend::module_compilation::generated::known::KnownGeneratedFunctions;
-use crate::compiler_frontend::module_compilation::generated::materialisation::{
-    GeneratedMaterialisationFailure, materialise_generated_request_roots,
-};
+use crate::compiler_frontend::module_compilation::generated::materialisation::materialise_generated_request_roots;
 use crate::compiler_frontend::module_compilation::generated::requests::install_generated_request_contracts;
 use crate::compiler_frontend::module_compilation::generated::transaction::{
     GeneratedFunctionTransaction, GeneratedRequestFacts,
@@ -205,14 +201,14 @@ pub(crate) fn compile_module(
             "normal module compilation unexpectedly stopped at the Boracle prefix",
         )
         .into()),
-        Err(PremergeFailure::Diagnosed(batch)) => match batch.classify_premerge() {
+        Err(PreparedFailure::Diagnosed(batch)) => match batch.classify_premerge() {
             Ok(prepared) => Ok(ModuleCompilationOutcome::Diagnosed(prepared)),
             Err(error) => Err(error.into()),
         },
-        Err(PremergeFailure::Infrastructure(error)) => Err(error),
+        Err(PreparedFailure::Infrastructure(error)) => Err(error),
         // Mixed double-failures only arise at source-finalization tails and never reach module
         // compilation; abort through the typed lane if one ever does.
-        Err(PremergeFailure::Mixed { error, .. }) => Err(error),
+        Err(PreparedFailure::Mixed { error, .. }) => Err(error),
     }
 }
 
@@ -227,7 +223,7 @@ pub(crate) fn compile_module_for_boracle(
     prepared: PreparedModuleInput,
     known_generated: KnownGeneratedFunctions<'_>,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<BoracleModuleInput, PremergeFailure> {
+) -> Result<BoracleModuleInput, PreparedFailure> {
     // Both typed lanes stay intact until the final build boundary performs the one vessel
     // conversion. Infrastructure errors propagate without building a second vessel or cloning
     // the local table.
@@ -288,7 +284,7 @@ pub(crate) fn compile_module_for_boracle(
     ) {
         Ok(SemanticStageOutput::Boracle(input)) => Ok(*input),
         Ok(SemanticStageOutput::Complete(_)) => {
-            Err(PremergeFailure::from(CompilerError::compiler_error(
+            Err(PreparedFailure::from(CompilerError::compiler_error(
                 "Boracle compiler service unexpectedly completed the normal semantic pipeline",
             )))
         }
@@ -325,15 +321,6 @@ enum SemanticStageOutput {
     Boracle(Box<BoracleModuleInput>),
 }
 
-impl From<GeneratedMaterialisationFailure> for PremergeFailure {
-    fn from(failure: GeneratedMaterialisationFailure) -> Self {
-        match failure {
-            GeneratedMaterialisationFailure::Ast(failure) => Self::from(failure),
-            GeneratedMaterialisationFailure::Premerge(failure) => failure,
-        }
-    }
-}
-
 /// Private request used by the two named compiler services to share the validated-HIR prefix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SemanticStageRequest {
@@ -366,7 +353,7 @@ fn run_semantic_stages(
     inputs: SemanticStageInputs<'_>,
     request: SemanticStageRequest,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<SemanticStageOutput, PremergeFailure> {
+) -> Result<SemanticStageOutput, PreparedFailure> {
     #[cfg(not(feature = "boracle"))]
     let _ = request;
     let SemanticStageInputs {
@@ -401,13 +388,13 @@ fn run_semantic_stages(
                         )
                     })
                     .ok_or_else(|| {
-                        PremergeFailure::from(CompilerError::compiler_error(format!(
+                        PreparedFailure::from(CompilerError::compiler_error(format!(
                             "semantic module compilation: candidate source ID {} is not in the boundary source file table",
                             source_id.index()
                         )))
                     })
             })
-            .collect::<Result<Vec<_>, PremergeFailure>>()?
+            .collect::<Result<Vec<_>, PreparedFailure>>()?
     } else {
         Vec::new()
     };
@@ -810,7 +797,7 @@ fn run_semantic_stages(
     let resource_table = Rc::try_unwrap(module_resources)
         .map(|cell| cell.into_inner())
         .map_err(|_| {
-            PremergeFailure::from(CompilerError::compiler_error(
+            PreparedFailure::from(CompilerError::compiler_error(
                 "ordinary module resource table still has a live shared handle after HIR lowering",
             ))
         })?;
@@ -894,7 +881,7 @@ fn bind_retained_headers(
     external_dependency_resolution_table: &ExternalImportResolutionTable,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
-) -> Result<BoundModuleHeaders, PremergeFailure> {
+) -> Result<BoundModuleHeaders, PreparedFailure> {
     let headers = bind_module_headers(
         prepared_header_syntax,
         compiler.external_package_registry.as_ref(),
@@ -920,12 +907,12 @@ fn bind_retained_headers(
                     None,
                     || Some(Arc::new(path_fork.snapshot_table())),
                 ) {
-                    Ok(batch) => PremergeFailure::Diagnosed(batch),
-                    Err(error) => PremergeFailure::from(error),
+                    Ok(batch) => PreparedFailure::Diagnosed(batch),
+                    Err(error) => PreparedFailure::from(error),
                 }
             }
             HeaderPreparationFailure::Infrastructure(error) => {
-                PremergeFailure::Infrastructure(error)
+                PreparedFailure::Infrastructure(error)
             }
         }
     })?;
@@ -939,30 +926,22 @@ fn sort_headers(
     module_headers: BoundModuleHeaders,
     resolved_file_references: &ResolvedFileReferenceTable,
     warnings: &mut Vec<CompilerDiagnostic>,
-) -> Result<SortedHeaders, PremergeFailure> {
-    match compiler.sort_headers(module_headers, resolved_file_references) {
-        Ok(sorted) => Ok(sorted),
-        Err(PremergeFailure::Diagnosed(mut batch)) => {
-            match batch.prepend_diagnostics_with_required_paths(std::mem::take(warnings), || {
-                Some(Arc::new(compiler.path_fork.snapshot_table()))
-            }) {
-                Ok(()) => Err(PremergeFailure::Diagnosed(batch)),
-                Err(error) => Err(PremergeFailure::from(error)),
-            }
-        }
-        Err(PremergeFailure::Infrastructure(error)) => Err(PremergeFailure::Infrastructure(error)),
-        Err(PremergeFailure::Mixed {
-            mut batch,
-            error: original_error,
-        }) => match batch.prepend_diagnostics_with_required_paths(std::mem::take(warnings), || {
-            Some(Arc::new(compiler.path_fork.snapshot_table()))
-        }) {
-            Ok(()) => Err(PremergeFailure::Mixed {
-                batch,
-                error: original_error,
-            }),
-            Err(error) => Err(PremergeFailure::from(error)),
-        },
+) -> Result<SortedHeaders, PreparedFailure> {
+    compiler
+        .sort_headers(module_headers, resolved_file_references)
+        .map_err(|failure| prepend_prior_warnings(failure, std::mem::take(warnings), compiler))
+}
+
+fn prepend_prior_warnings(
+    mut failure: PreparedFailure,
+    warnings: Vec<CompilerDiagnostic>,
+    compiler: &CompilerFrontend<'_>,
+) -> PreparedFailure {
+    match failure.prepend_diagnostics_with_required_paths(warnings, || {
+        Some(Arc::new(compiler.path_fork.snapshot_table()))
+    }) {
+        Ok(()) => failure,
+        Err(error) => PreparedFailure::from(error),
     }
 }
 
@@ -983,7 +962,7 @@ fn build_ast_with_registered_types(
     resolved_file_references: ResolvedFileReferenceTable,
     module_origin: Option<StableModuleOriginIdentity>,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<AstBuildResult, AstDiagnosticFailure> {
+) -> Result<AstBuildResult, PreparedFailure> {
     match compiler.headers_to_ast(
         AstBuildRequest {
             sorted,
@@ -1002,13 +981,11 @@ fn build_ast_with_registered_types(
             warnings.extend(std::mem::take(&mut build_result.ast.warnings));
             Ok(build_result)
         }
-        Err(mut failure) => match failure
-            .prepend_diagnostics_with_required_paths(std::mem::take(warnings), || {
-                Some(Arc::new(compiler.path_fork.snapshot_table()))
-            }) {
-            Ok(()) => Err(failure),
-            Err(error) => Err(AstDiagnosticFailure::from(error)),
-        },
+        Err(failure) => Err(prepend_prior_warnings(
+            failure,
+            std::mem::take(warnings),
+            compiler,
+        )),
     }
 }
 

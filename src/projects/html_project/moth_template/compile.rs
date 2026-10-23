@@ -14,13 +14,10 @@
 
 use crate::build_system::build::DeferredResourceOutput;
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
-use crate::compiler_frontend::compiler_errors::{
-    BoundaryFailure, CompilerError, CompilerMessages, RenderSourceContext,
-};
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::{
-    BoundaryAccumulator, into_boundary_failure,
-};
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::folded_value::OwnedFoldedString;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::single_source_compilation::{
@@ -31,11 +28,11 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::moth_template::bundle::{
-    DIRECT_TEMPLATE_PROJECT_NAME, prepare_file_value_bundle,
+    DIRECT_TEMPLATE_PROJECT_NAME, MothTemplateBundleFailure, prepare_file_value_bundle,
 };
 use crate::projects::html_project::moth_template::input::MothTemplateInput;
 use crate::projects::html_project::moth_template::output::{
-    CompiledMothTemplateDocument, MothTemplateCompileOutput,
+    CompiledMothTemplateDocument, MothTemplateCompileOutput, PreparedTemplateWarning,
 };
 use crate::projects::html_project::moth_template::render::{
     document_url_context, render_structural_content,
@@ -58,17 +55,15 @@ pub(crate) fn compile_moth_template(
         resources: compiled.resources,
         resource_inputs,
         warnings: compiled.warnings,
-        warning_source_contexts: compiled.warning_source_contexts,
     })
 }
 
-/// Documents, planned outputs and warnings produced against a caller-owned registry.
+/// Documents, planned outputs and prepared warnings produced against a caller-owned registry.
 #[derive(Debug)]
 pub(crate) struct DirectTemplateRegistryCompile {
     documents: Vec<CompiledMothTemplateDocument>,
     resources: Vec<DeferredResourceOutput>,
-    warnings: Vec<CompilerDiagnostic>,
-    warning_source_contexts: Vec<RenderSourceContext>,
+    warnings: Vec<PreparedTemplateWarning>,
 }
 
 /// Compile one input against a caller-owned registry so a failed plan still leaves its
@@ -78,98 +73,109 @@ pub(crate) fn compile_moth_template_with_registry(
     string_table: &mut StringTable,
     resource_inputs: &mut ResourceInputRegistry,
 ) -> Result<DirectTemplateRegistryCompile, BoundaryFailure> {
+    let mut warnings = Vec::new();
     let mut path_fork = PathInternerFork::empty();
     let sources = match input.collect_sources(string_table, &mut path_fork) {
         Ok(sources) => sources,
-        Err(mut messages) => {
-            if let Err(error) =
-                messages.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()))
-            {
-                return Err(into_boundary_failure(CompilerMessages::from_error_ref(
-                    error,
-                    string_table,
-                )));
-            }
-            return Err(into_boundary_failure(messages));
+        Err(failure) => {
+            return Err(prepared_failure_to_boundary(
+                failure,
+                &mut warnings,
+                None,
+                string_table,
+            ));
         }
     };
 
-    // The project's directive vocabulary is the same for every source in one request, so it is
-    // merged once rather than per document.
-    let style_directives = StyleDirectiveRegistry::merged(&html_project_style_directives())
-        .map_err(|error| {
-            into_boundary_failure(CompilerMessages::from_error(error, string_table.clone()))
-        })?;
+    let style_directives = match StyleDirectiveRegistry::merged(&html_project_style_directives()) {
+        Ok(style_directives) => style_directives,
+        Err(error) => {
+            return Err(prepared_failure_to_boundary(
+                PreparedFailure::from(error),
+                &mut warnings,
+                None,
+                string_table,
+            ));
+        }
+    };
 
     let mut documents = Vec::with_capacity(sources.len());
-    let mut warnings = Vec::new();
-    let mut warning_source_contexts = Vec::new();
     let mut resource_plan = HtmlResourceOutputPlan::new(DIRECT_TEMPLATE_PROJECT_NAME);
 
     for mut unit in sources {
         let source_path = unit.source_path.clone();
         let relative_path = unit.relative_path.clone();
-        let mut current_source_database = None;
 
-        // Physical file-reference resolution and the content closure are build policy; the
-        // compiler service folds the prepared bundle without touching the filesystem.
-        let file_value_bundle = report_with_prior_warnings(
-            prepare_file_value_bundle(&mut unit, &style_directives, string_table, resource_inputs),
-            &mut warnings,
-            &mut warning_source_contexts,
-            &mut current_source_database,
+        let file_value_bundle = match prepare_file_value_bundle(
+            &mut unit,
+            &style_directives,
             string_table,
-        )?;
+            resource_inputs,
+        ) {
+            Ok(bundle) => bundle,
+            Err(failure) => {
+                return Err(bundle_failure_to_boundary(
+                    failure,
+                    &mut warnings,
+                    string_table,
+                ));
+            }
+        };
 
-        let folded = report_template_with_prior_warnings(
-            compile_moth_template_source(
-                MothTemplateCompilationRequest {
-                    source_path: source_path.as_path(),
-                    source_code: None,
-                    style_directives: &style_directives,
-                    file_value_resolution: Some(file_value_bundle),
-                },
-                string_table,
-            ),
-            &mut warnings,
-            &mut warning_source_contexts,
+        let folded = match compile_moth_template_source(
+            MothTemplateCompilationRequest {
+                source_path: source_path.as_path(),
+                source_code: None,
+                style_directives: &style_directives,
+                file_value_resolution: Some(file_value_bundle),
+            },
             string_table,
-        )?;
+        ) {
+            Ok(folded) => folded,
+            Err(failure) => {
+                return Err(template_failure_to_boundary(
+                    failure,
+                    &mut warnings,
+                    string_table,
+                ));
+            }
+        };
         let content = folded.content;
         let module_resources = folded.module_resources;
-        let folded_warnings = folded.warnings;
         let source_database = folded.source_database;
-
-        let warning_start = warnings.len();
-        warnings.extend(folded_warnings);
-        let warning_end = warnings.len();
-        if warning_start != warning_end {
-            warning_source_contexts.push(RenderSourceContext {
-                diagnostic_range: warning_start..warning_end,
+        if let Some(batch) = folded.warnings {
+            warnings.push(PreparedTemplateWarning {
+                batch,
                 source_database: Arc::clone(&source_database),
-                domain: None,
             });
         }
-        current_source_database = Some(source_database);
 
-        // The fold's compiler-produced associations name sources this same registry issued, so
-        // publication must resolve; a missing attachment would silently drop the resource.
-        report_with_prior_warnings(
-            publish_module_resource_associations(resource_inputs, &module_resources, string_table),
-            &mut warnings,
-            &mut warning_source_contexts,
-            &mut current_source_database,
-            string_table,
-        )?;
+        if let Err(failure) =
+            publish_module_resource_associations(resource_inputs, &module_resources)
+                .map_err(PreparedFailure::from)
+        {
+            return Err(prepared_failure_to_boundary(
+                failure,
+                &mut warnings,
+                Some(source_database),
+                string_table,
+            ));
+        }
 
-        let document_path = report_with_prior_warnings(
-            document_url_context(relative_path.as_deref(), &source_path, string_table),
-            &mut warnings,
-            &mut warning_source_contexts,
-            &mut current_source_database,
-            string_table,
-        )?;
-        let content = report_with_prior_warnings(
+        let document_path = match document_url_context(relative_path.as_deref(), &source_path)
+            .map_err(PreparedFailure::from)
+        {
+            Ok(document_path) => document_path,
+            Err(failure) => {
+                return Err(prepared_failure_to_boundary(
+                    failure,
+                    &mut warnings,
+                    Some(source_database),
+                    string_table,
+                ));
+            }
+        };
+        let content = report_prepared_step(
             match &content {
                 OwnedFoldedString::Text(text) => Ok(text.clone()),
                 OwnedFoldedString::Pieces(_) => render_structural_content(
@@ -181,8 +187,7 @@ pub(crate) fn compile_moth_template_with_registry(
                 ),
             },
             &mut warnings,
-            &mut warning_source_contexts,
-            &mut current_source_database,
+            Some(source_database),
             string_table,
         )?;
 
@@ -193,11 +198,11 @@ pub(crate) fn compile_moth_template_with_registry(
         });
     }
 
-    let resources = report_with_prior_warnings(
-        deferred_resource_outputs(resource_inputs, resource_plan.into_records(), string_table),
+    let resources = report_prepared_step(
+        deferred_resource_outputs(resource_inputs, resource_plan.into_records())
+            .map_err(PreparedFailure::from),
         &mut warnings,
-        &mut warning_source_contexts,
-        &mut None,
+        None,
         string_table,
     )?;
 
@@ -205,7 +210,6 @@ pub(crate) fn compile_moth_template_with_registry(
         documents,
         resources,
         warnings,
-        warning_source_contexts,
     })
 }
 
@@ -217,14 +221,9 @@ pub(crate) fn compile_moth_template_with_registry(
 fn publish_module_resource_associations(
     resource_inputs: &mut ResourceInputRegistry,
     module_resources: &ModuleResourceTable,
-    string_table: &mut StringTable,
-) -> Result<(), CompilerMessages> {
-    // The fold produced this association batch wholesale, so publish it in the one
-    // preflight -> reserve -> commit order the shared registry requires.
+) -> Result<(), CompilerError> {
     let associations = module_resources.resource_source_associations();
-    let publication = resource_inputs
-        .preflight_resource_source_associations(associations)
-        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+    let publication = resource_inputs.preflight_resource_source_associations(associations)?;
 
     resource_inputs.reserve_resource_source_associations(&publication);
     resource_inputs.commit_resource_source_associations(publication);
@@ -239,20 +238,16 @@ fn publish_module_resource_associations(
 fn deferred_resource_outputs(
     resource_inputs: &ResourceInputRegistry,
     planned_resources: Vec<PlannedResourceOutput>,
-    string_table: &mut StringTable,
-) -> Result<Vec<DeferredResourceOutput>, CompilerMessages> {
+) -> Result<Vec<DeferredResourceOutput>, CompilerError> {
     let mut deferred_resources = Vec::with_capacity(planned_resources.len());
 
     for planned in planned_resources {
         let Some(source_id) = resource_inputs.source_for_origin(&planned.origin) else {
-            return Err(CompilerMessages::from_error(
-                CompilerError::compiler_error(format!(
-                    "planned direct-template resource origin {:?} has no registered source \
-                     attachment",
-                    planned.origin
-                )),
-                string_table.clone(),
-            ));
+            return Err(CompilerError::compiler_error(format!(
+                "planned direct-template resource origin {:?} has no registered source \
+                 attachment",
+                planned.origin
+            )));
         };
 
         deferred_resources.push(DeferredResourceOutput {
@@ -264,73 +259,86 @@ fn deferred_resource_outputs(
     Ok(deferred_resources)
 }
 
-/// Prepend warnings and their source contexts to a failed project step.
-///
-/// The successful path leaves the current source owner available for later fold steps. On error,
-/// it moves into the terminal report after prior warnings have entered the accumulator.
-fn report_with_prior_warnings<T>(
-    step: Result<T, CompilerMessages>,
-    warnings: &mut Vec<CompilerDiagnostic>,
-    warning_source_contexts: &mut Vec<RenderSourceContext>,
-    current_source_database: &mut Option<Arc<SourceDatabase>>,
+fn report_prepared_step<T>(
+    step: Result<T, PreparedFailure>,
+    warnings: &mut Vec<PreparedTemplateWarning>,
+    source_database: Option<Arc<SourceDatabase>>,
     string_table: &StringTable,
 ) -> Result<T, BoundaryFailure> {
     match step {
         Ok(value) => Ok(value),
-        Err(mut messages) => {
-            let install = messages.install_mode;
-            let mut accumulator = BoundaryAccumulator::new();
-            append_prior_warnings(
-                &mut accumulator,
-                warnings,
-                warning_source_contexts,
-                string_table,
-            );
-            if let Some(source_database) = current_source_database.take() {
-                messages.set_source_database(source_database);
-            }
-            accumulator.append(messages);
-            Err(accumulator.finish(install))
-        }
+        Err(failure) => Err(prepared_failure_to_boundary(
+            failure,
+            warnings,
+            source_database,
+            string_table,
+        )),
     }
 }
 
-fn report_template_with_prior_warnings<T>(
-    step: Result<T, MothTemplateCompilationFailure>,
-    warnings: &mut Vec<CompilerDiagnostic>,
-    warning_source_contexts: &mut Vec<RenderSourceContext>,
+fn prepared_failure_to_boundary(
+    failure: PreparedFailure,
+    warnings: &mut Vec<PreparedTemplateWarning>,
+    source_database: Option<Arc<SourceDatabase>>,
     string_table: &StringTable,
-) -> Result<T, BoundaryFailure> {
-    let failure = match step {
-        Ok(value) => return Ok(value),
-        Err(failure) => failure,
-    };
+) -> BoundaryFailure {
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(string_table);
+    append_prior_warnings(&mut accumulator, warnings);
+    append_prepared_failure(&mut accumulator, failure, source_database);
+    accumulator.finish(InstallMode::Unfrozen)
+}
 
-    let mut accumulator = BoundaryAccumulator::new();
-    append_prior_warnings(
-        &mut accumulator,
-        warnings,
-        warning_source_contexts,
-        string_table,
-    );
+fn bundle_failure_to_boundary(
+    failure: MothTemplateBundleFailure,
+    warnings: &mut Vec<PreparedTemplateWarning>,
+    string_table: &StringTable,
+) -> BoundaryFailure {
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(string_table);
+    append_prior_warnings(&mut accumulator, warnings);
+    failure.append_to_boundary(&mut accumulator);
+    accumulator.finish(InstallMode::Unfrozen)
+}
 
-    let install = failure.append_to_boundary(&mut accumulator, string_table);
-    Err(accumulator.finish(install))
+fn template_failure_to_boundary(
+    failure: MothTemplateCompilationFailure,
+    warnings: &mut Vec<PreparedTemplateWarning>,
+    string_table: &StringTable,
+) -> BoundaryFailure {
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(string_table);
+    append_prior_warnings(&mut accumulator, warnings);
+    let install = failure.append_to_boundary(&mut accumulator);
+    accumulator.finish(install)
 }
 
 fn append_prior_warnings(
     accumulator: &mut BoundaryAccumulator,
-    warnings: &mut Vec<CompilerDiagnostic>,
-    warning_source_contexts: &mut Vec<RenderSourceContext>,
-    string_table: &StringTable,
+    warnings: &mut Vec<PreparedTemplateWarning>,
 ) {
-    let diagnostics = std::mem::take(warnings);
-    if diagnostics.is_empty() {
-        warning_source_contexts.clear();
-        return;
+    for warning in std::mem::take(warnings) {
+        accumulator.append_prepared(warning.batch, Some((warning.source_database, None)));
     }
+}
 
-    let mut messages = CompilerMessages::from_diagnostics(diagnostics, string_table.clone());
-    messages.install_source_contexts(std::mem::take(warning_source_contexts), 0);
-    accumulator.append(messages);
+fn append_prepared_failure(
+    accumulator: &mut BoundaryAccumulator,
+    failure: PreparedFailure,
+    source_database: Option<Arc<SourceDatabase>>,
+) {
+    match failure {
+        PreparedFailure::Diagnosed(batch) => {
+            accumulator.append_prepared(batch, source_database.map(|database| (database, None)));
+        }
+        PreparedFailure::Infrastructure(errors) => {
+            accumulator.append_infrastructure(errors, source_database);
+        }
+        PreparedFailure::Mixed { batch, error } => {
+            accumulator.append_prepared(
+                batch,
+                source_database
+                    .as_ref()
+                    .map(|database| (Arc::clone(database), None)),
+            );
+            accumulator.append_infrastructure(error, source_database);
+        }
+    }
 }

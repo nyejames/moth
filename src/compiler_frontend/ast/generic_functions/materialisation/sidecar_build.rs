@@ -22,7 +22,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalEvidenceIdentity, CanonicalTraitIdentity, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
-use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_bindings::GenericTypeBindings;
@@ -100,11 +100,11 @@ impl ModuleMaterialisationPreparation {
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-    ) -> Result<MaterialisedGenericAst, AstDiagnosticFailure> {
+    ) -> Result<MaterialisedGenericAst, PreparedFailure> {
         let (declaring_context, template_index) = self
             .declaring_context_for_identity(identity.declaration())
             .ok_or_else(|| {
-                AstDiagnosticFailure::from(CompilerError::compiler_error(
+                PreparedFailure::from(CompilerError::compiler_error(
                     "Generated request has no retained declaring-module generic template",
                 ))
             })?;
@@ -148,7 +148,7 @@ pub(super) fn emit_materialised_sidecar<PrimarySource>(
     primary_source: &PrimarySource,
     path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     string_table: &mut StringTable,
-) -> Result<MaterialisedSidecarOutcome, AstDiagnosticFailure>
+) -> Result<MaterialisedSidecarOutcome, PreparedFailure>
 where
     PrimarySource: MaterialisationNominalSource,
 {
@@ -171,7 +171,7 @@ where
             string_table,
             path_fork,
         )
-        .map_err(AstDiagnosticFailure::from)?;
+        .map_err(PreparedFailure::from)?;
         materialised_type_arguments.push(type_id);
     }
     // Canonical reconstruction issues new definition paths, so keep the requester's own spellings
@@ -191,7 +191,7 @@ where
         environment
             .type_environment
             .register_nominal_path_alias(binding.local_path, type_id)
-            .map_err(AstDiagnosticFailure::from)?;
+            .map_err(PreparedFailure::from)?;
     }
     let mut value_services = GeneratedValueMaterialisationServices {
         external_registry: phase_context.external_package_registry.as_ref(),
@@ -201,7 +201,7 @@ where
                 .file_value_resolution
                 .as_ref()
                 .ok_or_else(|| {
-                    AstDiagnosticFailure::from(CompilerError::compiler_error(
+                    PreparedFailure::from(CompilerError::compiler_error(
                         "Generated evidence has no file-value services",
                     ))
                 })?
@@ -220,7 +220,7 @@ where
         path_fork,
         &mut value_services,
     )
-    .map_err(AstDiagnosticFailure::Infrastructure)?;
+    .map_err(PreparedFailure::Infrastructure)?;
 
     let request = GenericFunctionInstantiationRequest::generated(
         identity.declaration(),
@@ -230,7 +230,7 @@ where
         string_table,
         requester_call_span,
     )
-    .map_err(AstDiagnosticFailure::from)?;
+    .map_err(PreparedFailure::from)?;
     let instance_path = request.instance_path;
     #[cfg(feature = "timers")]
     let timing_context = phase_context.timing_context;
@@ -269,13 +269,13 @@ where
     if let Some(context) = &mut build_result.materialisation_context {
         context
             .inherit_stable_context(declaring_context)
-            .map_err(AstDiagnosticFailure::from)?;
+            .map_err(PreparedFailure::from)?;
         context
             .inherit_nominal_blueprints(primary_source)
-            .map_err(AstDiagnosticFailure::from)?;
+            .map_err(PreparedFailure::from)?;
         context
             .inherit_nominal_blueprints(requester_context)
-            .map_err(AstDiagnosticFailure::from)?;
+            .map_err(PreparedFailure::from)?;
         context.inherit_requester_declaring_contexts(requester_context);
     }
 

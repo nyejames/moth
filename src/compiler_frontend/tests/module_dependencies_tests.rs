@@ -11,7 +11,7 @@ use crate::builder_surface::external_import_providers::resolution_table::Externa
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason;
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
-use crate::compiler_frontend::compiler_messages::PremergeFailure;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::CircularDependencyView;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
@@ -41,8 +41,8 @@ use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use std::path::PathBuf;
 
-fn diagnosed_boundary(failure: PremergeFailure) -> BoundaryFailure {
-    let PremergeFailure::Diagnosed(batch) = failure else {
+fn diagnosed_boundary(failure: PreparedFailure) -> BoundaryFailure {
+    let PreparedFailure::Diagnosed(batch) = failure else {
         panic!("dependency-cycle test expected a diagnosed failure, got {failure:?}");
     };
     let mut accumulator = BoundaryAccumulator::new();

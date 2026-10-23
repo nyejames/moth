@@ -11,10 +11,10 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::project_
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
-use crate::compiler_frontend::compiler_messages::{DiagnosticSeverity, PremergeFailure};
+use crate::compiler_frontend::compiler_messages::{DiagnosticSeverity, PreparedFailure};
 
-fn prepared_failure_boundary(failure: PremergeFailure) -> BoundaryFailure {
-    let PremergeFailure::Diagnosed(batch) = failure else {
+fn prepared_failure_boundary(failure: PreparedFailure) -> BoundaryFailure {
+    let PreparedFailure::Diagnosed(batch) = failure else {
         panic!("expected a diagnosed boundary failure, got {failure:?}");
     };
     assert!(
@@ -26,7 +26,7 @@ fn prepared_failure_boundary(failure: PremergeFailure) -> BoundaryFailure {
     accumulator.finish(InstallMode::Unfrozen)
 }
 
-fn assert_config_failure(failure: PremergeFailure, expected_reason: InvalidConfigCode) {
+fn assert_config_failure(failure: PreparedFailure, expected_reason: InvalidConfigCode) {
     let boundary = prepared_failure_boundary(failure);
     assert!(
         boundary
@@ -42,7 +42,7 @@ fn assert_config_failure(failure: PremergeFailure, expected_reason: InvalidConfi
     );
 }
 
-fn assert_reserved_project_dependency_failure(failure: PremergeFailure) {
+fn assert_reserved_project_dependency_failure(failure: PreparedFailure) {
     let boundary = prepared_failure_boundary(failure);
     assert!(
         boundary

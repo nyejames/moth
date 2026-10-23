@@ -20,9 +20,8 @@ use crate::compiler_frontend::ast::AstImportedFunctionContract;
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionStore;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::DiagnosticBag;
-use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
+use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PreparedFailure};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -68,7 +67,7 @@ pub(in crate::compiler_frontend) fn lower_module(
     module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
     capacity_estimate: FrontendArenaCapacityEstimate,
     external_packages: &ExternalPackageRegistry,
-) -> Result<HirLoweringResult, AstDiagnosticFailure> {
+) -> Result<HirLoweringResult, PreparedFailure> {
     lower_module_with_owner(
         ast,
         string_table,
@@ -96,7 +95,7 @@ pub(in crate::compiler_frontend) fn lower_module_with_owner<'a>(
     external_packages: &ExternalPackageRegistry,
     frozen_identity_handle: Option<&FrozenIdentityHandle>,
     prior_diagnostics: Option<&'a mut DiagnosticBag>,
-) -> Result<HirLoweringResult, AstDiagnosticFailure> {
+) -> Result<HirLoweringResult, PreparedFailure> {
     // The builder owns the module environment for lowering and publication; `build_hir_module`
     // never reads the AST copy, so take it instead of cloning every module-local type table.
     let type_environment = std::mem::take(&mut ast.type_environment);
@@ -395,33 +394,37 @@ impl<'a> HirBuilder<'a> {
     fn lower_error_messages(
         &mut self,
         error: impl Into<HirConstructionFailure>,
-    ) -> AstDiagnosticFailure {
-        let mut messages = match error.into() {
-            HirConstructionFailure::Diagnosed(diagnostic) => {
+    ) -> PreparedFailure {
+        match error.into() {
+            HirConstructionFailure::Diagnosed(mut diagnostic) => {
                 let warnings = self
                     .prior_diagnostics
                     .take()
                     .map(|diagnostics| diagnostics.take_diagnostics())
-                    .unwrap_or_default();
-                CompilerMessages::from_diagnostic_with_warnings(
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|mut warning| {
+                        if let Some(handle) = &self.frozen_identity_handle {
+                            warning.attach_frozen_identity_handle_if_missing(handle.clone());
+                        }
+                        warning
+                    })
+                    .collect();
+                if let Some(handle) = &self.frozen_identity_handle {
+                    diagnostic.attach_frozen_identity_handle_if_missing(handle.clone());
+                }
+                PreparedFailure::with_diagnostic_and_warnings(
                     diagnostic,
                     warnings,
                     self.string_table,
+                    Some(&self.type_environment),
+                    || Some(Arc::new(self.path_fork.snapshot_table())),
                 )
             }
-            HirConstructionFailure::Infrastructure(error) => {
-                CompilerMessages::from_error_ref(error, self.string_table)
-            }
-        };
-        if let Some(handle) = &self.frozen_identity_handle {
-            messages.set_frozen_identity_handle_if_missing(handle.clone());
+            // Infrastructure failures keep no prior warnings: the AST lane never renders warnings
+            // beside infrastructure, and the caller's prior bag stays untouched.
+            HirConstructionFailure::Infrastructure(error) => PreparedFailure::from(error),
         }
-        AstDiagnosticFailure::capture_messages(
-            messages,
-            Some(&self.type_environment),
-            true,
-            Some(Arc::new(self.path_fork.snapshot_table())),
-        )
     }
 
     pub(in crate::compiler_frontend) fn set_frozen_identity_handle(
@@ -518,7 +521,7 @@ impl<'a> HirBuilder<'a> {
         mut self,
         mut ast: Ast,
         external_packages: &ExternalPackageRegistry,
-    ) -> Result<HirLoweringResult, AstDiagnosticFailure> {
+    ) -> Result<HirLoweringResult, PreparedFailure> {
         self.module_const_values = std::mem::take(&mut ast.const_values);
 
         self.module.const_facts = HirConstFacts::from(&ast.const_facts);

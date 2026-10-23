@@ -6,7 +6,7 @@
 
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidConfigReason, InvalidDeclarationReason,
+    CompilerDiagnostic, DiagnosticBag, InvalidConfigReason, InvalidDeclarationReason,
 };
 use crate::compiler_frontend::datatypes::generic_parameters::GenericParameterList;
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -725,7 +725,7 @@ pub(super) fn create_header(
 }
 
 fn emit_header_naming_warning(
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     identifier: StringId,
     span: Option<SourceSpan>,
     naming_kind: IdentifierNamingKind,

@@ -1,5 +1,5 @@
 use super::*;
-use crate::compiler_frontend::compiler_messages::PremergeFailure;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 #[derive(Debug)]
@@ -30,7 +30,7 @@ impl ExternalImportProvider for DummyJsImportProvider {
         &self,
         request: ExternalImportRequest,
         context: &mut ExternalImportProviderContext,
-    ) -> Result<Option<ResolvedExternalImport>, PremergeFailure> {
+    ) -> Result<Option<ResolvedExternalImport>, PreparedFailure> {
         self.calls.fetch_add(1, Ordering::SeqCst);
 
         let package_path = dummy_package_path(&request.canonical_source_path);
@@ -76,7 +76,7 @@ fn dummy_package_path(canonical_source_path: &Path) -> String {
 fn register_dummy_package(
     context: &mut ExternalImportProviderContext,
     package_path: String,
-) -> Result<crate::compiler_frontend::external_packages::ExternalPackageId, PremergeFailure> {
+) -> Result<crate::compiler_frontend::external_packages::ExternalPackageId, PreparedFailure> {
     context
         .package_registry
         .register_package(
@@ -108,7 +108,7 @@ fn fixture_dummy_js_runtime_asset(canonical_source_path: PathBuf) -> RuntimeAsse
 fn register_dummy_widget_type(
     context: &mut ExternalImportProviderContext,
     package_id: crate::compiler_frontend::external_packages::ExternalPackageId,
-) -> Result<ExternalTypeId, PremergeFailure> {
+) -> Result<ExternalTypeId, PreparedFailure> {
     context
         .package_registry
         .register_external_type(
@@ -124,7 +124,7 @@ fn register_dummy_widget_type(
 fn register_dummy_draw_function(
     context: &mut ExternalImportProviderContext,
     package_id: crate::compiler_frontend::external_packages::ExternalPackageId,
-) -> Result<ExternalFunctionId, PremergeFailure> {
+) -> Result<ExternalFunctionId, PreparedFailure> {
     context
         .package_registry
         .register_external_function(
@@ -149,7 +149,7 @@ fn register_dummy_make_widget_function(
     context: &mut ExternalImportProviderContext,
     package_id: crate::compiler_frontend::external_packages::ExternalPackageId,
     widget_type_id: ExternalTypeId,
-) -> Result<ExternalFunctionId, PremergeFailure> {
+) -> Result<ExternalFunctionId, PreparedFailure> {
     context
         .package_registry
         .register_external_function(
@@ -172,7 +172,7 @@ fn register_dummy_use_widget_function(
     context: &mut ExternalImportProviderContext,
     package_id: crate::compiler_frontend::external_packages::ExternalPackageId,
     widget_type_id: ExternalTypeId,
-) -> Result<ExternalFunctionId, PremergeFailure> {
+) -> Result<ExternalFunctionId, PreparedFailure> {
     context
         .package_registry
         .register_external_function(
@@ -198,7 +198,7 @@ fn register_dummy_use_widget_function(
         .map_err(provider_error_to_failure)
 }
 
-fn provider_error_to_failure(error: CompilerError) -> PremergeFailure {
+fn provider_error_to_failure(error: CompilerError) -> PreparedFailure {
     error.into()
 }
 
@@ -310,7 +310,7 @@ impl ExternalImportProvider for DummyJsImportProviderWithLowering {
         &self,
         request: ExternalImportRequest,
         context: &mut ExternalImportProviderContext,
-    ) -> Result<Option<ResolvedExternalImport>, PremergeFailure> {
+    ) -> Result<Option<ResolvedExternalImport>, PreparedFailure> {
         self.calls.fetch_add(1, Ordering::SeqCst);
 
         let package_path = dummy_package_path(&request.canonical_source_path);
@@ -333,7 +333,7 @@ impl ExternalImportProvider for DummyJsImportProviderWithLowering {
 fn register_dummy_draw_function_with_js_lowering(
     context: &mut ExternalImportProviderContext,
     package_id: crate::compiler_frontend::external_packages::ExternalPackageId,
-) -> Result<ExternalFunctionId, PremergeFailure> {
+) -> Result<ExternalFunctionId, PreparedFailure> {
     context
         .package_registry
         .register_external_function(

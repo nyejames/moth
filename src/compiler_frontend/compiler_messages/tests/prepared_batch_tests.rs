@@ -183,3 +183,46 @@ fn prepared_classifier_keeps_empty_and_warning_only_invariants() {
         "module semantic stage returned a premerge batch with no user-facing error diagnostic"
     );
 }
+
+#[test]
+fn root_domain_capture_renders_against_the_seeded_root_table() {
+    let mut root_string_table = StringTable::new();
+    let name = root_string_table.intern("unknown_name");
+    let diagnostic = CompilerDiagnostic::unknown_value_name(name, None);
+    let root_domain_batch = PreparedDiagnosticBatch::capture_from_root_string_table(
+        DiagnosticBag::from_diagnostics(vec![diagnostic]),
+        &root_string_table,
+        None,
+        || None,
+    )
+    .expect("root-domain capture without path payloads cannot fail");
+
+    // The run seeds its accumulator with the root table before root-domain batches join it.
+    let seed = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::new(),
+        root_string_table.clone(),
+        None,
+        false,
+        None,
+    );
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(seed, None);
+    accumulator.append_prepared(root_domain_batch, None);
+    let failure = accumulator.finish(InstallMode::Unfrozen);
+    assert_eq!(failure.reports.counts().errors, 1);
+    assert_eq!(failure.reports.counts().warnings, 0);
+
+    let mut reports = failure.reports.iter();
+    let (report, view) = reports
+        .next()
+        .expect("the root-domain diagnostic is retained");
+    let facts = view
+        .family_view::<UnknownValueNameView>()
+        .expect("the typed family view matches");
+    assert_eq!(
+        report.context().strings().resolve(facts.name),
+        "unknown_name"
+    );
+    assert_eq!(view.severity(), DiagnosticSeverity::Error);
+    assert!(reports.next().is_none());
+}

@@ -11,6 +11,7 @@
 //! `create_header` collects named-type dependency edges from alias targets just like from struct
 //! fields and constant type annotations. Self-reference (`A as A`) also creates a self-loop edge.
 
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::module_ast::environment::builder::{
     AstModuleEnvironmentBuilder, DeclarationPassLanes,
 };
@@ -18,7 +19,7 @@ use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedTypeAlias, ResolvedTypeAnnotation, resolve_parsed_type_annotation,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
+use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticToken, InvalidDeclarationReason, InvalidTypeAnnotationReason,
     TypeAnnotationContext,
@@ -56,21 +57,18 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         &mut self,
         declaration_lanes: &DeclarationPassLanes,
         sorted_headers: &[Header],
-        string_table: &mut StringTable,
-    ) -> Result<FxHashSet<PathId>, CompilerMessages> {
+    ) -> Result<FxHashSet<PathId>, ExpressionParseError> {
         let mut waiting = FxHashSet::default();
         for &declaration_id in &declaration_lanes.aliases {
-            let header = declaration_lanes
-                .header(declaration_id, sorted_headers)
-                .map_err(|error| self.error_messages(error, string_table))?;
-            let target = self.alias_target(header, string_table)?;
+            let header = declaration_lanes.header(declaration_id, sorted_headers)?;
+            let target = self.alias_target(header)?;
 
             if !header.capacity_references.is_empty() {
                 waiting.insert(header.declaration_path.to_owned());
                 continue;
             }
 
-            let visibility = self.header_visibility(header, string_table)?;
+            let visibility = self.header_visibility(header)?;
             let mut depends_on_waiting = false;
             for_each_named_type_in_parsed_ref(target, &mut |type_reference| {
                 if let VisibleNamedTypeResolution::Declaration(alias_path) =
@@ -100,11 +98,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         sorted_headers: &[Header],
         waiting_for_constants: &FxHashSet<PathId>,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), ExpressionParseError> {
         for &declaration_id in &declaration_lanes.aliases {
-            let header = declaration_lanes
-                .header(declaration_id, sorted_headers)
-                .map_err(|error| self.error_messages(error, string_table))?;
+            let header = declaration_lanes.header(declaration_id, sorted_headers)?;
             if waiting_for_constants.contains(&header.declaration_path) {
                 continue;
             }
@@ -128,11 +124,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         declaration_lanes: &DeclarationPassLanes,
         sorted_headers: &[Header],
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+    ) -> Result<(), CompilerError> {
         for &declaration_id in &declaration_lanes.aliases {
-            let header = declaration_lanes
-                .header(declaration_id, sorted_headers)
-                .map_err(|error| self.error_messages(error, string_table))?;
+            let header = declaration_lanes.header(declaration_id, sorted_headers)?;
             if self
                 .resolved_type_aliases_by_path
                 .contains_key(&header.declaration_path)
@@ -152,7 +146,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 header.name_span,
                 ErrorType::Compiler,
             );
-            return Err(self.error_messages(error, string_table));
+            return Err(error);
         }
 
         Ok(())
@@ -163,9 +157,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         &mut self,
         header: &Header,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
-        let target = self.alias_target(header, string_table)?;
-        let visibility = self.header_visibility(header, string_table)?;
+    ) -> Result<(), ExpressionParseError> {
+        let target = self.alias_target(header)?;
+        let visibility = self.header_visibility(header)?;
 
         // The use-site scope holds a handle on the alias table, so it must end before the table
         // is mutated. Publishing while it lives deep-clones every alias already published.
@@ -193,16 +187,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     }
 
     fn alias_target<'header>(
-        &mut self,
+        &self,
         header: &'header Header,
-        string_table: &mut StringTable,
-    ) -> Result<&'header ParsedTypeRef, CompilerMessages> {
+    ) -> Result<&'header ParsedTypeRef, CompilerError> {
         let HeaderKind::TypeAlias { target } = &header.kind else {
-            return Err(self.error_messages(
-                CompilerError::compiler_error(
-                    "Type-alias declaration lane contained a different header kind.",
-                ),
-                string_table,
+            return Err(CompilerError::compiler_error(
+                "Type-alias declaration lane contained a different header kind.",
             ));
         };
 
@@ -216,7 +206,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         visibility: &FileVisibility,
         scope_context: &ScopeContext,
         string_table: &mut StringTable,
-    ) -> Result<ResolvedTypeAnnotation, CompilerMessages> {
+    ) -> Result<ResolvedTypeAnnotation, ExpressionParseError> {
         let resolved_target = {
             let mut type_resolution_context = self.type_resolution_context_for(visibility, None);
             resolve_parsed_type_annotation(
@@ -228,7 +218,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             )
         };
 
-        resolved_target.map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))
+        resolved_target.map_err(ExpressionParseError::from)
     }
 
     fn complete_alias(
@@ -237,7 +227,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         target: &ParsedTypeRef,
         resolved_target: ResolvedTypeAnnotation,
         string_table: &mut StringTable,
-    ) -> Result<ResolvedTypeAlias, CompilerMessages> {
+    ) -> Result<ResolvedTypeAlias, ExpressionParseError> {
         // Reject aliases to external opaque types for Alpha.
         // WHAT: external types are opaque and cannot be aliased by user code.
         // WHY: aliases to opaque types would let user code pretend it owns a nominal type
@@ -253,24 +243,19 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .map(|def| def.name.to_string())
                 .unwrap_or_else(|| "external".to_string());
 
-            return Err(self.diagnostic_messages(
-                CompilerDiagnostic::invalid_declaration(
-                    InvalidDeclarationReason::ExternalTypeAlias {
-                        type_name: string_table.intern(&type_name),
-                    },
-                    self.path_fork.component(header.declaration_path),
-                    header.name_span,
-                ),
-                string_table,
-            ));
+            let diagnostic = CompilerDiagnostic::invalid_declaration(
+                InvalidDeclarationReason::ExternalTypeAlias {
+                    type_name: string_table.intern(&type_name),
+                },
+                self.path_fork.component(header.declaration_path),
+                header.name_span,
+            );
+            return Err(diagnostic.into());
         }
 
         let target_span = parsed_type_span(target);
         let Some(target_type_id) = resolved_target.type_id else {
-            return Err(self.diagnostic_messages(
-                unresolved_alias_target_diagnostic(target, target_span),
-                string_table,
-            ));
+            return Err(unresolved_alias_target_diagnostic(target, target_span).into());
         };
 
         Ok(ResolvedTypeAlias {

@@ -19,7 +19,7 @@ use crate::compiler_frontend::ast::statements::value_production::{
     types::{ValueBlock, ValueMatchBlock},
 };
 use crate::compiler_frontend::compiler_errors::ErrorType;
-use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::hir::expressions::HirExpression;
@@ -332,8 +332,8 @@ fn then_value_without_active_target_is_hir_invariant_failure() {
     .expect_err("ThenValue outside active value-block target should fail HIR lowering");
 
     let error = match err {
-        AstDiagnosticFailure::Infrastructure(errors) => errors.primary,
-        AstDiagnosticFailure::Prepared(_) => {
+        PreparedFailure::Infrastructure(errors) => errors.primary,
+        PreparedFailure::Diagnosed(_) | PreparedFailure::Mixed { .. } => {
             panic!("HIR lowering failure should be infrastructure")
         }
     };

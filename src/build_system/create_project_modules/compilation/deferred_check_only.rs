@@ -4,7 +4,7 @@
 //! artefacts never enter a retained boundary; this child preserves the diagnostic-only lane.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::PremergeFailure;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::module_compilation::ProviderMaterialisationRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
@@ -60,7 +60,7 @@ pub(super) fn compile_check_only_jobs_after_canonical(
     source_package_dependencies: &[ResolvedSourcePackageDependency],
     string_table: &mut StringTable,
     path_interner: &mut PathInternerBuilder,
-) -> Result<Vec<PreparedDiagnosticBatch>, PremergeFailure> {
+) -> Result<Vec<PreparedDiagnosticBatch>, PreparedFailure> {
     let mut provider_materialisations =
         seed_completed_package_materialisations(context.completed_packages())?;
     seed_boundary_materialisations(&mut provider_materialisations, provider_store)?;

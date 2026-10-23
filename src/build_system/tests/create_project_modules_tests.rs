@@ -40,7 +40,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticVi
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DependencyClauseKind, InvalidCompileTimePathReason,
-    InvalidDependencyClauseReason, PathKind, PremergeFailure,
+    InvalidDependencyClauseReason, PathKind, PreparedFailure,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -197,15 +197,15 @@ fn source_database_for_test(
 }
 
 fn prepared_failure_boundary(
-    failure: PremergeFailure,
+    failure: PreparedFailure,
     source_database: Option<Arc<SourceDatabase>>,
 ) -> BoundaryFailure {
     let mut accumulator = crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator::new();
     match failure {
-        PremergeFailure::Diagnosed(batch) => {
+        PreparedFailure::Diagnosed(batch) => {
             accumulator.append_prepared(batch, source_database.map(|database| (database, None)));
         }
-        PremergeFailure::Infrastructure(infrastructure) => {
+        PreparedFailure::Infrastructure(infrastructure) => {
             let mut messages = CompilerMessages::empty(StringTable::new());
             messages.append_infrastructure_errors(infrastructure);
             if let Some(source_database) = source_database {
@@ -213,7 +213,7 @@ fn prepared_failure_boundary(
             }
             accumulator.append(messages);
         }
-        PremergeFailure::Mixed { batch, error } => {
+        PreparedFailure::Mixed { batch, error } => {
             accumulator.append_prepared(
                 batch,
                 source_database.clone().map(|database| (database, None)),
@@ -1310,7 +1310,7 @@ impl ExternalImportProvider for RecordingExternalImportProvider {
         &self,
         request: ExternalImportRequest,
         _context: &mut ExternalImportProviderContext,
-    ) -> Result<Option<ResolvedExternalImport>, PremergeFailure> {
+    ) -> Result<Option<ResolvedExternalImport>, PreparedFailure> {
         self.canonical_paths
             .lock()
             .expect("recorded provider paths lock poisoned")
@@ -1346,7 +1346,7 @@ impl ExternalImportProvider for CanonicalPathPackageProvider {
         &self,
         request: ExternalImportRequest,
         context: &mut ExternalImportProviderContext,
-    ) -> Result<Option<ResolvedExternalImport>, PremergeFailure> {
+    ) -> Result<Option<ResolvedExternalImport>, PreparedFailure> {
         let package_path = format!(
             "@test/{}",
             request
@@ -1391,7 +1391,7 @@ impl ExternalImportProvider for CountingExternalImportProvider {
         &self,
         _request: ExternalImportRequest,
         _context: &mut ExternalImportProviderContext,
-    ) -> Result<Option<ResolvedExternalImport>, PremergeFailure> {
+    ) -> Result<Option<ResolvedExternalImport>, PreparedFailure> {
         self.calls.fetch_add(1, Ordering::Relaxed);
         Ok(None)
     }
@@ -1446,7 +1446,7 @@ impl ExternalImportProvider for ResolvingCountingProvider {
         &self,
         request: ExternalImportRequest,
         context: &mut ExternalImportProviderContext,
-    ) -> Result<Option<ResolvedExternalImport>, PremergeFailure> {
+    ) -> Result<Option<ResolvedExternalImport>, PreparedFailure> {
         self.calls.fetch_add(1, Ordering::Relaxed);
         let package_id = context
             .package_registry

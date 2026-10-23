@@ -12,13 +12,14 @@
 //!   language directive. One writer keeps `$code` and `$escape_html` from duplicating the
 //!   same five-byte escape loop.
 
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterInput, FormatterInputPiece, FormatterOutput, FormatterOutputPiece,
 };
 use crate::compiler_frontend::ast::templates::template::{
     Formatter, FormatterResult, TemplateFormatter,
 };
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::style_directives::StyleDirectiveArgumentValue;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::sync::Arc;
@@ -58,7 +59,7 @@ impl TemplateFormatter for EscapeHtmlTemplateFormatter {
         &self,
         input: FormatterInput,
         string_table: &mut StringTable,
-    ) -> Result<FormatterResult, CompilerMessages> {
+    ) -> Result<FormatterResult, TemplateError> {
         let pieces = input
             .pieces
             .into_iter()
@@ -78,7 +79,7 @@ impl TemplateFormatter for EscapeHtmlTemplateFormatter {
 
         Ok(FormatterResult {
             output: FormatterOutput { pieces },
-            warnings: Vec::new(),
+            warnings: DiagnosticBag::new(),
         })
     }
 }

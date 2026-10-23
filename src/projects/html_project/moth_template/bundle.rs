@@ -19,8 +19,11 @@ use crate::build_system::create_project_modules::file_reference_resolution::{
 };
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticBag, PreparedFailure,
+};
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput,
     HeaderParseOptions, SourcePreparationDelta,
@@ -60,6 +63,42 @@ use std::sync::Arc;
 /// path is its path relative to the document's portable directory under the request's shared
 /// module identity.
 pub(super) const DIRECT_TEMPLATE_PROJECT_NAME: &str = "moth-template";
+#[derive(Debug)]
+pub(super) struct MothTemplateBundleFailure {
+    failure: PreparedFailure,
+    source_database: Option<Arc<SourceDatabase>>,
+}
+
+impl From<PreparedFailure> for MothTemplateBundleFailure {
+    fn from(failure: PreparedFailure) -> Self {
+        Self {
+            failure,
+            source_database: None,
+        }
+    }
+}
+
+impl MothTemplateBundleFailure {
+    pub(super) fn append_to_boundary(self, accumulator: &mut BoundaryAccumulator) {
+        match self.failure {
+            PreparedFailure::Diagnosed(batch) => accumulator
+                .append_prepared(batch, self.source_database.map(|database| (database, None))),
+            PreparedFailure::Infrastructure(errors) => {
+                accumulator.append_infrastructure(errors, self.source_database);
+            }
+            PreparedFailure::Mixed { batch, error } => {
+                let source_database = self.source_database;
+                accumulator.append_prepared(
+                    batch,
+                    source_database
+                        .as_ref()
+                        .map(|database| (Arc::clone(database), None)),
+                );
+                accumulator.append_infrastructure(error, source_database);
+            }
+        }
+    }
+}
 
 /// One file the content fixed point has not prepared yet.
 enum QueuedSource {
@@ -80,7 +119,7 @@ pub(super) fn prepare_file_value_bundle(
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
     resource_inputs: &mut ResourceInputRegistry,
-) -> Result<MothTemplateFileValueBundle, CompilerMessages> {
+) -> Result<MothTemplateFileValueBundle, MothTemplateBundleFailure> {
     let module_root = unit
         .source_path
         .parent()
@@ -94,7 +133,7 @@ pub(super) fn prepare_file_value_bundle(
         &source_file_kinds,
         ModuleRootTable::empty(),
     )
-    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    .map_err(PreparedFailure::from)?;
 
     // Direct-template resources belong to the module origin the document's portable relative
     // directory names: sibling documents in distinct directories mint distinct origins, while a
@@ -111,7 +150,7 @@ pub(super) fn prepare_file_value_bundle(
             .unwrap_or_else(|| Path::new("")),
         ModuleRootRole::Normal,
     )
-    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    .map_err(PreparedFailure::from)?;
 
     // ------------------------
     //  Discover the source closure
@@ -136,13 +175,16 @@ pub(super) fn prepare_file_value_bundle(
             string_table,
         )
         .map_err(|error| match error {
-            SourceDatabaseError::Capacity(capacity) => CompilerMessages::from_diagnostic(
-                CompilerDiagnostic::source_table_capacity(capacity.resource()),
+            SourceDatabaseError::Capacity(capacity) => PreparedFailure::capture_diagnosed(
+                DiagnosticBag::from(CompilerDiagnostic::source_table_capacity(
+                    capacity.resource(),
+                )),
                 string_table.clone(),
+                None,
+                false,
+                None,
             ),
-            SourceDatabaseError::Infrastructure(error) => {
-                CompilerMessages::from_error_ref(error, string_table)
-            }
+            SourceDatabaseError::Infrastructure(error) => PreparedFailure::from(error),
         })?;
     let discovery_options = HeaderParseOptions {
         entry_file_id: Some(entry_file_id),
@@ -218,7 +260,7 @@ pub(super) fn prepare_file_value_bundle(
                     // exhaustion is a typed source-capacity rejection, not infrastructure.
                     SourceDatabaseError::Capacity(capacity) => {
                         FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
-                            warnings: Vec::new(),
+                            warnings: DiagnosticBag::new(),
                             diagnostic: CompilerDiagnostic::source_table_capacity(
                                 capacity.resource(),
                             ),
@@ -364,13 +406,10 @@ pub(super) fn prepare_file_value_bundle(
         &mut path_fork,
     )?;
     let Some(prepared_entry) = prepared_entry else {
-        let messages = CompilerMessages::from_error_ref(
-            CompilerError::compiler_error(
-                "direct-template walk completed without a prepared entry source",
-            ),
-            string_table,
-        );
-        return Err(finish_source_owner(messages, source_builder));
+        let failure = PreparedFailure::from(CompilerError::compiler_error(
+            "direct-template walk completed without a prepared entry source",
+        ));
+        return Err(finish_source_owner(failure, source_builder));
     };
 
     let mut resolved_file_references = ResolvedFileReferenceTable::new();
@@ -387,26 +426,22 @@ pub(super) fn prepare_file_value_bundle(
         {
             Some(owner_source_file) => owner_source_file,
             None => {
-                let messages = CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(format!(
-                        "source {:?} owner has no classified source identity",
-                        resolved.source_path
-                    )),
-                    string_table,
-                );
-                return Err(finish_source_owner(messages, source_builder));
+                let failure = PreparedFailure::from(CompilerError::compiler_error(format!(
+                    "source {:?} owner has no classified source identity",
+                    resolved.source_path
+                )));
+                return Err(finish_source_owner(failure, source_builder));
             }
         };
         let path_syntax = resolved.path_syntax;
         let class = resolved.class;
-        let mut outcome = match resolved_outcome_from_physical(
-            resolved,
-            source_builder.sources(),
-            string_table,
-        ) {
+        let mut outcome = match resolved_outcome_from_physical(resolved, source_builder.sources()) {
             Ok(outcome) => outcome,
-            Err(messages) => {
-                return Err(finish_source_owner(messages, source_builder));
+            Err(error) => {
+                return Err(finish_source_owner(
+                    PreparedFailure::from(error),
+                    source_builder,
+                ));
             }
         };
         if let ResolvedFileReferenceOutcome::Diagnostic(diagnostic) = &mut outcome {
@@ -418,8 +453,10 @@ pub(super) fn prepare_file_value_bundle(
             class,
             outcome,
         }) {
-            let messages = CompilerMessages::from_error_ref(error, string_table);
-            return Err(finish_source_owner(messages, source_builder));
+            return Err(finish_source_owner(
+                PreparedFailure::from(error),
+                source_builder,
+            ));
         }
     }
 
@@ -467,7 +504,7 @@ fn finalize_known_sources(
     path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<FinalizedTemplateSources, CompilerMessages> {
+) -> Result<FinalizedTemplateSources, MothTemplateBundleFailure> {
     let DiscoveredTemplateSources {
         candidates,
         loaded,
@@ -489,13 +526,16 @@ fn finalize_known_sources(
         .map_err(|error| match error {
             // Final registration publishes the authored template closure, so its compact-table
             // exhaustion is a typed source-capacity rejection, not infrastructure.
-            SourceDatabaseError::Capacity(capacity) => CompilerMessages::from_diagnostic(
-                CompilerDiagnostic::source_table_capacity(capacity.resource()),
+            SourceDatabaseError::Capacity(capacity) => PreparedFailure::capture_diagnosed(
+                DiagnosticBag::from(CompilerDiagnostic::source_table_capacity(
+                    capacity.resource(),
+                )),
                 string_table.clone(),
+                None,
+                false,
+                None,
             ),
-            SourceDatabaseError::Infrastructure(error) => {
-                CompilerMessages::from_error_ref(error, string_table)
-            }
+            SourceDatabaseError::Infrastructure(error) => PreparedFailure::from(error),
         })?;
     let mut source_builder = SourceDatabaseBuilder::new(source_files);
 
@@ -591,42 +631,44 @@ fn finalize_known_sources(
     }
 
     if let Some(error) = transfer_error {
-        let messages = CompilerMessages::from_error_ref(error, string_table);
-        return Err(finish_source_owner(messages, source_builder));
+        return Err(finish_source_owner(
+            PreparedFailure::from(error),
+            source_builder,
+        ));
     }
 
     // Registration may append logical paths for candidates queued before an aborted discovery
     // walk reaches them. Reseed those source paths into the original fork in final source-slot
     // order, and reject any unexpected identity remap before rebinding retained outputs.
-    let reseed_error: Option<CompilerMessages> = {
+    let reseed_error: Option<PreparedFailure> = {
         let source_files = source_builder.sources();
         source_files.iter().find_map(|source| {
             let expected_path = source.logical_path;
             match source_files.logical_path_in_fork(source.id, path_fork) {
                 Ok(path) if path == expected_path => None,
-                Ok(_) => Some(CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(
-                        "final source registration changed an existing logical PathId",
-                    ),
-                    string_table,
-                )),
-                // The fork re-interns the authored source paths, so its exhaustion is a typed
-                // source-capacity rejection, not infrastructure.
+                Ok(_) => Some(PreparedFailure::from(CompilerError::compiler_error(
+                    "final source registration changed an existing logical PathId",
+                ))),
                 Err(SourceDatabaseError::Capacity(capacity)) => {
-                    Some(CompilerMessages::from_diagnostic(
-                        CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                    Some(PreparedFailure::capture_diagnosed(
+                        DiagnosticBag::from(CompilerDiagnostic::source_table_capacity(
+                            capacity.resource(),
+                        )),
                         string_table.clone(),
+                        None,
+                        false,
+                        None,
                     ))
                 }
                 Err(SourceDatabaseError::Infrastructure(error)) => {
-                    Some(CompilerMessages::from_error_ref(error, string_table))
+                    Some(PreparedFailure::from(error))
                 }
             }
         })
     };
 
-    if let Some(messages) = reseed_error {
-        return Err(finish_source_owner(messages, source_builder));
+    if let Some(failure) = reseed_error {
+        return Err(finish_source_owner(failure, source_builder));
     }
 
     let rebound: Result<_, CompilerError> = (|| {
@@ -665,29 +707,49 @@ fn finalize_known_sources(
             prepared_entry,
             prepared_content_sources,
         }),
-        Err(error) => {
-            let messages = CompilerMessages::from_error_ref(error, string_table);
-            Err(finish_source_owner(messages, source_builder))
+        Err(error) => Err(finish_source_owner(
+            PreparedFailure::from(error),
+            source_builder,
+        )),
+    }
+}
+
+fn append_infrastructure_cause(failure: PreparedFailure, error: CompilerError) -> PreparedFailure {
+    match failure {
+        PreparedFailure::Diagnosed(batch) => PreparedFailure::Mixed {
+            batch,
+            error: error.into(),
+        },
+        PreparedFailure::Infrastructure(mut errors) => {
+            errors.push(error);
+            PreparedFailure::Infrastructure(errors)
+        }
+        PreparedFailure::Mixed {
+            batch,
+            error: mut errors,
+        } => {
+            errors.push(error);
+            PreparedFailure::Mixed {
+                batch,
+                error: errors,
+            }
         }
     }
 }
 
-/// Finish the exclusive source owner and attach its finalized context to one terminal message set.
-/// If span installation fails, append that cause without replacing earlier causes, diagnostics,
-/// string tables, or foreign frozen identity contexts.
 fn finish_source_owner(
-    mut messages: CompilerMessages,
+    failure: PreparedFailure,
     source_builder: SourceDatabaseBuilder,
-) -> CompilerMessages {
+) -> MothTemplateBundleFailure {
     match source_builder.finish() {
-        Ok(source_files) => {
-            messages.set_source_database(Arc::new(source_files));
-            messages
-        }
-        Err(install_error) => {
-            messages.set_infrastructure_error(install_error);
-            messages
-        }
+        Ok(source_database) => MothTemplateBundleFailure {
+            failure,
+            source_database: Some(Arc::new(source_database)),
+        },
+        Err(error) => MothTemplateBundleFailure {
+            failure: append_infrastructure_cause(failure, error),
+            source_database: None,
+        },
     }
 }
 
@@ -703,14 +765,14 @@ fn finish_source_owner(
 )]
 fn finalize_discovery_failure(
     failed_path: PathBuf,
-    mut failure: FileFrontendPrepareFailure,
+    failure: FileFrontendPrepareFailure,
     failed_builder: Option<ExtendedSpanBuilder>,
     sources: DiscoveredTemplateSources,
     entry_file_path: &Path,
     path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> CompilerMessages {
+) -> MothTemplateBundleFailure {
     let finalized = match finalize_known_sources(
         sources,
         failed_builder.map(|builder| (failed_path.as_path(), builder)),
@@ -720,7 +782,7 @@ fn finalize_discovery_failure(
         path_fork,
     ) {
         Ok(finalized) => finalized,
-        Err(messages) => return messages,
+        Err(failure) => return failure,
     };
     let FinalizedTemplateSources {
         source_builder,
@@ -728,55 +790,65 @@ fn finalize_discovery_failure(
         mut prepared_content_sources,
     } = finalized;
 
-    // Final identity rebinding updates warning locations along with the prepared output. Move
-    // those warnings only after rebinding so a diagnosed boundary never carries traversal-local
-    // source scopes into its finalized database.
-    let mut prior_warnings = Vec::new();
+    let mut prior_warnings = DiagnosticBag::new();
     if let Some(prepared_entry) = &mut prepared_entry {
-        prior_warnings.append(&mut prepared_entry.warnings);
+        for warning in prepared_entry.warnings.take_diagnostics() {
+            prior_warnings.push(warning);
+        }
     }
     for prepared in &mut prepared_content_sources {
-        prior_warnings.append(&mut prepared.warnings);
+        for warning in prepared.warnings.take_diagnostics() {
+            prior_warnings.push(warning);
+        }
     }
 
     let source_id = match source_id_for_path(
         source_builder.sources(),
         &failed_path,
-        string_table,
         "has no finalized identity for its preparation failure",
     ) {
         Ok(source_id) => source_id,
-        Err(mut messages) => {
-            messages.prepend_diagnostics_preserving_context(prior_warnings);
-            return finish_source_owner(messages, source_builder);
+        Err(error) => {
+            let failure = PreparedFailure::with_infrastructure_and_warnings(
+                error,
+                prior_warnings.into_diagnostics(),
+                string_table,
+                None,
+                || Some(Arc::new(path_fork.snapshot_table())),
+            );
+            return finish_source_owner(failure, source_builder);
         }
     };
-    match &mut failure {
-        FileFrontendPrepareFailure::Diagnosed(error) => {
-            for warning in &mut error.warnings {
+    let failure = match failure {
+        FileFrontendPrepareFailure::Diagnosed(mut error) => {
+            let mut error_warnings = error.warnings.take_diagnostics();
+            for warning in &mut error_warnings {
                 rebind_diagnostic_source(warning, source_id);
             }
             rebind_diagnostic_source(&mut error.diagnostic, source_id);
-            prior_warnings.append(&mut error.warnings);
-        }
-        FileFrontendPrepareFailure::Infrastructure(error) => {
-            rebind_error_source(error, source_id);
-        }
-    }
-
-    let messages = match failure {
-        FileFrontendPrepareFailure::Diagnosed(error) => {
-            CompilerMessages::from_diagnostic_with_warnings(
+            for warning in error_warnings {
+                prior_warnings.push(warning);
+            }
+            PreparedFailure::with_diagnostic_and_warnings(
                 error.diagnostic,
-                prior_warnings,
+                prior_warnings.into_diagnostics(),
                 string_table,
+                None,
+                || Some(Arc::new(path_fork.snapshot_table())),
             )
         }
-        FileFrontendPrepareFailure::Infrastructure(error) => {
-            CompilerMessages::from_error_with_warnings(error, prior_warnings, string_table)
+        FileFrontendPrepareFailure::Infrastructure(mut error) => {
+            rebind_error_source(&mut error, source_id);
+            PreparedFailure::with_infrastructure_and_warnings(
+                error,
+                prior_warnings.into_diagnostics(),
+                string_table,
+                None,
+                || Some(Arc::new(path_fork.snapshot_table())),
+            )
         }
     };
-    finish_source_owner(messages, source_builder)
+    finish_source_owner(failure, source_builder)
 }
 
 /// Record one physically resolved content target in the candidate set and queue it.
@@ -845,8 +917,7 @@ fn collect_content_candidate(
 fn resolved_outcome_from_physical(
     resolved: SingleFileResolvedReference,
     source_files: &SourceDatabase,
-    string_table: &mut StringTable,
-) -> Result<ResolvedFileReferenceOutcome, CompilerMessages> {
+) -> Result<ResolvedFileReferenceOutcome, CompilerError> {
     match resolved.outcome {
         SingleFileReferenceOutcome::NoPhysicalTarget => {
             Ok(ResolvedFileReferenceOutcome::NoPhysicalTarget)
@@ -870,7 +941,6 @@ fn resolved_outcome_from_physical(
             let source = source_id_for_path(
                 source_files,
                 &canonical,
-                string_table,
                 "has no classified source identity",
             )?;
             Ok(ResolvedFileReferenceOutcome::Target(
@@ -883,18 +953,12 @@ fn resolved_outcome_from_physical(
 fn source_id_for_path(
     source_files: &SourceDatabase,
     path: &Path,
-    string_table: &mut StringTable,
     missing: &str,
-) -> Result<SourceId, CompilerMessages> {
+) -> Result<SourceId, CompilerError> {
     source_files
         .get_by_canonical_path(path)
         .map(|identity| identity.id)
-        .ok_or_else(|| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(format!("source {path:?} {missing}")),
-                string_table,
-            )
-        })
+        .ok_or_else(|| CompilerError::compiler_error(format!("source {path:?} {missing}")))
 }
 
 fn rebind_source_span(span: &mut Option<SourceSpan>, source_id: SourceId) {

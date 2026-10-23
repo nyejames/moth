@@ -1,18 +1,16 @@
-//! Prepared diagnostics that cross the premerge boundary without a legacy vessel.
+//! Prepared diagnostics that cross the pre-freeze boundary without a legacy vessel.
 //!
 //! WHAT: owns family drafts with captured type-display snapshots, the batch-local string table,
 //! explicit path rows, and frozen-identity handles collected during Pass A.
-//! WHY: a premerge batch joins the run accumulator without constructing `CompilerMessages` or
+//! WHY: a captured batch joins the run accumulator without a message vessel or
 //! retaining its live type environment.
-use super::compiler_errors::{
-    CompilerError, CompilerMessages, InfrastructureErrors, RenderPathContext,
-};
-use super::diagnostic_bag::{DiagnosticBag, PremergeFailure};
+use super::compiler_errors::{CompilerError, RenderPathContext};
+use super::diagnostic_bag::DiagnosticBag;
 use super::diagnostics::legacy_adapter::{PreparedDiagnostic, prepare_diagnostic};
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
-use crate::compiler_frontend::symbols::path_interner::PathTable;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use std::sync::Arc;
 
@@ -32,69 +30,6 @@ pub struct PreparedDiagnosticBatch {
     pub(super) identity: Box<PreparedBatchIdentity>,
 }
 
-#[derive(Debug)]
-pub(crate) enum AstDiagnosticFailure {
-    Prepared(PreparedDiagnosticBatch),
-    Infrastructure(Box<InfrastructureErrors>),
-}
-
-impl AstDiagnosticFailure {
-    pub(crate) fn capture_messages(
-        messages: CompilerMessages,
-        environment: Option<&TypeEnvironment>,
-        path_table_is_available: bool,
-        path_table: Option<Arc<PathTable>>,
-    ) -> Self {
-        let CompilerMessages {
-            diagnostics,
-            infrastructure_errors,
-            string_table,
-            ..
-        } = messages;
-        if let Some(errors) = infrastructure_errors {
-            return Self::Infrastructure(errors);
-        }
-
-        match PreparedDiagnosticBatch::capture_with_required_paths_and_types(
-            DiagnosticBag::from_diagnostics(diagnostics),
-            *string_table,
-            environment,
-            || path_table_is_available.then_some(path_table).flatten(),
-        ) {
-            Ok(batch) => Self::Prepared(batch),
-            Err(error) => Self::from(error),
-        }
-    }
-
-    pub(crate) fn prepend_diagnostics_with_required_paths(
-        &mut self,
-        prior_diagnostics: impl IntoIterator<
-            Item = crate::compiler_frontend::compiler_messages::CompilerDiagnostic,
-        >,
-        path_table: impl FnOnce() -> Option<Arc<PathTable>>,
-    ) -> Result<(), CompilerError> {
-        if let Self::Prepared(batch) = self {
-            batch.prepend_diagnostics_with_required_paths(prior_diagnostics, path_table)?;
-        }
-        Ok(())
-    }
-}
-
-impl From<CompilerError> for AstDiagnosticFailure {
-    fn from(error: CompilerError) -> Self {
-        Self::Infrastructure(error.into())
-    }
-}
-
-impl From<AstDiagnosticFailure> for PremergeFailure {
-    fn from(failure: AstDiagnosticFailure) -> Self {
-        match failure {
-            AstDiagnosticFailure::Prepared(batch) => Self::Diagnosed(batch),
-            AstDiagnosticFailure::Infrastructure(errors) => Self::Infrastructure(errors),
-        }
-    }
-}
-
 impl std::fmt::Debug for PreparedDiagnosticBatch {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -105,6 +40,25 @@ impl std::fmt::Debug for PreparedDiagnosticBatch {
 }
 
 const _: () = assert!(std::mem::size_of::<PreparedDiagnosticBatch>() <= 48);
+
+fn validate_path_table_pairing(
+    path_table: &PathTable,
+    string_table: &StringTable,
+    required_paths: &[PathId],
+) -> Result<(), CompilerError> {
+    if let Some(index) = super::compiler_errors::unpaired_path_table_component_index(
+        path_table,
+        string_table,
+        required_paths,
+    ) {
+        return Err(CompilerError::compiler_error(format!(
+            "diagnostic path table is not pairable with this string table: path node \
+             {index} is unaddressable or carries a component StringId the string table \
+             cannot resolve"
+        )));
+    }
+    Ok(())
+}
 
 impl PreparedDiagnosticBatch {
     /// Capture an owning site's bag against the environment it supplies.
@@ -149,6 +103,61 @@ impl PreparedDiagnosticBatch {
             }),
         }
     }
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.5 S7b backend root-string diagnostics")
+    )]
+    /// Capture diagnostics already using the run root's string IDs.
+    ///
+    /// The returned batch owns an empty, unallocated string table: its diagnostic and path-table
+    /// IDs remain in `root_string_table`'s domain and it may only be appended to an accumulator
+    /// seeded with that same root table.
+    pub(crate) fn capture_from_root_string_table(
+        bag: DiagnosticBag,
+        root_string_table: &StringTable,
+        environment: Option<&TypeEnvironment>,
+        path_table: impl FnOnce() -> Option<Arc<PathTable>>,
+    ) -> Result<Self, CompilerError> {
+        let diagnostics = bag.into_diagnostics();
+        let mut required_paths = Vec::new();
+        for diagnostic in &diagnostics {
+            diagnostic
+                .payload
+                .required_path_payload_paths(&mut required_paths);
+        }
+
+        let retain_type_context = environment.is_some() && !diagnostics.is_empty();
+        let path_table = if required_paths.is_empty() && !retain_type_context {
+            None
+        } else {
+            path_table()
+        };
+        if let Some(path_table) = &path_table {
+            validate_path_table_pairing(path_table, root_string_table, &required_paths)?;
+        }
+
+        let batch = Self::capture_from_bag(
+            DiagnosticBag::from_diagnostics(diagnostics),
+            StringTable::empty_unallocated(),
+            environment,
+            path_table.is_some(),
+            path_table,
+        );
+        if let Some(path_table) = batch
+            .identity
+            .path_rows
+            .first()
+            .map(|row| row.path_table.as_ref())
+        {
+            let mut type_paths = Vec::new();
+            for diagnostic in &batch.prepared {
+                diagnostic.append_type_paths(&mut type_paths);
+            }
+            validate_path_table_pairing(path_table, root_string_table, &type_paths)?;
+        }
+        Ok(batch)
+    }
+
     /// Capture diagnostics while retaining a path snapshot only when a payload renders paths.
     ///
     /// Path snapshots are paired with the batch-local string table before capture. The type
@@ -197,18 +206,8 @@ impl PreparedDiagnosticBatch {
         } else {
             path_table()
         };
-        if let Some(path_table) = &path_table
-            && let Some(index) = super::compiler_errors::unpaired_path_table_component_index(
-                path_table,
-                &string_table,
-                &required_paths,
-            )
-        {
-            return Err(CompilerError::compiler_error(format!(
-                "diagnostic path table is not pairable with this string table: path node \
-                 {index} is unaddressable or carries a component StringId the string table \
-                 cannot resolve"
-            )));
+        if let Some(path_table) = &path_table {
+            validate_path_table_pairing(path_table, &string_table, &required_paths)?;
         }
         let type_environment_is_available = path_table.is_some();
         let batch = Self::capture_from_bag(
@@ -228,17 +227,7 @@ impl PreparedDiagnosticBatch {
             for diagnostic in &batch.prepared {
                 diagnostic.append_type_paths(&mut type_paths);
             }
-            if let Some(index) = super::compiler_errors::unpaired_path_table_component_index(
-                path_table,
-                &batch.identity.string_table,
-                &type_paths,
-            ) {
-                return Err(CompilerError::compiler_error(format!(
-                    "diagnostic path table is not pairable with this string table: path node \
-                     {index} is unaddressable or carries a component StringId the string table \
-                     cannot resolve"
-                )));
-            }
+            validate_path_table_pairing(path_table, &batch.identity.string_table, &type_paths)?;
         }
         Ok(batch)
     }

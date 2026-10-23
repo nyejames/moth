@@ -31,6 +31,8 @@ use crate::compiler_frontend::compiler_messages::{
     CapacityResource, CompilerDiagnostic, DiagnosticCapacityResource, DiagnosticSeverity,
     SourceSpanCapacityResource,
 };
+#[cfg(test)]
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PreparedFailure};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
@@ -235,10 +237,64 @@ pub(crate) fn into_boundary_failure(messages: CompilerMessages) -> BoundaryFailu
     accumulator.finish(install)
 }
 
+/// Converts one legacy planner message set into a prepared failure in the run's root string domain.
+///
+/// S7a seam for the HTML moth-template resource planner, which still returns `CompilerMessages`.
+/// The planner interns against the root table it was given, so its diagnostics capture without
+/// rebasing. S7b deletes this helper with `CompilerMessages`.
+#[cfg(test)]
+pub(crate) fn prepared_failure_from_root_messages(
+    messages: CompilerMessages,
+    root_string_table: &StringTable,
+) -> PreparedFailure {
+    let CompilerMessages {
+        diagnostics,
+        infrastructure_errors,
+        ..
+    } = messages;
+    if diagnostics.is_empty() {
+        return PreparedFailure::Infrastructure(
+            infrastructure_errors.expect("a planner failure carries diagnostics or infrastructure"),
+        );
+    }
+    let batch = PreparedDiagnosticBatch::capture_from_root_string_table(
+        DiagnosticBag::from_diagnostics(diagnostics),
+        root_string_table,
+        None,
+        || None,
+    )
+    .expect("planner diagnostics carry no path tables, so root-domain capture cannot fail");
+    match infrastructure_errors {
+        Some(error) => PreparedFailure::Mixed { batch, error },
+        None => PreparedFailure::Diagnosed(batch),
+    }
+}
+
 impl BoundaryAccumulator {
     /// Creates an empty accumulator without allocating.
     pub(crate) fn new() -> Self {
         Self { state: None }
+    }
+
+    /// Creates an accumulator seeded with the run's root string table.
+    ///
+    /// Causes that carry a source database must enter through an accumulator built this way,
+    /// because the frozen identity resolves strings through the table seeded here.
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.5 S7b root-seeded boundary callers")
+    )]
+    pub(crate) fn with_root_string_table(root: &StringTable) -> Self {
+        Self {
+            state: Some(BoundaryAccumulatorState {
+                string_table: root.clone(),
+                prepared: Vec::new(),
+                source_rows: Vec::new(),
+                path_rows: Vec::new(),
+                required_handles: Vec::new(),
+                infrastructure_errors: None,
+            }),
+        }
     }
 
     /// Captures one vessel against its own legacy contexts, then joins its rows to this run.
@@ -380,6 +436,38 @@ impl BoundaryAccumulator {
         }
         self.state = Some(state);
     }
+
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.5 S7b infrastructure boundary callers")
+    )]
+    /// Append infrastructure causes without fabricating a diagnostic vessel.
+    pub(crate) fn append_infrastructure(
+        &mut self,
+        mut errors: Box<InfrastructureErrors>,
+        source: Option<Arc<SourceDatabase>>,
+    ) {
+        assert!(
+            source.is_none() || self.state.is_some(),
+            "source-carrying infrastructure requires a root-seeded accumulator",
+        );
+        if let Some(source_database) = source {
+            errors.set_source_database(source_database);
+        }
+        let state = self.state.get_or_insert_with(|| BoundaryAccumulatorState {
+            string_table: StringTable::empty_unallocated(),
+            prepared: Vec::new(),
+            source_rows: Vec::new(),
+            path_rows: Vec::new(),
+            required_handles: Vec::new(),
+            infrastructure_errors: None,
+        });
+        match state.infrastructure_errors.as_mut() {
+            Some(existing) => existing.append(*errors),
+            None => state.infrastructure_errors = Some(errors),
+        }
+    }
+
     /// Append warnings that already reference this run's root string table.
     ///
     /// Unlike a legacy vessel, this batch has no independent table to merge or remap.
@@ -387,10 +475,10 @@ impl BoundaryAccumulator {
         if diagnostics.is_empty() {
             return;
         }
-        let messages = CompilerMessages::from_diagnostics(diagnostics, StringTable::new());
         let mut required_handles = Vec::new();
-        let prepared = (0..messages.diagnostics.len())
-            .map(|index| prepare(&messages, index, &mut required_handles))
+        let prepared = diagnostics
+            .into_iter()
+            .map(|diagnostic| prepare_diagnostic(&diagnostic, None, &mut required_handles))
             .collect::<Vec<_>>();
         let state = self
             .state

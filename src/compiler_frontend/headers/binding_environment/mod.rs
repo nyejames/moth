@@ -44,10 +44,10 @@ pub(crate) use builder::BindingEnvironmentBuilder;
 
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticBag};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
+use crate::compiler_frontend::headers::parse_file_headers::HeaderPreparationFailure;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -96,17 +96,16 @@ pub(crate) struct BindingEnvironmentInput<'a> {
 /// WHAT: builds per-file visibility maps by registering same-file declarations, prelude/builtin
 /// names, and resolved dependency clauses.
 /// WHY: this is the single entry point that AST will call to receive prepared visibility.
-/// BOUNDARY: returns `CompilerMessages` because this is a true build boundary that carries the
-/// shared `StringTable` needed for rendering and downstream transport. Inner helpers use
-/// `Result<..., CompilerDiagnostic>` to avoid repeated `StringTable` cloning; conversion happens
-/// only at this top-level boundary.
+/// BOUNDARY: returns one `HeaderPreparationFailure` for the first binding failure. Inner helpers use
+/// `Result<..., CompilerDiagnostic>` to avoid repeated `StringTable` cloning. Warnings collected
+/// before a failure are discarded.
 pub(crate) fn prepare_binding_environment(
     input: BindingEnvironmentInput<'_>,
-) -> Result<HeaderBindingEnvironment, CompilerMessages> {
+) -> Result<HeaderBindingEnvironment, HeaderPreparationFailure> {
     input
         .source_provider_dependencies
         .validate_binding_targets(input.external_package_registry)
-        .map_err(|error| CompilerMessages::from_error_ref(error, input.string_table))?;
+        .map_err(|error| HeaderPreparationFailure::Infrastructure(error.into()))?;
     let mut builder = BindingEnvironmentBuilder {
         module_symbols: input.module_symbols,
         external_package_registry: input.external_package_registry,
@@ -116,7 +115,7 @@ pub(crate) fn prepare_binding_environment(
         string_table: input.string_table,
         path_fork: input.path_fork,
         environment: HeaderBindingEnvironment::default(),
-        warnings: Vec::new(),
+        warnings: DiagnosticBag::new(),
         provider_semantics_registered: rustc_hash::FxHashSet::default(),
     };
 
@@ -136,16 +135,12 @@ pub(crate) fn prepare_binding_environment(
         match builder.build_file_visibility(&source_file, selection_table) {
             Ok(()) => {}
             Err(BindingEnvironmentError::Diagnostic(diagnostic)) => {
-                return Err(CompilerMessages::from_diagnostic(
+                return Err(HeaderPreparationFailure::Diagnosed(DiagnosticBag::from(
                     diagnostic,
-                    builder.string_table.clone(),
-                ));
+                )));
             }
             Err(BindingEnvironmentError::Internal(error)) => {
-                return Err(CompilerMessages::from_error_ref(
-                    error,
-                    builder.string_table,
-                ));
+                return Err(HeaderPreparationFailure::Infrastructure(error.into()));
             }
         }
     }

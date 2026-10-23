@@ -14,7 +14,7 @@ use crate::compiler_frontend::ast::function_body_to_ast;
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -35,7 +35,7 @@ pub(crate) struct GenericFunctionBodyValidationInput<'a, 'environment> {
     pub(crate) type_interner: &'a mut AstTypeInterner<'environment>,
     pub(crate) expression_builder: &'a mut AstExpressionBuilder,
     pub(crate) const_values: &'a mut ConstValueStore,
-    pub(crate) warnings: &'a mut Vec<CompilerDiagnostic>,
+    pub(crate) warnings: &'a mut DiagnosticBag,
     pub(crate) string_table: &'a mut StringTable,
     pub(crate) path_fork: &'a mut PathInternerFork,
 }
@@ -73,15 +73,17 @@ pub(crate) fn validate_generic_function_body(
     let (mut body_cursor, _) = parse_owner.cursor()?;
     // The validation context is built as an independent root by the caller, so its body must
     // complete before this pass can inspect typed nodes.
-    function_body_to_ast(
+    let mut warning_diagnostics = warnings.take_diagnostics();
+    let parsed_body = function_body_to_ast(
         &mut body_cursor,
         context,
         type_interner,
         expression_builder,
         const_values,
-        warnings,
+        &mut warning_diagnostics,
         string_table,
         path_fork,
-    )?
-    .expect_complete_nodes("a generic function template body")
+    );
+    *warnings = DiagnosticBag::from_diagnostics(warning_diagnostics);
+    parsed_body?.expect_complete_nodes("a generic function template body")
 }

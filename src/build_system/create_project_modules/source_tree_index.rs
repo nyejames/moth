@@ -23,7 +23,7 @@ use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry, SourcePacka
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, InvalidConfigReason, PremergeFailure,
+    DiagnosticBag, InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::project_globals::PROJECT_GLOBALS_DEPENDENCY_NAME;
@@ -460,7 +460,7 @@ impl SourceTreeIndex {
         source_file_kinds: &SourceFileKindRegistry,
         external_import_providers: &ExternalImportProviderRegistry,
         string_table: &mut StringTable,
-    ) -> Result<Self, PremergeFailure> {
+    ) -> Result<Self, PreparedFailure> {
         let SourceTreeProjectContext {
             project_root,
             validated_output_settings,
@@ -502,7 +502,7 @@ impl SourceTreeIndex {
         source_file_kinds: &SourceFileKindRegistry,
         external_import_providers: &ExternalImportProviderRegistry,
         string_table: &mut StringTable,
-    ) -> Result<Self, PremergeFailure> {
+    ) -> Result<Self, PreparedFailure> {
         let boundary = SourceTreeBoundary {
             entry_root: canonical_root,
             package_identity,
@@ -529,7 +529,7 @@ impl SourceTreeIndex {
         source_file_kinds: &SourceFileKindRegistry,
         external_import_providers: &ExternalImportProviderRegistry,
         string_table: &mut StringTable,
-    ) -> Result<Self, PremergeFailure> {
+    ) -> Result<Self, PreparedFailure> {
         let SourceTreeBoundary {
             entry_root,
             package_identity: boundary_package,
@@ -628,7 +628,7 @@ impl SourceTreeIndex {
                         InvalidConfigReason::ProjectGlobalsNameReserved,
                     );
                     let table = std::mem::take(string_table);
-                    return Err(PremergeFailure::Diagnosed(
+                    return Err(PreparedFailure::Diagnosed(
                         PreparedDiagnosticBatch::capture_from_bag(
                             DiagnosticBag::from(diagnostic),
                             table,
@@ -653,7 +653,7 @@ impl SourceTreeIndex {
                     };
                     let diagnostic = project_structure_diagnostic(reason);
                     let table = std::mem::take(string_table);
-                    return Err(PremergeFailure::Diagnosed(
+                    return Err(PreparedFailure::Diagnosed(
                         PreparedDiagnosticBatch::capture_from_bag(
                             DiagnosticBag::from(diagnostic),
                             table,
@@ -774,7 +774,7 @@ impl SourceTreeIndex {
                     };
                     let diagnostic = project_structure_diagnostic(reason);
                     let table = std::mem::take(string_table);
-                    return Err(PremergeFailure::Diagnosed(
+                    return Err(PreparedFailure::Diagnosed(
                         PreparedDiagnosticBatch::capture_from_bag(
                             DiagnosticBag::from(diagnostic),
                             table,
@@ -792,7 +792,7 @@ impl SourceTreeIndex {
                 let diagnostic =
                     project_structure_diagnostic(InvalidConfigReason::ProjectGlobalsNameReserved);
                 let table = std::mem::take(string_table);
-                return Err(PremergeFailure::Diagnosed(
+                return Err(PreparedFailure::Diagnosed(
                     PreparedDiagnosticBatch::capture_from_bag(
                         DiagnosticBag::from(diagnostic),
                         table,
@@ -820,7 +820,7 @@ impl SourceTreeIndex {
                         };
                         let diagnostic = project_structure_diagnostic(reason);
                         let table = std::mem::take(string_table);
-                        return Err(PremergeFailure::Diagnosed(
+                        return Err(PreparedFailure::Diagnosed(
                             PreparedDiagnosticBatch::capture_from_bag(
                                 DiagnosticBag::from(diagnostic),
                                 table,
@@ -927,7 +927,7 @@ impl SourceTreeIndex {
     /// registered package must never take precedence over a local source or directory segment.
     pub(super) fn single_file_dependency_keys(
         source_root: &Path,
-    ) -> Result<BTreeSet<String>, PremergeFailure> {
+    ) -> Result<BTreeSet<String>, PreparedFailure> {
         let skip_policy = SourceTreeSkipPolicy::default();
         let mut keys = BTreeSet::new();
         for entry in Self::sorted_directory_entries(source_root)? {
@@ -968,7 +968,7 @@ impl SourceTreeIndex {
         source_file_kinds: &SourceFileKindRegistry,
         external_import_providers: &ExternalImportProviderRegistry,
         string_table: &mut StringTable,
-    ) -> Result<ModuleRootTable, PremergeFailure> {
+    ) -> Result<ModuleRootTable, PreparedFailure> {
         let file_name = entry_file
             .file_name()
             .and_then(|name| name.to_str())
@@ -1132,7 +1132,7 @@ fn discover_project_package_facade(
     project_root: &Path,
     stats: &mut SourceTreeDiscoveryStats,
     string_table: &mut StringTable,
-) -> Result<Option<PathBuf>, PremergeFailure> {
+) -> Result<Option<PathBuf>, PreparedFailure> {
     // A project-root read failure is an infrastructure error, not the absence of a facade.
     // Preserve it through the file-error lane with the project-root path so the build boundary
     // can render it instead of silently treating the facade as missing.
@@ -1171,7 +1171,7 @@ fn discover_project_package_facade(
             let diagnostic =
                 project_structure_diagnostic(InvalidConfigReason::ProjectGlobalsNameReserved);
             let table = std::mem::take(string_table);
-            return Err(PremergeFailure::Diagnosed(
+            return Err(PreparedFailure::Diagnosed(
                 PreparedDiagnosticBatch::capture_from_bag(
                     DiagnosticBag::from(diagnostic),
                     table,
@@ -1206,7 +1206,7 @@ fn discover_project_package_facade(
                 candidates,
             });
         let table = std::mem::take(string_table);
-        return Err(PremergeFailure::Diagnosed(
+        return Err(PreparedFailure::Diagnosed(
             PreparedDiagnosticBatch::capture_from_bag(
                 DiagnosticBag::from(diagnostic),
                 table,
@@ -1230,7 +1230,7 @@ fn classify_directory_root(
     directory: &Path,
     directory_roots: &mut Vec<DiscoveredDirectoryRoot>,
     string_table: &mut StringTable,
-) -> Result<Option<DiscoveredDirectoryRoot>, PremergeFailure> {
+) -> Result<Option<DiscoveredDirectoryRoot>, PreparedFailure> {
     if directory_roots.is_empty() {
         return Ok(None);
     }
@@ -1247,7 +1247,7 @@ fn classify_directory_root(
                 candidates,
             });
         let table = std::mem::take(string_table);
-        return Err(PremergeFailure::Diagnosed(
+        return Err(PreparedFailure::Diagnosed(
             PreparedDiagnosticBatch::capture_from_bag(
                 DiagnosticBag::from(diagnostic),
                 table,
@@ -1278,7 +1278,7 @@ fn classify_package_root_directory(
     directory_roots: &mut Vec<DiscoveredDirectoryRoot>,
     package_prefix: &str,
     string_table: &mut StringTable,
-) -> Result<Option<DiscoveredDirectoryRoot>, PremergeFailure> {
+) -> Result<Option<DiscoveredDirectoryRoot>, PreparedFailure> {
     let normal_roots = directory_roots
         .iter()
         .filter(|root| root.role == ModuleRootRole::Normal)
@@ -1291,7 +1291,7 @@ fn classify_package_root_directory(
                 root: path_id(directory, string_table),
             });
         let table = std::mem::take(string_table);
-        return Err(PremergeFailure::Diagnosed(
+        return Err(PreparedFailure::Diagnosed(
             PreparedDiagnosticBatch::capture_from_bag(
                 DiagnosticBag::from(diagnostic),
                 table,
@@ -1319,7 +1319,7 @@ fn classify_package_root_directory(
                 candidates,
             });
         let table = std::mem::take(string_table);
-        return Err(PremergeFailure::Diagnosed(
+        return Err(PreparedFailure::Diagnosed(
             PreparedDiagnosticBatch::capture_from_bag(
                 DiagnosticBag::from(diagnostic),
                 table,

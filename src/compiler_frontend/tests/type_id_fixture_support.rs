@@ -22,7 +22,7 @@ use crate::compiler_frontend::ast::expressions::expression_types::{
     ConstRecordState, FallibleExpressionHandling, FallibleHandling,
 };
 use crate::compiler_frontend::ast::statements::functions::{ReturnChannel, ReturnSlot};
-use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
     StructTypeDefinition,
@@ -481,7 +481,7 @@ pub(crate) fn lower_ast(
         HirModule,
         crate::compiler_frontend::datatypes::environment::TypeEnvironment,
     ),
-    AstDiagnosticFailure,
+    PreparedFailure,
 > {
     let result = lower_ast_with_metadata(ast, string_table, path_fork, external_packages)?;
     Ok((result.hir_module, result.type_environment))
@@ -497,7 +497,7 @@ pub(crate) fn lower_ast_with_metadata(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     external_packages: &ExternalPackageRegistry,
-) -> Result<crate::compiler_frontend::module_metadata::HirLoweringResult, AstDiagnosticFailure> {
+) -> Result<crate::compiler_frontend::module_metadata::HirLoweringResult, PreparedFailure> {
     let type_environment = std::mem::take(&mut ast.type_environment);
     HirBuilder::new(
         string_table,

@@ -10,9 +10,10 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalCoreTraitIdentity, CanonicalEvidenceIdentity,
     CanonicalTraitIdentity, CanonicalTypeIdentity,
 };
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticLabelStyle, DiagnosticPayload, ImportDiagnosticKind,
-    ReservedNameOwner,
+    CompilerDiagnostic, DiagnosticKind, DiagnosticLabelStyle, DiagnosticPayload,
+    ImportDiagnosticKind, ReservedNameOwner,
 };
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalConstantDef, ExternalConstantId, ExternalConstantValue,
@@ -30,6 +31,7 @@ use crate::compiler_frontend::headers::dependency_clause_syntax::{
 use crate::compiler_frontend::headers::module_symbols::{
     ModuleRootBoundary, ModuleSymbols, PublicExportEntry, PublicExportTarget,
 };
+use crate::compiler_frontend::headers::parse_file_headers::HeaderPreparationFailure;
 use crate::compiler_frontend::headers::types::{
     DependencyBindingSyntax, DependencySelection, DependencySelectionRange, HeaderExportMode,
     RetainedDependencyClause,
@@ -178,6 +180,20 @@ fn assert_keyword_shadow_dependency_diagnostic(
     );
 }
 
+fn failure_diagnostics(failure: &HeaderPreparationFailure) -> &[CompilerDiagnostic] {
+    match failure {
+        HeaderPreparationFailure::Diagnosed(diagnostics) => diagnostics.diagnostics(),
+        HeaderPreparationFailure::Infrastructure(_) => &[],
+    }
+}
+
+fn primary_infrastructure_error(failure: &HeaderPreparationFailure) -> Option<&CompilerError> {
+    match failure {
+        HeaderPreparationFailure::Infrastructure(errors) => errors.iter().next(),
+        HeaderPreparationFailure::Diagnosed(_) => None,
+    }
+}
+
 fn register_keyword_test_package(
     registry: &mut ExternalPackageRegistry,
     package_path: &str,
@@ -230,7 +246,7 @@ fn namespace_dependency_default_rejects_keyword_shadow_name_variants() {
         .expect_err("namespace names that shadow config must be rejected");
 
         assert_keyword_shadow_dependency_diagnostic(
-            &error.diagnostics,
+            failure_diagnostics(&error),
             expected_name,
             &expected_span,
         );
@@ -277,7 +293,7 @@ fn namespace_dependency_alias_rejects_keyword_shadow_name_variants() {
         .expect_err("namespace aliases that shadow config must be rejected");
 
         assert_keyword_shadow_dependency_diagnostic(
-            &error.diagnostics,
+            failure_diagnostics(&error),
             expected_name,
             &expected_span,
         );
@@ -343,7 +359,7 @@ fn namespace_dependency_alias_collision_retains_exact_alias_span() {
     })
     .expect_err("namespace alias should collide with the same-file declaration");
 
-    let diagnostic = &error.diagnostics[0];
+    let diagnostic = &failure_diagnostics(&error)[0];
     assert_eq!(
         diagnostic.kind,
         DiagnosticKind::Import(ImportDiagnosticKind::ImportNameCollision)
@@ -390,7 +406,7 @@ fn explicit_moth_extension_diagnostic_retains_dependency_path_span() {
     })
     .expect_err("explicit .moth dependency should be rejected during binding");
 
-    let diagnostic = &error.diagnostics[0];
+    let diagnostic = &failure_diagnostics(&error)[0];
     assert!(matches!(
         diagnostic.kind,
         DiagnosticKind::Import(ImportDiagnosticKind::ExplicitMothExtension)
@@ -449,7 +465,7 @@ fn selected_dependency_unaliased_name_rejects_keyword_shadow_variants() {
         .expect_err("selected names that shadow config must be rejected");
 
         assert_keyword_shadow_dependency_diagnostic(
-            &error.diagnostics,
+            failure_diagnostics(&error),
             expected_name,
             &expected_span,
         );
@@ -510,7 +526,7 @@ fn selected_dependency_alias_rejects_keyword_shadow_name_variants() {
         .expect_err("selected aliases that shadow config must be rejected");
 
         assert_keyword_shadow_dependency_diagnostic(
-            &error.diagnostics,
+            failure_diagnostics(&error),
             expected_name,
             &expected_span,
         );
@@ -572,7 +588,7 @@ fn source_selection_binding_rejects_keyword_shadow_names_before_source_validatio
         .expect_err("source dependency names that shadow config must be rejected");
 
         assert_keyword_shadow_dependency_diagnostic(
-            &error.diagnostics,
+            failure_diagnostics(&error),
             expected_name,
             &expected_span,
         );
@@ -635,7 +651,7 @@ fn provider_declaration_selection_rejects_keyword_shadow_names_before_provider_r
         .expect_err("provider declaration names that shadow config must be rejected");
 
         assert_keyword_shadow_dependency_diagnostic(
-            &error.diagnostics,
+            failure_diagnostics(&error),
             expected_name,
             &expected_span,
         );
@@ -1032,7 +1048,7 @@ fn source_receiver_methods_remain_absent_from_namespace_records() {
         source_files: &SourceDatabase::empty(),
         string_table: &mut string_table,
         environment: Default::default(),
-        warnings: Vec::new(),
+        warnings: Default::default(),
         provider_semantics_registered: Default::default(),
     };
 
@@ -1084,7 +1100,7 @@ fn module_root_namespace_uses_prepared_root_file_identity() {
         string_table: &mut string_table,
         path_fork: &mut path_fork,
         environment: Default::default(),
-        warnings: Vec::new(),
+        warnings: Default::default(),
         provider_semantics_registered: Default::default(),
     };
 
@@ -1347,11 +1363,11 @@ fn prelude_namespace_alias_collides_with_same_file_declaration() {
     let error =
         result.expect_err("same-file declaration should collide with prelude namespace alias");
     assert_eq!(
-        error.diagnostics[0].kind,
+        failure_diagnostics(&error)[0].kind,
         DiagnosticKind::Import(ImportDiagnosticKind::ImportNameCollision)
     );
     assert_eq!(
-        error.diagnostics[0].primary_span,
+        failure_diagnostics(&error)[0].primary_span,
         Some(SourceSpan::new(
             SourceId::COMPILATION_ROOT,
             declaration_span
@@ -1469,7 +1485,7 @@ fn nested_module_root_depends_on_child_facade_resolves_child_root() {
         string_table: &mut string_table,
         path_fork: &mut path_fork,
         environment: Default::default(),
-        warnings: Vec::new(),
+        warnings: Default::default(),
         provider_semantics_registered: Default::default(),
     };
 
@@ -1807,7 +1823,7 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
     ])
     .expect("two distinct providers should register");
 
-    let messages = prepare_binding_environment(BindingEnvironmentInput {
+    let failure = prepare_binding_environment(BindingEnvironmentInput {
         module_symbols: &mut module_symbols,
         external_package_registry: &ExternalPackageRegistry::new(),
         external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
@@ -1818,7 +1834,7 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
     })
     .expect_err("differing evidence records with one identity must fail before AST projection");
 
-    let error = messages.primary_infrastructure_error().expect(
+    let error = primary_infrastructure_error(&failure).expect(
         "differing evidence records with one identity must fail with an infrastructure error",
     );
     assert!(
@@ -2026,7 +2042,7 @@ fn bind_environment(
     path_fork: &mut PathInternerFork,
 ) -> Result<
     crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment,
-    crate::compiler_frontend::compiler_errors::CompilerMessages,
+    HeaderPreparationFailure,
 > {
     prepare_binding_environment(BindingEnvironmentInput {
         module_symbols,
@@ -2070,7 +2086,7 @@ fn provider_selection_public_namespace_member_joins_declaration_surface() {
         path_fork: &mut path_fork,
         string_table: &mut string_table,
         environment: Default::default(),
-        warnings: Vec::new(),
+        warnings: Default::default(),
         provider_semantics_registered: Default::default(),
     };
     let mut file_visibility = FileVisibility::default();
@@ -2136,7 +2152,7 @@ fn provider_selection_namespace_prefers_source_name_over_facade_alias() {
         string_table: &mut string_table,
         environment: Default::default(),
         path_fork: &mut path_fork,
-        warnings: Vec::new(),
+        warnings: Default::default(),
         provider_semantics_registered: Default::default(),
     };
     let mut file_visibility = FileVisibility::default();
@@ -2197,7 +2213,7 @@ fn provider_selection_public_namespace_member_joins_binding_surface() {
         string_table: &mut string_table,
         path_fork: &mut path_fork,
         environment: Default::default(),
-        warnings: Vec::new(),
+        warnings: Default::default(),
         provider_semantics_registered: Default::default(),
     };
     let mut file_visibility = FileVisibility::default();
@@ -2255,7 +2271,7 @@ fn provider_selection_namespace_binding_prefers_source_name_over_facade_alias() 
         string_table: &mut string_table,
         path_fork: &mut path_fork,
         environment: Default::default(),
-        warnings: Vec::new(),
+        warnings: Default::default(),
         provider_semantics_registered: Default::default(),
     };
     let mut file_visibility = FileVisibility::default();
@@ -2307,7 +2323,7 @@ fn provider_selection_public_namespace_member_rejects_missing_shell() {
         string_table: &mut string_table,
         path_fork: &mut path_fork,
         environment: Default::default(),
-        warnings: Vec::new(),
+        warnings: Default::default(),
         provider_semantics_registered: Default::default(),
     };
     let mut file_visibility = FileVisibility::default();
@@ -2365,7 +2381,7 @@ fn provider_selection_public_namespace_member_rejects_missing_member() {
         string_table: &mut string_table,
         path_fork: &mut path_fork,
         environment: Default::default(),
-        warnings: Vec::new(),
+        warnings: Default::default(),
         provider_semantics_registered: Default::default(),
     };
     let mut file_visibility = FileVisibility::default();
@@ -2583,14 +2599,14 @@ fn missing_provider_record_fails_deterministically() {
     }])
     .expect("one shell should register");
 
-    let messages = bind_environment(
+    let failure = bind_environment(
         &provider_dependencies,
         &mut module_symbols,
         &mut string_table,
         &mut path_fork,
     )
     .expect_err("a missing provider record must fail binding deterministically");
-    let diagnostic = &messages.diagnostics[0];
+    let diagnostic = &failure_diagnostics(&failure)[0];
     let DiagnosticPayload::NotExportedByPublicSurface { requested_path, .. } = &diagnostic.payload
     else {
         panic!("unexpected diagnostic payload: {:?}", diagnostic.payload);
@@ -2831,7 +2847,7 @@ fn retained_local_source_edge_must_reference_prepared_compiler_slot() {
         .file_dependency_clauses_by_source
         .insert(source_file, vec![dependency]);
 
-    let messages = prepare_binding_environment(BindingEnvironmentInput {
+    let failure = prepare_binding_environment(BindingEnvironmentInput {
         module_symbols: &mut module_symbols,
         external_package_registry: &ExternalPackageRegistry::new(),
         external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
@@ -2842,8 +2858,7 @@ fn retained_local_source_edge_must_reference_prepared_compiler_slot() {
     })
     .expect_err("a retained local edge with no source slot must fail closed");
 
-    let error = messages
-        .primary_infrastructure_error()
+    let error = primary_infrastructure_error(&failure)
         .expect("missing retained source identity should be an infrastructure error");
     assert!(
         error.msg.contains("missing source identity"),
@@ -2906,7 +2921,7 @@ fn retained_local_source_edge_rejects_wrong_valid_in_module_identity() {
         .file_dependency_clauses_by_source
         .insert(page_source, vec![dependency]);
 
-    let messages = prepare_binding_environment(BindingEnvironmentInput {
+    let failure = prepare_binding_environment(BindingEnvironmentInput {
         module_symbols: &mut module_symbols,
         external_package_registry: &ExternalPackageRegistry::new(),
         external_dependency_resolution_table: &ExternalImportResolutionTable::new(),
@@ -2917,8 +2932,7 @@ fn retained_local_source_edge_rejects_wrong_valid_in_module_identity() {
     })
     .expect_err("a wrong but valid in-module local edge must fail closed");
 
-    let error = messages
-        .primary_infrastructure_error()
+    let error = primary_infrastructure_error(&failure)
         .expect("contradictory local source identity should be an infrastructure error");
     assert!(
         error

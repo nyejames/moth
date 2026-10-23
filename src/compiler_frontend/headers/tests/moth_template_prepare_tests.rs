@@ -16,11 +16,10 @@ use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
-use crate::compiler_frontend::compiler_messages::prepared_batch::{
-    AstDiagnosticFailure, PreparedDiagnosticBatch,
-};
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, DiagnosticKind, DiagnosticPayload, SyntaxDiagnosticKind,
+    CompilerDiagnostic, DiagnosticBag, DiagnosticKind, DiagnosticPayload, PreparedFailure,
+    SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
@@ -458,7 +457,7 @@ impl MothTemplateScopeFixture {
         &self,
         moth_template_relative_path: &str,
         prepared_relative_paths: &[&str],
-    ) -> Result<(Ast, StringTable, PathInternerFork), AstDiagnosticFailure> {
+    ) -> Result<(Ast, StringTable, PathInternerFork), PreparedFailure> {
         let (ast, string_table, path_fork) = self.compile_module_ast(prepared_relative_paths)?;
 
         self.assert_ast_contains_moth_template_content(
@@ -474,7 +473,7 @@ impl MothTemplateScopeFixture {
         moth_template_relative_path: &str,
         prepared_relative_paths: &[&str],
         source_provider_dependencies: &crate::compiler_frontend::public_interface::SourceProviderDependencySet<'_>,
-    ) -> Result<(Ast, StringTable, PathInternerFork), AstDiagnosticFailure> {
+    ) -> Result<(Ast, StringTable, PathInternerFork), PreparedFailure> {
         let (ast, string_table, path_fork) = self.compile_module_ast_with_providers(
             prepared_relative_paths,
             source_provider_dependencies,
@@ -491,7 +490,7 @@ impl MothTemplateScopeFixture {
     fn compile_module_ast(
         &self,
         prepared_relative_paths: &[&str],
-    ) -> Result<(Ast, StringTable, PathInternerFork), AstDiagnosticFailure> {
+    ) -> Result<(Ast, StringTable, PathInternerFork), PreparedFailure> {
         let html_interface = empty_provider_interface("html");
         let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
             kind:
@@ -508,7 +507,7 @@ impl MothTemplateScopeFixture {
         &self,
         prepared_relative_paths: &[&str],
         source_provider_dependencies: &crate::compiler_frontend::public_interface::SourceProviderDependencySet<'_>,
-    ) -> Result<(Ast, StringTable, PathInternerFork), AstDiagnosticFailure> {
+    ) -> Result<(Ast, StringTable, PathInternerFork), PreparedFailure> {
         let mut path_fork = self.source_files.fork_path_interner();
         let (headers, mut string_table) = self
             .prepare_and_bind_headers_with_providers_with_table(
@@ -526,15 +525,11 @@ impl MothTemplateScopeFixture {
             &mut path_fork,
         )
         .map_err(|failure| match failure {
-            crate::compiler_frontend::compiler_messages::PremergeFailure::Diagnosed(batch) => {
-                AstDiagnosticFailure::Prepared(batch)
-            }
-            crate::compiler_frontend::compiler_messages::PremergeFailure::Infrastructure(error) => {
+            PreparedFailure::Diagnosed(batch) => PreparedFailure::Diagnosed(batch),
+            PreparedFailure::Infrastructure(error) => {
                 panic!("dependency sorting infrastructure failure: {error:?}")
             }
-            crate::compiler_frontend::compiler_messages::PremergeFailure::Mixed {
-                error, ..
-            } => {
+            PreparedFailure::Mixed { error, .. } => {
                 panic!("dependency sorting infrastructure failure alongside diagnostics: {error:?}")
             }
         })?;
@@ -817,8 +812,8 @@ impl MothTemplateScopeFixture {
         diagnostic: CompilerDiagnostic,
         string_table: StringTable,
         path_fork: &PathInternerFork,
-    ) -> AstDiagnosticFailure {
-        AstDiagnosticFailure::Prepared(PreparedDiagnosticBatch::capture_from_bag(
+    ) -> PreparedFailure {
+        PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
             DiagnosticBag::from(diagnostic),
             string_table,
             None,
@@ -828,17 +823,20 @@ impl MothTemplateScopeFixture {
     }
 
     fn freeze_ast_failure(
-        failure: AstDiagnosticFailure,
+        failure: PreparedFailure,
         source_files: Arc<SourceDatabase>,
     ) -> BoundaryFailure {
         match failure {
-            AstDiagnosticFailure::Prepared(batch) => {
+            PreparedFailure::Diagnosed(batch) => {
                 let mut accumulator = BoundaryAccumulator::new();
                 accumulator.append_prepared(batch, Some((source_files, None)));
                 accumulator.finish(InstallMode::Frozen)
             }
-            AstDiagnosticFailure::Infrastructure(error) => {
+            PreparedFailure::Infrastructure(error) => {
                 panic!("Moth template AST infrastructure failure: {error:?}")
+            }
+            PreparedFailure::Mixed { error, .. } => {
+                panic!("Moth template AST failure included infrastructure: {error:?}")
             }
         }
     }
@@ -1251,7 +1249,7 @@ fn unescaped_outer_close_diagnostic_flows_through_pipeline_preparation() {
         panic!("unescaped template close must be a source diagnostic");
     };
 
-    assert!(warnings.is_empty());
+    assert!(warnings.as_slice().is_empty());
     assert_eq!(
         diagnostic.kind,
         DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnescapedImplicitTemplateClose)

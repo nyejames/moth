@@ -62,7 +62,7 @@ fn produces_exactly_one_header() {
     assert!(output.top_level_const_fragments.is_empty());
     assert_eq!(output.const_template_count, 0);
     assert_eq!(output.runtime_fragment_count, 0);
-    assert!(output.warnings.is_empty());
+    assert!(output.warnings.as_slice().is_empty());
 }
 
 #[test]

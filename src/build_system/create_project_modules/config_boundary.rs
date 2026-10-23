@@ -18,7 +18,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticBag, DiagnosticLabel, DiagnosticLabelMessage,
-    InvalidConfigReason, PremergeFailure,
+    InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
     SourceBuildConfigContract, build_input_type_name,
@@ -774,7 +774,7 @@ fn describe_build_config_contract(fact: &BuildConfigContractFact) -> String {
 
 /// Map one compiler-owned barrier failure onto the typed premerge config diagnostic lane.
 ///
-/// WHAT: converts a [`BuildConfigResolutionError`] into a [`PremergeFailure`] without
+/// WHAT: converts a [`BuildConfigResolutionError`] into a [`PreparedFailure`] without
 ///       constructing the final `CompilerMessages` vessel. User-facing failures capture a
 ///       prepared batch at this owning boundary; the declaration-owned config handoff invariant
 ///       stays a typed infrastructure error.
@@ -785,12 +785,12 @@ pub(super) fn build_config_resolution_failure(
     error: BuildConfigResolutionError,
     fallback_span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> PremergeFailure {
+) -> PreparedFailure {
     if matches!(
         &error,
         BuildConfigResolutionError::DirectProjectProviderMissing { .. }
     ) {
-        return PremergeFailure::Infrastructure(
+        return PreparedFailure::Infrastructure(
             CompilerError::compiler_error(format!(
                 "grouped-project build-config value for '{}' was not retained by config folding",
                 error.name().as_str()
@@ -826,7 +826,7 @@ pub(super) fn build_config_resolution_failure(
             }
             None => CompilerDiagnostic::invalid_number_literal(literal, reason, contract.span()),
         };
-        return PremergeFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+        return PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
             DiagnosticBag::from(diagnostic),
             std::mem::take(string_table),
             None,
@@ -914,7 +914,7 @@ pub(super) fn build_config_resolution_failure(
 
     // Move the boundary table into the prepared batch; every failure path here terminates
     // resolution, so no clone is needed to carry the diagnostic ids.
-    PremergeFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+    PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
         DiagnosticBag::from(diagnostic),
         std::mem::take(string_table),
         None,
@@ -930,7 +930,7 @@ pub(super) fn resolve_boundary_build_config(
     builder_globals: &BuilderConfigGlobalSet,
     fallback_span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> Result<ResolvedBuildConfigMap, PremergeFailure> {
+) -> Result<ResolvedBuildConfigMap, PreparedFailure> {
     resolve_build_config_values(
         source_facts,
         fixed_project_facts,

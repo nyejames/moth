@@ -6,6 +6,7 @@
 //! should see an ordinary constant header instead of a Moth template-specific AST path
 //! or textually wrapped source.
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::find_config_qualifier_marker_in_cursor;
 use crate::compiler_frontend::headers::ordering_hints::collect_content_source_ordering_hints;
 use crate::compiler_frontend::headers::synthetic_content_header::{
@@ -116,7 +117,7 @@ pub(crate) fn prepare_moth_template_file(
         const_template_count: 0,
         runtime_fragment_count: 0,
         has_non_trivial_root_body: false,
-        warnings: Vec::new(),
+        warnings: DiagnosticBag::new(),
     })
 }
 

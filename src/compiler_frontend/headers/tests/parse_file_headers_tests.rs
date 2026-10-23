@@ -8,7 +8,7 @@
 use super::*;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerErrorMetadataKey, CompilerMessages,
+    CompilerError, CompilerErrorMetadataKey, InfrastructureErrors,
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DeferredFeatureReason, DiagnosticBag, DiagnosticKind,
@@ -473,7 +473,7 @@ fn parse_single_file_headers_with_warnings(
         &mut string_table,
         &mut path_fork,
     );
-    let warnings = output.warnings.clone();
+    let warnings = output.warnings.clone().into_diagnostics();
 
     let headers = prepare_and_bind_headers_result(
         vec![output],
@@ -884,7 +884,7 @@ fn parse_multi_file_headers_with_path(
             Ok(output) => {
                 const_template_offset += output.const_template_count;
                 runtime_fragment_offset += output.runtime_fragment_count;
-                warnings.extend(output.warnings.clone());
+                warnings.extend(output.warnings.clone().into_diagnostics());
                 prepared_outputs.push(output);
             }
             Err(FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
@@ -892,7 +892,7 @@ fn parse_multi_file_headers_with_path(
                 diagnostic,
                 ..
             })) => {
-                warnings.extend(file_warnings);
+                warnings.extend(file_warnings.into_diagnostics());
                 diagnostic_bag.push(diagnostic);
             }
             Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
@@ -1167,7 +1167,7 @@ fn snapshot_prepared_type_anchors(
 }
 
 #[test]
-fn binding_messages_move_every_infrastructure_cause_into_header_failure() {
+fn binding_infrastructure_failure_retains_every_cause() {
     let primary = CompilerError::compiler_error("binding infrastructure cause");
     let mut secondary = CompilerError::file_error(
         std::path::Path::new("binding-input.moth"),
@@ -1178,12 +1178,12 @@ fn binding_messages_move_every_infrastructure_cause_into_header_failure() {
         "bind".to_owned(),
     );
     let expected = [primary.clone(), secondary.clone()];
-    let mut messages = CompilerMessages::from_error(primary, StringTable::new());
-    messages.set_infrastructure_error(secondary);
+    let mut errors = InfrastructureErrors::new(primary);
+    errors.push(secondary);
 
-    let HeaderPreparationFailure::Infrastructure(errors) = HeaderPreparationFailure::from(messages)
-    else {
-        panic!("binding infrastructure failures must not become source diagnostics");
+    let failure = HeaderPreparationFailure::Infrastructure(Box::new(errors));
+    let HeaderPreparationFailure::Infrastructure(errors) = failure else {
+        panic!("binding infrastructure failures must remain off the diagnostic lane");
     };
     let actual = errors.iter().collect::<Vec<_>>();
     assert_eq!(actual.len(), expected.len());

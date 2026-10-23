@@ -25,13 +25,9 @@ use crate::compiler_frontend::ast::{
     Stage0ResolutionFacts,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
-#[cfg(test)]
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::prepared_batch::{
-    AstDiagnosticFailure, PreparedDiagnosticBatch,
-};
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, PremergeFailure,
+    CompilerDiagnostic, DiagnosticBag, PreparedFailure,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -228,7 +224,7 @@ fn source_identity_facts(
             // the typed source-capacity diagnostic lane instead of the infrastructure lane.
             SourceDatabaseError::Capacity(capacity) => {
                 FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
-                    warnings: Vec::new(),
+                    warnings: DiagnosticBag::new(),
                     diagnostic: CompilerDiagnostic::source_table_capacity(capacity.resource()),
                 })
             }
@@ -257,7 +253,7 @@ fn source_identity_facts_for_id(
         .map_err(|error| match error {
             SourceDatabaseError::Capacity(capacity) => {
                 FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
-                    warnings: Vec::new(),
+                    warnings: DiagnosticBag::new(),
                     diagnostic: CompilerDiagnostic::source_table_capacity(capacity.resource()),
                 })
             }
@@ -295,7 +291,7 @@ fn source_identity_facts_for_owner(
         .map_err(|error| match error {
             SourceDatabaseError::Capacity(capacity) => {
                 FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
-                    warnings: Vec::new(),
+                    warnings: DiagnosticBag::new(),
                     diagnostic: CompilerDiagnostic::source_table_capacity(capacity.resource()),
                 })
             }
@@ -486,7 +482,7 @@ impl<'a> CompilerFrontend<'a> {
         &mut self,
         headers: BoundModuleHeaders,
         resolved_file_references: &ResolvedFileReferenceTable,
-    ) -> Result<SortedHeaders, PremergeFailure> {
+    ) -> Result<SortedHeaders, PreparedFailure> {
         // Content-source ordering edges resolve through Stage 0's canonical targets, which this
         // compiler instance already retains as the module source identities.
         let content_source_targets = ContentSourceTargets::from_resolved_references(
@@ -508,7 +504,7 @@ impl<'a> CompilerFrontend<'a> {
         &mut self,
         request: AstBuildRequest<'_>,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-    ) -> Result<AstBuildResult, AstDiagnosticFailure> {
+    ) -> Result<AstBuildResult, PreparedFailure> {
         let AstBuildRequest {
             sorted,
             entry_file_path,
@@ -526,7 +522,7 @@ impl<'a> CompilerFrontend<'a> {
                 let error = CompilerError::compiler_error(format!(
                     "entry file {entry_file_path:?} was not registered before AST construction"
                 ));
-                return Err(AstDiagnosticFailure::Infrastructure(error.into()));
+                return Err(PreparedFailure::Infrastructure(error.into()));
             }
         };
 
@@ -592,7 +588,7 @@ impl<'a> CompilerFrontend<'a> {
         function_origin_lookup: HirFunctionOriginLookup,
         module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
         capacity_estimate: FrontendArenaCapacityEstimate,
-    ) -> Result<HirLoweringResult, AstDiagnosticFailure> {
+    ) -> Result<HirLoweringResult, PreparedFailure> {
         self.generate_hir_with_owner(
             ast,
             function_origin_lookup,
@@ -611,7 +607,7 @@ impl<'a> CompilerFrontend<'a> {
         capacity_estimate: FrontendArenaCapacityEstimate,
         frozen_identity_handle: Option<&FrozenIdentityHandle>,
         prior_diagnostics: Option<&mut DiagnosticBag>,
-    ) -> Result<HirLoweringResult, AstDiagnosticFailure> {
+    ) -> Result<HirLoweringResult, PreparedFailure> {
         let static_if_function_provenance = ast.static_if_function_provenance.clone();
         let mut result = lower_module_with_owner(
             ast,
@@ -630,7 +626,7 @@ impl<'a> CompilerFrontend<'a> {
                     == Some(function_path))
                 .then_some(function.id)
             }) else {
-                return Err(AstDiagnosticFailure::from(CompilerError::compiler_error(
+                return Err(PreparedFailure::from(CompilerError::compiler_error(
                     format!(
                         "Static configuration provenance has no lowered HIR function for path {:?}",
                         function_path
@@ -640,7 +636,7 @@ impl<'a> CompilerFrontend<'a> {
             let Some(existing_provenance) =
                 result.hir_module.function_provenance.get_mut(&function_id)
             else {
-                return Err(AstDiagnosticFailure::from(CompilerError::compiler_error(
+                return Err(PreparedFailure::from(CompilerError::compiler_error(
                     format!(
                         "HIR function {:?} is missing its provenance fact while applying static configuration provenance",
                         function_id
@@ -661,7 +657,7 @@ impl<'a> CompilerFrontend<'a> {
         type_environment: &TypeEnvironment,
         prior_diagnostics: &mut DiagnosticBag,
         frozen_identity_handle: Option<&FrozenIdentityHandle>,
-    ) -> Result<BorrowCheckReport, AstDiagnosticFailure> {
+    ) -> Result<BorrowCheckReport, PreparedFailure> {
         match run_borrow_checker(
             hir_module,
             self.external_package_registry.as_ref(),
@@ -692,10 +688,10 @@ impl<'a> CompilerFrontend<'a> {
                     Some(type_environment),
                     || Some(Arc::new(self.path_fork.snapshot_table())),
                 )
-                .map_err(AstDiagnosticFailure::from)?;
-                Err(AstDiagnosticFailure::Prepared(batch))
+                .map_err(PreparedFailure::from)?;
+                Err(PreparedFailure::Diagnosed(batch))
             }
-            Err(BorrowCheckError::Infrastructure(error)) => Err(AstDiagnosticFailure::from(*error)),
+            Err(BorrowCheckError::Infrastructure(error)) => Err(PreparedFailure::from(*error)),
         }
     }
 
@@ -703,7 +699,7 @@ impl<'a> CompilerFrontend<'a> {
     pub(in crate::compiler_frontend) fn check_borrows(
         &self,
         hir_module: &HirModule,
-    ) -> Result<BorrowCheckReport, CompilerMessages> {
+    ) -> Result<BorrowCheckReport, PreparedFailure> {
         match run_borrow_checker(
             hir_module,
             self.external_package_registry.as_ref(),
@@ -712,11 +708,20 @@ impl<'a> CompilerFrontend<'a> {
         ) {
             Ok(report) => Ok(report),
             Err(error) => match error.into_diagnostic_or_infrastructure() {
-                Ok(diagnostic) => Err(CompilerMessages::from_diagnostic_ref(
+                Ok(diagnostic) => Err(PreparedFailure::with_diagnostic_and_warnings(
                     diagnostic,
+                    Vec::new(),
                     &self.string_table,
+                    None,
+                    || Some(Arc::new(self.path_fork.snapshot_table())),
                 )),
-                Err(error) => Err(CompilerMessages::from_error_ref(error, &self.string_table)),
+                Err(error) => Err(PreparedFailure::with_infrastructure_and_warnings(
+                    error,
+                    Vec::new(),
+                    &self.string_table,
+                    None,
+                    || None,
+                )),
             },
         }
     }

@@ -151,7 +151,7 @@ pub(crate) fn parse_choice_shell(
     choice_path: PathId,
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
 ) -> Result<Vec<ChoiceVariantSyntax>, HeaderParseFailure> {
     // Mutation: EOF diagnostic payloads intern delimiter symbols that are not present
     // in the source text.

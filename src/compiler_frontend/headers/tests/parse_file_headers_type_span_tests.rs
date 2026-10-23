@@ -70,7 +70,7 @@ INFERRED #= 1\n"
     )
     .expect("parsed type headers should prepare");
     assert!(
-        prepared.warnings.is_empty(),
+        prepared.warnings.as_slice().is_empty(),
         "warning-free preparation must not add diagnostic span rows"
     );
     assert_eq!(
@@ -308,7 +308,7 @@ State type {parameter_name} is {display_trait_name} and {named_trait_name} ::\n\
     )
     .expect("generic headers should prepare");
     assert!(
-        prepared.warnings.is_empty(),
+        prepared.warnings.as_slice().is_empty(),
         "valid generic names should not add warning spans"
     );
     assert_eq!(

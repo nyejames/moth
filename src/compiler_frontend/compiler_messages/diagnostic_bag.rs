@@ -2,16 +2,18 @@
 //!
 //! WHAT: `DiagnosticBag` stores diagnostics emitted by a stage before its owner captures them in
 //! a `PreparedDiagnosticBatch`.
-//! WHY: stages can accumulate diagnostics without constructing `CompilerMessages`; the prepared
+//! WHY: stages accumulate diagnostics without constructing a boundary vessel; the prepared
 //! batch owns frozen diagnostic facts and the identity tables needed by the final boundary.
 
 use super::compiler_errors::{CompilerError, InfrastructureErrors};
 use super::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
-use crate::compiler_frontend::symbols::path_interner::PathIdRemap;
-use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::symbols::path_interner::{PathIdRemap, PathTable};
+use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
+use std::sync::Arc;
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct DiagnosticBag {
     diagnostics: Vec<CompilerDiagnostic>,
 }
@@ -102,7 +104,7 @@ impl From<CompilerDiagnostic> for DiagnosticBag {
 /// WHY: owning sites capture diagnostics before they leave the type/path context that produced
 /// them; only the final boundary assembles source ownership and freezes reports.
 #[derive(Debug)]
-pub enum PremergeFailure {
+pub enum PreparedFailure {
     Diagnosed(PreparedDiagnosticBatch),
     Infrastructure(Box<InfrastructureErrors>),
     Mixed {
@@ -111,13 +113,98 @@ pub enum PremergeFailure {
     },
 }
 
-impl From<PreparedDiagnosticBatch> for PremergeFailure {
+impl PreparedFailure {
+    /// Capture a stage-local bag at its owner edge, retaining path and type facts only when
+    /// the caller confirms the matching path table is available.
+    pub(crate) fn capture_diagnosed(
+        bag: DiagnosticBag,
+        string_table: StringTable,
+        environment: Option<&TypeEnvironment>,
+        path_table_is_available: bool,
+        path_table: Option<Arc<PathTable>>,
+    ) -> Self {
+        match PreparedDiagnosticBatch::capture_with_required_paths_and_types(
+            bag,
+            string_table,
+            path_table_is_available.then_some(environment).flatten(),
+            || path_table_is_available.then_some(path_table).flatten(),
+        ) {
+            Ok(batch) => Self::Diagnosed(batch),
+            Err(error) => Self::from(error),
+        }
+    }
+
+    /// Preserve prior warnings before a diagnosed failure, in their original production order.
+    pub(crate) fn with_diagnostic_and_warnings(
+        diagnostic: CompilerDiagnostic,
+        mut warning_diagnostics: Vec<CompilerDiagnostic>,
+        string_table: &StringTable,
+        environment: Option<&TypeEnvironment>,
+        path_table: impl FnOnce() -> Option<Arc<PathTable>>,
+    ) -> Self {
+        warning_diagnostics.push(diagnostic);
+        match PreparedDiagnosticBatch::capture_with_required_paths_and_types(
+            DiagnosticBag::from_diagnostics(warning_diagnostics),
+            string_table.clone(),
+            environment,
+            path_table,
+        ) {
+            Ok(batch) => Self::Diagnosed(batch),
+            Err(error) => Self::from(error),
+        }
+    }
+
+    #[cfg(test)]
+    /// Preserve prior warnings beside an infrastructure failure, in their original order.
+    pub(crate) fn with_infrastructure_and_warnings(
+        error: CompilerError,
+        warning_diagnostics: Vec<CompilerDiagnostic>,
+        string_table: &StringTable,
+        environment: Option<&TypeEnvironment>,
+        path_table: impl FnOnce() -> Option<Arc<PathTable>>,
+    ) -> Self {
+        if warning_diagnostics.is_empty() {
+            return Self::from(error);
+        }
+        match PreparedDiagnosticBatch::capture_with_required_paths_and_types(
+            DiagnosticBag::from_diagnostics(warning_diagnostics),
+            string_table.clone(),
+            environment,
+            path_table,
+        ) {
+            Ok(batch) => Self::Mixed {
+                batch,
+                error: error.into(),
+            },
+            Err(capture_error) => {
+                let mut errors = InfrastructureErrors::new(error);
+                errors.push(capture_error);
+                Self::Infrastructure(Box::new(errors))
+            }
+        }
+    }
+
+    pub(crate) fn prepend_diagnostics_with_required_paths(
+        &mut self,
+        prior_diagnostics: impl IntoIterator<Item = CompilerDiagnostic>,
+        path_table: impl FnOnce() -> Option<Arc<PathTable>>,
+    ) -> Result<(), CompilerError> {
+        match self {
+            Self::Diagnosed(batch) | Self::Mixed { batch, .. } => {
+                batch.prepend_diagnostics_with_required_paths(prior_diagnostics, path_table)
+            }
+            Self::Infrastructure(_) => Ok(()),
+        }
+    }
+}
+
+impl From<PreparedDiagnosticBatch> for PreparedFailure {
     fn from(batch: PreparedDiagnosticBatch) -> Self {
         Self::Diagnosed(batch)
     }
 }
 
-impl From<CompilerError> for PremergeFailure {
+impl From<CompilerError> for PreparedFailure {
     fn from(error: CompilerError) -> Self {
         Self::Infrastructure(error.into())
     }

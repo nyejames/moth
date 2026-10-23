@@ -5,7 +5,10 @@
 //! WHY: template construction and folding sit between AST source diagnostics and project-aware
 //! formatting/folding infrastructure. This boundary keeps that distinction explicit locally.
 
+use crate::compiler_frontend::ast::const_eval::ConstantFoldError;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStoreError;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionConstructionFailure;
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 
@@ -23,8 +26,8 @@ impl TemplateError {
         map: impl FnOnce(CompilerDiagnostic) -> CompilerDiagnostic,
     ) -> Self {
         match self {
-            TemplateError::Diagnostic(diagnostic) => TemplateError::Diagnostic(map(diagnostic)),
-            TemplateError::Infrastructure(error) => TemplateError::Infrastructure(error),
+            Self::Diagnostic(diagnostic) => Self::Diagnostic(map(diagnostic)),
+            Self::Infrastructure(error) => Self::Infrastructure(error),
         }
     }
 }
@@ -72,15 +75,8 @@ impl From<ExpressionParseError> for TemplateError {
     }
 }
 
-impl
-    From<
-        crate::compiler_frontend::ast::expressions::expression_store::ExpressionConstructionFailure,
-    > for TemplateError
-{
-    fn from(
-        error: crate::compiler_frontend::ast::expressions::expression_store::ExpressionConstructionFailure,
-    ) -> Self {
-        use crate::compiler_frontend::ast::expressions::expression_store::ExpressionConstructionFailure;
+impl From<ExpressionConstructionFailure> for TemplateError {
+    fn from(error: ExpressionConstructionFailure) -> Self {
         match error {
             ExpressionConstructionFailure::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
             ExpressionConstructionFailure::Invariant(error) => error.into(),
@@ -88,13 +84,8 @@ impl
     }
 }
 
-impl From<crate::compiler_frontend::ast::const_values::store::ConstValueStoreError>
-    for TemplateError
-{
-    fn from(
-        error: crate::compiler_frontend::ast::const_values::store::ConstValueStoreError,
-    ) -> Self {
-        use crate::compiler_frontend::ast::const_values::store::ConstValueStoreError;
+impl From<ConstValueStoreError> for TemplateError {
+    fn from(error: ConstValueStoreError) -> Self {
         match error {
             ConstValueStoreError::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
             ConstValueStoreError::Infrastructure(error) => Self::Infrastructure(error),
@@ -102,9 +93,8 @@ impl From<crate::compiler_frontend::ast::const_values::store::ConstValueStoreErr
     }
 }
 
-impl From<crate::compiler_frontend::ast::const_eval::ConstantFoldError> for TemplateError {
-    fn from(error: crate::compiler_frontend::ast::const_eval::ConstantFoldError) -> Self {
-        use crate::compiler_frontend::ast::const_eval::ConstantFoldError;
+impl From<ConstantFoldError> for TemplateError {
+    fn from(error: ConstantFoldError) -> Self {
         match error {
             ConstantFoldError::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
             ConstantFoldError::Infrastructure(error) => Self::Infrastructure(error),

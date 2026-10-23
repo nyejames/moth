@@ -15,7 +15,7 @@ use crate::builder_surface::{SourceFileKindRegistry, SourcePackageRegistry};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, InvalidConfigReason, PremergeFailure,
+    DiagnosticBag, InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -58,7 +58,7 @@ pub(super) fn build_project_path_resolver(
     builder_source_packages: &SourcePackageRegistry,
     source_file_kinds: &SourceFileKindRegistry,
     string_table: &mut StringTable,
-) -> Result<ProjectPathResolver, PremergeFailure> {
+) -> Result<ProjectPathResolver, PreparedFailure> {
     // Test-only resolver construction defaults to no external import providers; tests that
     // exercise provider-owned indexing call `build_project_path_resolver_with_index` directly.
     let external_import_providers = ExternalImportProviderRegistry::default();
@@ -87,7 +87,7 @@ pub(super) fn build_project_path_resolver_with_index(
     external_import_providers: &ExternalImportProviderRegistry,
     binding_packages: &ExternalPackageRegistry,
     string_table: &mut StringTable,
-) -> Result<ProjectPathResolverSetup, PremergeFailure> {
+) -> Result<ProjectPathResolverSetup, PreparedFailure> {
     let roots = resolve_project_roots(config, string_table)?;
 
     let source_package_boundary_indexes = build_source_package_boundary_indexes(
@@ -160,11 +160,11 @@ pub(crate) fn resolve_project_entry_root(config: &Config) -> PathBuf {
 fn resolve_project_roots(
     config: &Config,
     string_table: &mut StringTable,
-) -> Result<ProjectRootResolution, PremergeFailure> {
+) -> Result<ProjectRootResolution, PreparedFailure> {
     let project_root = match fs::canonicalize(&config.entry_dir) {
         Ok(path) => path,
         Err(error) => {
-            return Err(PremergeFailure::Infrastructure(
+            return Err(PreparedFailure::Infrastructure(
                 CompilerError::file_error(
                     &config.entry_dir,
                     format!("Failed to canonicalize project root: {error}"),
@@ -185,7 +185,7 @@ fn resolve_project_roots(
             string_table,
         );
         let table = std::mem::take(string_table);
-        return Err(PremergeFailure::Diagnosed(
+        return Err(PreparedFailure::Diagnosed(
             PreparedDiagnosticBatch::capture_from_bag(
                 DiagnosticBag::from(diagnostic),
                 table,
@@ -199,7 +199,7 @@ fn resolve_project_roots(
     let entry_root = match fs::canonicalize(&entry_root_path) {
         Ok(path) => path,
         Err(error) => {
-            return Err(PremergeFailure::Infrastructure(
+            return Err(PreparedFailure::Infrastructure(
                 CompilerError::file_error(
                     &entry_root_path,
                     format!("Failed to canonicalize configured entry root: {error}"),

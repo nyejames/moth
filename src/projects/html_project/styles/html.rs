@@ -7,12 +7,12 @@
 //! WHY:
 //! - HTML-specific safety heuristics are output-policy concerns owned by the HTML project builder.
 
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::formatter_contract::FormatterInput;
 use crate::compiler_frontend::ast::templates::styles::whitespace::TemplateWhitespacePassProfile;
 use crate::compiler_frontend::ast::templates::template::{
     Formatter, FormatterResult, TemplateFormatter,
 };
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
 
 use crate::compiler_frontend::compiler_messages::{
     HtmlTemplateWarning, MalformedTemplateReason, SyntaxDiagnosticKind,
@@ -47,7 +47,7 @@ impl TemplateFormatter for HtmlValidationTemplateFormatter {
         &self,
         input: FormatterInput,
         string_table: &mut StringTable,
-    ) -> Result<FormatterResult, CompilerMessages> {
+    ) -> Result<FormatterResult, TemplateError> {
         let flattened_input = PassThroughFormatterInput::from_input(input, string_table);
         let warnings = flattened_input.map_warnings(
             validate_html_source(&flattened_input.flattened_source),

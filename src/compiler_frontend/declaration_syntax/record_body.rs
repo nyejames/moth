@@ -4,7 +4,7 @@
 //! WHY: record bodies are a neutral declaration syntax concept, not struct-specific logic.
 
 use super::DeclarationCursor;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::declaration_syntax::signature_members::{
     SignatureMemberContext, SignatureMemberSyntax, parse_signature_members_syntax,
 };
@@ -22,7 +22,7 @@ type RecordBodyParseResult = Result<Vec<SignatureMemberSyntax>, HeaderParseFailu
 pub fn parse_record_body(
     token_stream: &mut DeclarationCursor<'_>,
     string_table: &mut StringTable,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     member_context: SignatureMemberContext,
     owner_path: PathId,
     path_fork: &mut PathInternerFork,

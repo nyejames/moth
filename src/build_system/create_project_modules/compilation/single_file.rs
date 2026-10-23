@@ -23,7 +23,7 @@ use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, PremergeFailure, SourceSpanCapacityResource,
+    CompilerDiagnostic, DiagnosticBag, PreparedFailure, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
@@ -232,7 +232,7 @@ fn compile_single_file_frontend_with_target(
                     // Authored exhaustion of the compact path table: the typed capacity diagnostic
                     // travels without a path snapshot, because the exhausted table owns no further
                     // PathId to render.
-                    return Err(PremergeFailure::Diagnosed(
+                    return Err(PreparedFailure::Diagnosed(
                         PreparedDiagnosticBatch::capture_from_bag(
                             DiagnosticBag::from(CompilerDiagnostic::source_table_capacity(
                                 SourceSpanCapacityResource::LogicalPath,
@@ -246,7 +246,7 @@ fn compile_single_file_frontend_with_target(
                     .into());
                 }
                 Err(PathInternError::BaseMismatch { .. }) => {
-                    return Err(PremergeFailure::Infrastructure(CompilerError::compiler_error(
+                    return Err(PreparedFailure::Infrastructure(CompilerError::compiler_error(
                     "logical path merge base is not a structural prefix of the destination table",
                 ).into()).into());
                 }
@@ -263,7 +263,7 @@ fn compile_single_file_frontend_with_target(
             None,
             || Some(Arc::new(discovery_path_fork.snapshot_table())),
         )?;
-        return Err(PremergeFailure::Diagnosed(batch).into());
+        return Err(PreparedFailure::Diagnosed(batch).into());
     }
 
     timing_scope!(
@@ -671,7 +671,7 @@ fn compile_single_file_frontend_with_target(
     let (result, finalized) = match (result, finish_outcome) {
         (result, Ok(finished)) => (result, Arc::new(finished)),
         (Ok(_), Err(finish_error)) => {
-            return Err(PremergeFailure::Infrastructure(finish_error.into()).into());
+            return Err(PreparedFailure::Infrastructure(finish_error.into()).into());
         }
         (Err(failure), Err(finish_error)) => {
             return Err(append_boundary_finish_failure(failure, finish_error));

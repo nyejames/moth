@@ -12,7 +12,7 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, CallArgument};
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirProjection};
@@ -543,8 +543,8 @@ fn duplicate_local_declarations_in_same_scope_fail() {
     )
     .expect_err("duplicate symbol should fail");
     let error = match error {
-        AstDiagnosticFailure::Infrastructure(errors) => errors.primary,
-        AstDiagnosticFailure::Prepared(_) => {
+        PreparedFailure::Infrastructure(errors) => errors.primary,
+        PreparedFailure::Diagnosed(_) | PreparedFailure::Mixed { .. } => {
             panic!("HIR lowering failure should be infrastructure")
         }
     };

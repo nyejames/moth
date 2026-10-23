@@ -8,8 +8,10 @@ use super::bundle::prepare_file_value_bundle;
 use crate::build_system::create_project_modules::resource_inputs::{
     ResourceContentState, ResourceInputRegistry,
 };
-use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerMessages, ErrorType};
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, ErrorType};
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, dev_server::render_boundary_messages_html,
     terse::format_terse_boundary_messages,
@@ -79,9 +81,11 @@ fn warnings_keep_document_snapshots_on_success_and_later_preparation_failure() {
             result.expect_err("the third document should fail preparation")
         } else {
             let output = result.expect("both HTML documents should fold with warnings");
-            let mut messages = CompilerMessages::from_diagnostics(output.warnings, string_table);
-            messages.install_source_contexts(output.warning_source_contexts, 0);
-            into_boundary_failure(messages)
+            let mut accumulator = BoundaryAccumulator::with_root_string_table(&string_table);
+            for warning in output.warnings {
+                accumulator.append_prepared(warning.batch, Some((warning.source_database, None)));
+            }
+            accumulator.finish(InstallMode::Unfrozen)
         };
 
         let mut expected_codes = vec!["MOTH-SYNTAX-0005", "MOTH-SYNTAX-0005"];
@@ -719,7 +723,7 @@ fn content_source_preparation_failures_name_the_logical_source() {
     let style_directives = StyleDirectiveRegistry::merged(&html_project_style_directives())
         .expect("style directives should merge");
     let mut resource_inputs = ResourceInputRegistry::new();
-    let Err(messages) = prepare_file_value_bundle(
+    let Err(bundle_failure) = prepare_file_value_bundle(
         &mut units[0],
         &style_directives,
         &mut string_table,
@@ -727,31 +731,33 @@ fn content_source_preparation_failures_name_the_logical_source() {
     ) else {
         panic!("an unterminated string in a content source should fail preparation");
     };
+    let mut accumulator = BoundaryAccumulator::new();
+    bundle_failure.append_to_boundary(&mut accumulator);
+    let failure = accumulator.finish(InstallMode::Unfrozen);
 
-    let diagnostic = messages
-        .diagnostics()
+    let (report, view) = failure
+        .reports
+        .iter()
         .next()
         .expect("the preparation diagnostic should be present");
-    let source_database = messages
-        .source_database_for_diagnostic(0)
-        .expect("preparation diagnostics should retain their source database");
-    let span = diagnostic
-        .primary_span
-        .expect("the preparation diagnostic should retain its source span");
+    let primary_site = view.primary_site();
+    let span = match primary_site {
+        SiteRef::Local(span) | SiteRef::Foreign { span, .. } => span,
+        SiteRef::Absent => panic!("the preparation diagnostic should retain its primary span"),
+    };
     assert_eq!(
-        source_database.retained_text(span.source()),
+        report.context().retained_text(span.source()),
         Some("# Broken\n\n[$insert(\"unterminated]\n"),
         "the diagnosed boundary should retain the exact content snapshot",
     );
-    let logical_path = source_database
-        .source_logical_path(span.source())
-        .expect("the diagnosed source should have a logical path");
-    let scope = messages
-        .diagnostic_render_context(0)
-        .render_path(logical_path);
+    let position = DiagnosticRenderContext::for_report(report)
+        .site_position(primary_site)
+        .expect("the preparation diagnostic should retain its source span");
     assert_eq!(
-        scope, "docs/broken.mtf",
-        "the failure should name the logical content source, got {scope:?}"
+        position.path,
+        PathBuf::from("docs/broken.mtf"),
+        "the failure should name the logical content source, got {:?}",
+        position.path,
     );
 }
 

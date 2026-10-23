@@ -13,7 +13,7 @@ use crate::compiler_frontend::ast::templates::formatter_contract::{
 };
 use crate::compiler_frontend::ast::templates::template::FormatterResult;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, MalformedTemplateReason, SyntaxDiagnosticKind,
+    CompilerDiagnostic, DiagnosticBag, MalformedTemplateReason, SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -86,10 +86,7 @@ impl PassThroughFormatterInput {
         }
     }
 
-    pub(crate) fn into_formatter_result(
-        self,
-        warnings: Vec<CompilerDiagnostic>,
-    ) -> FormatterResult {
+    pub(crate) fn into_formatter_result(self, warnings: DiagnosticBag) -> FormatterResult {
         FormatterResult {
             output: FormatterOutput {
                 pieces: self.output_pieces,
@@ -106,22 +103,24 @@ impl PassThroughFormatterInput {
         &self,
         warnings: Vec<SourceWarning>,
         kind: SyntaxDiagnosticKind,
-    ) -> Vec<CompilerDiagnostic> {
+    ) -> DiagnosticBag {
         if self.spans.is_empty() || self.flattened_source.trim().is_empty() {
-            return Vec::new();
+            return DiagnosticBag::new();
         }
 
-        warnings
-            .into_iter()
-            .filter_map(|warning| {
-                let span = map_warning_span_to_source_span(&self.spans, &warning)?;
-                Some(CompilerDiagnostic::malformed_template(
-                    kind,
-                    warning.reason,
-                    span,
-                ))
-            })
-            .collect()
+        DiagnosticBag::from_diagnostics(
+            warnings
+                .into_iter()
+                .filter_map(|warning| {
+                    let span = map_warning_span_to_source_span(&self.spans, &warning)?;
+                    Some(CompilerDiagnostic::malformed_template(
+                        kind,
+                        warning.reason,
+                        span,
+                    ))
+                })
+                .collect(),
+        )
     }
 }
 

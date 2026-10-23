@@ -37,7 +37,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeIdentity, GenericDeclarationOrigin,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
-use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -156,14 +156,14 @@ impl ModuleMaterialisationContext {
         &self,
         template_index: usize,
         input: ModuleMaterialisationInput<'a>,
-    ) -> Result<MaterialisedGenericAst, AstDiagnosticFailure> {
+    ) -> Result<MaterialisedGenericAst, PreparedFailure> {
         let artefact = self.artefacts.get(template_index).ok_or_else(|| {
-            AstDiagnosticFailure::from(CompilerError::compiler_error(format!(
+            PreparedFailure::from(CompilerError::compiler_error(format!(
                 "Published materialisation context has no template row {template_index}"
             )))
         })?;
         check_materialisation_row_identity(artefact, input.identity)
-            .map_err(AstDiagnosticFailure::from)?;
+            .map_err(PreparedFailure::from)?;
         artefact.materialise_ast(self, input)
     }
 
@@ -308,7 +308,7 @@ impl GenericTemplateArtefact {
         &self,
         context: &ModuleMaterialisationContext,
         input: ModuleMaterialisationInput<'a>,
-    ) -> Result<MaterialisedGenericAst, AstDiagnosticFailure> {
+    ) -> Result<MaterialisedGenericAst, PreparedFailure> {
         let ModuleMaterialisationInput {
             identity,
             requester_context,
@@ -324,24 +324,23 @@ impl GenericTemplateArtefact {
         } = input;
         requester_context
             .validate_requester_string_prefix(string_table)
-            .map_err(AstDiagnosticFailure::from)?;
+            .map_err(PreparedFailure::from)?;
         let source_file = self.source_file;
         let function_path = self.function_path;
         let entry_dir = path_fork.parent(source_file).unwrap_or(PathId::ROOT);
         let identity_tables = context
             .retained_identity_arcs()
-            .map_err(AstDiagnosticFailure::from)?;
+            .map_err(PreparedFailure::from)?;
         let materialised_body = self
             .body
             .materialise(source_file, path_fork, string_table, identity_tables)
-            .map_err(AstDiagnosticFailure::from)?;
+            .map_err(PreparedFailure::from)?;
         let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
         let file_value_resolution = generated_file_value_resolution_services(
             Rc::clone(&module_resources),
             context.module_origin.clone(),
             Arc::clone(&materialised_body.resolution_facts),
         );
-        let build_path_table = Arc::new(path_fork.snapshot_table());
         let build_context = AstBuildContext {
             external_package_registry: Arc::clone(external_package_registry),
             style_directives,
@@ -361,15 +360,7 @@ impl GenericTemplateArtefact {
             timing_metric_family: crate::compiler_frontend::ast::AstTimingMetricFamily::Generated,
         };
         let (mut phase_context, string_table_ref, path_fork_ref) =
-            AstPhaseContext::from_build_context(build_context, Arc::new(Default::default()))
-                .map_err(|messages| {
-                    AstDiagnosticFailure::capture_messages(
-                        messages,
-                        None,
-                        true,
-                        Some(build_path_table),
-                    )
-                })?;
+            AstPhaseContext::from_build_context(build_context, Arc::new(Default::default()))?;
         crate::timing_scope_attributed!(
             timing_guard_generated_ast_total,
             crate::timing::TimingMetric::FrontendGeneratedAstTotal,
@@ -383,7 +374,7 @@ impl GenericTemplateArtefact {
                 path_fork_ref,
                 string_table_ref,
             )
-            .map_err(AstDiagnosticFailure::from)?;
+            .map_err(PreparedFailure::from)?;
         let builtin_manifest =
             crate::compiler_frontend::builtins::error_type::register_builtin_error_types(
                 path_fork_ref,
@@ -428,7 +419,7 @@ impl GenericTemplateArtefact {
             path_fork_ref,
             Some(materialised_body),
         )
-        .map_err(AstDiagnosticFailure::Infrastructure)?;
+        .map_err(PreparedFailure::Infrastructure)?;
 
         let (build_result, instance_path) = emit_materialised_sidecar(
             phase_context,

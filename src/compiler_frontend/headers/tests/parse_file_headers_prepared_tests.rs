@@ -398,7 +398,7 @@ fn diagnosed_header_failure_keeps_source_identity_and_extended_span_owner() {
     };
 
     assert!(
-        error.warnings.is_empty(),
+        error.warnings.as_slice().is_empty(),
         "empty export block should not emit preparation warnings"
     );
     let diagnostic_span = error

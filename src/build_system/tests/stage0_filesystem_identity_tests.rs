@@ -12,11 +12,11 @@ use super::*;
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
-use crate::compiler_frontend::compiler_messages::{DiagnosticSeverity, PremergeFailure};
+use crate::compiler_frontend::compiler_messages::{DiagnosticSeverity, PreparedFailure};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
-fn prepared_failure_boundary(failure: PremergeFailure) -> BoundaryFailure {
-    let PremergeFailure::Diagnosed(batch) = failure else {
+fn prepared_failure_boundary(failure: PreparedFailure) -> BoundaryFailure {
+    let PreparedFailure::Diagnosed(batch) = failure else {
         panic!("expected a diagnosed failure, got {failure:?}");
     };
     assert!(
@@ -28,14 +28,14 @@ fn prepared_failure_boundary(failure: PremergeFailure) -> BoundaryFailure {
     accumulator.finish(InstallMode::Unfrozen)
 }
 
-fn primary_infrastructure_error(failure: PremergeFailure) -> CompilerError {
-    let PremergeFailure::Infrastructure(errors) = failure else {
+fn primary_infrastructure_error(failure: PreparedFailure) -> CompilerError {
+    let PreparedFailure::Infrastructure(errors) = failure else {
         panic!("expected an infrastructure failure, got {failure:?}");
     };
     errors.primary
 }
 
-fn assert_first_boundary_error_code(failure: PremergeFailure, expected_code: &str) {
+fn assert_first_boundary_error_code(failure: PreparedFailure, expected_code: &str) {
     let boundary = prepared_failure_boundary(failure);
     let (_, diagnostic) = boundary
         .reports
@@ -75,7 +75,7 @@ mod non_utf8_filesystem_identity {
     use std::os::unix::ffi::OsStringExt;
     use std::path::PathBuf;
 
-    fn assert_file_infrastructure_error(failure: PremergeFailure) {
+    fn assert_file_infrastructure_error(failure: PreparedFailure) {
         let error = primary_infrastructure_error(failure);
         assert_eq!(
             error.error_type,
@@ -406,7 +406,7 @@ mod source_package_boundary_indexes_tests {
         string_table: &mut StringTable,
     ) -> Result<
         super::source_package_discovery::SourcePackageBoundaryIndexes,
-        crate::compiler_frontend::compiler_messages::PremergeFailure,
+        crate::compiler_frontend::compiler_messages::PreparedFailure,
     > {
         super::source_package_discovery::build_source_package_boundary_indexes(
             source_packages,
@@ -425,7 +425,7 @@ mod source_package_boundary_indexes_tests {
         );
     }
 
-    fn assert_invalid_config_reason(failure: PremergeFailure, expected_reason: InvalidConfigCode) {
+    fn assert_invalid_config_reason(failure: PreparedFailure, expected_reason: InvalidConfigCode) {
         let boundary = prepared_failure_boundary(failure);
         assert!(
             boundary
@@ -753,7 +753,7 @@ mod non_utf8_package_boundary_candidate_tests {
     use std::os::unix::ffi::OsStringExt;
     use std::path::PathBuf;
 
-    fn assert_non_utf8_file_error(failure: PremergeFailure) {
+    fn assert_non_utf8_file_error(failure: PreparedFailure) {
         let error = primary_infrastructure_error(failure);
         assert_eq!(
             error.error_type,
@@ -772,7 +772,7 @@ mod non_utf8_package_boundary_candidate_tests {
         string_table: &mut StringTable,
     ) -> Result<
         super::source_package_discovery::SourcePackageBoundaryIndexes,
-        crate::compiler_frontend::compiler_messages::PremergeFailure,
+        crate::compiler_frontend::compiler_messages::PreparedFailure,
     > {
         super::source_package_discovery::build_source_package_boundary_indexes(
             source_packages,
@@ -1259,7 +1259,7 @@ mod module_identity_tests {
         assert_file_infrastructure_error(failure, "discovering package facade");
     }
 
-    fn assert_file_infrastructure_error(failure: PremergeFailure, expected_text: &str) {
+    fn assert_file_infrastructure_error(failure: PreparedFailure, expected_text: &str) {
         use crate::compiler_frontend::compiler_errors::ErrorType;
 
         let error = primary_infrastructure_error(failure);
@@ -2581,7 +2581,7 @@ mod owned_source_inventory_tests {
             &self,
             _request: ExternalImportRequest,
             _context: &mut ExternalImportProviderContext,
-        ) -> Result<Option<ResolvedExternalImport>, PremergeFailure> {
+        ) -> Result<Option<ResolvedExternalImport>, PreparedFailure> {
             Ok(None)
         }
     }

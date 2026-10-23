@@ -179,8 +179,7 @@ use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::generic_functions::{
     GenericFunctionInstantiationRequest, ModuleMaterialisationPreparationBuilder,
 };
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PreparedFailure};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment;
@@ -363,7 +362,7 @@ impl Ast {
     pub(in crate::compiler_frontend) fn new(
         input: AstBuildInput,
         context: AstBuildContext,
-    ) -> Result<AstBuildResult, AstDiagnosticFailure> {
+    ) -> Result<AstBuildResult, PreparedFailure> {
         let AstBuildInput {
             headers,
             source_token_owners,
@@ -377,10 +376,7 @@ impl Ast {
         let header_count = headers.len();
         let ast_header_counts = AstHeaderCounterSnapshot::from_headers(&headers);
         let (mut phase_context, string_table, path_fork) =
-            AstPhaseContext::from_build_context(context, source_build_config_contract_names)
-                .map_err(|messages| {
-                    AstDiagnosticFailure::capture_messages(messages, None, false, None)
-                })?;
+            AstPhaseContext::from_build_context(context, source_build_config_contract_names)?;
 
         timing_scope_attributed!(
             timing_guard_ast_total,

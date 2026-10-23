@@ -38,11 +38,8 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
-use crate::compiler_frontend::compiler_messages::prepared_batch::{
-    AstDiagnosticFailure, PreparedDiagnosticBatch,
-};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, InvalidFallibleHandlingReason,
+    CompilerDiagnostic, InvalidFallibleHandlingReason, PreparedFailure,
 };
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
@@ -140,7 +137,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         top_level_const_fragments: &[TopLevelConstFragment],
         materialisation_retention: MaterialisationContextRetention,
         string_table: &mut StringTable,
-    ) -> Result<AstBuildResult, AstDiagnosticFailure> {
+    ) -> Result<AstBuildResult, PreparedFailure> {
         // ----------------------------
         //  Collect doc fragments
         // ----------------------------
@@ -392,7 +389,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                      invariant violation",
                     Rc::strong_count(&shared)
                 ));
-                return Err(AstDiagnosticFailure::Infrastructure(error.into()));
+                return Err(PreparedFailure::Infrastructure(error.into()));
             }
         };
 
@@ -432,7 +429,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                         .template_const_loop_iteration_limit,
                 },
             )
-            .map_err(|error| AstDiagnosticFailure::Infrastructure(error.into()))?;
+            .map_err(|error| PreparedFailure::Infrastructure(error.into()))?;
             Some(context)
         } else {
             None
@@ -482,7 +479,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             ..
         } = self.context;
         let template_ir_store = Rc::try_unwrap(template_ir_store).map_err(|shared| {
-            AstDiagnosticFailure::Infrastructure(
+            PreparedFailure::Infrastructure(
                 CompilerError::compiler_error(format!(
                     "AST finalization: {} TIR references remain at the last-reader barrier",
                     Rc::strong_count(&shared)
@@ -493,7 +490,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         drop(template_ir_store);
         let expressions = expression_builder
             .freeze(&mut emitted.ast)
-            .map_err(|error| AstDiagnosticFailure::Infrastructure(error.into()))?;
+            .map_err(|error| PreparedFailure::Infrastructure(error.into()))?;
 
         let public_interface_projection_input = AstPublicInterfaceProjectionInput {
             root_table: resolved_public_type_roots,
@@ -536,19 +533,14 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         warnings: &[CompilerDiagnostic],
         string_table: &StringTable,
         capture_types: bool,
-    ) -> AstDiagnosticFailure {
-        let mut diagnostics = warnings.to_vec();
-        diagnostics.push(diagnostic);
-        let environment = capture_types.then_some(&self.environment.type_environment);
-        match PreparedDiagnosticBatch::capture_with_required_paths_and_types(
-            DiagnosticBag::from_diagnostics(diagnostics),
-            string_table.clone(),
-            environment,
+    ) -> PreparedFailure {
+        PreparedFailure::with_diagnostic_and_warnings(
+            diagnostic,
+            warnings.to_vec(),
+            string_table,
+            capture_types.then_some(&self.environment.type_environment),
             || Some(Arc::new(self.path_fork.snapshot_table())),
-        ) {
-            Ok(batch) => AstDiagnosticFailure::Prepared(batch),
-            Err(error) => AstDiagnosticFailure::from(error),
-        }
+        )
     }
 
     /// Routes infrastructure failures through their typed lane.
@@ -557,8 +549,8 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         error: impl Into<Box<InfrastructureErrors>>,
         _warnings: &[CompilerDiagnostic],
         _string_table: &StringTable,
-    ) -> AstDiagnosticFailure {
-        AstDiagnosticFailure::Infrastructure(error.into())
+    ) -> PreparedFailure {
+        PreparedFailure::Infrastructure(error.into())
     }
 
     /// Converts a [`TemplateNormalizationError`] into a prepared or infrastructure failure.
@@ -567,7 +559,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         error: TemplateNormalizationError,
         warnings: &[CompilerDiagnostic],
         string_table: &StringTable,
-    ) -> AstDiagnosticFailure {
+    ) -> PreparedFailure {
         match error {
             TemplateNormalizationError::Diagnostic(diagnostic) => {
                 self.diagnostic_failure(diagnostic, warnings, string_table, true)
@@ -583,7 +575,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         error: ConstValueStoreError,
         warnings: &[CompilerDiagnostic],
         string_table: &StringTable,
-    ) -> AstDiagnosticFailure {
+    ) -> PreparedFailure {
         match error {
             ConstValueStoreError::Diagnostic(diagnostic) => {
                 self.diagnostic_failure(diagnostic, warnings, string_table, true)
@@ -680,7 +672,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         has_assertion_validation_candidates: bool,
         warnings: &[CompilerDiagnostic],
         string_table: &StringTable,
-    ) -> Result<FxHashSet<PathId>, AstDiagnosticFailure> {
+    ) -> Result<FxHashSet<PathId>, PreparedFailure> {
         if nodes.is_empty() && !has_assertion_validation_candidates {
             return Ok(FxHashSet::default());
         }
@@ -832,7 +824,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         start_function_path: Option<PathId>,
         warnings: &[CompilerDiagnostic],
         string_table: &StringTable,
-    ) -> Result<(), AstDiagnosticFailure> {
+    ) -> Result<(), PreparedFailure> {
         for node in ast_nodes {
             let NodeKind::Function(path, signature, body) = &node.kind else {
                 continue;

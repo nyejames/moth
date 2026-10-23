@@ -15,7 +15,7 @@ use crate::compiler_frontend::build_config::{
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, InvalidDependencyClauseReason, PremergeFailure,
+    CompilerDiagnostic, DiagnosticBag, InvalidDependencyClauseReason, PreparedFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
@@ -808,14 +808,14 @@ fn compile_check_only_job(
                 fallback_span,
                 &mut prepared.semantic.string_table,
             ) {
-                PremergeFailure::Diagnosed(batch) => match batch.classify_premerge() {
+                PreparedFailure::Diagnosed(batch) => match batch.classify_premerge() {
                     Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics),
                     Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error.into()),
                 },
-                PremergeFailure::Infrastructure(error) => {
+                PreparedFailure::Infrastructure(error) => {
                     DirectoryModuleTaskOutcome::Infrastructure(error)
                 }
-                PremergeFailure::Mixed { batch, error } => {
+                PreparedFailure::Mixed { batch, error } => {
                     DirectoryModuleTaskOutcome::Mixed { batch, error }
                 }
             };
@@ -880,7 +880,7 @@ pub(super) fn compile_check_only_batches(
     build_config_index: &BuildConfigResolutionIndex<'_>,
     string_table: &mut StringTable,
     path_interner: &mut PathInternerBuilder,
-) -> Result<Vec<PreparedDiagnosticBatch>, PremergeFailure> {
+) -> Result<Vec<PreparedDiagnosticBatch>, PreparedFailure> {
     // Check-only units are semantically compiled after canonical publication, but their
     // successful artefacts, interfaces, generated deltas and resource associations are discarded.
     // Their prepared diagnostics and warnings stay in the premerge lane until final source pairing.
@@ -926,10 +926,10 @@ pub(super) fn compile_check_only_batches(
                 // dependent check-only unit contributes no cascade diagnostics.
             }
             DirectoryModuleTaskOutcome::Infrastructure(error) => {
-                return Err(PremergeFailure::Infrastructure(error));
+                return Err(PreparedFailure::Infrastructure(error));
             }
             DirectoryModuleTaskOutcome::Mixed { batch, error } => {
-                return Err(PremergeFailure::Mixed { batch, error });
+                return Err(PreparedFailure::Mixed { batch, error });
             }
         }
     }
@@ -945,7 +945,7 @@ pub(super) fn compile_check_only_batches(
 ///      here lets the regression test exercise the production path.
 pub(super) fn check_only_success_batch(
     compiled: ModuleSemanticResult,
-) -> Result<Option<PreparedDiagnosticBatch>, PremergeFailure> {
+) -> Result<Option<PreparedDiagnosticBatch>, PreparedFailure> {
     let ModuleSemanticResult {
         module,
         warnings: module_warnings,
@@ -984,7 +984,7 @@ pub(super) fn compile_module_waves_in_premerge_lane(
     resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
     path_interner: &mut PathInternerBuilder,
-) -> Result<(CompiledGraphBoundary, Vec<PreparedDiagnosticBatch>), PremergeFailure> {
+) -> Result<(CompiledGraphBoundary, Vec<PreparedDiagnosticBatch>), PreparedFailure> {
     let mut provider_store = ModuleArtifactStore::new(graph.nodes().len());
     let mut generated_store = BoundaryGeneratedFunctionStore::default();
     // The compiler resolves declaring generic templates through this registry, so it never reads a
@@ -1128,10 +1128,10 @@ pub(super) fn compile_module_waves_in_premerge_lane(
                     .into());
                 }
                 DirectoryModuleTaskOutcome::Infrastructure(error) => {
-                    return Err(PremergeFailure::Infrastructure(error));
+                    return Err(PreparedFailure::Infrastructure(error));
                 }
                 DirectoryModuleTaskOutcome::Mixed { batch, error } => {
-                    return Err(PremergeFailure::Mixed { batch, error });
+                    return Err(PreparedFailure::Mixed { batch, error });
                 }
             }
         }

@@ -11,8 +11,9 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch_for_tag,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticToken, InvalidFunctionSignatureReason,
-    InvalidParameterContractReason, InvalidSignatureMemberReason, ParameterContractKind,
+    CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticBag, DiagnosticToken,
+    InvalidFunctionSignatureReason, InvalidParameterContractReason, InvalidSignatureMemberReason,
+    ParameterContractKind,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
@@ -178,7 +179,7 @@ impl FunctionSignatureSyntax {
 /// EXIT INVARIANT: the stream is positioned immediately after the terminating `:`.
 pub fn parse_function_signature_syntax(
     token_stream: &mut DeclarationCursor<'_>,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     string_table: &mut StringTable,
     function_path: PathId,
     path_fork: &mut PathInternerFork,
@@ -259,7 +260,7 @@ pub fn parse_function_signature_syntax(
 pub fn parse_signature_members_syntax(
     token_stream: &mut DeclarationCursor<'_>,
     string_table: &mut StringTable,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     member_context: SignatureMemberContext,
     owner_path: PathId,
     path_fork: &mut PathInternerFork,
@@ -563,7 +564,7 @@ fn parse_signature_member_syntax(
     token_stream: &mut DeclarationCursor<'_>,
     full_name: PathId,
     string_table: &mut StringTable,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     allow_reserved_this: bool,
     member_context: SignatureMemberContext,
     path_fork: &PathInternerFork,
@@ -917,7 +918,7 @@ fn parse_trait_requirement_return_list(
 /// EXIT INVARIANT: the stream is positioned on the first token after the signature.
 pub fn parse_trait_requirement_signature_syntax(
     token_stream: &mut DeclarationCursor<'_>,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut DiagnosticBag,
     string_table: &mut StringTable,
     method_path: PathId,
     path_fork: &mut PathInternerFork,

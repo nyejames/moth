@@ -8,9 +8,7 @@
 
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::arena::{HeaderStats, TokenStats};
-use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerMessages, InfrastructureErrors,
-};
+use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticBag, InvalidConfigReason,
     InvalidDeclarationReason,
@@ -194,18 +192,22 @@ fn capture_preparation_spans(
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     match &mut file_output {
         Ok(output) => {
-            for warning in &mut output.warnings {
+            let mut warnings = output.warnings.take_diagnostics();
+            for warning in &mut warnings {
                 warning
                     .capture_preparation_span(file_id)
                     .map_err(FileFrontendPrepareFailure::Infrastructure)?;
             }
+            output.warnings = DiagnosticBag::from_diagnostics(warnings);
         }
         Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
-            for warning in &mut error.warnings {
+            let mut warnings = error.warnings.take_diagnostics();
+            for warning in &mut warnings {
                 warning
                     .capture_preparation_span(file_id)
                     .map_err(FileFrontendPrepareFailure::Infrastructure)?;
             }
+            error.warnings = DiagnosticBag::from_diagnostics(warnings);
             error
                 .diagnostic
                 .capture_preparation_span(file_id)
@@ -311,20 +313,6 @@ pub(crate) enum HeaderPreparationFailure {
 impl From<DiagnosticBag> for HeaderPreparationFailure {
     fn from(diagnostics: DiagnosticBag) -> Self {
         Self::Diagnosed(diagnostics)
-    }
-}
-
-impl From<CompilerMessages> for HeaderPreparationFailure {
-    fn from(messages: CompilerMessages) -> Self {
-        let CompilerMessages {
-            infrastructure_errors,
-            diagnostics,
-            ..
-        } = messages;
-        match infrastructure_errors {
-            Some(errors) => Self::Infrastructure(errors),
-            None => Self::Diagnosed(DiagnosticBag::from_diagnostics(diagnostics)),
-        }
     }
 }
 
@@ -800,8 +788,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
         source_files,
         string_table,
         path_fork,
-    })
-    .map_err(HeaderPreparationFailure::from)?;
+    })?;
 
     canonicalize_local_ordering_hints(
         &mut headers,

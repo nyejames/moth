@@ -26,7 +26,7 @@ use crate::compiler_frontend::ast::templates::tir::refs::{
 };
 use crate::compiler_frontend::ast::templates::tir::render_unit::{
     build_aggregate_wrapper_candidate_root_from_tir_nodes,
-    build_conditional_body_candidate_root_from_tir_nodes, tir_formatter_messages_to_template_error,
+    build_conditional_body_candidate_root_from_tir_nodes,
 };
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::summary::TemplateIrSummary;
@@ -34,7 +34,7 @@ use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
 use crate::compiler_frontend::ast::templates::tir::wrapper_sets::wrapper_reference_for_template;
 use crate::compiler_frontend::ast::templates::tir::{head_prefix_tir_nodes, sequence_children};
 use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerErrorMetadataKey, CompilerMessages,
+    CompilerError, CompilerErrorMetadataKey, InfrastructureErrors,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::path::Path;
@@ -277,11 +277,11 @@ fn formatter_infrastructure_aggregate_survives_ast_error_adapters() {
         "read input".to_owned(),
     );
     let expected = [primary.clone(), secondary.clone()];
-    let mut messages = CompilerMessages::from_error(primary, StringTable::new());
-    messages.set_infrastructure_error(secondary);
+    let mut infrastructure = InfrastructureErrors::new(primary);
+    infrastructure.push(secondary);
 
     // Template folding and stored values re-enter expression construction through these adapters.
-    let template_error = tir_formatter_messages_to_template_error(messages);
+    let template_error = TemplateError::Infrastructure(Box::new(infrastructure));
     let fold_error = ConstantFoldError::from(template_error);
     let typing_error = ExpressionTypingError::from(fold_error);
     let expression_error = ExpressionParseError::from(typing_error);
@@ -289,9 +289,12 @@ fn formatter_infrastructure_aggregate_survives_ast_error_adapters() {
     let store_error = ConstValueStoreError::from(template_error);
     let construction_error = ExpressionConstructionFailure::from(store_error);
     let expression_error = ExpressionParseError::from(construction_error);
-    let errors = expression_error
+    let ExpressionParseError::Infrastructure(errors) = expression_error
         .at_boundary_without_numeric_retention("the formatter adapter test")
-        .expect_err("both formatter causes must remain infrastructure failures");
+        .expect_err("both formatter causes must remain infrastructure failures")
+    else {
+        panic!("formatter causes must stay on the infrastructure lane");
+    };
 
     let actual = errors.iter().collect::<Vec<_>>();
     assert_eq!(actual.len(), expected.len());

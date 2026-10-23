@@ -21,7 +21,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMod
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, PremergeFailure, SourceSpanCapacityResource,
+    CompilerDiagnostic, DiagnosticBag, PreparedFailure, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
@@ -146,7 +146,7 @@ pub(super) fn publish_compiled_module(
     path_base_len: usize,
     string_table: &mut StringTable,
     path_interner: &mut PathInternerBuilder,
-) -> Result<(), PremergeFailure> {
+) -> Result<(), PreparedFailure> {
     let remap = string_table.merge_delta_from(&compiled.string_table, string_table_base_len);
     debug_assert_eq!(compiled.path_fork.base_len(), path_base_len);
     // Authored exhaustion during module publication is a deterministic source-capacity
@@ -165,9 +165,9 @@ pub(super) fn publish_compiled_module(
                     false,
                     None,
                 );
-                PremergeFailure::Diagnosed(batch)
+                PreparedFailure::Diagnosed(batch)
             }
-            error => PremergeFailure::Infrastructure(
+            error => PreparedFailure::Infrastructure(
                 CompilerError::compiler_error(format!("module path merge failed: {error:?}"))
                     .into(),
             ),
@@ -238,7 +238,7 @@ pub(super) fn publish_compiled_module(
         generated_delta,
         resource_source_associations,
     })
-    .map_err(PremergeFailure::from)
+    .map_err(PreparedFailure::from)
 }
 
 /// Add one newly published module's generic templates to the boundary materialisation registry.
@@ -344,19 +344,19 @@ struct SourcePackageCheckOnlyInventory {
 /// The terminal source owner is attached after finalization, when this prepared failure can be
 /// paired with the database that owns its spans.
 pub(super) struct BoundaryPremergeFailure {
-    failure: Box<PremergeFailure>,
+    failure: Box<PreparedFailure>,
     package_source: Option<Box<SourceDatabase>>,
 }
 
 impl BoundaryPremergeFailure {
-    pub(super) fn project(failure: PremergeFailure) -> Self {
+    pub(super) fn project(failure: PreparedFailure) -> Self {
         Self {
             failure: Box::new(failure),
             package_source: None,
         }
     }
 
-    pub(super) fn package(failure: PremergeFailure, source: SourceDatabase) -> Self {
+    pub(super) fn package(failure: PreparedFailure, source: SourceDatabase) -> Self {
         Self {
             failure: Box::new(failure),
             package_source: Some(Box::new(source)),
@@ -364,15 +364,15 @@ impl BoundaryPremergeFailure {
     }
 }
 
-impl From<PremergeFailure> for BoundaryPremergeFailure {
-    fn from(failure: PremergeFailure) -> Self {
+impl From<PreparedFailure> for BoundaryPremergeFailure {
+    fn from(failure: PreparedFailure) -> Self {
         Self::project(failure)
     }
 }
 
 impl From<CompilerError> for BoundaryPremergeFailure {
     fn from(error: CompilerError) -> Self {
-        Self::project(PremergeFailure::from(error))
+        Self::project(PreparedFailure::from(error))
     }
 }
 
@@ -389,17 +389,17 @@ impl From<SourceDatabaseError> for BoundaryPremergeFailure {
                     false,
                     None,
                 );
-                Self::project(PremergeFailure::Diagnosed(batch))
+                Self::project(PreparedFailure::Diagnosed(batch))
             }
             SourceDatabaseError::Infrastructure(error) => {
-                Self::project(PremergeFailure::from(error))
+                Self::project(PreparedFailure::from(error))
             }
         }
     }
 }
 /// Consume a terminal prepared failure with its package owner or project fallback.
-pub(super) fn premerge_failure_to_boundary(
-    failure: PremergeFailure,
+pub(super) fn prepared_failure_to_boundary(
+    failure: PreparedFailure,
     _string_table: &StringTable,
     package_source: Option<Box<SourceDatabase>>,
     project_source: Option<Arc<SourceDatabase>>,
@@ -409,10 +409,10 @@ pub(super) fn premerge_failure_to_boundary(
         .or(project_source);
     let mut accumulator = BoundaryAccumulator::new();
     match failure {
-        PremergeFailure::Diagnosed(batch) => {
+        PreparedFailure::Diagnosed(batch) => {
             accumulator.append_prepared(batch, source.map(|source| (source, None)));
         }
-        PremergeFailure::Infrastructure(errors) => {
+        PreparedFailure::Infrastructure(errors) => {
             let mut messages = CompilerMessages::empty(StringTable::empty_unallocated());
             messages.append_infrastructure_errors(errors);
             if let Some(source) = source {
@@ -420,7 +420,7 @@ pub(super) fn premerge_failure_to_boundary(
             }
             accumulator.append(messages);
         }
-        PremergeFailure::Mixed { batch, error } => {
+        PreparedFailure::Mixed { batch, error } => {
             accumulator.append_prepared(batch, source.clone().map(|source| (source, None)));
             let mut messages = CompilerMessages::empty(StringTable::empty_unallocated());
             messages.append_infrastructure_errors(error);
@@ -447,7 +447,7 @@ pub(super) fn boundary_failure_to_boundary(
         .map(|source| Arc::new(*source))
         .or(project_source);
 
-    premerge_failure_to_boundary(*failure, string_table, None, source)
+    prepared_failure_to_boundary(*failure, string_table, None, source)
 }
 
 /// Keep an earlier typed failure beside an error from its last-source finalization.
@@ -475,7 +475,7 @@ pub(super) fn append_boundary_finish_failure(
 ///      the user's failure or the freeze failure silently; both stay observable in the one
 ///      project-scoped failure without cloning any diagnostic batch or string table.
 fn finalize_package_failure(
-    failure: PremergeFailure,
+    failure: PreparedFailure,
     builder: SourceDatabaseBuilder,
 ) -> BoundaryPremergeFailure {
     match builder.finish() {
@@ -490,21 +490,21 @@ fn finalize_package_failure(
 /// The builder is consumed by a failed finish, but the original diagnostic batch and every
 /// infrastructure cause still belong to the aborted compilation and must reach its final tail.
 pub(super) fn append_finish_failure(
-    failure: PremergeFailure,
+    failure: PreparedFailure,
     finish_error: CompilerError,
-) -> PremergeFailure {
+) -> PreparedFailure {
     match failure {
-        PremergeFailure::Diagnosed(batch) => PremergeFailure::Mixed {
+        PreparedFailure::Diagnosed(batch) => PreparedFailure::Mixed {
             batch,
             error: finish_error.into(),
         },
-        PremergeFailure::Mixed { batch, mut error } => {
+        PreparedFailure::Mixed { batch, mut error } => {
             error.push(finish_error);
-            PremergeFailure::Mixed { batch, error }
+            PreparedFailure::Mixed { batch, error }
         }
-        PremergeFailure::Infrastructure(mut errors) => {
+        PreparedFailure::Infrastructure(mut errors) => {
             errors.push(finish_error);
-            PremergeFailure::Infrastructure(errors)
+            PreparedFailure::Infrastructure(errors)
         }
     }
 }
@@ -812,7 +812,7 @@ pub(super) fn discover_source_package_inventories(
         package_sources.adopt_pending_span_builders();
         if let Err(error) = package_retain_result {
             return Err(finalize_package_failure(
-                PremergeFailure::from(error),
+                PreparedFailure::from(error),
                 package_sources,
             ));
         }
@@ -833,7 +833,7 @@ pub(super) fn discover_source_package_inventories(
             .module_id_for_directory(package_index.entry_root())
         else {
             return Err(finalize_package_failure(
-                PremergeFailure::Infrastructure(CompilerError::compiler_error(format!(
+                PreparedFailure::Infrastructure(CompilerError::compiler_error(format!(
                     "Source package @{dependency_prefix} has no module rooted at its indexed entry root"
                 )).into()),
                 package_sources,
@@ -908,7 +908,7 @@ pub(super) fn prepare_source_package_check_only_jobs(
             (Ok(()), Err(error)) => {
                 let inventory = inventories.swap_remove(index);
                 return Err(finalize_package_failure(
-                    PremergeFailure::from(error),
+                    PreparedFailure::from(error),
                     inventory.source_files,
                 ));
             }
@@ -973,7 +973,7 @@ pub(super) fn compile_source_package_inventories(
         } = inventory;
         let (module_waves, provider_bindings, source_package_dependencies, check_only_jobs) =
             schedule.into_parts();
-        let result: Result<_, PremergeFailure> = (|| {
+        let result: Result<_, PreparedFailure> = (|| {
             let package_inputs = BuildConfigInputSet::new();
             let package_fallback_span = None;
             let build_config_values = config_boundary::resolve_boundary_build_config(
@@ -1080,7 +1080,7 @@ pub(super) fn compile_source_package_inventories(
             mut batches,
             mut path_interner,
         } = inventory;
-        let result: Result<_, PremergeFailure> = (|| {
+        let result: Result<_, PreparedFailure> = (|| {
             let package_id = completed_source_packages
                 .by_prefix(dependency_prefix.as_str())
                 .ok_or_else(|| {
@@ -1126,7 +1126,7 @@ pub(super) fn compile_source_package_inventories(
         let (result, finalized_source) = match (result, finish_outcome) {
             (result, Ok(finished)) => (result, finished),
             (Ok(_), Err(finish_error)) => {
-                return Err(BoundaryPremergeFailure::project(PremergeFailure::from(
+                return Err(BoundaryPremergeFailure::project(PreparedFailure::from(
                     finish_error,
                 )));
             }
@@ -1255,7 +1255,7 @@ fn compile_directory_frontend_in_premerge_lane(
                 Ok(database) => database,
                 Err(_) => {
                     return Err(BoundaryPremergeFailure::project(
-                    PremergeFailure::Infrastructure(CompilerError::compiler_error(
+                    PreparedFailure::Infrastructure(CompilerError::compiler_error(
                         "project source database was unexpectedly shared before registration",
                     ).into()),
                 ));
@@ -1391,7 +1391,7 @@ fn compile_directory_frontend_in_premerge_lane(
         match (project_check_only_result, project_retain_result) {
             (Ok(()), Ok(())) => {}
             (Ok(()), Err(error)) => {
-                return Err(BoundaryPremergeFailure::project(PremergeFailure::from(
+                return Err(BoundaryPremergeFailure::project(PreparedFailure::from(
                     error,
                 )));
             }
@@ -1545,7 +1545,7 @@ fn compile_directory_frontend_in_premerge_lane(
     let (result, finalized) = match (result, finish_outcome) {
         (result, Ok(finished)) => (result, Arc::new(finished)),
         (Ok(_), Err(finish_error)) => {
-            return Err(BoundaryPremergeFailure::project(PremergeFailure::from(
+            return Err(BoundaryPremergeFailure::project(PreparedFailure::from(
                 finish_error,
             )));
         }

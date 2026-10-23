@@ -15,7 +15,7 @@ use crate::builder_surface::external_import_providers::provider::{
 };
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
-use crate::compiler_frontend::compiler_messages::PremergeFailure;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionId, ExternalPackageId, ExternalPackageRegistry, ExternalTypeId,
 };
@@ -48,7 +48,7 @@ impl ExternalImportProvider for DummyProvider {
         &self,
         _request: ExternalImportRequest,
         context: &mut ExternalImportProviderContext,
-    ) -> Result<Option<ResolvedExternalImport>, PremergeFailure> {
+    ) -> Result<Option<ResolvedExternalImport>, PreparedFailure> {
         let package_id = context
             .package_registry
             .register_package(

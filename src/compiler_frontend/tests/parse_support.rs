@@ -17,12 +17,10 @@ use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
-use crate::compiler_frontend::compiler_messages::prepared_batch::{
-    AstDiagnosticFailure, PreparedDiagnosticBatch,
-};
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticBag, DiagnosticSeverity, InvalidCompileTimePathReason,
+    PreparedFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SourceTokenOwner;
@@ -130,7 +128,7 @@ fn capture_diagnostic_failure(
     diagnostic: CompilerDiagnostic,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> AstDiagnosticFailure {
+) -> PreparedFailure {
     capture_diagnostic_bag_failure(diagnostic.into(), string_table, path_fork)
 }
 
@@ -138,38 +136,39 @@ fn capture_diagnostic_bag_failure(
     bag: DiagnosticBag,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-) -> AstDiagnosticFailure {
-    AstDiagnosticFailure::Prepared(PreparedDiagnosticBatch::capture_from_bag(
+) -> PreparedFailure {
+    PreparedFailure::capture_diagnosed(
         bag,
         string_table.clone(),
         None,
         true,
         Some(Arc::new(path_fork.snapshot_table())),
-    ))
+    )
 }
 
-pub(crate) fn freeze_ast_diagnostic_failure(failure: AstDiagnosticFailure) -> BoundaryFailure {
+pub(crate) fn freeze_ast_diagnostic_failure(failure: PreparedFailure) -> BoundaryFailure {
     match failure {
-        AstDiagnosticFailure::Prepared(batch) => {
+        PreparedFailure::Diagnosed(batch) => {
             let mut accumulator = BoundaryAccumulator::new();
             accumulator.append_prepared(batch, None);
             accumulator.finish(InstallMode::Frozen)
         }
-        AstDiagnosticFailure::Infrastructure(error) => {
+        PreparedFailure::Infrastructure(error) | PreparedFailure::Mixed { error, .. } => {
             panic!("single-file AST construction infrastructure failure: {error:?}")
         }
     }
 }
+
 pub(crate) fn parse_single_file_ast_build_result(
     source: &str,
-) -> Result<(AstBuildResult, PathInternerFork, StringTable), AstDiagnosticFailure> {
+) -> Result<(AstBuildResult, PathInternerFork, StringTable), PreparedFailure> {
     parse_single_file_ast_build_result_with_registry(source, ExternalPackageRegistry::new())
 }
 
 pub(crate) fn parse_single_file_ast_build_result_with_registry(
     source: &str,
     registry: ExternalPackageRegistry,
-) -> Result<(AstBuildResult, PathInternerFork, StringTable), AstDiagnosticFailure> {
+) -> Result<(AstBuildResult, PathInternerFork, StringTable), PreparedFailure> {
     let mut source_context = TestSourceContext::new("@page.moth");
 
     let mut path_fork = PathInternerFork::empty();
@@ -275,23 +274,23 @@ pub(crate) fn parse_single_file_ast_build_result_with_registry(
         capture_diagnostic_bag_failure(bag, string_table, &path_fork)
     })?;
 
-    let sorted = resolve_module_dependencies(
+    let sorted = match resolve_module_dependencies(
         headers,
         &ContentSourceTargets::empty(),
         string_table,
         &mut path_fork,
-    )
-    .map_err(|failure| match failure {
-        crate::compiler_frontend::compiler_messages::PremergeFailure::Diagnosed(batch) => {
-            AstDiagnosticFailure::Prepared(batch)
+    ) {
+        Ok(sorted) => sorted,
+        Err(PreparedFailure::Diagnosed(batch)) => {
+            return Err(PreparedFailure::Diagnosed(batch));
         }
-        crate::compiler_frontend::compiler_messages::PremergeFailure::Infrastructure(error) => {
+        Err(PreparedFailure::Infrastructure(error)) => {
             panic!("dependency sorting infrastructure failure: {error:?}")
         }
-        crate::compiler_frontend::compiler_messages::PremergeFailure::Mixed { error, .. } => {
+        Err(PreparedFailure::Mixed { error, .. }) => {
             panic!("dependency sorting infrastructure failure alongside diagnostics: {error:?}")
         }
-    })?;
+    };
 
     let entry_path = path_fork
         .try_intern_portable_path("@page.moth", string_table)
@@ -330,7 +329,7 @@ pub(crate) fn parse_single_file_ast_build_result_with_registry(
 
 pub(crate) fn parse_single_file_ast_result(
     source: &str,
-) -> Result<(Ast, PathInternerFork, StringTable), AstDiagnosticFailure> {
+) -> Result<(Ast, PathInternerFork, StringTable), PreparedFailure> {
     parse_single_file_ast_build_result(source)
         .map(|(build_result, path_fork, string_table)| (build_result.ast, path_fork, string_table))
 }

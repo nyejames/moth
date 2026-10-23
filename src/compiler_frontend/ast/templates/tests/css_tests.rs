@@ -96,8 +96,9 @@ fn css_formatter_preserves_structural_anchors_and_maps_warnings_to_authored_text
         .format(input, &mut string_table)
         .expect("CSS formatter should preserve structural anchors");
 
+    let warnings = result.warnings.as_slice();
     assert_eq!(
-        result.warnings.len(),
+        warnings.len(),
         1,
         "the malformed declaration after the anchors should be diagnosed"
     );
@@ -294,6 +295,7 @@ fn css_formatter_passes_through_comments_and_maps_warning_to_source_piece() {
     ));
 
     // The `bad` declaration warns once, attributed to the piece that authored it.
-    assert_eq!(result.warnings.len(), 1);
-    assert_eq!(result.warnings[0].primary_span, Some(second_span));
+    let warnings = result.warnings.as_slice();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].primary_span, Some(second_span));
 }

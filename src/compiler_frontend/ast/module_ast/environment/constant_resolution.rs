@@ -54,7 +54,7 @@ use crate::compiler_frontend::build_config::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic,
+    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticBag,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
@@ -125,7 +125,7 @@ pub(crate) struct ConstantHeaderInput<'a> {
     pub type_environment: &'a mut TypeEnvironment,
     pub expression_builder: &'a mut AstExpressionBuilder,
     pub const_values: &'a mut ConstValueStore,
-    pub warnings: &'a mut Vec<CompilerDiagnostic>,
+    pub warnings: &'a mut DiagnosticBag,
     pub path_fork: &'a mut PathInternerFork,
 }
 
@@ -436,7 +436,9 @@ impl ConstantResolutionSession {
                 path_fork,
             )?;
         }
-        warnings.extend(scope_context.take_emitted_warnings());
+        for warning in scope_context.take_emitted_warnings() {
+            warnings.push(warning);
+        }
 
         // After resolution, the initializer must be fully foldable at compile time.
         // Runtime expressions in constants are rejected here. Template payloads keep

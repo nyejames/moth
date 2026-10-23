@@ -19,11 +19,10 @@ use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError, 
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidConfigReason, PremergeFailure,
+    CompilerDiagnostic, InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::single_source_compilation::{
-    CompiledConfigSource, ConfigCompilationFailure, ConfigCompilationOutcome,
-    ConfigCompilationRequest, compile_config_source,
+    CompiledConfigSource, ConfigCompilationOutcome, ConfigCompilationRequest, compile_config_source,
 };
 use crate::compiler_frontend::source::{SourceDatabase, SourceDatabaseError, SourceKind};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -232,14 +231,7 @@ pub(crate) fn compile_project_config_file(
                 .map(|settings| (compiled_config, settings))
                 .map_err(ProjectConfigFailure::Legacy),
         ),
-        Err(ConfigCompilationFailure::Legacy(messages)) => {
-            Some(Err(ProjectConfigFailure::Legacy(messages)))
-        }
-        Err(ConfigCompilationFailure::Ast(failure)) => {
-            compiler_failure = Some(failure.into());
-            None
-        }
-        Err(ConfigCompilationFailure::Premerge(failure)) => {
+        Err(failure) => {
             compiler_failure = Some(failure);
             None
         }
@@ -255,7 +247,7 @@ pub(crate) fn compile_project_config_file(
             .take()
             .expect("the config source owner remains available through span finalization");
         return Err(ProjectConfigFailure::Boundary(
-            finalize_compiler_diagnostic_failure(failure, source_database),
+            finalize_compiler_diagnostic_failure(failure, source_database, string_table),
         ));
     }
 
@@ -272,30 +264,29 @@ pub(crate) fn compile_project_config_file(
 }
 
 fn finalize_compiler_diagnostic_failure(
-    failure: PremergeFailure,
+    failure: PreparedFailure,
     source_database: SourceDatabase,
+    string_table: &StringTable,
 ) -> BoundaryFailure {
     let source_database = Arc::new(source_database);
-    let mut accumulator = BoundaryAccumulator::new();
     match failure {
-        PremergeFailure::Diagnosed(batch) => {
+        PreparedFailure::Diagnosed(batch) => {
+            let mut accumulator = BoundaryAccumulator::new();
             accumulator.append_prepared(batch, Some((source_database, None)));
+            accumulator.finish(InstallMode::Frozen)
         }
-        PremergeFailure::Infrastructure(mut errors) => {
-            errors.set_source_database(source_database);
-            let mut messages = CompilerMessages::empty(StringTable::new());
-            messages.append_infrastructure_errors(errors);
-            accumulator.append(messages);
+        PreparedFailure::Infrastructure(errors) => {
+            let mut accumulator = BoundaryAccumulator::with_root_string_table(string_table);
+            accumulator.append_infrastructure(errors, Some(source_database));
+            accumulator.finish(InstallMode::Frozen)
         }
-        PremergeFailure::Mixed { batch, mut error } => {
+        PreparedFailure::Mixed { batch, error } => {
+            let mut accumulator = BoundaryAccumulator::new();
             accumulator.append_prepared(batch, Some((Arc::clone(&source_database), None)));
-            error.set_source_database(source_database);
-            let mut messages = CompilerMessages::empty(StringTable::new());
-            messages.append_infrastructure_errors(error);
-            accumulator.append(messages);
+            accumulator.append_infrastructure(error, Some(source_database));
+            accumulator.finish(InstallMode::Frozen)
         }
     }
-    accumulator.finish(InstallMode::Frozen)
 }
 
 fn validate_and_apply_compiled_config(

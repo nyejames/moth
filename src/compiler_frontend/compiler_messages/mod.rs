@@ -6,9 +6,11 @@
 //! boundaries decide how those facts become user-visible text.
 //!
 //! `CompilerDiagnostic` is the normal source/config/import/type/rule/borrow diagnostic path.
-//! `CompilerMessages` is the ordered boundary container that carries diagnostics with the
-//! `StringTable` and optional type render context needed for prose. `CompilerError` is reserved
-//! for internal compiler, filesystem, backend, and dev-server infrastructure failures.
+//! `DiagnosticBag` accumulates stage-local diagnostics and warnings in production order.
+//! `PreparedFailure` is the owner-edge capture that
+//! pairs diagnostics with the `StringTable` and optional type render context needed for prose.
+//! `CompilerError` is reserved for internal compiler, filesystem, backend, and dev-server
+//! infrastructure failures.
 
 pub(crate) mod compiler_dev_logging;
 pub(crate) mod compiler_diagnostic;
@@ -34,7 +36,7 @@ pub(crate) use crate::compiler_frontend::tokenizer::tokens::TokenDescriptorPaylo
 #[cfg(test)]
 pub(crate) use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 pub(crate) use compiler_diagnostic::CompilerDiagnostic;
-pub(crate) use diagnostic_bag::{DiagnosticBag, PremergeFailure};
+pub(crate) use diagnostic_bag::{DiagnosticBag, PreparedFailure};
 pub(crate) use diagnostic_descriptor::DiagnosticDescriptor;
 #[cfg(test)]
 pub(crate) use diagnostic_identity::DiagnosticIdentity;

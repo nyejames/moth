@@ -27,8 +27,8 @@ use crate::compiler_frontend::ast::templates::tir::slot_composition::compose_tir
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
 
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 // ------------------------------
 //  Aggregate-wrapper candidates
@@ -148,35 +148,6 @@ fn conditional_body_candidate_span(
 //  Formatter helpers
 // ------------------------------
 
-/// Converts TIR formatter diagnostic messages into a single `TemplateError`.
-///
-/// WHAT: returns the outer infrastructure failure typed when present, else scans the
-///       formatter output for hard errors and returns the first one as a `TemplateError`;
-///       when neither exists, fabricates a generic compiler-error so the caller never
-///       receives an unexplained failure.
-/// WHY: the formatter emits structured diagnostics; this helper provides the
-///      narrow bridge from formatter messages back to template-stage errors without
-///      converting the outer failure into a user diagnostic.
-pub(super) fn tir_formatter_messages_to_template_error(
-    messages: CompilerMessages,
-) -> TemplateError {
-    let CompilerMessages {
-        infrastructure_errors,
-        diagnostics,
-        ..
-    } = messages;
-    if let Some(errors) = infrastructure_errors {
-        return TemplateError::Infrastructure(errors);
-    }
-    for diagnostic in diagnostics {
-        if diagnostic.severity == DiagnosticSeverity::Error {
-            return diagnostic.into();
-        }
-    }
-
-    CompilerError::compiler_error("TIR formatter failed without returning a compiler error.").into()
-}
-
 /// Runs the TIR formatter and forwards any warnings to the active diagnostic
 /// context.
 ///
@@ -207,14 +178,18 @@ pub(in crate::compiler_frontend::ast::templates) fn run_tir_formatter_with_warni
         context,
         style,
         string_table,
-    )
-    .map_err(tir_formatter_messages_to_template_error)?;
+    )?;
 
-    for warning in &result.warnings {
+    let TirFormatterResult { root, warnings } = result;
+    let warnings = warnings.into_diagnostics();
+    for warning in &warnings {
         scope_context.emit_warning(warning.clone());
     }
 
-    Ok(result)
+    Ok(TirFormatterResult {
+        root,
+        warnings: DiagnosticBag::from_diagnostics(warnings),
+    })
 }
 
 /// Formats a control-flow body TIR root using the template's style formatter.
@@ -245,11 +220,10 @@ pub(in crate::compiler_frontend::ast::templates) fn format_tir_body_root(
         empty_context,
         style,
         string_table,
-    )
-    .map_err(tir_formatter_messages_to_template_error)?;
+    )?;
 
-    for warning in &result.warnings {
-        context.emit_warning(warning.clone());
+    for warning in result.warnings.into_diagnostics() {
+        context.emit_warning(warning);
     }
 
     Ok(result.root)

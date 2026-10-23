@@ -16,7 +16,7 @@ use crate::builder_surface::external_import_providers::resolution_table::Externa
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, InvalidConfigReason, PremergeFailure,
+    DiagnosticBag, InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
@@ -170,7 +170,7 @@ fn resolve_directory_dependency_path(
     provider: &RetainedDependencyPath,
     source_path: &Path,
     string_table: &mut StringTable,
-) -> Result<ResolvedDependency, PremergeFailure> {
+) -> Result<ResolvedDependency, PreparedFailure> {
     directory_dependency_resolution
         .resolve_dependency(provider, source_path, string_table)
         .map_err(|diagnostic| {
@@ -188,8 +188,8 @@ fn resolve_directory_dependency_path(
                     ))
                 },
             ) {
-                Ok(batch) => PremergeFailure::Diagnosed(batch),
-                Err(error) => PremergeFailure::Infrastructure(error.into()),
+                Ok(batch) => PreparedFailure::Diagnosed(batch),
+                Err(error) => PreparedFailure::Infrastructure(error.into()),
             }
         })
 }
@@ -264,7 +264,7 @@ impl ModuleCompilationSchedule {
         string_table: &mut StringTable,
         path_interner: &mut PathInternerBuilder,
         selected_source_texts: &mut SelectedSourceTextMap,
-    ) -> Result<(), PremergeFailure> {
+    ) -> Result<(), PreparedFailure> {
         let specs = std::mem::take(&mut self.check_only_specs);
         if specs.is_empty() {
             return Ok(());
@@ -353,7 +353,7 @@ pub(crate) fn discover_all_modules_in_project(
     string_table: &mut StringTable,
     path_interner: &mut PathInternerBuilder,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
-) -> Result<ModuleCompilationSchedule, PremergeFailure> {
+) -> Result<ModuleCompilationSchedule, PreparedFailure> {
     let mut selected_source_texts = SelectedSourceTextMap::default();
     discover_all_modules_in_project_with_check_only(
         config,
@@ -396,7 +396,7 @@ pub(crate) fn discover_all_modules_in_project_with_check_only(
     string_table: &mut StringTable,
     path_interner: &mut PathInternerBuilder,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
-) -> Result<ModuleCompilationSchedule, PremergeFailure> {
+) -> Result<ModuleCompilationSchedule, PreparedFailure> {
     discover_all_modules_in_boundary(
         config,
         project_path_resolver,
@@ -438,7 +438,7 @@ pub(crate) fn discover_all_modules_in_package_with_check_only(
     string_table: &mut StringTable,
     path_interner: &mut PathInternerBuilder,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
-) -> Result<ModuleCompilationSchedule, PremergeFailure> {
+) -> Result<ModuleCompilationSchedule, PreparedFailure> {
     discover_all_modules_in_boundary(
         config,
         project_path_resolver,
@@ -479,7 +479,7 @@ fn discover_all_modules_in_boundary(
     string_table: &mut StringTable,
     path_interner: &mut PathInternerBuilder,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
-) -> Result<ModuleCompilationSchedule, PremergeFailure> {
+) -> Result<ModuleCompilationSchedule, PreparedFailure> {
     let seeds = module_seeds_in_module_id_order(project_module_graph);
     let source_origin_lookup = project_module_graph
         .build_source_origin_lookup(directory_dependency_resolution.source_tree_index())?;
@@ -503,7 +503,7 @@ fn discover_all_modules_in_boundary(
             string_table,
         );
         let table = std::mem::take(string_table);
-        return Err(PremergeFailure::Diagnosed(
+        return Err(PreparedFailure::Diagnosed(
             PreparedDiagnosticBatch::capture_from_bag(
                 DiagnosticBag::from(diagnostic),
                 table,
@@ -683,7 +683,7 @@ fn prepare_check_only_module(
     fork_source: &StringTableForkSource,
     path_fork_source: &PathInternerForkSource,
     selected_source_texts: &mut SelectedSourceTextMap,
-) -> Result<CheckOnlyModuleCompilationJob, PremergeFailure> {
+) -> Result<CheckOnlyModuleCompilationJob, PreparedFailure> {
     let candidate_source_ids = compiler_source_ids_for_indices(
         candidate_source_indices,
         source_tree_index,
@@ -1031,7 +1031,7 @@ fn prepare_check_only_module(
 fn insert_resolved_dependency_edges(
     project_module_graph: &mut ProjectModuleGraph,
     resolved_edges: &[ResolvedDependencyEdge],
-) -> Result<(), PremergeFailure> {
+) -> Result<(), PreparedFailure> {
     if resolved_edges.is_empty() {
         return Ok(());
     }
@@ -1064,8 +1064,8 @@ fn insert_resolved_dependency_edges(
 ///
 /// Reaching this helper means the graph and discovery disagree on which normal entry roots exist,
 /// which is a proven invariant violation rather than a user-facing failure.
-fn graph_inventory_mismatch_error(reason: String) -> PremergeFailure {
-    PremergeFailure::Infrastructure(CompilerError::compiler_error(reason).into())
+fn graph_inventory_mismatch_error(reason: String) -> PreparedFailure {
+    PreparedFailure::Infrastructure(CompilerError::compiler_error(reason).into())
 }
 
 /// Group module-job drafts by the populated graph's compile waves and attach each stable origin.
@@ -1088,7 +1088,7 @@ fn order_discovered_modules_by_compile_waves(
     source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
     check_only_specs: Vec<CheckOnlyModuleSpec>,
     source_module_origins: Arc<SourceModuleOriginTable>,
-) -> Result<ModuleCompilationSchedule, PremergeFailure> {
+) -> Result<ModuleCompilationSchedule, PreparedFailure> {
     let waves = project_module_graph.compile_waves()?;
 
     // Index discovered drafts by their graph-assigned `ModuleId`. A duplicate `ModuleId` means
@@ -1181,7 +1181,7 @@ fn discover_modules_serial_provider_capable(
     string_table: &mut StringTable,
     path_interner: &mut PathInternerBuilder,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
-) -> Result<ModuleCompilationJobBatch, PremergeFailure> {
+) -> Result<ModuleCompilationJobBatch, PreparedFailure> {
     let ModuleDiscoveryContext {
         project_path_resolver,
         style_directives,

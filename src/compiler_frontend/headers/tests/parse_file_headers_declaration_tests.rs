@@ -463,7 +463,7 @@ fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
     cursor.advance();
     let malformed_clause =
         super::malformed_direct_selection_clause(DependencySelectionRange::new(0, 1));
-    let mut warnings = Vec::new();
+    let mut warnings = DiagnosticBag::new();
     let mut context = HeaderBuildContext {
         warnings: &mut warnings,
         source_file: scope,

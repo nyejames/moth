@@ -7,7 +7,7 @@
 //! `PreparedSourceInput` values for downstream compilation stages.
 //! Stage 0 returns move-only typed failures in `SourceDiscoveryError`: a plain `CompilerDiagnostic`
 //! for diagnosed input and a typed `CompilerError` for infrastructure failures, plus a finalized
-//! form pairing a `PremergeFailure` with its finished `SourceDatabase`. Production discovery never
+//! form pairing a `PreparedFailure` with its finished `SourceDatabase`. Production discovery never
 //! constructs `CompilerMessages`; the parent single-file/test tail owns that single conversion.
 
 use crate::builder_surface::external_import_providers::cache::ExternalImportCacheKey;
@@ -20,7 +20,7 @@ use crate::builder_surface::external_import_providers::resolution_table::Externa
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DependencyClauseKind, InvalidDependencyClauseReason, PremergeFailure,
+    CompilerDiagnostic, DependencyClauseKind, InvalidDependencyClauseReason, PreparedFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
@@ -166,11 +166,11 @@ pub(super) struct CollectedReachableInputs {
 ///      a diagnosed discovery failure.
 #[derive(Debug)]
 pub(super) struct CollectReachableInputsError {
-    failure: Box<PremergeFailure>,
+    failure: Box<PreparedFailure>,
     source_database: Option<Box<SourceDatabase>>,
 }
 impl CollectReachableInputsError {
-    pub(super) fn into_parts(self) -> (PremergeFailure, Option<SourceDatabase>) {
+    pub(super) fn into_parts(self) -> (PreparedFailure, Option<SourceDatabase>) {
         let Self {
             failure,
             source_database,
@@ -244,7 +244,7 @@ fn missing_source_load_input_index(result: &MissingSourceLoadResult) -> usize {
 /// Collect all reachable source files for a given entry point and load their content.
 ///
 /// Failures travel as [`CollectReachableInputsError`]; the final boundary converts the inner
-/// [`PremergeFailure`] once and attaches the finished source database when present.
+/// [`PreparedFailure`] once and attaches the finished source database when present.
 #[allow(
     clippy::too_many_arguments,
     reason = "reachable-input collection keeps the entry path, resolver, directives, and mutable external-import/kind/resource/path/string state as separate borrows"

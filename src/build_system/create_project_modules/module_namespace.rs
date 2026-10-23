@@ -28,7 +28,7 @@ use super::source_tree_index::{
 
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidImportPathReason, PremergeFailure,
+    CompilerDiagnostic, InvalidImportPathReason, PreparedFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
@@ -332,7 +332,7 @@ impl ModuleNamespaceSet {
         package_boundary_indexes: SourcePackageBoundaryIndexes,
         binding_packages: &ExternalPackageRegistry,
         project_path_resolver: &ProjectPathResolver,
-    ) -> Result<Self, PremergeFailure> {
+    ) -> Result<Self, PreparedFailure> {
         let mut namespaces = Self::for_source_packages(package_boundary_indexes, binding_packages);
         let roots = std::iter::once(project_path_resolver.entry_root().to_path_buf())
             .chain(project_path_resolver.module_roots().cloned())

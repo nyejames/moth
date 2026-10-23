@@ -722,7 +722,7 @@ fn semantic_result_with_local_path()
 #[test]
 fn forced_path_exhaustion_during_module_publication_reports_capacity_diagnostic() {
     use crate::compiler_frontend::compiler_messages::{
-        DiagnosticSeverity, PremergeFailure, SourceSpanCapacityResource,
+        DiagnosticSeverity, PreparedFailure, SourceSpanCapacityResource,
         diagnostics::{
             families::token_lexical::SourceSpanCapacityView, freeze::InstallMode,
             legacy_adapter::BoundaryAccumulator,
@@ -763,7 +763,7 @@ fn forced_path_exhaustion_during_module_publication_reports_capacity_diagnostic(
     )
     .expect_err("authored path exhaustion must fail module publication");
 
-    let PremergeFailure::Diagnosed(batch) = error else {
+    let PreparedFailure::Diagnosed(batch) = error else {
         panic!("authored publication exhaustion must produce the diagnosed capacity lane");
     };
     assert_eq!(batch.diagnostic_count(), 1);
@@ -793,7 +793,7 @@ fn source_finish_failures_preserve_every_cause_and_original_provenance() {
     };
     use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
     use crate::compiler_frontend::compiler_messages::{
-        CompilerDiagnostic, DiagnosticBag, PremergeFailure,
+        CompilerDiagnostic, DiagnosticBag, PreparedFailure,
     };
     use crate::compiler_frontend::source::{LocalSpan, SourceDatabase, SourceId, SourceSpan};
 
@@ -808,7 +808,7 @@ fn source_finish_failures_preserve_every_cause_and_original_provenance() {
         let mut errors = InfrastructureErrors::new(primary);
         errors.set_source_database(Arc::new(SourceDatabase::empty()));
         let failure = if mixed {
-            PremergeFailure::Mixed {
+            PreparedFailure::Mixed {
                 batch: PreparedDiagnosticBatch::capture_from_bag(
                     DiagnosticBag::from(CompilerDiagnostic::unexpected_trailing_comma(None)),
                     StringTable::new(),
@@ -819,7 +819,7 @@ fn source_finish_failures_preserve_every_cause_and_original_provenance() {
                 error: Box::new(errors),
             }
         } else {
-            PremergeFailure::Infrastructure(Box::new(errors))
+            PreparedFailure::Infrastructure(Box::new(errors))
         };
         let mut finish = CompilerError::file_error(
             std::path::Path::new("finish-source.moth"),
@@ -835,8 +835,8 @@ fn source_finish_failures_preserve_every_cause_and_original_provenance() {
             CompilerError::compiler_error("second finish failure"),
         );
         let errors = match failure {
-            PremergeFailure::Infrastructure(errors) if !mixed => errors,
-            PremergeFailure::Mixed { batch, error } if mixed => {
+            PreparedFailure::Infrastructure(errors) if !mixed => errors,
+            PreparedFailure::Mixed { batch, error } if mixed => {
                 assert_eq!(batch.diagnostic_count(), 1);
                 assert!(batch.has_errors());
                 error
