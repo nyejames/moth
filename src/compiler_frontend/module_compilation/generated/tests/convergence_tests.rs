@@ -10,9 +10,13 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
-use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, diagnostic_type_name,
-};
+use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::TypeMismatchView;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, TypeMismatchContext};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::blocks::HirBlock;
@@ -1933,10 +1937,36 @@ fn module_and_single_file_results_reconverge_recursive_failure_facts_after_servi
             .expect("the typed producer survives the service")
             .error_return
             .expect("load retains its custom failure channel");
-        let type_context = DiagnosticRenderContext::new(&strings)
-            .with_optional_type_environment(Some(&modules[0].executable.type_environment))
-            .with_path_table(&modules[0].executable.path_table);
-        assert_eq!(diagnostic_type_name(custom_type, type_context), "Failure");
+        let diagnostic = CompilerDiagnostic::type_mismatch(
+            custom_type,
+            custom_type,
+            TypeMismatchContext::Assignment,
+            None,
+        );
+        let prepared = PreparedDiagnosticBatch::capture_from_bag(
+            DiagnosticBag::from(diagnostic),
+            strings.clone(),
+            Some(&modules[0].executable.type_environment),
+            true,
+            Some(std::sync::Arc::clone(&modules[0].executable.path_table)),
+        );
+        let mut accumulator = BoundaryAccumulator::new();
+        accumulator.append_prepared(prepared, None);
+        let failure = accumulator.finish(InstallMode::Frozen);
+        let (diagnostic_report, view) =
+            failure.reports.iter().next().expect("captured custom type");
+        let type_mismatch = view
+            .family_view::<TypeMismatchView>()
+            .expect("the diagnostic must retain type-mismatch facts");
+        let type_context = DiagnosticRenderContext::for_report(diagnostic_report);
+        assert_eq!(
+            view.types().display_for_render(
+                type_mismatch.expected,
+                type_context.string_table,
+                type_context.path_table(),
+            ),
+            "Failure"
+        );
         let (typed_span, failure_block, error_local) = base
             .blocks
             .iter()

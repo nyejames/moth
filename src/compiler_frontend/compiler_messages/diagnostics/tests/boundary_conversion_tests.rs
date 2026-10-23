@@ -98,7 +98,7 @@ fn legacy_render(messages: &CompilerMessages) -> Vec<Rendered> {
             let position = context
                 .primary_position(diagnostic)
                 .map(|position| owned_position(&position));
-            let compact = compact_render_for_test(diagnostic, context);
+            let compact = compact_render_for_test(diagnostic);
             let view = compact.view();
             let render = view
                 .family()
@@ -511,21 +511,28 @@ fn first_covering_row_owns_the_diagnostic() {
     assert!(host_path.ends_with("a.moth"));
 }
 
-/// A type environment without a path table is filtered out, so type ids render raw on both sides.
+/// Uncaptured types retain the legacy raw-id spelling in their frozen snapshots.
 #[test]
-fn type_environment_without_a_path_table_renders_raw_type_ids() {
+fn uncaptured_types_render_raw_type_ids() {
     let diagnostic = CompilerDiagnostic::type_mismatch(
         TypeId(999),
         TypeId(1000),
         TypeMismatchContext::Assignment,
         None,
     );
-    let messages = CompilerMessages::from_diagnostics(vec![diagnostic], StringTable::new())
-        .with_type_context_for_all_diagnostics(TypeEnvironment::new());
-
-    let frozen = assert_legacy_parity(messages, InstallMode::Frozen);
+    let prepared = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        StringTable::new(),
+        None,
+        true,
+        None,
+    );
+    let mut run = BoundaryAccumulator::new();
+    run.append_prepared(prepared, None);
+    let frozen = run.finish(InstallMode::Frozen);
+    let rendered = frozen_render(&frozen);
     assert_eq!(
-        frozen[0].message,
+        rendered[0].message,
         "Type mismatch in assignment: expected TypeId(999), found TypeId(1000)"
     );
 }
@@ -1337,97 +1344,6 @@ fn accumulator_parity_deduplicates_a_shared_explicit_path_table() {
     assert_eq!(primary(&rendered[1]).line, "main");
 }
 
-/// Each vessel's type snapshot and explicit path table survive independent string and path remaps.
-#[test]
-fn accumulator_parity_captures_each_vessel_type_display() {
-    let dir = tempfile::tempdir().expect("should create temp dir");
-    let identity = StablePackageIdentity::project_local("type-owners");
-    let make_vessels = || {
-        let mut base_strings = StringTable::new();
-        let (database, _) = retained_database(dir.path(), "main.moth", "main", &mut base_strings);
-        let database = Arc::new(database);
-
-        let mut alpha_strings = base_strings.clone();
-        let alpha_name = alpha_strings.intern("TAlpha");
-        let mut alpha_paths = PathInternerBuilder::new();
-        let alpha_import_path = alpha_paths
-            .try_intern_portable_path("pkg/alpha-only.moth", &mut alpha_strings)
-            .expect("Alpha import path should intern");
-        let alpha_explicit = Arc::new(alpha_paths.freeze());
-
-        let mut beta_strings = base_strings;
-        let beta_name = beta_strings.intern("TBeta");
-        assert_eq!(alpha_name, beta_name, "type-name ids should collide");
-        let mut beta_paths = PathInternerBuilder::new();
-        let beta_import_path = beta_paths
-            .try_intern_portable_path("pkg/beta-only.moth", &mut beta_strings)
-            .expect("Beta import path should intern");
-        let beta_explicit = Arc::new(beta_paths.freeze());
-
-        for explicit in [&alpha_explicit, &beta_explicit] {
-            assert!(
-                !database
-                    .clone_path_builder()
-                    .merge_snapshot(explicit)
-                    .expect("explicit paths should merge into the owner")
-                    .is_identity(),
-                "each explicit path table should require a path-id remap"
-            );
-        }
-        assert!(
-            !Arc::ptr_eq(&alpha_explicit, &beta_explicit),
-            "each vessel should own a distinct explicit table"
-        );
-
-        let make_messages = |strings, name, import_path, explicit| {
-            let mut environment = TypeEnvironment::new();
-            let generic_type = environment.register_synthetic_generic_parameter(name);
-            let boolean = environment.builtins().bool;
-            let mut messages = CompilerMessages::from_diagnostics(
-                vec![
-                    CompilerDiagnostic::type_mismatch(
-                        generic_type,
-                        boolean,
-                        TypeMismatchContext::Assignment,
-                        None,
-                    ),
-                    CompilerDiagnostic::missing_import_target(import_path, None),
-                ],
-                strings,
-            )
-            .with_type_context_for_all_diagnostics(environment);
-            messages.install_source_contexts(
-                [RenderSourceContext {
-                    diagnostic_range: 0..2,
-                    source_database: Arc::clone(&database),
-                    domain: Some(identity.clone()),
-                }],
-                0,
-            );
-            messages
-                .attach_path_table_if_missing(explicit)
-                .expect("explicit paths should cover both diagnostics");
-            messages
-        };
-
-        (
-            make_messages(alpha_strings, alpha_name, alpha_import_path, alpha_explicit),
-            make_messages(beta_strings, beta_name, beta_import_path, beta_explicit),
-        )
-    };
-
-    let (merged, accumulated) =
-        assert_accumulator_matches_merge(make_vessels, InstallMode::Frozen, (4, 0, 0), 4, 0);
-    for failure in [&merged, &accumulated] {
-        let rendered = frozen_render(failure);
-        assert_eq!(rendered.len(), 4);
-        assert!(rendered[0].message.contains("TAlpha"));
-        assert!(rendered[1].message.contains("pkg/alpha-only.moth"));
-        assert!(rendered[2].message.contains("TBeta"));
-        assert!(rendered[3].message.contains("pkg/beta-only.moth"));
-    }
-}
-
 /// Infrastructure causes from both vessels retain their own frozen source owners and order.
 #[test]
 fn accumulator_parity_preserves_infrastructure_causes_and_owners() {
@@ -2021,72 +1937,4 @@ fn prepared_batch_owning_site_capture_preserves_unresolved_type_ids() {
     assert!(rendered[0].message.contains("TypeId(1000)"));
     assert!(rendered[1].message.contains("TypeId("));
     assert!(!rendered[1].message.contains("TUnavailablePathTable"));
-}
-
-#[test]
-fn prepared_batch_owning_site_type_capacity_fault_matches_vessel_span() {
-    let dir = tempfile::tempdir().expect("should create temp dir");
-
-    let mut captured_strings = StringTable::new();
-    let (captured_database, captured_source) =
-        retained_database(dir.path(), "main.moth", "main", &mut captured_strings);
-    let captured_name = captured_strings.intern("TCapturedCapacity");
-    let mut captured_environment = TypeEnvironment::new();
-    let captured_type = captured_environment.register_synthetic_generic_parameter(captured_name);
-    let captured_bool = captured_environment.builtins().bool;
-    let captured_diagnostic = CompilerDiagnostic::type_mismatch(
-        captured_type,
-        captured_bool,
-        TypeMismatchContext::Assignment,
-        Some(inline_span(captured_source, 0, 4)),
-    );
-    let captured_path_table = Arc::new(PathInternerBuilder::new().freeze());
-
-    let mut vessel_strings = StringTable::new();
-    let (vessel_database, vessel_source) =
-        retained_database(dir.path(), "main.moth", "main", &mut vessel_strings);
-    let vessel_name = vessel_strings.intern("TCapturedCapacity");
-    let mut vessel_environment = TypeEnvironment::new();
-    let vessel_type = vessel_environment.register_synthetic_generic_parameter(vessel_name);
-    let vessel_bool = vessel_environment.builtins().bool;
-    let vessel_diagnostic = CompilerDiagnostic::type_mismatch(
-        vessel_type,
-        vessel_bool,
-        TypeMismatchContext::Assignment,
-        Some(inline_span(vessel_source, 0, 4)),
-    );
-    let mut vessel_messages =
-        CompilerMessages::from_diagnostics(vec![vessel_diagnostic], vessel_strings)
-            .with_type_context_for_all_diagnostics(vessel_environment);
-    vessel_messages.set_source_database(Arc::new(vessel_database));
-    vessel_messages
-        .attach_path_table_if_missing(Arc::clone(&captured_path_table))
-        .expect("test type context should pair with the path table");
-    let legacy = legacy_render(&vessel_messages);
-
-    let _exhausted = ForcedTypeDisplayExhaustionGuard::new();
-    let captured = PreparedDiagnosticBatch::capture_from_bag(
-        DiagnosticBag::from(captured_diagnostic),
-        captured_strings,
-        Some(&captured_environment),
-        true,
-        Some(captured_path_table),
-    );
-    let mut captured_run = BoundaryAccumulator::new();
-    captured_run.append_prepared(captured, Some((Arc::new(captured_database), None)));
-    let captured = captured_run.finish(InstallMode::Frozen);
-    let vessel = into_frozen_boundary_failure(vessel_messages);
-
-    let captured_render = frozen_render(&captured);
-    let vessel_render = frozen_render(&vessel);
-    assert_render_parity(&vessel_render, &captured_render);
-    assert_eq!(primary(&captured_render[0]), primary(&legacy[0]));
-    let codes = |failure: &BoundaryFailure| {
-        failure
-            .reports
-            .iter()
-            .map(|(_, view)| view.descriptor().code)
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(codes(&captured), codes(&vessel));
 }

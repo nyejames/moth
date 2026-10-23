@@ -37,9 +37,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::{
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::{
-    BoundaryAccumulator, into_boundary_failure,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, dev_server, invalid_config_message, terminal, terse,
@@ -1078,84 +1076,6 @@ fn capture_with_required_paths_rejects_unresolved_rendered_ancestor() {
 }
 
 #[test]
-fn compiler_messages_preserve_type_context_ranges_when_prepending_and_appending() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let point_path = path_fork
-        .try_intern_portable_path("Point", &mut string_table)
-        .expect("test path fits");
-    let status_path = path_fork
-        .try_intern_portable_path("Status", &mut string_table)
-        .expect("test path fits");
-    let path_table = Arc::new(path_fork.snapshot_table());
-
-    let mut first_environment = TypeEnvironment::new();
-    let (_, point_type) = first_environment.register_nominal_struct(StructTypeDefinition {
-        id: NominalTypeId(0),
-        path: point_path,
-        fields: Box::new([]),
-        generic_parameters: None,
-        const_record: false,
-    });
-    let first_error = CompilerDiagnostic::type_mismatch(
-        point_type,
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        TypeMismatchContext::Assignment,
-        None,
-    );
-    let warning = CompilerDiagnostic::unreachable_match_arm(None);
-    let mut first_messages =
-        CompilerMessages::from_diagnostics(vec![first_error], string_table.clone())
-            .with_type_context_for_all_diagnostics(first_environment);
-    first_messages
-        .attach_path_table_if_missing(Arc::clone(&path_table))
-        .expect("test path tables must pair with the test string table");
-    first_messages.prepend_diagnostics_preserving_context(vec![warning]);
-
-    let mut second_environment = TypeEnvironment::new();
-    let (_, status_type) = second_environment.register_nominal_struct(StructTypeDefinition {
-        id: NominalTypeId(0),
-        path: status_path,
-        fields: Box::new([]),
-        generic_parameters: None,
-        const_record: false,
-    });
-    let second_error = CompilerDiagnostic::type_mismatch(
-        status_type,
-        second_environment.builtins().string,
-        TypeMismatchContext::ReturnValue,
-        None,
-    );
-    let mut second_messages = CompilerMessages::from_diagnostics(vec![second_error], string_table)
-        .with_type_context_for_all_diagnostics(second_environment);
-    second_messages
-        .attach_path_table_if_missing(path_table)
-        .expect("test path tables must pair with the test string table");
-
-    first_messages.append_messages_preserving_context(second_messages);
-    assert_eq!(
-        first_messages.render_type_contexts()[0].diagnostic_range,
-        1..2
-    );
-    assert_eq!(
-        first_messages.render_type_contexts()[1].diagnostic_range,
-        2..3
-    );
-    let failure = into_boundary_failure(first_messages);
-    let rendered = terse::format_terse_boundary_messages(&failure);
-    assert!(
-        rendered[0].contains("expected Point, found I32"),
-        "errors should render before warnings; first rendered line should be the Point error, got: {}",
-        rendered[0]
-    );
-    assert!(
-        rendered[1].contains("expected Status, found String"),
-        "second rendered line should be the Status error, got: {}",
-        rendered[1]
-    );
-}
-
-#[test]
 fn prepared_rebase_updates_payloads_labels_and_tokens() {
     let mut local_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -1607,7 +1527,7 @@ fn type_mismatch_constructor_carries_type_ids_without_rendering() {
 }
 
 #[test]
-fn type_mismatch_terminal_guidance_renders_type_names_with_context() {
+fn type_mismatch_terminal_guidance_renders_captured_type_names() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let source_path = path_fork
@@ -1621,12 +1541,17 @@ fn type_mismatch_terminal_guidance_renders_type_names_with_context() {
         TypeMismatchContext::Declaration,
         span(source_path),
     );
-    let path_table = path_fork.snapshot_table();
-    let render_context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment))
-        .with_path_table(&path_table);
-
-    let guidance = terminal::format_diagnostic_guidance(&diagnostic, render_context);
+    let prepared = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        string_table,
+        Some(&type_environment),
+        true,
+        Some(Arc::new(path_fork.snapshot_table())),
+    );
+    let failure = finish_prepared_batch(prepared, StringTable::new());
+    let (report, view) = failure.reports.iter().next().expect("captured mismatch");
+    let guidance =
+        terminal::format_guidance_view(view, DiagnosticRenderContext::for_report(report));
 
     assert!(guidance.iter().any(|line| line == "Expected: I32"));
     assert!(guidance.iter().any(|line| line == "Found: String"));
@@ -1634,7 +1559,7 @@ fn type_mismatch_terminal_guidance_renders_type_names_with_context() {
 }
 
 #[test]
-fn type_mismatch_terse_renderer_renders_type_names_with_context() {
+fn type_mismatch_terse_renderer_renders_captured_type_names() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let source_path = path_fork
@@ -1648,11 +1573,18 @@ fn type_mismatch_terse_renderer_renders_type_names_with_context() {
         TypeMismatchContext::FunctionArgument,
         span(source_path),
     );
-    let path_table = path_fork.snapshot_table();
-    let render_context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment))
-        .with_path_table(&path_table);
-    let line = terse::format_terse_diagnostic_with_context(&diagnostic, render_context);
+    let prepared = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        string_table,
+        Some(&type_environment),
+        true,
+        Some(Arc::new(path_fork.snapshot_table())),
+    );
+    let failure = finish_prepared_batch(prepared, StringTable::new());
+    let line = terse::format_terse_boundary_messages(&failure)
+        .into_iter()
+        .next()
+        .expect("captured mismatch");
 
     assert!(line.contains("expected I32"));
     assert!(line.contains("found String"));
@@ -2194,16 +2126,6 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
             "'card' is a value and cannot be used as a type.",
             "NamespaceMisuse",
         ),
-        (
-            CompilerDiagnostic::unsupported_operator_types(
-                DiagnosticOperator::Add,
-                builtin_type_ids::STRING,
-                Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
-                span(source_path),
-            ),
-            "Operator `+` cannot concatenate",
-            "Add",
-        ),
     ];
     let render_context = DiagnosticRenderContext::new(&string_table);
 
@@ -2228,6 +2150,51 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
             "Terse output should not expose '{debug_name}': {terse_line}",
         );
     }
+    let type_environment = TypeEnvironment::new();
+    let operator_diagnostic = CompilerDiagnostic::unsupported_operator_types(
+        DiagnosticOperator::Add,
+        type_environment.builtins().string,
+        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
+        span(source_path),
+    );
+    let prepared = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(operator_diagnostic),
+        string_table,
+        Some(&type_environment),
+        true,
+        Some(Arc::new(path_fork.snapshot_table())),
+    );
+    let failure = finish_prepared_batch(prepared, StringTable::new());
+    let (report, view) = failure
+        .reports
+        .iter()
+        .next()
+        .expect("captured operator diagnostic");
+    let render_context = DiagnosticRenderContext::for_report(report);
+    let guidance = terminal::format_guidance_view(view, render_context);
+    let terse_line = terse::format_terse_boundary_messages(&failure)
+        .into_iter()
+        .next()
+        .expect("captured operator diagnostic");
+
+    assert!(
+        guidance
+            .iter()
+            .any(|line| line.contains("Operator `+` cannot concatenate")),
+        "Guidance should retain typed operator prose: {guidance:?}",
+    );
+    assert!(
+        terse_line.contains("Operator `+` cannot concatenate"),
+        "Terse output should retain typed operator prose: {terse_line}",
+    );
+    assert!(
+        !guidance.iter().any(|line| line.contains("Add")),
+        "Guidance should not expose the reason code: {guidance:?}",
+    );
+    assert!(
+        !terse_line.contains("Add"),
+        "Terse output should not expose the reason code: {terse_line}",
+    );
 }
 
 #[test]
@@ -2430,18 +2397,29 @@ fn propagation_boundary_renderers_preserve_authored_count_and_semantic_error_typ
         generic_parameters: None,
         const_record: false,
     });
-    let path_table = path_fork.snapshot_table();
-    let context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment))
-        .with_path_table(&path_table);
+    let path_table = Arc::new(path_fork.snapshot_table());
+    let render_captured = |diagnostic| {
+        let prepared = PreparedDiagnosticBatch::capture_from_bag(
+            DiagnosticBag::from(diagnostic),
+            string_table.clone(),
+            Some(&type_environment),
+            true,
+            Some(Arc::clone(&path_table)),
+        );
+        finish_prepared_batch(prepared, StringTable::new())
+    };
 
     for count in [2, 5] {
         let diagnostic = CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::FunctionHasMultipleSuccessReturns { count },
             None,
         );
-        let guidance = terminal::format_diagnostic_guidance(&diagnostic, context).join("\n");
-        let terse = terse::format_terse_diagnostic_with_context(&diagnostic, context);
+        let failure = render_captured(diagnostic);
+        let (report, view) = failure.reports.iter().next().expect("captured diagnostic");
+        let guidance =
+            terminal::format_guidance_view(view, DiagnosticRenderContext::for_report(report))
+                .join("\n");
+        let terse = terse::format_terse_boundary_messages(&failure).join("\n");
         let count_fact = format!("{count} authored success return slots");
         for message in [&guidance, &terse] {
             assert!(message.contains(&count_fact), "{message}");
@@ -2461,8 +2439,12 @@ fn propagation_boundary_renderers_preserve_authored_count_and_semantic_error_typ
         },
         None,
     );
-    let guidance = terminal::format_diagnostic_guidance(&diagnostic, context).join("\n");
-    let terse = terse::format_terse_diagnostic_with_context(&diagnostic, context);
+    let failure = render_captured(diagnostic);
+    let (report, view) = failure.reports.iter().next().expect("captured diagnostic");
+    let guidance =
+        terminal::format_guidance_view(view, DiagnosticRenderContext::for_report(report))
+            .join("\n");
+    let terse = terse::format_terse_boundary_messages(&failure).join("\n");
     for message in [&guidance, &terse] {
         assert!(message.contains("produces `ParseFailure!`"), "{message}");
         assert!(message.contains("`start` `Error!` boundary"), "{message}");
@@ -2807,26 +2789,27 @@ fn render_boundary_smoke_coverage_hides_internal_debug_names_by_family() {
         ),
         CompilerDiagnostic::deferred_feature(feature_name, span(source_path)),
     ];
-    let path_table = path_fork.snapshot_table();
-    let render_context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment))
-        .with_path_table(&path_table);
+    let prepared = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from_diagnostics(diagnostics),
+        string_table,
+        Some(&type_environment),
+        true,
+        Some(Arc::new(path_fork.snapshot_table())),
+    );
+    let failure = finish_prepared_batch(prepared, StringTable::new());
+    let html = dev_server::render_boundary_messages_html(&failure, Path::new("/tmp"));
+    assert_rendered_diagnostic_hides_internal_names(&html);
 
-    for diagnostic in &diagnostics {
-        let terminal_guidance =
-            terminal::format_diagnostic_guidance(diagnostic, render_context).join("\n");
-        let terse_line = terse::format_terse_diagnostic_with_context(diagnostic, render_context);
-        let dev_server_html = dev_server::render_diagnostics_html_with_context(
-            std::slice::from_ref(diagnostic),
-            Path::new("/tmp"),
-            render_context,
-        );
-
+    let terse_lines = terse::format_terse_boundary_messages(&failure);
+    assert_eq!(terse_lines.len(), 6);
+    for (report, view) in failure.reports.iter() {
+        let render_context = DiagnosticRenderContext::for_report(report);
+        let terminal_guidance = terminal::format_guidance_view(view, render_context).join("\n");
+        let terse_line = terse::format_terse_diagnostic_view(view, render_context);
         assert_rendered_diagnostic_hides_internal_names(&terminal_guidance);
         assert_rendered_diagnostic_hides_internal_names(&terse_line);
-        assert_rendered_diagnostic_hides_internal_names(&dev_server_html);
-        assert!(terse_line.contains(diagnostic.kind.code()));
-        assert!(dev_server_html.contains(diagnostic.kind.code()));
+        assert!(terse_line.contains(view.descriptor().code));
+        assert!(html.contains(view.descriptor().code));
     }
 }
 
@@ -3571,7 +3554,6 @@ fn generic_conflict_rendering_resolves_concrete_type_names() {
     let path_fork = PathInternerFork::empty();
     let function_name = string_table.intern("first");
     let parameter_name = string_table.intern("T");
-    let span = None;
     let type_environment = TypeEnvironment::new();
 
     let diagnostic = CompilerDiagnostic::invalid_generic_instantiation(
@@ -3583,14 +3565,24 @@ fn generic_conflict_rendering_resolves_concrete_type_names() {
             existing_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
             replacement_type_id: type_environment.builtins().string,
         },
-        span,
+        None,
     );
 
-    let path_table = path_fork.snapshot_table();
-    let render_context = DiagnosticRenderContext::new(&string_table)
-        .with_optional_type_environment(Some(&type_environment))
-        .with_path_table(&path_table);
-    let guidance = terminal::format_diagnostic_guidance(&diagnostic, render_context);
+    let prepared = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        string_table,
+        Some(&type_environment),
+        true,
+        Some(Arc::new(path_fork.snapshot_table())),
+    );
+    let failure = finish_prepared_batch(prepared, StringTable::new());
+    let (report, view) = failure
+        .reports
+        .iter()
+        .next()
+        .expect("captured inference conflict");
+    let guidance =
+        terminal::format_guidance_view(view, DiagnosticRenderContext::for_report(report));
 
     assert!(
         guidance
@@ -3598,7 +3590,7 @@ fn generic_conflict_rendering_resolves_concrete_type_names() {
             .any(|line| line.contains("Generic parameter 'T'")
                 && line.contains("I32")
                 && line.contains("String")),
-        "expected rendered type names in guidance, got: {guidance:?}"
+        "expected captured type names in guidance, got: {guidance:?}"
     );
 }
 

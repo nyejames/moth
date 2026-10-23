@@ -5,9 +5,9 @@
 //! WHY: diagnostics render type spellings after the live environment is gone. The snapshot stores
 //! the same spelling facts the live formatter reads, so both render identically.
 //! OWNERSHIP: the builder borrows the environment for the build. It owns the snapshot under
-//! construction, memos from `TypeId` to `TypeDisplayId` for resolved types and unresolved roots,
-//! and a scratch stack of child ids. `finish` consumes the builder, so the memos and scratch stack
-//! cannot outlive the build.
+//! construction, one memo that distinguishes encoded types from unresolved roots, and a scratch
+//! stack of child ids. `finish` consumes the builder, so the memo and scratch stack cannot outlive
+//! the build.
 //! EXCLUSIONS: string and path ids are copied as they are. The builder never remaps or merges them,
 //! and it does not deduplicate distinct `TypeId`s that share a spelling. Struct and choice records
 //! hold their path, and a choice also holds its variant names, but never member types. Recursive
@@ -51,12 +51,18 @@ impl Drop for ForcedTypeDisplayExhaustionGuard {
     }
 }
 
+/// Identifies an encoded type record or an unresolved root in the builder's shared memo.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum TypeDisplayMemoKey {
+    Encoded(TypeId),
+    UnresolvedRoot(TypeId),
+}
+
 pub(crate) struct TypeDisplaySnapshotBuilder<'environment> {
     environment: Option<&'environment TypeEnvironment>,
     snapshot: TypeDisplaySnapshot,
-    memo: FxHashMap<TypeId, TypeDisplayId>,
-    /// Separate from `memo`: unresolved roots and encoded unknown children have different shapes.
-    unresolved_memo: FxHashMap<TypeId, TypeDisplayId>,
+    /// Distinct keys preserve the different records for unresolved roots and unknown children.
+    memo: FxHashMap<TypeDisplayMemoKey, TypeDisplayId>,
     /// Display ids of the child frames being collected, innermost frame last.
     scratch: Vec<TypeDisplayId>,
 }
@@ -68,7 +74,6 @@ impl<'environment> TypeDisplaySnapshotBuilder<'environment> {
             environment,
             snapshot: TypeDisplaySnapshot::default(),
             memo: FxHashMap::default(),
-            unresolved_memo: FxHashMap::default(),
             scratch: Vec::new(),
         }
     }
@@ -81,7 +86,8 @@ impl<'environment> TypeDisplaySnapshotBuilder<'environment> {
         &mut self,
         type_id: TypeId,
     ) -> Result<TypeDisplayId, TypeDisplayCapacityError> {
-        if let Some(existing) = self.memo.get(&type_id) {
+        let memo_key = TypeDisplayMemoKey::Encoded(type_id);
+        if let Some(existing) = self.memo.get(&memo_key) {
             return Ok(*existing);
         }
 
@@ -90,8 +96,7 @@ impl<'environment> TypeDisplaySnapshotBuilder<'environment> {
             .records
             .push(DiagnosticTypeRecord::new(DiagnosticTypeTag::Unknown, 0, 0));
         // Record the id before encoding arguments, so a cyclic argument graph reuses this id.
-        self.memo.insert(type_id, id);
-
+        self.memo.insert(memo_key, id);
         let record = self.encode(type_id)?;
         let slot = self
             .snapshot
@@ -102,8 +107,8 @@ impl<'environment> TypeDisplaySnapshotBuilder<'environment> {
         Ok(id)
     }
 
-    /// Returns the id of a top-level type. A type the environment does not define, and every type without an
-    /// environment, gets a transitional unresolved root. That root prints its raw `TypeId`, the legacy spelling.
+    /// Returns the id of a top-level type. An absent definition or environment gets an unresolved
+    /// root that preserves its raw `TypeId` spelling for diagnostics.
     pub(crate) fn display_top_level(
         &mut self,
         type_id: TypeId,
@@ -118,12 +123,13 @@ impl<'environment> TypeDisplaySnapshotBuilder<'environment> {
         }
     }
 
-    /// Pushes or reuses an unresolved root, separate from any encoded unknown child record.
+    /// Pushes or reuses an unresolved root, distinct from an encoded unknown child record.
     fn push_unresolved(
         &mut self,
         type_id: TypeId,
     ) -> Result<TypeDisplayId, TypeDisplayCapacityError> {
-        if let Some(existing) = self.unresolved_memo.get(&type_id) {
+        let memo_key = TypeDisplayMemoKey::UnresolvedRoot(type_id);
+        if let Some(existing) = self.memo.get(&memo_key) {
             return Ok(*existing);
         }
 
@@ -133,7 +139,7 @@ impl<'environment> TypeDisplaySnapshotBuilder<'environment> {
             type_id.0,
             0,
         ));
-        self.unresolved_memo.insert(type_id, id);
+        self.memo.insert(memo_key, id);
         Ok(id)
     }
 

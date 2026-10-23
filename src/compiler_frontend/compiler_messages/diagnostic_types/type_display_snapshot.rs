@@ -14,7 +14,6 @@ use super::{TypeDisplayCapacityError, TypeDisplayId};
 use crate::compiler_frontend::datatypes::display::{
     ChoiceVariantShape, TypeDisplayShape, TypeDisplayView, display_view_type,
 };
-use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{
     StringId, StringIdRemap, StringTableResolver,
@@ -44,8 +43,8 @@ pub(super) enum DiagnosticTypeTag {
     GenericParameter,
     GenericInstance,
     AnonymousConstRecord,
-    /// Transitional root for a top-level type that legacy rendering prints as its raw `TypeId`.
-    /// `data_0` holds the raw id. P4.5 deletes this tag with the transitional fallback.
+    /// Root captured without a resolved type spelling. `data_0` holds its source `TypeId`.
+    /// Diagnostic rendering preserves that id as `TypeId(N)`.
     UnresolvedTypeId,
 }
 
@@ -249,12 +248,6 @@ impl TypeDisplaySnapshot {
                 path_table.expect("resolved type spellings need the path table"),
             ),
         }
-    }
-
-    /// Transitional: serves only the `TypeId(N)` fallback; P4.5 deletes it with that fallback.
-    pub(crate) fn unresolved_type_id(&self, type_id: TypeDisplayId) -> Option<TypeId> {
-        let record = self.record(type_id);
-        (record.tag == DiagnosticTypeTag::UnresolvedTypeId).then_some(TypeId(record.data_0))
     }
 
     fn record(&self, type_id: TypeDisplayId) -> &DiagnosticTypeRecord {
@@ -490,9 +483,7 @@ impl TypeDisplayView for TypeDisplaySnapshot {
                 base_path: self.generic_instance(type_id).base_path,
             },
             DiagnosticTypeTag::AnonymousConstRecord => TypeDisplayShape::AnonymousConstRecord,
-            DiagnosticTypeTag::UnresolvedTypeId => {
-                unreachable!("unresolved roots render through display_for_render")
-            }
+            DiagnosticTypeTag::UnresolvedTypeId => TypeDisplayShape::Unknown,
         }
     }
 

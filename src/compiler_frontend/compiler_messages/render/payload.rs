@@ -148,8 +148,8 @@ pub(crate) fn render_missing_closing_delimiter(
 }
 
 /// WHAT: renders a type mismatch from its compact facts.
-/// WHY: each type is spelled through the snapshot's display rules. A type prints as a raw
-/// `TypeId` unless both the live type environment and the path table are available.
+/// WHY: type spellings come from the owning site's captured snapshot; unresolved roots retain
+/// their stable `TypeId(N)` spelling.
 pub(crate) fn render_type_mismatch(
     diagnostic: &DiagnosticView<'_>,
     facts: &TypeMismatchView,

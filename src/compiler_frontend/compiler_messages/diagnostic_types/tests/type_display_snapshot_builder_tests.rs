@@ -1,9 +1,9 @@
 //! Builder tests for the frozen type-display snapshot.
 //!
-//! WHAT: proves that the builder returns one stable display id per requested type, that it stays
-//! finite on recursive definitions and that it maps missing definitions to the unknown placeholder.
-//! WHY: diagnostics can name recursive nominal types, and a builder that never terminates would
-//! hang the compiler while it renders an error.
+//! WHAT: proves that the builder returns stable display ids, stays finite on recursive
+//! definitions and distinguishes unknown children from unresolved roots.
+//! WHY: diagnostics preserve `TypeId(N)` for unresolved roots while unknown nested types remain
+//! visibly unknown; recursive types must not hang rendering.
 //! OWNERSHIP: tests only. Each test builds its own environment, string table and path table.
 
 use super::{choice_definition, empty_path_table, struct_definition, test_path};
@@ -114,17 +114,36 @@ fn builder_terminates_on_recursive_choice_payload_types() {
 }
 
 #[test]
-fn builder_maps_missing_definitions_to_unknown_placeholder() {
+fn builder_distinguishes_unknown_children_from_unresolved_roots() {
     let strings = StringTable::new();
     let paths = empty_path_table();
     let environment = TypeEnvironment::new();
+    let type_id = TypeId(9_999);
     let mut builder = TypeDisplaySnapshotBuilder::new(Some(&environment));
-    let display_id = builder
-        .display_id(TypeId(9_999))
+    let unknown_child = builder.display_id(type_id).expect("test snapshot fits");
+    let unresolved_root = builder
+        .display_top_level(type_id)
         .expect("test snapshot fits");
-    let snapshot = builder.finish();
     assert_eq!(
-        snapshot.display(display_id, &strings, &paths),
+        builder.display_id(type_id).expect("test snapshot fits"),
+        unknown_child
+    );
+    assert_eq!(
+        builder
+            .display_top_level(type_id)
+            .expect("test snapshot fits"),
+        unresolved_root
+    );
+    assert_ne!(unknown_child, unresolved_root);
+
+    let snapshot = builder.finish();
+    assert_eq!(snapshot.records.len(), 2);
+    assert_eq!(
+        snapshot.display(unknown_child, &strings, &paths),
         "<unknown type>"
+    );
+    assert_eq!(
+        snapshot.display_for_render(unresolved_root, &strings, Some(&paths)),
+        "TypeId(9999)"
     );
 }

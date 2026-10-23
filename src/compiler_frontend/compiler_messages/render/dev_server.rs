@@ -100,7 +100,7 @@ pub(crate) fn render_diagnostics_html_with_context(
     diagnostics
         .iter()
         .map(|d| {
-            let compact = compact_render_for_test(d, context);
+            let compact = compact_render_for_test(d);
             render_diagnostic_card(compact.view(), project_root, context)
         })
         .collect::<Vec<_>>()

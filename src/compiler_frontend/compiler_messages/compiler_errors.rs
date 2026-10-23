@@ -82,7 +82,6 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
-use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
     FrozenIdentityContext, FrozenIdentityHandle, SourceDatabase, SourceSpan, SpanCapacityError,
@@ -133,16 +132,6 @@ pub struct CompilerMessages {
     /// set. Each range is shifted alongside its diagnostics during aggregation.
     pub(crate) render_source_contexts: Vec<RenderSourceContext>,
 
-    /// Module-local type tables used only by diagnostic renderers.
-    ///
-    /// WHAT: carries semantic type lookup tables beside the diagnostics produced with them.
-    /// WHY: type diagnostics store `TypeId`s. Renderers need the matching module environment for
-    /// each diagnostic index, but individual diagnostics must not own that environment.
-    ///
-    /// Boundary shape: this is intentionally owned by `CompilerMessages` only on failed module or
-    /// build boundaries where diagnostics outlive the AST/HIR owner that still has the active
-    /// `TypeEnvironment`. Successful builds carry the module type table in `Module`, not here.
-    pub(crate) render_type_contexts: Vec<RenderTypeContext>,
     /// Per-diagnostic path-table snapshots used by transitional diagnostic renderers.
     ///
     /// A row is retained only when a direct path payload or type-render context consumes paths.
@@ -153,14 +142,6 @@ pub struct CompilerMessages {
 }
 
 const _: () = assert!(std::mem::size_of::<CompilerMessages>() <= 128);
-#[derive(Debug, Clone)]
-pub(crate) struct RenderTypeContext {
-    /// Range whose `TypeId` payloads resolve against this mutable environment. Aggregation shifts
-    ///       the range and remaps it with its string table before the vessel's single boundary
-    ///       conversion captures the type-display snapshot.
-    pub(crate) diagnostic_range: Range<usize>,
-    pub(crate) type_environment: TypeEnvironment,
-}
 #[derive(Debug, Clone)]
 pub(crate) struct RenderSourceContext {
     pub(crate) diagnostic_range: Range<usize>,
@@ -393,7 +374,6 @@ impl CompilerMessages {
             string_table: Box::new(string_table),
             install_mode: InstallMode::Unfrozen,
             render_source_contexts: Vec::new(),
-            render_type_contexts: Vec::new(),
             render_path_contexts: None,
         }
     }
@@ -408,18 +388,16 @@ impl CompilerMessages {
             string_table: Box::new(string_table),
             install_mode: InstallMode::Unfrozen,
             render_source_contexts: Vec::new(),
-            render_type_contexts: Vec::new(),
             render_path_contexts: None,
         }
     }
 
     /// Retain the path table that issued diagnostics before the local compiler owner is dropped.
     ///
-    /// The snapshot is range-bound to the diagnostics it serves. A caller-supplied table is
-    /// retained only when a renderer consumes path identities: a diagnostic payload renders a
-    /// `PathId`, or a retained type context needs the table for nominal type names. Path-free
-    /// diagnostics without type contexts have no path consumer, so their supplied table is
-    /// discarded rather than retained merely as incidental context.
+    /// Each path-table snapshot is range-bound to the diagnostics it serves. A caller-supplied
+    /// table is retained only when a diagnostic payload renders path identities. Path-free
+    /// diagnostics have no path consumer, so their supplied table is discarded instead of
+    /// being retained incidentally.
     ///
     /// When retention is required, pairing validates both the path identities the payloads
     /// render (each payload path and every ancestor its resolver walks) and every non-root node
@@ -450,7 +428,7 @@ impl CompilerMessages {
                 .payload
                 .required_path_payload_paths(&mut required_paths);
         }
-        if required_paths.is_empty() && self.render_type_contexts.is_empty() {
+        if required_paths.is_empty() {
             return Ok(());
         }
 
@@ -605,7 +583,6 @@ impl CompilerMessages {
             string_table: Box::new(string_table),
             install_mode: InstallMode::Unfrozen,
             render_source_contexts: Vec::new(),
-            render_type_contexts: Vec::new(),
             render_path_contexts: None,
         }
     }
@@ -630,7 +607,6 @@ impl CompilerMessages {
             string_table: Box::new(string_table),
             install_mode: InstallMode::Unfrozen,
             render_source_contexts: Vec::new(),
-            render_type_contexts: Vec::new(),
             render_path_contexts: None,
         }
     }
@@ -663,7 +639,6 @@ impl CompilerMessages {
             string_table: Box::new(string_table.clone()),
             install_mode: InstallMode::Unfrozen,
             render_source_contexts: Vec::new(),
-            render_type_contexts: Vec::new(),
             render_path_contexts: None,
         }
     }
@@ -687,7 +662,6 @@ impl CompilerMessages {
             string_table: Box::new(string_table.clone()),
             install_mode: InstallMode::Unfrozen,
             render_source_contexts: Vec::new(),
-            render_type_contexts: Vec::new(),
             render_path_contexts: None,
         }
     }
@@ -733,26 +707,13 @@ impl CompilerMessages {
             }));
     }
 
-    pub(crate) fn with_type_context_for_all_diagnostics(
-        mut self,
-        type_environment: TypeEnvironment,
-    ) -> Self {
-        if !self.diagnostics.is_empty() {
-            self.render_type_contexts.push(RenderTypeContext {
-                diagnostic_range: 0..self.diagnostics.len(),
-                type_environment,
-            });
-        }
-        self
-    }
-
     /// Prepend diagnostics that were produced before this message set.
     ///
-    /// WHAT: shifts every stored source, type and path render-context range forward by the
-    /// prepended length.
+    /// WHAT: shifts every stored source and path render-context range forward by the
+    ///       prepended length.
     /// WHY: frontend/build aggregation often carries warnings from earlier stages into a later
-    /// failure. Those warnings must stay before the failure without disconnecting diagnostics from
-    /// their retained source snapshot or render type table.
+    ///      failure. Those warnings must stay before the failure without disconnecting diagnostics
+    ///      from their retained source snapshot or path table.
     // The compiler-source-token-and-diagnostic-data-layout plan retains direct-template warning
     // contexts. Test-gated template pipelines and diagnostic aggregation tests consume this method.
     #[cfg_attr(not(test), allow(dead_code, reason = "P4.6 tests move to typed views"))]
@@ -775,10 +736,6 @@ impl CompilerMessages {
             source_context.diagnostic_range.end += shift;
         }
 
-        for type_context in &mut self.render_type_contexts {
-            type_context.diagnostic_range.start += shift;
-            type_context.diagnostic_range.end += shift;
-        }
         if let Some(path_contexts) = self.render_path_contexts.as_mut() {
             for path_context in path_contexts.iter_mut() {
                 path_context.diagnostic_range.start += shift;
@@ -788,9 +745,9 @@ impl CompilerMessages {
     }
     /// Append another boundary message set while preserving its render contexts.
     ///
-    /// WHAT: moves diagnostics and all source, type and path render-context ranges from `messages`
+    /// WHAT: moves diagnostics and all source and path render-context ranges from `messages`
     ///       into this set, offsets the appended ranges by the current diagnostic count, and
-    ///       remaps premerge facts into this set's table.
+    ///       remaps diagnostic and path facts into this set's table.
     /// WHY: this is the retired production merge. It survives only as the parity oracle that S4a's
     ///      accumulator tests compare against; every production tail now appends to the run
     ///      accumulator and freezes once.
@@ -802,12 +759,10 @@ impl CompilerMessages {
             string_table,
             install_mode,
             mut render_source_contexts,
-            mut render_type_contexts,
             mut render_path_contexts,
         } = messages;
         let remap = self.string_table.merge_from(string_table.as_ref());
         remap_diagnostics(&mut diagnostics, &remap);
-        remap_type_contexts(&mut render_type_contexts, &remap);
         remap_path_contexts(render_path_contexts.as_deref_mut(), &remap);
 
         let shift = self.diagnostics.len();
@@ -832,11 +787,6 @@ impl CompilerMessages {
             combined.extend(path_contexts.into_vec());
             self.render_path_contexts = Some(combined.into_boxed_slice());
         }
-        for mut type_context in render_type_contexts {
-            type_context.diagnostic_range.start += shift;
-            type_context.diagnostic_range.end += shift;
-            self.render_type_contexts.push(type_context);
-        }
 
         if install_mode == InstallMode::Frozen {
             self.mark_frozen();
@@ -848,27 +798,23 @@ impl CompilerMessages {
     }
     /// Remap premerge facts into another mutable string-table domain.
     ///
-    /// Diagnostics, type contexts and path contexts all move through the supplied mutable-table
-    /// remap. The boundary converter owns identity installation, so no fact is exempt here.
+    /// Diagnostics and path contexts move through the supplied string-table remap. The boundary
+    /// converter owns identity installation, so no fact is exempt here.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         remap_diagnostics(&mut self.diagnostics, remap);
-        remap_type_contexts(&mut self.render_type_contexts, remap);
         remap_path_contexts(self.render_path_contexts.as_deref_mut(), remap);
     }
 
-    /// Remap complete logical paths for diagnostics and renderer-owned type contexts.
+    /// Remap complete logical paths carried by diagnostics and renderer-owned path contexts.
     ///
-    /// Diagnostics and type environments belong to the worker fork and are rewritten through the
-    /// same `PathIdRemap` used by the rest of the module facts.
+    /// Diagnostics and path contexts belong to the worker fork and are rewritten through the same
+    /// `PathIdRemap` used by the rest of the module facts.
     pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         if remap.is_identity() {
             return;
         }
         for diagnostic in &mut self.diagnostics {
             diagnostic.remap_path_ids(remap);
-        }
-        for context in &mut self.render_type_contexts {
-            context.type_environment.remap_path_ids(remap);
         }
     }
 
@@ -887,6 +833,7 @@ impl CompilerMessages {
             .find(|source_context| source_context.diagnostic_range.contains(&diagnostic_index))
             .map(|source_context| source_context.source_database.as_ref())
     }
+    #[cfg(test)]
     pub(crate) fn path_table_for_diagnostic(&self, diagnostic_index: usize) -> Option<&PathTable> {
         self.render_path_contexts
             .as_deref()
@@ -898,15 +845,6 @@ impl CompilerMessages {
             .map(|context| context.path_table.as_ref())
     }
 
-    pub(crate) fn type_environment_for_diagnostic(
-        &self,
-        diagnostic_index: usize,
-    ) -> Option<&TypeEnvironment> {
-        self.render_type_contexts
-            .iter()
-            .find(|type_context| type_context.diagnostic_range.contains(&diagnostic_index))
-            .map(|type_context| &type_context.type_environment)
-    }
     /// Rebuild the legacy diagnostic context for test-only render parity checks.
     ///
     /// Production rendering uses compact report views; this adapter remains only for legacy
@@ -919,14 +857,8 @@ impl CompilerMessages {
         crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext::new(
             self.string_table.as_ref(),
         )
-        .with_optional_type_environment(self.type_environment_for_diagnostic(diagnostic_index))
         .with_optional_source_database(self.source_database_for_diagnostic(diagnostic_index))
         .with_optional_path_table(self.path_table_for_diagnostic(diagnostic_index))
-    }
-
-    #[cfg(test)]
-    pub(crate) fn render_type_contexts(&self) -> &[RenderTypeContext] {
-        &self.render_type_contexts
     }
 }
 
@@ -984,16 +916,6 @@ fn remap_diagnostics(diagnostics: &mut [CompilerDiagnostic], remap: &StringIdRem
 
     for diagnostic in diagnostics {
         diagnostic.remap_string_ids(remap);
-    }
-}
-
-fn remap_type_contexts(type_contexts: &mut [RenderTypeContext], remap: &StringIdRemap) {
-    if remap.is_identity() {
-        return;
-    }
-
-    for context in type_contexts {
-        context.type_environment.remap_string_ids(remap);
     }
 }
 

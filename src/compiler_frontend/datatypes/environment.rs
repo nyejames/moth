@@ -409,16 +409,12 @@ impl TypeEnvironment {
     //  Maintenance
     // -----------------
 
-    /// Remaps all interned string handles so this environment can be used with a merged table.
+    /// Remaps all interned string handles while reusing remapped snapshots.
     ///
     /// WHAT: updates nominal paths, field names, variant names, generic parameter names,
     /// function parameter names, and cached generic instance views.
-    /// WHY: module compilation uses local `StringTable`s and later merges them into the build
-    /// table; every frontend payload that stores `StringId`s must be rewritten at that boundary.
-    pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.remap_string_ids_with_cache(remap, &mut TypeEnvironmentRemapCache::default());
-    }
-
+    /// WHY: module compilation merges local `StringTable`s into the build table and shares
+    /// inherited snapshots across related environments.
     pub(crate) fn remap_string_ids_with_cache(
         &mut self,
         remap: &StringIdRemap,

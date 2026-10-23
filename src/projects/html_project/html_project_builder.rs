@@ -533,10 +533,7 @@ impl HtmlProjectBuilder {
         )
         .map_err(|error| match error {
             BackendFeatureValidationError::Diagnostic(diagnostic) => {
-                let mut messages = CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
-                    .with_type_context_for_all_diagnostics(
-                        module.executable.type_environment.clone(),
-                    );
+                let mut messages = CompilerMessages::from_diagnostic_ref(diagnostic, string_table);
                 attach_module_source_identity(&mut messages, &module.executable.hir, source_domain);
                 messages
             }
@@ -572,10 +569,7 @@ impl HtmlProjectBuilder {
             .map_err(|error| match error {
                 BackendFeatureValidationError::Diagnostic(diagnostic) => {
                     let mut messages =
-                        CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
-                            .with_type_context_for_all_diagnostics(
-                                linked.module.executable.type_environment.clone(),
-                            );
+                        CompilerMessages::from_diagnostic_ref(diagnostic, string_table);
                     attach_module_source_identity(
                         &mut messages,
                         &linked.module.executable.hir,

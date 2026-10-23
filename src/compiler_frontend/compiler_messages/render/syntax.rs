@@ -5,8 +5,8 @@
 //! need to live in the root render module map.
 
 use super::{
-    DiagnosticRenderContext, RenderedPayload, diagnostic_type_name, expected_token_message,
-    invalid_expression_message, token_kind_name,
+    DiagnosticRenderContext, RenderedPayload, expected_token_message, invalid_expression_message,
+    token_kind_name,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
     InvalidLoopHeaderCode, InvalidLoopHeaderView, InvalidMatchArmView,
@@ -709,10 +709,7 @@ pub(crate) fn render_invalid_match_arm(
     }
 }
 
-pub(crate) fn invalid_loop_header_message(
-    reason: InvalidLoopHeaderReason,
-    context: DiagnosticRenderContext<'_>,
-) -> String {
+pub(crate) fn invalid_loop_header_message(reason: InvalidLoopHeaderReason) -> String {
     match reason {
         InvalidLoopHeaderReason::EmptyHeader => {
             "Loop header is empty. Expected a condition or iteration source after 'loop'.".to_string()
@@ -762,13 +759,9 @@ pub(crate) fn invalid_loop_header_message(
         InvalidLoopHeaderReason::BindingAlreadyDeclared => {
             "Loop binding is already declared in this scope.".to_string()
         }
-        InvalidLoopHeaderReason::CollectionSourceNotCollection { found_type } => match found_type {
-            Some(found_type) => {
-                let found_type = diagnostic_type_name(found_type, context);
-                invalid_loop_header_collection_source_message(Some(&found_type))
-            }
-            None => invalid_loop_header_collection_source_message(None),
-        },
+        InvalidLoopHeaderReason::CollectionSourceNotCollection { .. } => {
+            unreachable!("collection type details are rendered from the snapshot")
+        }
         InvalidLoopHeaderReason::MissingRangeSeparator => {
             "Range loops must include 'to' between bounds.".to_string()
         }
@@ -819,7 +812,7 @@ pub(crate) fn render_invalid_loop_header(
             });
             invalid_loop_header_collection_source_message(found_type.as_deref())
         }
-        reason => invalid_loop_header_message(reason.to_reason(None), context),
+        reason => invalid_loop_header_message(reason.to_reason(None)),
     };
     RenderedPayload {
         message,

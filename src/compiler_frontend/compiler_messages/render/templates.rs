@@ -218,10 +218,7 @@ fn unsupported_template_head_type_message(type_name: &str) -> String {
     )
 }
 
-pub(crate) fn invalid_template_structure_message(
-    reason: InvalidTemplateStructureReason,
-    context: DiagnosticRenderContext<'_>,
-) -> String {
+pub(crate) fn invalid_template_structure_message(reason: InvalidTemplateStructureReason) -> String {
     match reason {
 
         // Template delimiters, nesting and direct child structure.
@@ -254,9 +251,8 @@ pub(crate) fn invalid_template_structure_message(
         InvalidTemplateStructureReason::FallibleValueInTemplateHead => {
             "Template heads do not implicitly unwrap fallible values. Handle the error before using the success value, with postfix `!` in a compatible fallible function or with `catch` recovery.".to_string()
         }
-        InvalidTemplateStructureReason::UnsupportedTypeInTemplateHead { type_id } => {
-            let type_name = super::context::diagnostic_type_name(type_id, context);
-            unsupported_template_head_type_message(&type_name)
+        InvalidTemplateStructureReason::UnsupportedTypeInTemplateHead { .. } => {
+            unreachable!("template-head type details are rendered from the snapshot")
         }
         InvalidTemplateStructureReason::RuntimeTemplateInConst => {
             "Const templates can only capture compile-time templates.".to_string()
@@ -357,7 +353,7 @@ pub(crate) fn render_invalid_template_structure(
             let reason = reason
                 .to_reason(None, facts.limit)
                 .expect("the template-structure code stores the data its reason names");
-            invalid_template_structure_message(reason, context)
+            invalid_template_structure_message(reason)
         }
     };
     RenderedPayload {

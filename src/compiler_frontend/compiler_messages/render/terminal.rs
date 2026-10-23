@@ -133,7 +133,7 @@ pub(crate) fn format_terminal_source_frame_for_test(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
 ) -> Option<String> {
-    let compact = compact_render_for_test(diagnostic, context);
+    let compact = compact_render_for_test(diagnostic);
     let subject = DiagnosticSubject::new(compact.view());
     let position = subject.primary_position(context)?;
     let frame = terminal_source_frame(&position)?;
@@ -153,7 +153,7 @@ pub(crate) fn format_label_messages_with_context(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
 ) -> Vec<String> {
-    let compact = compact_render_for_test(diagnostic, context);
+    let compact = compact_render_for_test(diagnostic);
     let subject = DiagnosticSubject::new(compact.view());
     let root = std::env::current_dir().unwrap_or_default();
     format_label_messages_from_subject(&subject, context, &root)
@@ -165,7 +165,7 @@ pub(crate) fn format_label_messages_with_context_from_root(
     context: DiagnosticRenderContext<'_>,
     root: &Path,
 ) -> Vec<String> {
-    let compact = compact_render_for_test(diagnostic, context);
+    let compact = compact_render_for_test(diagnostic);
     let subject = DiagnosticSubject::new(compact.view());
     format_label_messages_from_subject(&subject, context, root)
 }
@@ -240,7 +240,7 @@ pub(crate) fn format_diagnostic_guidance(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
 ) -> Vec<String> {
-    let compact = compact_render_for_test(diagnostic, context);
+    let compact = compact_render_for_test(diagnostic);
     let subject = DiagnosticSubject::new(compact.view());
     format_guidance_from_subject(&subject, context)
 }

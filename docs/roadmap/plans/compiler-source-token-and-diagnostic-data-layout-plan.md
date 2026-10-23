@@ -108,10 +108,12 @@ ACTIVE_PLAN:
 - Execution order: Phase 4 runs as the steps in `PHASE_4_EXECUTION_ORDER` below. The slice
   checklists remain the acceptance contract. Only their order and grouping changed, under the
   architecture document's repository-discovered corrections rule.
-- NEXT_SUBSTEP: P4.5 slice S6 of `PHASE_4_5_SEQUENCE`, owning-site type capture, at sub-slice
-  S6f2: delete `RenderTypeContext`, live type-environment rendering and the transitional
-  unresolved type-display fallbacks; the captured `TypeId(N)` spelling for owners without an
-  environment or path table stays. S6f1 is accepted in "Phase 4 P4.5 S6f1: premerge failures
+- NEXT_SUBSTEP: P4.5 slice S7 of `PHASE_4_5_SEQUENCE`: delete `CompilerMessages`, the remaining
+  `Render*Context` types and boundary types; re-home build-result items, probes and metrics. S6
+  is complete. S6f2 is accepted in "Phase 4 P4.5 S6f2: diagnostics retain no type environment":
+  `RenderTypeContext`, every retained or render-time type environment, `diagnostic_type_name` and
+  `TypeDisplaySnapshot::unresolved_type_id` are deleted, and the builder keeps one memo. S6f1 is
+  accepted in "Phase 4 P4.5 S6f1: premerge failures
   carry prepared batches": `PremergeFailure::{Diagnosed, Mixed}` carry
   `PreparedDiagnosticBatch`, every producer captures at its site
   (`capture_with_required_paths` retains the issuing fork's snapshot only for rendered-path
@@ -233,13 +235,11 @@ PHASE_4_MIGRATION_STATE:
 - Foreign-site contexts: the diagnostic store keeps a deduplicated `Vec<FrozenIdentityHandle>`
   behind its 8-byte cold rows. P4.5 replaces it with the report-owned context references of the
   frozen report.
-- Type-display fallback: the live `diagnostic_type_name` still renders `TypeId(N)` when a render
-  context has no type environment, no path table, or an environment without the type. P4.3
-  reproduces that at render time with one transitional snapshot record created only by the render
-  adapter. P4.4 added `TypeDisplaySnapshot::unresolved_type_id`, through which the operator
-  renderers classify such an operand by its raw `TypeId`, and a builder memo of unresolved roots
-  by `TypeId`. P4.5 deletes all three once every capture point snapshots types with their owning
-  environment.
+- Type-display fallback: resolved by S6. Every capture point snapshots types with its owning
+  environment; render reads only snapshots. An owner that captured without an environment or path
+  table (for example `CatchOnNonFallible` in finalization, or path-free successful warnings)
+  records an `UnresolvedTypeId` root, which still renders `TypeId(N)` and has no shape, so no
+  renderer classifies it by its raw `TypeId`.
 - Infrastructure errors: `BoundaryFailure::infrastructure` (`Option<Box<InfrastructureErrors>>`)
   is the transitional lane beside `DiagnosticReportSet`. Its callers are the S3 boundary exits:
   `build_project`, the `BuildResult` take functions, check, the frontend benchmark, boracle

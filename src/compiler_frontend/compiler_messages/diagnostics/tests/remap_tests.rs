@@ -128,11 +128,8 @@ impl Stored {
 fn render_context<'a>(
     strings: &'a StringTable,
     paths: &'a PathTable,
-    type_environment: &'a TypeEnvironment,
 ) -> DiagnosticRenderContext<'a> {
-    DiagnosticRenderContext::new(strings)
-        .with_optional_type_environment(Some(type_environment))
-        .with_path_table(paths)
+    DiagnosticRenderContext::new(strings).with_path_table(paths)
 }
 
 /// The string IDs a draft's extra record carries, or none when the draft has no string extra.
@@ -357,7 +354,7 @@ fn string_fact_words_map_to_destination_ids() {
     assert_ne!(alpha, dest_alpha);
     assert_ne!(beta, dest_beta);
     let paths = domain.paths.freeze();
-    let context = render_context(&domain.strings, &paths, &type_environment);
+    let context = render_context(&domain.strings, &paths);
 
     let mut remapped = duplicate_declaration(alpha, Some(exact_span(0, 5)));
     remapped.remap_string_ids(&domain.string_remap);
@@ -382,7 +379,7 @@ fn optional_string_words_remap_only_when_present() {
     assert_ne!(alpha, dest_alpha);
     assert_ne!(beta, dest_beta);
     let paths = domain.paths.freeze();
-    let context = render_context(&domain.strings, &paths, &type_environment);
+    let context = render_context(&domain.strings, &paths);
 
     // `WrongArgumentCount` stores its name in words 3..4, the other named reasons in words 1..2. An absent name keeps
     // the sentinel word.
@@ -431,7 +428,7 @@ fn extra_string_ids_remap_to_destination_ids() {
     assert_ne!(alpha, dest_alpha);
     assert_ne!(beta, dest_beta);
     let paths = domain.paths.freeze();
-    let context = render_context(&domain.strings, &paths, &type_environment);
+    let context = render_context(&domain.strings, &paths);
 
     // Missing variant names live in the extra record, not in the fact words.
     let mut remapped = non_exhaustive_match(
@@ -484,7 +481,7 @@ fn path_fact_words_map_to_destination_path_ids() {
         .expect("the test path is portable");
     assert_eq!(dest_path, direct_path);
     let paths = domain.paths.freeze();
-    let context = render_context(&domain.strings, &paths, &type_environment);
+    let context = render_context(&domain.strings, &paths);
 
     let mut remapped = circular_dependency(source_path, Some(exact_span(0, 5)));
     remapped.remap_path_ids(&domain.path_remap);
@@ -507,7 +504,7 @@ fn place_words_remap_by_tag() {
     assert_ne!(alpha, dest_alpha);
     assert_ne!(source_path, dest_path);
     let paths = domain.paths.freeze();
-    let context = render_context(&domain.strings, &paths, &type_environment);
+    let context = render_context(&domain.strings, &paths);
 
     // `Local` and `RenderedText` store string IDs, `Path` stores a path ID, and `Unknown` stores neither.
     let places = [
@@ -599,7 +596,7 @@ fn token_words_remap_their_string_payloads() {
     let dest_alpha = domain.string_remap.get(alpha);
     assert_ne!(alpha, dest_alpha);
     let paths = domain.paths.freeze();
-    let context = render_context(&domain.strings, &paths, &type_environment);
+    let context = render_context(&domain.strings, &paths);
 
     // A symbol and a style directive carry a string payload, so their IDs remap. A static token carries none.
     let cases = [
@@ -663,7 +660,7 @@ fn label_words_remap_only_string_labels() {
     assert_ne!(input_name, dest_input);
     assert_ne!(rendered_text, dest_text);
     let paths = domain.paths.freeze();
-    let context = render_context(&domain.strings, &paths, &type_environment);
+    let context = render_context(&domain.strings, &paths);
 
     let mut remapped = label_draft(input_name, rendered_text);
     remapped.remap_string_ids(&domain.string_remap);
@@ -695,7 +692,7 @@ fn substitution_parameter_names_remap() {
     let dest_parameter = domain.string_remap.get(parameter);
     assert_ne!(parameter, dest_parameter);
     let paths = domain.paths.freeze();
-    let context = render_context(&domain.strings, &paths, &type_environment);
+    let context = render_context(&domain.strings, &paths);
 
     let mut remapped = substitution_draft(parameter);
     remapped.remap_string_ids(&domain.string_remap);
@@ -776,7 +773,7 @@ fn conflicting_inference_names_live_in_the_extra_and_remap() {
     assert_ne!(type_name, dest_type);
     assert_ne!(parameter_name, dest_parameter);
     let paths = domain.paths.freeze();
-    let context = render_context(&domain.strings, &paths, &type_environment);
+    let context = render_context(&domain.strings, &paths);
 
     let mut remapped = invalid_generic_instantiation(
         Some(type_name),

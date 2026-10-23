@@ -146,7 +146,7 @@ pub(crate) fn format_terse_diagnostic_with_context(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let compact = compact_render_for_test(diagnostic, context);
+    let compact = compact_render_for_test(diagnostic);
     format_terse_diagnostic_view(compact.view(), context)
 }
 

@@ -27,8 +27,6 @@ use crate::compiler_frontend::compiler_messages::diagnostic_types::{
     type_display_snapshot::TypeDisplaySnapshot,
     type_display_snapshot_builder::TypeDisplaySnapshotBuilder,
 };
-#[cfg(test)]
-use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
     CapacityResource, CompilerDiagnostic, DiagnosticCapacityResource, DiagnosticSeverity,
     SourceSpanCapacityResource,
@@ -138,18 +136,12 @@ impl CompactRender {
 ///
 /// Returns `None` when the adapter declines the diagnostic.
 #[cfg(test)]
-pub(crate) fn compact_for_render(
-    diagnostic: &CompilerDiagnostic,
-    context: DiagnosticRenderContext<'_>,
-) -> Option<CompactRender> {
+pub(crate) fn compact_for_render(diagnostic: &CompilerDiagnostic) -> Option<CompactRender> {
     let mut draft = finish(families::from_legacy(diagnostic)?, diagnostic);
 
-    // Spellings resolve only when the live environment and the path table both exist, which is the condition
-    // `diagnostic_type_name` applies. Any other type becomes an unresolved root that prints its raw id.
-    let environment = context
-        .type_environment
-        .filter(|_| context.path_table().is_some());
-    let mut builder = TypeDisplaySnapshotBuilder::new(environment);
+    // Test-only legacy contexts no longer carry a live type environment; uncaptured roots keep
+    // the same `TypeId(N)` spelling as production capture without an environment.
+    let mut builder = TypeDisplaySnapshotBuilder::new(None);
     draft
         .capture_types(&mut |type_id| builder.display_top_level(type_id))
         .expect("one diagnostic's types always fit the u32 display-id space");
@@ -167,11 +159,8 @@ pub(crate) fn compact_for_render(
 /// Compacts `diagnostic` for a render test. A diagnostic without a compact family cannot reach a render entry, so
 /// this panics where the boundary converter does.
 #[cfg(test)]
-pub(crate) fn compact_render_for_test(
-    diagnostic: &CompilerDiagnostic,
-    context: DiagnosticRenderContext<'_>,
-) -> CompactRender {
-    compact_for_render(diagnostic, context).unwrap_or_else(|| {
+pub(crate) fn compact_render_for_test(diagnostic: &CompilerDiagnostic) -> CompactRender {
+    compact_for_render(diagnostic).unwrap_or_else(|| {
         panic!(
             "legacy diagnostic has no compact family; the boundary converter cannot represent it"
         )
@@ -750,10 +739,7 @@ fn prepare(
         rows.iter()
             .position(|row| row.diagnostic_range.contains(&index))
     });
-    let environment = messages
-        .type_environment_for_diagnostic(index)
-        .filter(|_| messages.path_table_for_diagnostic(index).is_some());
-    let mut prepared = prepare_diagnostic(diagnostic, environment, required_handles);
+    let mut prepared = prepare_diagnostic(diagnostic, None, required_handles);
     prepared.owner = owner;
     prepared.identityless_owner = identityless_owner;
     prepared.explicit_path = explicit_path;

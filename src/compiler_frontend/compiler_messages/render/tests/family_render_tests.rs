@@ -20,11 +20,11 @@ fn severity_override_on_a_family_changes_only_the_severity_letter() {
 
     // Both lines must come from the compact path, or the comparison would not test a stored severity.
     assert!(
-        compact_for_render(&family_default, DiagnosticRenderContext::new(&string_table)).is_some(),
+        compact_for_render(&family_default).is_some(),
         "the family default must take the compact path"
     );
     assert!(
-        compact_for_render(&escalated, DiagnosticRenderContext::new(&string_table)).is_some(),
+        compact_for_render(&escalated).is_some(),
         "the escalated diagnostic must take the compact path"
     );
 

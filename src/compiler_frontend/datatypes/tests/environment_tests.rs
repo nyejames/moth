@@ -931,7 +931,8 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
     merged_table.intern("preexisting-name");
     let remap = merged_table.merge_from(&local_table);
 
-    env.remap_string_ids(&remap);
+    let mut remap_cache = TypeEnvironmentRemapCache::default();
+    env.remap_string_ids_with_cache(&remap, &mut remap_cache);
 
     let remapped_box_path = box_path;
     assert_eq!(

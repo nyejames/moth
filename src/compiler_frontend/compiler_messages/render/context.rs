@@ -5,6 +5,8 @@
 //! WHY: diagnostic facts stay structured until this boundary, where stable IDs and token
 //! kinds become user-facing prose.
 
+#[cfg(test)]
+use super::subject::DiagnosticSubject;
 use super::*;
 use crate::compiler_frontend::build_config::BuildConfigValueOrigin;
 use crate::compiler_frontend::compiler_messages::DiagnosticLabelStyle;
@@ -14,12 +16,12 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::token_le
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
+#[cfg(test)]
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::compact_render_for_test;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReport;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 #[cfg(test)]
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage,
-};
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticLabel};
 #[cfg(test)]
 use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::source::line_index::{LineIndex, LinePosition};
@@ -100,14 +102,13 @@ impl<'a> DiagnosticPathContext<'a> {
 /// Render-boundary data needed to turn diagnostic facts into user-facing text.
 ///
 /// WHAT: carries shared lookup tables by reference while diagnostics keep only stable IDs.
-/// WHY: type diagnostics should store semantic `TypeId`s, not rendered strings or owned
-/// `TypeEnvironment` snapshots. The render boundary decides how those IDs become names.
-/// Frozen identity rows are authoritative for retained source spans. A test-only `SourceDatabase`
-/// is consulted only when no frozen identity context is attached.
+/// WHY: type spellings are frozen into snapshots at the owning boundary, while source identity
+/// rows remain available to renderers after diagnostics outlive their producer.
+/// Frozen identity rows are authoritative for retained source spans. A test-only
+/// `SourceDatabase` is consulted only when no frozen identity context is attached.
 #[derive(Clone, Copy)]
 pub(crate) struct DiagnosticRenderContext<'a> {
     pub(crate) string_table: &'a dyn StringTableResolver,
-    pub(crate) type_environment: Option<&'a TypeEnvironment>,
     #[cfg(test)]
     pub(crate) source_database: Option<&'a SourceDatabase>,
     pub(crate) frozen_identity: Option<&'a FrozenIdentityContext>,
@@ -118,7 +119,6 @@ impl<'a> DiagnosticRenderContext<'a> {
     pub(crate) fn new(string_table: &'a dyn StringTableResolver) -> Self {
         Self {
             string_table,
-            type_environment: None,
             #[cfg(test)]
             source_database: None,
             frozen_identity: None,
@@ -138,15 +138,6 @@ impl<'a> DiagnosticRenderContext<'a> {
         self.string_table = frozen_identity.strings();
         self.frozen_identity = Some(frozen_identity);
         self.path_context = Some(DiagnosticPathContext::Table(frozen_identity.paths()));
-        self
-    }
-
-    #[cfg(test)]
-    pub(crate) fn with_optional_type_environment(
-        mut self,
-        type_environment: Option<&'a TypeEnvironment>,
-    ) -> Self {
-        self.type_environment = type_environment;
         self
     }
 
@@ -353,34 +344,17 @@ impl<'a> DiagnosticRenderContext<'a> {
         })
     }
 }
-/// Resolve secondary labels into facts consumed independently by terminal and HTML renderers.
+/// Resolve labels through the captured compact snapshot for legacy-boundary tests.
 ///
-/// The path is made relative to `root`, while line and column remain one-based display
-/// coordinates. A label with a resolvable source span keeps its location even when it carries no
-/// message, which then stays empty. A spanless message is retained with no location; a label whose
-/// source span cannot be resolved, or that has neither a location nor a message, is omitted.
+/// This adapter keeps source-position tests on the same snapshot-backed label path as production.
 #[cfg(test)]
 pub(crate) fn resolve_label_render_facts_from_root(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
     root: &Path,
 ) -> Vec<ResolvedDiagnosticLabel> {
-    diagnostic
-        .labels
-        .iter()
-        .filter_map(|label| {
-            resolved_label_fact(
-                label.style,
-                label.span.is_some(),
-                context.label_position(label),
-                label
-                    .message
-                    .as_ref()
-                    .map(|message| diagnostic_label_message_text(message, context)),
-                root,
-            )
-        })
-        .collect()
+    let compact = compact_render_for_test(diagnostic);
+    DiagnosticSubject::new(compact.view()).resolved_labels(context, root)
 }
 
 /// Build one resolved label from its style, its position and its message.
@@ -420,76 +394,6 @@ pub(super) fn resolved_label_fact(
         )),
         message: message.unwrap_or_default(),
     })
-}
-
-#[cfg(test)]
-fn diagnostic_label_message_text(
-    message: &DiagnosticLabelMessage,
-    context: DiagnosticRenderContext<'_>,
-) -> String {
-    let string_table = context.string_table;
-
-    match message {
-        DiagnosticLabelMessage::PreviousDeclaration => "previous declaration here".to_owned(),
-        DiagnosticLabelMessage::ConflictingAccess => "earlier conflicting access here".to_owned(),
-        DiagnosticLabelMessage::ValueMovedHere => "value moved here".to_owned(),
-        DiagnosticLabelMessage::RenderedText(text) => string_table.resolve(*text).to_owned(),
-        DiagnosticLabelMessage::ConfigInputOrigin { input_name, origin } => {
-            let origin_text = match origin {
-                BuildConfigValueOrigin::ExplicitInput => "an explicit input",
-                BuildConfigValueOrigin::BuilderGlobal => "a builder-provided global",
-                BuildConfigValueOrigin::FixedProjectField => "a fixed project field",
-                BuildConfigValueOrigin::DeclarationDefault => "its declaration default",
-            };
-            format!(
-                "configuration input `{}` resolved from {origin_text}",
-                string_table.resolve(*input_name)
-            )
-        }
-        DiagnosticLabelMessage::GenericInstantiationBodySite => {
-            "generic body operation failed here".to_owned()
-        }
-        DiagnosticLabelMessage::GenericInstantiationDeclarationSite => {
-            "generic function declared here".to_owned()
-        }
-        DiagnosticLabelMessage::GenericInstantiationSubstitutions { substitutions } => {
-            let substitution_text = substitutions
-                .iter()
-                .map(|substitution| {
-                    let parameter_name = string_table.resolve(substitution.parameter_name);
-                    let concrete_type =
-                        diagnostic_type_name(substitution.concrete_type_id, context);
-                    format!("{parameter_name} = {concrete_type}")
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-
-            format!("generic substitution: {substitution_text}")
-        }
-        DiagnosticLabelMessage::GenericInferencePreviousEvidence => {
-            "previous generic inference evidence here".to_owned()
-        }
-        DiagnosticLabelMessage::ImmutableBindingDeclaration => {
-            "immutable binding declared here".to_owned()
-        }
-        DiagnosticLabelMessage::TypedFailureProducer { error_type_id } => {
-            let error_type = diagnostic_type_name(*error_type_id, context);
-            format!("`{error_type}!` failure produced here")
-        }
-        DiagnosticLabelMessage::ImplicitFailureProducer => {
-            "implicit built-in failure may escape here".to_owned()
-        }
-        DiagnosticLabelMessage::BuiltinFailureCall => {
-            "implicit built-in failure propagates through this call".to_owned()
-        }
-        DiagnosticLabelMessage::BuiltinFailureOrigin => {
-            "original failing numeric or range operation here".to_owned()
-        }
-        DiagnosticLabelMessage::BuiltinWriteBackOrigin { target_type_id } => {
-            let target = diagnostic_type_name(*target_type_id, context);
-            format!("write-back into `{target}` here after the compound update")
-        }
-    }
 }
 
 /// The message of one compact label. `None` is the message-less label, which marks a location
@@ -680,27 +584,6 @@ pub(crate) fn primary_underline_length(
         u32::MAX
     };
     caret_cells(line, position.start.column, end_column).1
-}
-
-pub(crate) fn diagnostic_type_name(
-    type_id: TypeId,
-    context: DiagnosticRenderContext<'_>,
-) -> String {
-    let Some(type_environment) = context.type_environment else {
-        return format!("TypeId({})", type_id.0);
-    };
-    let Some(path_table) = context.path_table() else {
-        return format!("TypeId({})", type_id.0);
-    };
-    if type_environment.get(type_id).is_none() {
-        return format!("TypeId({})", type_id.0);
-    }
-    crate::compiler_frontend::datatypes::display::display_type_with_resolver(
-        type_id,
-        type_environment,
-        context.string_table,
-        path_table,
-    )
 }
 
 pub(crate) fn value_receiver_context_name(

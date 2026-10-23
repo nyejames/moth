@@ -84,9 +84,6 @@ use crate::compiler_frontend::compiler_messages::{DiagnosticToken, TokenDescript
 use crate::compiler_frontend::datatypes::display::{
     BOOL_TYPE_SPELLING, TypeDisplayShape, TypeDisplayView,
 };
-use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::common_fixed_integer;
 use crate::compiler_frontend::source_packages::root_file::{
     dependency_component_is_config_file, dependency_component_is_support_root_file,
@@ -321,7 +318,7 @@ pub(crate) fn invalid_map_type_message(
 }
 
 /// WHAT: renders map-type diagnostics from compact type displays and their reason code.
-/// WHY: the stored type display cannot be converted back to a legacy raw `TypeId`.
+/// WHY: key type names come from the diagnostic's captured display records.
 pub(crate) fn render_invalid_map_type(
     diagnostic: &DiagnosticView<'_>,
     view: &InvalidMapTypeView,
@@ -654,12 +651,6 @@ fn diagnostic_fixed_scalar(
     types: &TypeDisplaySnapshot,
     type_id: TypeDisplayId,
 ) -> Option<FixedScalar> {
-    if let Some(type_id) = types.unresolved_type_id(type_id) {
-        return FixedScalar::ALL
-            .into_iter()
-            .find(|scalar| builtin_type_ids::fixed_scalar(*scalar) == type_id);
-    }
-
     match types.shape(type_id) {
         TypeDisplayShape::FixedScalar(scalar) => Some(scalar),
         _ => None,
@@ -721,29 +712,18 @@ fn exactly_one_operand_is_plain_string(
 }
 
 fn is_plain_string(types: &TypeDisplaySnapshot, type_id: TypeDisplayId) -> bool {
-    match types.unresolved_type_id(type_id) {
-        Some(type_id) => type_id == builtin_type_ids::STRING,
-        None => matches!(types.shape(type_id), TypeDisplayShape::String),
-    }
+    matches!(types.shape(type_id), TypeDisplayShape::String)
 }
 
-/// The generic parameter an operand names, if any. A captured type answers from the snapshot; an unresolved one needs
-/// the live environment.
+/// The generic parameter an operand names, if its captured type snapshot records one.
 fn generic_parameter_name(
     type_id: TypeDisplayId,
     types: &TypeDisplaySnapshot,
     context: DiagnosticRenderContext<'_>,
 ) -> Option<String> {
-    match types.unresolved_type_id(type_id) {
-        Some(type_id) => matches!(
-            context.type_environment?.shape(type_id),
-            TypeDisplayShape::GenericParameter { .. }
-        )
-        .then(|| diagnostic_type_name(type_id, context)),
-        None => types
-            .is_generic_parameter(type_id)
-            .then(|| diagnostic_type_display_name(types, type_id, context)),
-    }
+    types
+        .is_generic_parameter(type_id)
+        .then(|| diagnostic_type_display_name(types, type_id, context))
 }
 
 fn diagnostic_type_display_name(
