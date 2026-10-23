@@ -21,10 +21,12 @@ fn detects_int_divide_at_statement_start_as_comment_mistake() {
 }
 
 #[test]
-fn detects_fn_keyword_as_function_declaration_mistake() {
-    assert_common_syntax_mistake("fn hello():\n", |reason| {
-        matches!(reason, CommonSyntaxMistakeReason::FunctionKeyword { .. })
-    });
+fn fn_is_an_ordinary_function_name() {
+    let source = "fn || -> I32:\n    return 7\n;\nvalue = fn()\n";
+    assert!(
+        crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result(source).is_ok(),
+        "fn must be legal both as a declared function and as a call"
+    );
 }
 
 #[test]

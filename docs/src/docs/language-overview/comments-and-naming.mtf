@@ -51,7 +51,7 @@ Identifiers start with `_` or a Unicode alphabetic character and continue with
 `_` or a Unicode alphanumeric character. Exact source-word recognition remains
 case-sensitive, including `this` and `This`. `moth-lexical` owns one shared
 source-word inventory and user-name predicate for Moth and MON, including
-reserved-only names such as `fn`. The predicate strips leading underscores and
+reserved-only names. The predicate strips leading underscores and
 matches reserved words without regard to ASCII case. It applies no Unicode
 normalisation or XID substitution. Naming conventions above describe style, not
 lexical validity: a style mismatch can produce a warning without making an
