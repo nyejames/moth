@@ -1,8 +1,11 @@
-This cheatsheet describes the accepted final language design, which can exceed current compiler support. The @../progress (progress matrix) and @https://github.com/nyejames/moth/blob/main/docs/roadmap/roadmap.md (roadmap) are the authorities for implementation and sequencing. Check the linked language references before assuming an ambiguous form is valid.
+This cheatsheet covers the accepted final Moth language design, including features beyond current compiler support.
+See the @../progress (progress matrix) and @https://github.com/nyejames/moth/blob/main/docs/roadmap/roadmap.md (roadmap) for implementation status.
+Follow the linked references for ambiguous or detailed rules.
 
 ## Syntax and names
 
-`:` opens a block and `;` closes it. Semicolons do not end statements. Indentation aids reading but does not define scope. Statements run in source order.
+`:` opens a block and `;` closes it. Semicolons don't end statements. Indentation aids reading but doesn't define scope.
+Statements run in source order.
 
 [codeblock, $code("moth"):
     if ready:
@@ -13,10 +16,13 @@ This cheatsheet describes the accepted final language design, which can exceed c
 ]
 
 - `--` starts a line comment in code. In template bodies it is text. Use `$note` or `$todo` for discarded template content.
-- Names never shadow visible values, types, aliases, dependencies or builtins, including in parameters and child scopes. Separate scopes may reuse names when neither sees the other.
+- Names never shadow visible values, types, aliases, dependencies or builtins, including in parameters and child scopes.
+  Separate scopes may reuse names when neither sees the other.
 - Variables and functions use `snake_case`, types and generic parameters use `PascalCase` and traits use `ALL_CAPS`.
-- Identifiers start with a letter or `_` and continue with letters, digits or `_`. Unicode letters are allowed. Leading underscores and changes of case cannot escape reserved names, including `none`/`None`.
-- Ordinary names such as `config`, `Config`, `project`, `block`, `group` and `region` are not keywords. `$config` and `@project` have their own meanings.
+- Identifiers start with a letter or `_` and continue with letters, digits or `_`. Unicode letters are allowed.
+  Leading underscores and changes of case can't escape reserved names, including `none`/`None`.
+- Ordinary names such as `config`, `Config`, `project`, `block`, `group` and `region` are not keywords.
+  `$config` and `@project` have their own meanings.
 - There is no general bare lexical block or control-flow label. A `name:` statement opens a declared region. Exact `_:` is invalid.
 
 Symbolic binary operators and assignment require spaces on both sides. Keep compound tokens together:
@@ -32,28 +38,26 @@ Symbolic binary operators and assignment require spaces on both sides. Keep comp
 ## Values, bindings and constants
 
 [codeblock, $code("moth"):
-    name = "Priya"              -- inferred, immutable
-    age I32 = 30                -- typed, immutable
+    name = "Priya"  -- inferred and immutable
+    age I32 = 30    -- explicitly typed
     ready Bool = true
     letter Char = 'm'
 
-    count ~= 0                  -- inferred, mutable
-    names ~{String} = {}         -- typed, mutable
-    count = 1                   -- reassignment
+    count ~= 0            -- mutable
+    names ~{String} = {}  -- mutable collection
+    count = 1             -- reassignment, not a new binding
 
-    site_name #= "Moth"          -- inferred compile-time constant
-    version #I32 = 1             -- typed compile-time constant
+    site_name #= "Moth"  -- compile-time constant
+    version #I32 = 1
 ]
 
-`=` declares a new binding or reassigns an existing mutable binding. `~` controls access, not type identity: `names` above has type `{String}`. `#` controls compile-time evaluation, not visibility, and cannot combine with `~`.
-
-Ordinary bindings and constants need initialisers. Constants are immutable and fully evaluate from compile-time values. Use earlier same-file constants or dependency-bound constants, not same-file forward references. Cross-file constants follow dependency order. Cycles are invalid. Each constant resolves at its declaration boundary; later runtime uses cannot retype it.
-
-Only Core functions with a documented constant-evaluation contract can fold calls. `#` does not make ordinary function or host calls executable at compile time. `$config` input declarations have separate fallback and omission rules under **Project configuration**.
+`~` grants write access without changing the type. `#` requires a compile-time value and can't combine with `~`.
+Ordinary declarations and constants need initialisers. Constants may use earlier same-file or imported constants,
+without forward references or cycles.
 
 ### Strings and characters
 
-Quoted text and templates share one `String` type. `Char` supports equality and ordering. `Bool` supports equality only.
+Quoted text and templates share the `String` type. Use templates for interpolation and concatenation, rather than `String + String`:
 
 [codeblock, $code("moth"):
     escaped = "Hello\nworld"
@@ -62,9 +66,8 @@ Quoted text and templates share one `String` type. `Char` supports equality and 
     same = "Moth" is [: Moth]
 ]
 
-Quoted strings accept only `\\`, `\"`, `\n`, `\r` and `\t`. A backslash cannot continue one across a physical newline. Backticks do not create source strings.
-
-Use templates for concatenation and interpolation. `String + String` is invalid. `is` and `is not` compare content regardless of string origin. Strings have no ordering, indexing or in-place character mutation. A mutable string binding can be reassigned.
+Quoted strings support `\\`, `\"`, `\n`, `\r` and `\t`. They can't span physical lines. `is`/`is not` compare string contents.
+Strings have no ordering, indexing or in-place character mutation. `Char` supports equality and ordering. `Bool` supports equality only.
 
 ### Const records
 
@@ -77,29 +80,28 @@ Use templates for concatenation and interpolation. `String + String` is invalid.
     empty_record #= ()
 ]
 
-Every record field has a unique name and an explicit value. Initialisers use the surrounding scope, not earlier field labels. Nested anonymous records and explicit named constructors are allowed. All fields must fold.
+A const record is a compile-time group of named, folded values. Fields have unique labels with explicit values and don't see preceding field labels
+as bindings. Runtime code may read its ordinary fields but can't pass, return or store the whole record or call methods on it.
 
-A whole const record is a compile-time field group. Read its ordinary fields in runtime code. Do not pass, return or store the record itself at runtime or call runtime methods on it. This also applies to fully folded struct constants used as const records. Runtime anonymous records have a separate contract below.
-
-MON syntax shares Moth's construction notation. The separate Rust `moth-mon` codec reads schema-directed literal data, preserves lossless Integer and Decimal data and uses exact numeric schemas without source inference. It does not provide a Moth runtime codec or automatic schema extraction.
+Only Core functions with an explicit constant-evaluation contract can fold calls. MON shares record syntax but is a separate data format.
 
 ## References, copies and lifetimes
 
-Existing values use shared read-only access when bound, passed, returned or stored. Live shared aliases block overlapping mutation:
+Existing values use shared read-only access when bound, passed, returned or stored. A live shared alias blocks overlapping mutation.
+The compiler follows the *last use*, not just lexical scope.
 
 [codeblock, $code("moth"):
     items ~= {1, 2}
-    view = items
+    view = items    -- shared read-only alias
     size = view.length()
-    ~items.push(3)             -- valid: view has no later use
+    ~items.push(3)  -- valid: view is no longer used
 
-    independent ~= copy items
-    outer = {items}            -- new outer collection, shared inner items
+    independent ~= copy items  -- independent deep copy
+    outer = {items}            -- new collection, shared inner storage
 ]
 
-A later use of `view` would invalidate the mutation. Last use follows control flow, not lexical scope alone. A fresh outer aggregate does not copy existing children.
-
-A mutable declaration from an existing mutable place creates an exclusive write-through alias:
+A mutable declaration from an existing mutable *place* creates a write-through alias.
+A value returned from a function gets a separate caller binding, even if it shares storage:
 
 [codeblock, $code("moth"):
     same_items |value {I32}| -> {I32}:
@@ -108,118 +110,113 @@ A mutable declaration from an existing mutable place creates an exclusive write-
 
     original ~= {1}
     writer ~= original
-    writer = {2}              -- original now holds {2}
+    writer = {2}  -- also changes original
 
     returned ~= same_items(original)
-    returned = {3}            -- original still holds {2}
+    returned = {3}  -- original still holds {2}
 ]
 
-Returned values get separate caller bindings even when they alias existing allocations. Reassignment changes only that binding. Fallible success values and multiple results may alias parameters or one another.
+`copy` deep-copies a binding, field or parenthesised place. It preserves internal sharing but shares no storage with the source.
+Every member must be copyable. Opaque handles and resources need an independent-copy contract.
+Literals, templates and computed results are not copyable places.
 
-`copy` deep-copies a binding, field projection or parenthesised place. It preserves internal sharing without sharing mutable storage with the source. Any non-copyable member rejects the whole copy. Opaque handles and resources are non-copyable unless their contract defines an independent copy. Literals, templates, calls and computations are not places.
-
-`~place` requests exclusive access for one operation. It neither copies nor moves. Referenced storage must live at least as long as its container. Field and element aliases retain their containing storage. A value may outlive its original binding, but independently ending lifetimes need a common owner or `copy`.
-
-Moth has no explicit reference types, lifetime annotations or move operator. Access and lifetime rules apply under every backend and build profile.
-
-### Declared regions
-
-Only an explicit `into name` declaration places storage in a declared region. Lexical containment alone does not. Write placement after access/type syntax and before `=`:
-
-[codeblock, $code("moth"):
-    request:
-        scratch:
-            temporary String into scratch = [: temporary]
-            saved String into request = copy temporary
-        ;
-
-        io.line(saved)
-    ;
-]
-
-- Place a fresh result with legal retained references or an independent copy. `into` cannot adopt an existing alias.
-- Target the current or an enclosing declared region. Ancestor placement requires straight-line nested regions, with no intervening conditional or repeated construct, even `if true:`. The name stays visible in the destination scope after the inner region ends.
-- For conditional production, declare in the destination scope with an `if`, match or `catch` initialiser. Loops can mutate an aggregate already placed there.
-- Children may retain parent-owned values. Parents and siblings cannot retain child-owned values. No region-owned value or alias may escape its region.
-- A reference cycle, including a copied cycle, belongs wholly to one declared region.
-- Region-owned storage stays until exit and is reclaimed together on every path, including returns, loop exits and recoverable failure.
-- Reassignment preserves region ownership. Use fresh storage, an independent copy or a same-region value at proven final use. It cannot create a borrowed alias of outside storage.
-
-Regions are not values or types. `into` is declaration-only, with no extraction, adoption or unrestricted transfer.
+`~place` grants exclusive access for one operation, without copying or moving. Stored references must outlive their containers.
+Field and element aliases also retain their containing storage. Moth has no explicit reference types, lifetime annotations or move operator.
+Access and lifetime checks apply to every build profile.
 
 Further detail: @../memory (Memory).
 
 ## Numbers and operators
 
-The only bounded numeric types are:
-
 - Signed integers: `I8`, `I16`, `I32`, `I64`
 - Unsigned integers: `U8`, `U16`, `U32`, `U64`
 - Binary floats: `F16`, `F32`, `F64`
+- Decimal: `Dec`/`Dec0`, `Dec1` through `Dec256`
+- `Byte`: an octet with comparison but no arithmetic
 
-`Byte` is an octet without arithmetic. `Dec`/`Dec0` and `Dec1` through `Dec256` retain exact decimal scale identities. Binary floats support subnormals and signed zero, never `NaN` or infinities.
+### Literals and inference
 
-### Literals and bounded inference
+Whole literals default to `I32` and decimal/exponent literals to `F64` when unconstrained. Magnitude never widens a default.
+An exact receiver can type a literal directly as `U64`, `F32`, `Dec` or another supported type.
 
-An unconstrained whole-number origin defaults to `I32`; a decimal/exponent origin defaults to `F64`, after eligible constraints resolve. Defaults do not set a minimum arithmetic width. Size never selects a type. A whole literal can materialise directly in an exact integer, float, `Byte` or `Dec` receiver. Decimal/exponent spelling cannot initialise an integer merely because its value is whole. Negative values cannot initialise `U*` or `Byte`, and signed minima materialise directly from their negative spelling.
-
-Use lowercase `e` and underscores between digits. Uppercase `E`, radix literals, suffixes, unary `+` and spaced `- count` are invalid.
-
-One function body, including nested blocks, branches, loops and handlers, is the numeric inference boundary. The implicit root runtime body follows the same rule. Exact annotations, assignment targets, concrete parameters, return slots, fields, copies and mutable writes constrain existing numeric origins before fallback. All eligible uses participate regardless of source order, and each binding keeps one static type.
-
-Raw literal receivers outrank eligible literal peers, which outrank defaults. A receiver can reach unresolved literal arithmetic and raw leaves beside named operands, but it cannot retype a bound value or completed result. For example, an `I32` named operand plus a raw `1` at an `I64` receiver keeps the named value `I32` and materialises the raw leaf as `I64`. Two named `I32` operands still produce `I32`; an `I64` receiver cannot retag their result.
-
-Whole-number origins stay integer-family. Decimal/exponent origins stay binary-float-family. In a non-empty collection, raw whole and decimal/exponent literals select the binary-float family in either order. A bound integer never changes family beside a raw float literal. Existing collection/map/nominal/optional shapes can carry eligible numeric leaves without changing shape, capacity, key rules, constructor identity or nonnumeric types. Empty containers still need their existing explicit declaration or field-default type; no new empty-container argument inference applies.
-
-An existing numeric origin can share a generic parameter and result only through the declared signature. Later exact uses in the same body can select that origin. The compiler does not inspect a callee body or search trait evidence. This adds no general later-use or result-only inference, no inference for a generic parameter without a numeric origin and no outer expected-type forwarding into a nested generic call. Named arithmetic operands never infer backwards from the result.
-
-Function signatures, fields and public interfaces remain concrete under their declaration rules. A generic signature contains declared type parameters, not numeric inference variables. Compile-time declarations resolve at their own constant boundary, and later runtime uses cannot retype named constants.
+**Moth infers unresolved numeric literals across an entire function body**, including later uses.
+Annotations, parameters, return types, fields and writes can constrain them before defaults apply.
+Unlike Rust's broader inference, later uses can't retype a completed Moth expression.
 
 [codeblock, $code("moth"):
     accept_u64 |value U64|:
     ;
 
     count = 4_294_967_296
-    accept_u64(count)              -- resolves the literal origin to U64
+    accept_u64(count)  -- this later use resolves count as U64
+
+    base I32 = 10
+    total I64 = base + 1      -- base stays I32, raw 1 receives I64
     small U8 = 200
-    samples {F32} = {1, 2.5}
-    whole = 42                     -- defaults to I32
-    fraction = 0.5                 -- defaults to F64
+    samples {F32} = {1, 2.5}  -- raw mixed literals receive F32
+    ordinary = 42             -- I32
+    fraction = 0.5            -- F64
+
+    seed = 1
+    twice = seed + seed  -- completed I32 expression
+    -- accept_u64(twice)      -- invalid: later receiver can't retype the addition
 ]
 
-See @../numbers (Numbers) for the exact inference and arithmetic contracts.
+Raw numeric literals can inherit a type through arithmetic, collection elements and an established generic argument/result relationship.
+Empty containers still need a type. Constants resolve when declared rather than from later runtime uses.
+
+Use lowercase `e` and underscores between digits. Radix notation, suffixes, uppercase `E`, unary `+` and spaced unary minus are invalid.
+Decimal/exponent literals can't initialise integers or `Byte`, even when whole. Unsigned types and `Byte` reject negative literals.
 
 ### Arithmetic and comparison
 
-- Fixed integer `+`, `-`, `*`, `//`, `%` and `^` preserve equal operand types. Mixed same-signedness types use the wider width. Mixed signedness uses the smallest available signed type containing both complete ranges. No 32-bit floor applies: `I8 + I8 -> I8`, `I8 + U8 -> I16`, `I8 + U16 -> I32`, `I32 + U32 -> I64`. `I64 + U64` and `I32 + U64` have no common type.
-- Fixed integer `/` checks the common-integer eligibility, then returns `F64`, including for equal narrow operands. `//` truncates towards zero and `%` follows the dividend's sign.
-- Fixed binary-float `+`, `-`, `*`, `/`, `%` and `^` preserve equal types and otherwise use the wider precision. `F16` has no minimum `F32` domain. Every operation completes at its selected precision: `(2048 + 1) - 2048` with `F16` operands produces zero because the addition rounds first.
-- Unary `-` preserves signed integer or float type. Negating a signed minimum fails at that width. Unary minus on every `U*` and on `Byte` is invalid, including zero.
-- Every integer result checks its selected type. Wider scratch carriers cannot wrap, saturate or defer a required check. Float results round and check finiteness at their selected precision. Known invalid operations remain diagnostics, including inside `catch`.
-- Exact fixed-integer comparison does not need an arithmetic common type. `I64`/`U64` comparisons stay exact. Fixed integers and fixed floats never mix implicitly. Binary floats reject `//`.
-- A result cast happens after the operation. To request wider arithmetic, convert operands before the operation at legal typed receivers.
+[codeblock, $code("moth"):
+    a I8 = 10
+    b U8 = 20
+    sum I16 = a + b       -- smallest signed type containing both ranges
+    quotient F64 = a / a  -- / produces F64 for integers
+    integral I8 = a // a  -- // truncates towards zero
+]
 
-Compound `+= -= *= /= //= %= ^=` evaluate the place and right operand once, use the revised operation domain and check write-back when the destination differs. Commit only on success. A right-hand `catch` covers the right-hand expression, not later arithmetic or conversion. Integer `/=` still starts with `F64` division and checks conversion back; use `//=` for integer division.
+Equal fixed integer types preserve their width (`I8 + I8 -> I8`). Mixed integer types use the smallest available type covering both operand ranges.
+Thus `I8 + U8 -> I16`, while `I64 + U64` has no common arithmetic type. Fixed floats preserve the wider of their operand precisions.
+Fixed integers and floats don't mix implicitly. `Dec` follows its separate scale rules below.
+
+Arithmetic checks the **selected result type** at every step. Integer overflow is recoverable.
+Binary floats round at their own precision and reject non-finite results, even for intermediate operations. Subnormals and signed zero are valid.
+Fixed-integer comparisons remain exact, including `I64` against `U64`.
+
+`//` truncates towards zero, `%` follows the dividend's sign and integer `/` returns `F64`.
+Float division uses `/`. Unary `-` applies to signed numbers, not `U*` or `Byte`.
+
+Cast operands **before** arithmetic when wider calculations are needed. Casting the result can't undo an earlier overflow.
+Compound assignments check both the operation and destination write-back before committing. RHS `catch` doesn't handle that write-back.
 
 ### Byte and Dec
 
-`Byte` accepts whole literals `0` through `255` and compares only with `Byte`, using equality or unsigned-octet ordering. It has no arithmetic or range domain.
+`Byte` accepts whole values from `0` to `255`. It supports equality and unsigned ordering, but not arithmetic or range iteration.
+Convert through `U8` when doing numeric work.
 
-`Dec` is scale zero, also spelt `Dec0`. `Dec1` through `Dec256` store `coefficient / 10^scale`. Scale determines type identity. `Dec01` and scales above `256` are invalid. Literals must fit the declared scale exactly.
+`DecN` represents exact decimal scale `N`. `Dec` is `Dec0`. `Dec01` and scales greater than `256` are invalid.
+Literals must fit their declared scale exactly.
 
-- Same-scale `+`/`-` and unary minus are exact. Multiplication, positive-scale `/` and exponentiation round half to even at each result.
-- Scale zero permits `//`/`%`, not `/`. Positive scales permit `/`/`%`, not `//`.
-- `DecN ^ I32` requires a non-negative exponent. A receiving context reaches the base but not the exponent; another exact-width exponent needs explicit conversion at a legal receiving site.
-- Fixed integers scale exactly into the `Dec` operand's scale for arithmetic and comparison. Different scales need explicit conversion. Binary floats and `Byte` never mix implicitly.
-- A `Dec` receiver can type unresolved literal arithmetic at its scale. Decimal text trims fractional trailing zeroes, includes a leading zero before fractions and uses neither exponent notation nor negative zero.
+- Same-scale addition, subtraction and negation are exact. Multiplication, positive-scale division and exponentiation round half to even at the
+  result scale.
+- Scale zero supports `//` and `%`, not `/`. Positive scales support `/` and `%`, not `//`.
+- `DecN ^ I32` takes a non-negative exponent. Fixed integers combine exactly with the decimal operand's scale.
+  Mixed decimal scales require an explicit cast.
+- Binary floats and `Byte` never mix implicitly with `Dec`. Formatting uses ordinary decimal text without exponent notation.
+
+See @../numbers (Numbers) for exact operator domains and inference rules.
 
 ## Explicit casts
 
-The only conversion spelling is plain `cast`. Its target comes from an immediate concrete typed receiver. The cast target does not constrain or default the source. Resolve the source from independent eligible constraints first, then apply the ordinary default if none exists. A later receiver cannot invent a missing cast target.
+`cast` converts between supported types, taking its target from an **immediate typed receiver** such as a declaration, return or parameter.
+The operand keeps its own type. An untyped declaration or later use can't supply a missing cast target.
 
 [codeblock, $code("moth"):
     octet U8 = 42
-    count U64 = cast octet
+    count U64 = cast octet  -- infallible widening
     label String = cast count
 
     narrow_sum |left U32, right U32| -> U8:
@@ -228,34 +225,23 @@ The only conversion spelling is plain `cast`. Its target comes from an immediate
     ;
 ]
 
-`narrow_sum` handles both `U32` addition overflow and failure to convert its result to `U8`. A result cast does not prevent an earlier narrow operation from failing.
-
-Typed declarations, assignments, returns, concrete parameters, fields, defaults, container entries, assertion arguments and explicitly received `then` arms supply cast targets. Untyped declarations, conditions, operators, template interpolation, expression statements and parentheses do not. Same-type casts and conversion constructors such as `I32(value)` are invalid. `Error(...)` is a real constructor. Cast targets are builtin types, not user-defined types.
-
-The cast target never selects the source type. For example, an unbound whole-number origin used only as a cast source defaults to `I32` even when the cast targets `U32`. An independent exact use can still select its source type before cast classification.
+The `catch` above covers both addition overflow and narrowing failure. A cast of the *result* can't prevent earlier arithmetic from failing.
 
 ### Conversion rules
 
-Fallibility follows the complete source and target types, not a known safe value.
+- Integer conversions preserve values and check range. Integer-to-float may round or fail when `F16` can't represent a finite result.
+- Float-to-integer truncates towards zero, then checks range.
+- Float precision narrowing rounds once to the target precision and fails if the result is not finite. Widening is infallible.
+- Integers convert exactly to `DecN`, and widening decimal scale is exact. Narrowing scale or converting to integer requires exactness.
+- Numeric text parsing must consume the complete string without surrounding whitespace. Formatting numbers as text is infallible.
+- `String -> Bool` accepts `true` or `false` after trimming whitespace. `String -> Char` requires one Unicode scalar.
+- `Byte` converts through `U8`. `Char` converts to/from its `I32` Unicode scalar value.
+  `String -> Error` and `Error -> String` use the error message.
 
-- Fixed-integer conversion preserves the value. It is infallible only when the complete source range fits the target.
-- Integer-to-`F32`/`F64` conversion is infallible and may round. Integer-to-`F16` conversion is infallible only when the complete source range fits its finite range. Convert `U64` directly, without a binary64 intermediate.
-- Binary-float precision widening is infallible. Narrowing rounds directly to the destination once, nearest with ties to even. Precision loss alone succeeds; a non-finite rounded result fails.
-- Float-to-integer conversion is fallible: truncate towards zero, then check the destination range.
-- `Byte <-> U8` is infallible. Other numeric or text conversions involving `Byte` go through `U8`.
-- Integer-to-`Dec`/`DecN` and decimal scale widening are exact and infallible. Scale narrowing and decimal-to-integer conversion are exact-or-fail, never rounded.
-- Numeric text casts are fallible and consume the whole string. They reject surrounding whitespace, unary `+`, uppercase `E`, malformed separators or exponents, `NaN` and infinities. Numeric formatting to `String` is infallible and stable.
-- `String -> Bool` trims surrounding whitespace and accepts only lowercase `true` or `false`. `String -> Char` requires exactly one Unicode scalar. Both are fallible.
-- `Char -> I32` produces its code point. `I32 -> Char` is fallible and requires a Unicode scalar. `Bool` and `Char` convert infallibly to `String`.
-- `String -> Error` creates a message with code `0`. `Error -> String` returns its message. Both are infallible.
+Fallibility depends on the **source and target types**, even for values known to fit.
+Custom conversions use explicit trait conformance (see **Custom cast conformance**).
 
-Other source-target pairs are not implied. No conversion-chain search or generic cast target is added.
-
-Every fixed integer and binary float target has infallible and fallible source-authored cast-evidence families. `CASTABLE_TO_I32` requires `to_i32 |This| -> I32`; `TRY_CASTABLE_TO_I32` requires `try_to_i32 |This| -> I32, Error!`. Existing `Bool`, `String`, `Char` and `Error` evidence remains. `Byte` and `Dec` gain no source-authored evidence. The two evidence classes for one pair conflict, and existing same-file, visibility and generic-nominal conformance rules remain.
-
-### Optional targets
-
-A `T?` target casts to inner `T`, then wraps the result. Its handler also supplies `T`, so `then none` is invalid. Optional operands never unwrap automatically.
+A `T?` cast target casts into `T` then wraps the result. Its handler must supply `T`, not `none`:
 
 [codeblock, $code("moth"):
     parse_optional |text String| -> I32?:
@@ -266,7 +252,8 @@ A `T?` target casts to inner `T`, then wraps the result. Its handler also suppli
     ;
 ]
 
-Potentially failing casts use ordinary implicit failure. A compatible local `catch`, private inferred failure lane or builtin `Error!` slot handles it. Custom `E!` needs local recovery or explicit mapping. Postfix `!` remains for declared fallible calls.
+Fallible casts follow ordinary implicit failure rules: handle them with `catch` or builtin `Error!`.
+Custom error types need explicit recovery or mapping. Postfix `!` is for declared fallible calls.
 
 ## Functions and calls
 
@@ -279,11 +266,11 @@ Potentially failing casts use ordinary implicit failure. A compatible local `cat
     other_label = describe("fruit", subject = "pear")
 ]
 
-Use `|...|` for parameters, `||` for none and parentheses for supplied values. Positional arguments precede named arguments. Each parameter receives at most one value. Named arguments can skip defaults. Host functions and builtin members are positional-only.
+Parameters use `|...|`, or `||` when empty. Call with parentheses. Positional arguments precede named ones.
+A named argument may skip a default, which must be compile-time evaluable and can't refer to other parameters.
+Builtin and host calls use positional arguments. Omit `->` for no success or error results. A function with only a failure slot writes `-> Error!`.
 
-Defaults fold at compile time and cannot reference other parameters. Omit `->` only when there are no return slots. An error-only function still writes `-> Error!`. No-success functions can fall through or use bare `return`. There is no `Void` annotation.
-
-Mutable parameters take `~place` for existing mutable storage or a plain fresh value:
+Mutable parameters accept `~place` for existing mutable storage or a fresh value:
 
 [codeblock, $code("moth"):
     increment |value ~I32|:
@@ -295,9 +282,9 @@ Mutable parameters take `~place` for existing mutable storage or a plain fresh v
     increment(1)
 ]
 
-Shared parameters and fresh rvalues reject `~`. Mutable receivers always require an existing mutable place.
+Shared parameters read without mutation authority. Mutable receiver calls similarly require `~` on an existing mutable place.
 
-Multiple returns remain separate values:
+Multiple return slots remain **separate results, not a tuple**:
 
 [codeblock, $code("moth"):
     pair || -> String, I32:
@@ -307,11 +294,11 @@ Multiple returns remain separate values:
     name, count = pair()
 ]
 
-Receive all results through matching multi-bind, `return` or value-producing syntax. All results are computed before assigning any existing targets. A comma can continue a multi-bind onto another line, but no trailing comma precedes `=`. Multi-bind targets are runtime bindings, so a `#` marker is invalid on every target, new or existing. There are no tuple returns. Every reachable success path returns matching values or terminates.
+Receive every result through a matching multi-bind, return or value-producing block.
+All right-hand results evaluate before writes to existing targets. Every reachable success path must return the declared values or terminate.
+There is no `Void` type and a no-success function may fall through.
 
 ### Never-returning calls: `-> !`
-
-`-> !` declares that a callable never returns control normally:
 
 [codeblock, $code("moth"):
     fatal |message String| -> !:
@@ -328,15 +315,14 @@ Receive all results through matching multi-bind, `return` or value-producing syn
     ;
 ]
 
-`-> !` replaces the whole return contract and cannot combine with other slots. Every reachable path must diverge. Fallthrough, returns and error/option propagation do not qualify.
-
-Calls are standalone terminating statements, including in block branches. They produce no value and accept no postfix `!`, `?` or `catch`. There is no `Never` value type or implicit conversion into another return type.
-
-Only the explicit signature communicates divergence across calls. A wholly divergent function with no written return contract needs `-> !` or its intended ordinary contract. An ordinary typed function can use `assert(false)` as a placeholder. Methods, generics, traits and foreign declarations preserve the exact contract.
+`-> !` declares a function that never returns normally. It replaces the return contract, not a value type.
+Every reachable path must diverge. Propagating an error or option doesn't count.
+These calls terminate their statement or branch and can't be received as values or handled with `!`, `?` or `catch`.
 
 ## Options: `T?`, `none` and postfix `?`
 
-`T?` accepts a `T` value or `none`, without an `Option` constructor. `none` needs an immediate optional receiving context. Optional values never unwrap implicitly.
+`T?` holds either `T` or `none`, without an `Option` constructor. `none` requires an immediate optional type context.
+Optional values never unwrap implicitly.
 
 [codeblock, $code("moth"):
     find_name |id String| -> String?:
@@ -347,14 +333,13 @@ Only the explicit signature communicates divergence across calls. A wholly diver
     ;
 
     load_label |id String| -> String?:
-        name = find_name(id)?
+        name = find_name(id)?  -- absent: return none immediately
         return [: User: [name]]
     ;
 ]
 
-Postfix `?` unwraps a present value or immediately returns `none`. The enclosing function needs exactly one success slot, of a compatible optional type. It cannot combine with `catch`.
-
-Inspect absence or capture a present value:
+Postfix `?` unwraps or propagates absence. Its function needs exactly one compatible optional success slot. It can't combine with `catch`.
+Inspect or capture a present value with `is`:
 
 [codeblock, $code("moth"):
     maybe_name String? = "Priya"
@@ -371,11 +356,11 @@ Inspect absence or capture a present value:
     ;
 ]
 
-Options of the same type support equality when their inner type does, but have no ordering or direct `else then` fallback operator.
+Options support equality when their inner type does, but no ordering. There is no general fallback operator. Use a producing `if` or match.
 
 ## Errors, propagation and recovery
 
-One final `E!` slot declares typed failure. `return!` returns an error, postfix `!` propagates through an exactly compatible caller slot and `catch` recovers.
+A final `E!` result slot declares typed failure. `return!` returns an error, postfix `!` propagates a compatible error and `catch` handles it.
 
 [codeblock, $code("moth"):
     load_user |id String| -> String, F64, Error!:
@@ -396,38 +381,20 @@ One final `E!` slot declares typed failure. `return!` returns an error, postfix 
     ;
 ]
 
-Builtin `Error` has `message String` and `code U32 = 0`. Codes span `0` to `4294967295`. An `I32` variable needs a fallible cast. Code `0` still represents failure. Errors can be constants or carry runtime messages. Custom errors use ordinary nominal types.
+`Error` has `message String` and `code U32 = 0`. Code `0` is still an error. Custom error types are ordinary nominal types.
+An error-only `-> Error!` function succeeds by reaching the end. Error channels aren't first-class `Result` values.
+Use a choice for domain-level alternatives.
 
-An error-only function succeeds by reaching its end:
+### Implicit failure
 
-[codeblock, $code("moth"):
-    validate |ready Bool| -> Error!:
-        if not ready:
-            return! Error("not ready")
-        ;
-    ;
-]
-
-Calls with an `E!` slot need `!` or applicable recovery. `Error!` does not create a first-class `Result` value. Use a choice for result-like domain data.
-
-### Implicit failure at function boundaries
-
-Checked numeric failures propagate according to the enclosing boundary:
-
-[table:
-    [th: [: Boundary] [: Implicit failure]]
-    [td: [: Private function, no error slot] [: Propagates within the module, without per-call `!`]]
-    [td: [: Builtin `Error!`] [: Becomes an `Error`]]
-    [td: [: Custom `E!`] [: Requires local recovery or explicit mapping to `E`]]
-    [td: [: Exported callable, no error slot] [: Must eliminate or handle every escaping failure]]
-    [td: [: Selected top-level work] [: Uses a builtin `Error!` entry contract]]
-]
-
-The exported rule includes methods, generics and re-exports. Traits and conformance cannot silently widen an error contract.
+Checked numeric operations and casts can fail even without a written `E!` on the immediate expression.
+Within a module, **private functions can propagate these failures without postfix `!` at every private call**.
+A builtin `Error!` boundary turns them into `Error`. An exported function without an error slot must handle them,
+while a custom `E!` requires local recovery or explicit mapping.
 
 [codeblock, $code("moth"):
     product |left I32, right I32| -> I32:
-        return left * right
+        return left * right  -- implicit failure can travel through private calls
     ;
 
     export:
@@ -441,7 +408,8 @@ The exported rule includes methods, generics and re-exports. Traits and conforma
     ;
 ]
 
-A transparent alias of `Error` preserves this built-in behaviour. A custom wrapper does not. Map implicit failure into a custom error explicitly:
+These boundaries also apply to methods, generic functions and re-exports. Ordinary top-level entry work has a builtin `Error!` contract.
+A transparent alias of `Error` retains builtin behaviour, but a custom wrapper doesn't.
 
 [codeblock, $code("moth"):
     GeometryError ::
@@ -458,24 +426,8 @@ A transparent alias of `Error` preserves this built-in behaviour. A custom wrapp
 
 ### Whole-expression catch
 
-`catch` binds below ordinary operators and protects the complete selected evaluation, including receivers, arguments, nested calls and cast operands.
-
-An otherwise legally placed catch is eligible when its authored expression contains:
-
-- a valid plain cast
-- valid arithmetic, including numeric unary negation
-- more than one function/member call at the selected expression's call-count level
-- an actual compatible typed or inferred recoverable failure
-
-Receiver-chain calls and calls in separate operands count. Calls inside an argument do not increase the enclosing count, though a real failure inside that argument remains protected. Thus `source.first().second()` and `left() is right()` qualify by call count, while `outer(inner())` with infallible calls does not. A fallible `inner()` qualifies by its actual failure instead.
-
-Comparisons and Boolean operators alone do not count as arithmetic. A literal or one infallible call alone does not qualify. Eligibility is not a claim that failure exists and creates no failure effect.
-
-The handler still contributes ordinary type constraints when the protected expression proves infallible. Validate its names, types, access, casts and result paths before removing unreachable executable work. Without a typed failure producer, a bound handler error has builtin `Error` type; syntax-only eligibility does not fabricate an error. Compatible builtin `Error` producers may mix with implicit failure. A custom `E` producer cannot mix with implicit `Error` or a different typed error.
-
-Work evaluates once in source order. The first failure skips later protected work. Earlier mutations and IO remain visible. A handler's own failure propagates outward. A catch is not a transaction.
-
-Use `catch:` or `catch |err|:` for blocks, and `catch then value` or `catch |err| then value` inline. The error binding is immutable and local. A value handler supplies matching `then` values, returns or diverges. A no-success handler may fall through.
+`catch` protects the selected **whole expression**, including nested calls, receivers and arithmetic, rather than only the last operation.
+It evaluates work once, stops at the first failure and preserves earlier side effects. A handler's own failure propagates outward.
 
 [codeblock, $code("moth"):
     increment_or_zero |value I8| -> I8:
@@ -483,41 +435,34 @@ Use `catch:` or `catch |err|:` for blocks, and `catch then value` or `catch |err
     ;
 ]
 
-This safety catch handles overflow at `I8` width. The same authored arithmetic
-also permits a catch when the compiler proves that no failure can occur.
+`catch` is valid for casts, arithmetic, actual recoverable failures and expressions containing at least two calls at the selected level.
+For example, `source.first().second()` qualifies, while `outer(inner())` needs an actually fallible call.
+The compiler may still prove an eligible expression infallible.
 
-To recover a complete update, catch a private helper that performs it or compute the replacement under `catch`, including any required cast back to the destination type, then assign. A catch on a compound assignment RHS covers the RHS only; later arithmetic and checked write-back keep their own failure obligations.
+Use `catch then value`, `catch |err| then value`, `catch:` or `catch |err|:`.
+Handlers supply matching values, return or diverge. Their error binding is immutable and local.
+`catch` handles compatible errors, not assertions, allocation exhaustion or unexpected host faults.
 
-Catch bodies remain prohibited inside conditions, templates and constants, except directly foldable cast recovery at an explicit constant/default receiving boundary. Safety catch does not handle assertions, allocation or stack exhaustion, foreign-value integrity guards or unexpected host/runtime faults.
+For compound assignment, RHS `catch` doesn't cover the update itself.
+To recover the entire update, compute the replacement and any narrowing cast under `catch` before assigning, or use a helper.
 
 ### Assertions
 
-`assert` checks invariants in every build:
+`assert` checks invariants in every build and aborts unrecoverably on failure:
 
 [codeblock, $code("moth"):
     assert(ready)
     assert(condition = ready, message = "must be ready")
 ]
 
-`assert` is statement-only and requires parentheses. Its condition takes `Bool`, its message takes `String?` and neither accepts `~`. Omitted or `none` messages use `"assertion failed"`. Other types do not stringify automatically.
-
-Failure while computing the condition follows the enclosing failure contract without evaluating the message. The message is fully checked even for a known-true condition, but evaluates only for `false`. It cannot escape through failure, `!`, `?`, `return`, `break` or `continue`. Handle fallible message work beforehand.
-
-Assertion failure is unrecoverable. `assert(false)` is statically terminal. `assert` cannot be imported, aliased or handled with postfix `!` or `catch`.
-
-To request a deliberate panic on a checked failure:
-
-[codeblock, $code("moth"):
-    product = left * right catch:
-        assert(false, "product must fit")
-    ;
-]
-
-Only authored assertions deliberately request panic. Catch cannot recover them, allocation or stack exhaustion, or unexpected host/runtime faults.
+`assert` is statement-only, with a `Bool` condition and optional `String?` message. Omission uses `"assertion failed"`.
+The message is checked even when the condition is statically true, but evaluated only on failure.
+Handle failing message expressions first. Assertion messages can't propagate errors or return.
+`assert(false)` terminates, and assertion failures can't be caught.
 
 ## Branching and value-producing blocks
 
-Conditions use `Bool`. Statement `else` is optional. There is no statement `else if`: nest an `if` or match one value against several patterns.
+Conditions use `Bool`. A statement `else` is optional. Nest an `if` or use matching instead of `else if`.
 
 [codeblock, $code("moth"):
     label = if ready then "ready" else "waiting"
@@ -528,11 +473,7 @@ Conditions use `Bool`. Statement `else` is optional. There is no statement `else
         >= 90 => then "excellent"
         else => then "other"
     ;
-]
 
-The inline `then ... else ...` form stays on one logical line. A block can perform work before producing its values:
-
-[codeblock, $code("moth"):
     label, score = if ready:
         then "ready", 1
     else
@@ -541,16 +482,18 @@ The inline `then ... else ...` form stays on one logical line. A block can perfo
     ;
 ]
 
-`then` sends values to an immediate declaration, assignment, multi-bind or return. These forms are not general expressions: do not nest them in arguments, operators, constructors, collections, templates or another `then`. Every reachable path produces matching arity and types or terminates, and at least one produces values. A real fallthrough is invalid. A single-predicate producing `if` requires `else`.
+`then` supplies results to an immediate declaration, assignment or return, including multiple slots.
+Value-producing blocks can't appear inside calls, collections or other expressions. Every reachable path must produce matching results or terminate.
+A producing `if` needs an `else`. Inline `then ... else ...` stays on one logical line.
 
-A full match uses `if value is:` and line-initial `pattern =>` arms. Arms have no colon or individual semicolon. Guards use `pattern if condition =>`. `else =>` is the only catch-all. A bodyless `else =>` deliberately ignores remaining cases in a statement match.
+A full match uses `if value is:` with `pattern =>` arms, optionally guarded by `if condition`. `else =>` is the catch-all.
+A bodyless `else =>` ignores remaining cases in a statement match.
 
-- Ordinary full matches require `else =>`, even when listed literals appear exhaustive.
-- A choice match can omit it when every variant is covered without guards. Any guarded choice arm requires it. A variant cannot appear twice.
-- An option match can omit it with both unguarded `none` and unguarded `|name|` arms. Literal and relational arms do not replace the present-value capture.
-- Relational patterns work for numeric types, `Byte` and `Char`, not `String`. Patterns must match the subject's type.
+- Ordinary matches need `else =>`. A choice match may omit it when all variants appear unguarded. A guarded arm requires `else =>`.
+- An option match may omit it with both unguarded `none` and `|name|` arms. Literal matches alone don't cover every present value.
+- Relational patterns work with numbers, `Byte` and `Char`, not `String`. Patterns match the subject's type.
 
-A compile-time-known condition selects one ordinary `if` branch after both branches satisfy name, type and value-production rules. The selected branch keeps its scope. This does not conditionally remove declarations, dependencies or exports.
+A compile-time-known `if` selects its branch only after both sides have been checked. This doesn't remove declarations, exports or file dependencies.
 
 ## Loops
 
@@ -558,11 +501,11 @@ A compile-time-known condition selects one ordinary `if` branch after both branc
     count ~= 0
     names = {"Priya", "Rob"}
 
-    loop count < 3:
+    loop count < 3:  -- condition checked before each iteration
         count += 1
     ;
 
-    loop names |name, index|:
+    loop names |name, index|:  -- read-only element and optional I32 index
         io.line([: [index]: [name]])
     ;
 
@@ -571,22 +514,13 @@ A compile-time-known condition selects one ordinary `if` branch after both branc
     ;
 ]
 
-Conditional loops check `Bool` before each iteration. Collection loops capture
-source and length once, then visit collection order. They accept no binding
-suffix, `|item|` or `|item, index|`. Bindings are immutable and body-local.
-The optional position index has type `I32`; maps are not collection-loop sources.
+Collection loops capture their source and length once. The iteration binding is immutable, and a map is not a collection-loop source.
+`break` exits the nearest loop, `continue` advances it and neither takes values or labels.
 
-Range rules:
-
-- `to` excludes the end, `to &` includes it. `loop to n` starts at zero.
-- Bounds select one exact counter domain. Omitted zero and default step one materialise in that domain; the automatically supplied position index remains a separate `I32`.
-- Direction follows the bounds. `by` supplies a magnitude regardless of sign. Integer steps default to one. Every binary-float range needs explicit `by`.
-- Start, end and explicit step evaluate once, left to right. Static zero steps are invalid. Dynamic zero fails before iteration.
-- Fixed-width operands follow the exact numeric domain rules in Numbers. `Byte` and `Dec` have no range domain.
-- Checked updates stop at the last valid value, including inclusive maxima and unsigned descent to zero. An inclusive range exits after visiting its endpoint without an unrepresentable successor.
-- Floating candidates round before endpoint checks. Non-finite or out-of-range candidates end the loop. An in-range candidate rounded back to the current value fails as no progress.
-
-`break` exits the nearest ordinary loop. `continue` advances its check, item or step. Neither takes values or labels. `return`/`return!` exit the function.
+Ranges exclude the endpoint with `to` and include it with `to &`. `loop to n` begins at zero.
+`by` supplies the step magnitude. Direction follows the bounds. Integer steps default to one, while float ranges require `by`.
+Bounds and steps evaluate once. Zero steps fail, as do floating steps that can't make progress.
+Updates respect fixed-width limits, including inclusive endpoints. `Byte` and `Dec` have no range iteration.
 
 ### Repeated option capture
 
@@ -596,7 +530,8 @@ Range rules:
     ;
 ]
 
-The header accepts any `T?` expression, evaluated once per attempted iteration. `none` exits, otherwise one immutable body-local capture receives the payload. Completion/`continue` re-evaluates the header. `break` performs no further evaluation. There is no index, special `next` method or implied consumption. `~` follows ordinary access rules.
+An option-producing header runs before every attempted iteration, binding one immutable present payload or exiting on `none`.
+`continue` reevaluates the header, while `break` doesn't. It implies no special `next` method or consumption rule.
 
 ### Collection-producing loops
 
@@ -608,13 +543,11 @@ The header accepts any `T?` expression, evaluated once per attempted iteration. 
     ;
 ]
 
-Any of the four loop forms can eagerly produce `{T}` at a runtime declaration, single assignment or one-slot return. Producing loops are not general expressions, multi-bind/multi-slot results or `#` initialisers.
+Any ordinary loop can eagerly produce `{T}` for a declaration, assignment or single-value return.
+`then value` appends once and ends that iteration. `continue` and fallthrough append nothing. `break` returns the partial collection.
+At least one reachable `then` is required. An explicit `{T}` supplies element type context.
 
-`then value` appends one element and ends that iteration. Fallthrough/`continue` add nothing. `break` returns the partial collection. Each iteration contributes at most one element.
-
-An explicit `{T}` supplies element context. Otherwise every reachable contribution must infer one compatible type. At least one reachable `then` is required. Both branches remain valid before static selection.
-
-Branches inherit the production target. An ordinary nested loop blocks it, and a nested producing loop owns its own. Template loops support neither repeated option capture nor collection production.
+A nested ordinary loop blocks the outer production target. A nested producing loop has its own. Templates don't have collection-producing loops.
 
 ## Structs and receiver methods
 
@@ -631,15 +564,16 @@ Branches inherit the production target. An ordinary nested loop blocks it, and a
 
     person ~= Person(name = "Priya", age = 30)
     person.age += 1
-    ~person.birthday()
+    ~person.birthday()  -- mutating receiver needs ~
     person_name = person.display_name()
 ]
 
-Fields require explicit types. Defaults must fold. Fields without defaults are required. Constructors follow normal argument routing. Matching fields imply neither type compatibility nor structural equality. Named children require their explicit constructors.
+Fields have explicit types. Defaults must fold and omitted non-default fields are errors. Constructors use normal arguments.
+Identical fields don't make distinct structs compatible. Field mutation requires mutable access.
 
-Field writes require a mutable root and valid access. Receiver methods are top-level functions with first parameter `this T` or `this ~T`. Shared calls omit `~`. Mutable calls need `~place.method(...)` on an existing mutable place. Free-call syntax is invalid.
-
-Methods belong to same-file structs/choices, cannot collide with fields and follow their type's visibility. Values carry their type's methods, so callers need not import the type's name. They cannot extend other types or be imported, aliased or re-exported separately.
+Receiver methods are top-level functions starting with `this T` or `this ~T`, defined in the receiver type's file.
+Methods are visible wherever their receiver type is visible. They can't be imported or exported on their own.
+Mutable methods need `~place.method(...)`.
 
 ### Runtime anonymous records
 
@@ -657,15 +591,14 @@ Methods belong to same-file structs/choices, cannot collide with fields and foll
     ;
 ]
 
-Records require non-empty, unique `label = expression` entries with comma separators and optional trailing comma. No positional fields, shorthand, field types or field-level mutability. Initialisers evaluate once in source order and need not fold.
+Runtime records use non-empty named fields, evaluated once in source order.
+Field labels aren't local bindings, type annotations or receiving contexts.
+Context-sensitive values such as `none`, `cast` and empty collections need an earlier typed value. Empty `()` is a const record only.
 
-Labels introduce no locals or receiving types. Earlier fields do not enter scope. Context-dependent `none`, empty containers and `cast` need earlier typed values. Runtime context selects a runtime record even for constant-looking fields. Empty `()` belongs only to const records.
-
-Each literal site defines one hidden identity, preserved by repeated execution, aliases and copies. Matching fields at another site do not permit replacement assignment.
-
-Local binding, projection, compatible assignment, copying and recursive anonymous nesting are allowed. Parents can contain existing anonymous children and explicit nominal children, without extra copying or mutation authority.
-
-Hidden identities cannot cross any function argument/return, authored signature, nominal field, type alias, method, conformance or export, nor enter collection/map storage or generic arguments. Restrictions apply through parents, options and captures. Extracted ordinary leaves keep their own rules.
+**Each runtime record literal site has its own type**, even when fields match. Repeated execution, aliases and copies retain that identity.
+Records can nest and be copied locally. Hidden record types can't cross function arguments/results, nominal fields, exports,
+collection/map storage or generic arguments.
+Extracted ordinary fields retain their usual types.
 
 ## Choices
 
@@ -686,11 +619,16 @@ Hidden identities cannot cross any function argument/return, authored signature,
     ;
 ]
 
-A choice needs at least one variant. Unit variants omit `()`. Payloads need non-empty, explicitly typed immutable fields, without defaults. Construction supplies every field through normal argument routing. Known expected choice types permit `::Variant(...)`, otherwise qualify it. `Status::Failed` permits no gaps around `::`.
+A choice needs at least one variant. Unit variants omit `()`. Payloads need non-empty, explicitly typed immutable fields, without defaults.
+Construction supplies every field through normal argument routing. Known expected choice types permit `::Variant(...)`, otherwise qualify it.
+Write `Choice::Variant` with no whitespace around `::`.
 
-Patterns capture every exact field name in declaration order. `as` renames the immutable arm-local binding. Wildcards and named assignments are invalid. See **Branching** for guards/exhaustiveness.
+Patterns capture every exact field name in declaration order. `as` renames the immutable arm-local binding.
+Wildcards and named assignments are invalid. See **Branching** for guards/exhaustiveness.
 
-Same-type equality compares tag and payload only when every possible payload type supports equality. Scalars, decimals, qualifying choices/options work. Structs, collections, maps, functions and opaque types do not. One unsupported field disables whole-choice equality, including unit variants. Choices have no ordering.
+Same-type equality compares tag and payload only when every possible payload type supports equality.
+Scalars, decimals, qualifying choices/options work. Structs, collections, maps, functions and opaque types don't.
+One unsupported field disables whole-choice equality, including unit variants. Choices have no ordering.
 
 ## Type aliases and generics
 
@@ -701,9 +639,8 @@ Same-type equality compares tag and payload only when every possible payload typ
     User = | id I32 |
 ]
 
-Aliases are transparent: `UserId` and `I32` interchange, while `User` has
-distinct identity. Aliases can chain, not cycle. They introduce no runtime
-value or constructor. Construct through the canonical nominal name.
+Aliases are transparent (`UserId` is `I32`). Named structs and choices have their own identity regardless of matching fields.
+Aliases may chain but not cycle and they create no new constructors.
 
 [codeblock, $code("moth"):
     identity type A |value A| -> A:
@@ -711,7 +648,6 @@ value or constructor. Construct through the canonical nominal name.
     ;
 
     Box type A = | value A |
-
     Maybe type A ::
         Some | value A |,
         Empty,
@@ -730,34 +666,17 @@ value or constructor. Construct through the canonical nominal name.
 
     box Box of String = Box("Moth")
     value = identity(1)
-    accept_u64(value)
-    items {I32} = empty()
+    accept_u64(value)      -- later use resolves an existing numeric origin
+    items {I32} = empty()  -- immediate receiver supplies the generic result
     missing Maybe of String = Maybe::Empty
-    StringBox as Box of String
 ]
 
-Generics apply to top-level structs, choices and free functions. Parameters
-must appear in the declared signature/type shape. Receiver method parameters
-must align exactly with the generic constructor. Concrete-instance methods are
-invalid.
+Generics apply to top-level structs, choices and free functions.
+Function type arguments come from call arguments or an immediately expected result, such as `items {I32} = empty()`.
+As with ordinary numeric inference, an unresolved numeric literal can gain its type from later uses when the signature preserves it.
+Generic inference uses the declared signature, rather than the callee's body.
 
-`of` supplies concrete types with matching arity. Ordinary generic inference
-uses immediate arguments and an immediate expected result. The bounded numeric
-exception carries an existing numeric origin through its declared parameter
-and result relation, so an exact use later in the same body can select it.
-Only the signature participates: there is no callee-body inspection or trait
-evidence search. A generic parameter with no eligible numeric origin does not
-gain later-use inference.
-
-Known non-empty collection, map, nominal/generic and optional shapes can carry
-eligible numeric leaves while their shape, capacity, keys, constructor identity
-and nonnumeric types stay fixed. This adds no structural inference, empty
-container inference, general result-only inference or backward constraints
-through named arithmetic. An outer call's expected type does not flow into a
-nested generic call. Annotate an intermediate result when that call has no
-immediate evidence.
-
-Nested inline `of` requires an inner alias:
+Use `of` to name concrete generic types. Nested `of` applications need an alias:
 
 [codeblock, $code("moth"):
     Pair type A, B = | first A, second B |
@@ -765,12 +684,19 @@ Nested inline `of` requires an inner alias:
     paired Box of StringIntPair = Box(Pair("count", 3))
 ]
 
-One application is allowed inside a collection element, such as `{Box of String}`.
+`{Box of String}` is valid with a single `of` application. Generic receiver methods use their type's generic parameters.
+Generic values can be passed, stored and returned without bounds:
 
-Unconstrained code can pass, return, store and forward values, but cannot assume
-arithmetic, comparison, fields, interpolation, IO or methods. Use bounds. No
-`where`, generic function values, parameterised aliases, partial application,
-higher-kinded types, lifetime parameters or general const generics.
+[codeblock, $code("moth"):
+    make_box type A |value A| -> Box of A:
+        return Box(value)
+    ;
+
+    boxed Box of String = make_box("hello")
+]
+
+Operations that depend on `A`, such as comparing or displaying it, need trait bounds (see **Traits and conformance**).
+
 ## Traits and conformance
 
 [codeblock, $code("moth"):
@@ -791,19 +717,19 @@ higher-kinded types, lifetime parameters or general const generics.
     ;
 ]
 
-Requirements use `This`/`~This` receivers. Other `This` parameters need names. Direct return `This` is allowed, composed `This?`, `{This}` or `Box of This` invalid. Requirements have no bodies or individual semicolons. Newlines separate them, one `;` closes the trait. Empty marker traits are valid.
+Traits are **compile-time contracts**. A type conforms with `Type must TRAIT` beside its declaration and matching methods.
+Requirements declare signatures without bodies. Generic bounds use `is`, as in `type Item is DISPLAY_TEXT and NAMED`.
+Conformance travels with the type, so callers can use bounded functions without importing the trait separately.
 
-Conformance is explicit and bodyless, without `;`. Commas list traits. Same-file structs, choices and aligned generic constructors must match receiver mutability, parameter access/types and return types/channels exactly. Parameter names do not matter. Conformance evidence travels with values of the type, so generic calls need not name the type or trait.
+Requirements use `This` or `~This` receivers and may return `This` directly, but can't wrap `This` in another type.
+Signatures must match, including access and results.
+Traits are resolved statically. Use choices to represent runtime alternatives between concrete types.
 
-Bounds use `is`, as in `type Item is DISPLAY_TEXT and NAMED`. Commas separate parameters. Concrete arguments need conformance evidence for their type. Bound calls resolve a unique required method statically. Traits cannot serve as runtime types or values.
-
-`READABLE must not WRITABLE` declares symmetric incompatibility between traits. It adds neither inheritance nor negative conformance. `Type must not TRAIT` is invalid.
-
-No trait objects, dynamic dispatch, default methods, associated items, inheritance, aliases, generic traits/methods, structural or blanket/conditional/negative/specialised conformance. Use choices for runtime alternatives.
+`READABLE must not WRITABLE` makes the traits incompatible.
 
 ### Custom cast conformance
 
-Using `Label` above, provide a same-file receiver method and explicit conformance:
+A method alone doesn't enable a user-defined cast. The source type must explicitly conform to a built-in cast trait:
 
 [codeblock, $code("moth"):
     to_string |this Label| -> String:
@@ -816,149 +742,112 @@ Using `Label` above, provide a same-file receiver method and explicit conformanc
     text String = cast label
 ]
 
-Each of the eleven fixed numeric target types has an infallible and a fallible
-source-authored evidence family. `CASTABLE_TO_*` requires `to_* |This| ->
-Target`; `TRY_CASTABLE_TO_*` requires `try_to_* |This| -> Target, Error!`.
-The existing `Bool`, `String`, `Char` and `Error` families remain. `Byte` and
-`Dec` gain no source-authored numeric cast evidence. One source/target pair
-cannot conform through both evidence classes.
-
-A method alone supplies no cast. These predeclared traits cannot be imported,
-exported, aliased or redeclared. Generic cast targets and conversion-chain
-search remain outside scope.
+`CASTABLE_TO_I32` requires `to_i32 |This| -> I32`. `TRY_CASTABLE_TO_I32` requires `try_to_i32 |This| -> I32, Error!`.
+Other fixed numeric targets follow the same pattern, alongside supported `Bool`, `String`, `Char` and `Error` casts.
+A source/target pair can conform to only one of the infallible or fallible variants. `Byte` and `Dec` have no custom numeric casts.
 
 ## Collections
 
 [codeblock, $code("moth"):
-    names ~= {"Priya", "Rob"}
-    empty ~{I32} = {}
-    fixed ~{3 I32} = {10, 20}
-
+    names ~= {"Priya", "Rob"}       -- growable {String}
+    empty ~{I32} = {}               -- typed empty collection
+    fixed ~{3 I32} = {10, 20}       -- capacity 3
     capacity #I32 = 4
-    scratch ~{capacity String} = {}
-    labels {capacity} = {"a", "b"}
+    labels {capacity} = {"a", "b"}  -- fixed capacity, inferred element type
+
+    size = names.length()
+    ~names.push("Emmy")
+    first = names.get(0)  -- shared read-only element
+    ~names.set(0, "Huw")
+    removed = ~names.remove(1)
+    ~names.clear()
 ]
 
-`{T}` is growable and `{N T}` has maximum capacity `N`. Element type,
-collection shape and fixed capacity are semantic identities. Capacity,
-collection length, element index and loop position use `I32`. Fixed capacity
-must be a positive `I32` literal or bare `#I32` name; it is not a growable
-allocation hint.
+`{T}` grows dynamically. `{N T}` has fixed maximum capacity `N`, which is part of its type. `N` is a positive `I32` literal or bare `#I32` constant.
+Length, capacity and indexes use `I32`. Collections have no `[]` indexing or builtin equality.
 
-Non-empty literals have one homogeneous element type. Raw numeric origins can
-remain unresolved until eligible exact constraints select their element type.
-Raw whole plus decimal/exponent literals choose the binary-float family in
-either order; a bound integer keeps its integer family. Already typed elements
-must match exactly. Arithmetic promotion does not find a collection storage
-type.
+Non-empty literals have one element type. Raw numeric literals can receive that type from context.
+A collection can't promote already typed elements to a new storage type. Empty collections require an explicit type at declaration or field default.
 
-Empty literals introduce no numeric origin. Empty collections need an explicit
-type at a declaration or field default, and empty maps need a known map shape.
-No new argument-context inference applies. Later push, assignment or calls
-cannot infer an otherwise untyped empty container. Mutation checks the selected
-element type and never widens it.
-
-[table:
-    [th:
-        [: Call]
-        [: Result]
-        [: Failure]
-    ]
-    [td:
-        [: `items.get(index)`]
-        [: Shared element]
-        [: Invalid index]
-    ]
-    [td:
-        [: `~items.set(index, value)`]
-        [: No value. Replaces existing item only.]
-        [: Invalid index]
-    ]
-    [td:
-        [: `~items.push(value)`]
-        [: No value. Appends.]
-        [: Fixed: full. Growable: infallible.]
-    ]
-    [td:
-        [: `~items.remove(index)`]
-        [: Removed value. Shifts later items, frees fixed slot.]
-        [: Invalid index]
-    ]
-    [td:
-        [: `items.length()`]
-        [: Logical length as `I32`]
-        [: Infallible]
-    ]
-    [td:
-        [: `~items.clear()`]
-        [: No value. Length becomes zero, capacity unchanged.]
-        [: Infallible]
-    ]
-]
-
-Indices use `I32`. Arguments are positional-only. Fallible operations use
-builtin `Error!` and need `catch` or postfix `!`. Growable allocation
-exhaustion is unrecoverable. Failed mutations preserve contents. Collections
-have no square-bracket indexing or builtin equality.
+`get` returns a shared element. `set` replaces, `push` appends, `remove` returns and shifts elements and `clear` empties the collection.
+Invalid indexes fail without changing contents. Fixed `push` fails when full. Growable `push` only fails fatally on allocation exhaustion.
+Use normal `Error!` handling for recoverable collection failures. Live element aliases block conflicting mutation.
 
 ## Hash maps
 
 [codeblock, $code("moth"):
     scores ~{String = I32} = {"Priya" = 10, "Rob" = 8}
     empty_scores ~{String = I32} = {=}
+
+    found = scores.contains("Priya")
+    score = scores.get("Priya") catch then 0
+    ~scores.set("Emmy", 5) catch:
+        io.warn("update failed")
+    ;
 ]
 
-`{Key = Value}` uses one key/value form throughout. Bare key names read
-variables. `{}` always denotes a collection and `{=}` a map. A receiving type
-cannot change the container kind.
+`{Key = Value}` uses one key/value form throughout. `{}` is a collection and `{=}` is an empty map.
+Keys may be `String`, `Bool`, `Char`, `Byte` or a fixed-width integer, but not floats, `Dec` or user-defined types.
+Types are exact. Numeric promotion can't change an existing key or value type.
 
-Keys are `String`, `Bool`, `Char`, fixed-width integers or `Byte`. Binary
-floats, `Dec`, user types and generic parameters are invalid keys. Typed keys
-never cross nominal or width boundaries. Contextual raw literals materialise
-in the exact declared key type. Non-empty maps can carry eligible numeric
-origins through their known key/value shape; insertion order and duplicate-key
-checking follow the materialised exact key identity.
+`get` fails for a missing key, `contains` returns `Bool` and `set` inserts or replaces.
+`remove` returns and removes a value, while `clear` empties the map. `length` is an `I32` property **without parentheses**.
+Keys are borrowed and `get` returns a shared read-only value, so a live alias blocks conflicting mutation.
 
-Replacement preserves insertion position and stored key. Removal then
-reinsertion appends.
+Replacing a key preserves its position. Removing and reinserting moves it to the end.
+Maps have no square-bracket indexing or collection-loop iteration. Nesting beyond two inline map levels needs an alias.
 
-- `scores.get(key)`: shared value, fallible.
-- `scores.contains(key)`: `Bool`, infallible.
-- `~scores.set(key, value)`: inserts/replaces, no value, fallible.
-- `~scores.remove(key)`: removed value, fallible.
-- `~scores.clear()`: removes all entries, no value, infallible.
-- `scores.length`: read-only `I32` property, no parentheses.
+## Declared regions
 
-Arguments are positional-only, lookup keys borrowed. Failed mutations preserve
-contents. A live `get` alias blocks mutation. No indexing, collection-loop
-iteration, entry API, fixed capacity, equality, sets or custom key/hash policy.
-Inline map nesting beyond two levels needs an inner type alias.
+Most lifetimes are inferred. Declare a region when allocations need an explicit shared lifetime, particularly for reference cycles or bulk cleanup.
+Only `into name` places newly created storage in a region. Being lexically inside one is not enough.
+
+[codeblock, $code("moth"):
+    request:
+        scratch:
+            temporary String into scratch = [: temporary]
+            saved String into request = copy temporary
+        ;
+
+        io.line(saved)
+    ;
+]
+
+`into` targets the current or an enclosing region and places fresh storage or an independent `copy`.
+Placing into an ancestor requires straight-line nesting. For conditional construction, use a value-producing `if`,
+match or `catch` at the destination.
+
+Storage is reclaimed together when its region exits, including on error or early return.
+Region-owned values can't escape or retain shorter-lived storage. A reference cycle must belong entirely to one declared region.
+Reassignment preserves region ownership. Use `copy` to introduce independent storage from another region.
+
+Regions are neither values nor types. See @../memory (Memory) for full placement and lifetime rules.
 
 ## Templates
 
-Templates produce `String` values, folding static work and evaluating the rest at runtime. `:` separates head values, helpers, directives and slot contributions from the body.
+Templates produce `String` values. Static content folds at compile time. Dynamic interpolations evaluate at runtime.
+A `:` separates the head from the body.
 
 [codeblock, $code("moth"):
     content = [$md:
         # Hello [name]
     ]
+    joined = ["Hello, ", name]  -- concatenation, no String + String
     literal = [: ["[brackets]"]]
 ]
 
-Insert a quoted string to emit literal square brackets.
+A `.mtf` source begins as an implicit compile-time `$md` body exported as `content #String`. See @../moth-templates (Moth template files).
 
 ### Directives and formatting
 
-- `$md` formats Moth Markdown. `$raw` preserves body text and whitespace.
-- `$note` and `$todo` discard balanced bodies. `$doc` marks documentation comments.
-- The HTML builder supplies `$html` for raw HTML, `$css` for CSS checking/formatting and `$escape_html` for escaping HTML-sensitive text.
-- `$code("language")` highlights literal code without nested template interpretation. It removes formatting indentation while preserving relative indentation.
+Directives are compiler or builder-provided operations written `$name` or `$name(arguments)`.
+Some format templates, while others configure projects or mark declarations (see @../directives (Directives)).
 
-Formatters affect only their own template. Incompatible formatters cannot share a head.
+`$md` formats Markdown. `$raw` preserves text and whitespace. `$note`/`$todo` discard content, while `$doc` marks documentation.
+The HTML builder supplies `$html`, `$css` and `$escape_html`. `$code("language")` highlights literal code.
+Formatters apply to their own templates, and incompatible formatters can't share a head.
 
-A `.mtf` file folds an implicit `$md` body into `content #String`. See @../moth-templates (Moth template files).
-
-### Slots and child wrappers
+### Slots and wrappers
 
 [codeblock, $code("moth"):
     card #= [:
@@ -977,13 +866,13 @@ A `.mtf` file folds an implicit `$md` body into `content #String`. See @../moth-
     [list: [: one] [$fresh: [: two]]]
 ]
 
-Positive integer slots receive loose head contributions in ascending order, then the default slot receives any remainder. Unassignable content causes an error. Missing slots render empty and repeated slots replay content.
-
-`$children(...)` wraps direct child templates. `$fresh` skips one immediate parent wrapper, preserving wrappers inside that child.
+Named `$slot` values receive matching `$insert` content. Numbered slots consume head contributions in order. `$slot` receives the remainder.
+Missing slots render empty, repeated slots reuse content and unassigned content is an error.
+`$children` wraps direct children. `$fresh` skips one parent wrapper.
 
 ### Template control flow
 
-Place `if` or `loop` last in the head, after a comma when another head item precedes it:
+Templates support a single-body `if` and `loop`, written last in the head. More complex decisions belong in ordinary Moth code.
 
 [codeblock, $code("moth"):
     [card, if maybe_name is |name|:
@@ -995,45 +884,38 @@ Place `if` or `loop` last in the head, after a comma when another head item prec
     ]
 ]
 
-A template `if` includes one body when its `Bool` condition is true or its
-option is present. An option capture scopes its payload to that body. A false
-condition or absent option produces structural no-output. Template loops repeat
-their body using ordinary conditional, collection or range headers. Iterations
-concatenate without separators. Template control flow has no `else` or `else if`
-form, and template loops have no `break` or `continue` controls.
+An `if` body renders when its condition is true or its option is present, with a captured value available only in that body.
+Loops concatenate iteration bodies in order, using conditional, collection or range headers.
+Template control flow supports `if` and `loop` only, without `else`, `break` or `continue`.
 
-For richer decisions in `.moth` code, select a `String` with value-producing
-`if` at a supported receiving site, then interpolate it. The form cannot appear
-directly inside interpolation. A `.mtf` body remains const-required and cannot
-call runtime functions as a general replacement.
-
-A loop-head wrapper wraps the aggregate once. Put per-iteration wrappers in the
-body. Structural no-output skips shared wrappers, while a selected empty body
-may render its own head wrapper. Selected runtime content can propagate `!`
-through its enclosing function, but cannot use `catch` blocks as expressions.
-Routed slot contributions remain valid inside conditional bodies and loop
-bodies.
-
-Const templates require the condition and body to be compile-time evaluable,
-including when the body is inactive. A runtime expression in an inactive body
-is rejected. Only selected output is folded. Const range and collection loops
-obey `template_const_loop_iteration_limit` (default `10_000`, maximum
-`1_000_000`). A const conditional loop folds to no-output only for a
-compile-time `false` condition.
+A loop-head wrapper wraps the whole loop once. Place per-item wrappers inside the body.
+Const templates check every body for compile-time evaluation, including inactive branches.
+Constant loops have a configurable iteration limit.
 
 ### Moth Markdown
 
-`$md` supports headings, paragraphs, lists, emphasis, links and same-line paired single-backtick code. It escapes raw HTML and has no fenced code blocks or pipe tables. Use `$code` for blocks and helpers for tables. Static headings render generated kebab-case IDs, so `@#my-section (My section)` and `@/route#my-section (My section)` link to them.
+`$md` supports headings, paragraphs, lists, emphasis, links and same-line paired backtick code, while escaping raw HTML.
+Use `$code` for code blocks and `@html` helpers for tables. For HTML projects, import `@html table, th, td` in `.moth` files.
+The same helpers are available automatically in `.mtf` files:
 
-Links use `@./path (label)`, `@/site-route (label)` or `@https://example.com (label)`. A single leading `/` uses `origin`. Other targets render literally. Link targets neither resolve files nor create resource dependencies.
+[codeblock, $code("moth"):
+    [table, [th: [: Name] [: Score]]:
+        [td: [: Priya] [: 10]]
+    ]
+]
 
-Separate target and label with a non-empty gap containing only spaces, tabs and at most one line break (LF, CRLF or lone CR). Other content or a second break prevents association. Links cannot cross inline blocks, opaque expressions or child-template boundaries.
+Static headings receive kebab-case IDs, linkable with `@#hello (Hello)`.
+
+Links use `@./path (label)`, `@/route (label)` or `@https://example.com (label)`.
+The target and label may be separated by spaces, tabs and **at most one newline** (including CRLF). Other content breaks the link.
+Link targets don't themselves create file dependencies.
 
 See @../templates (Templates).
 
 ## Wiring
 
-`Wire` and `Route` describe parameter capabilities through the following contracts. They are not general wrapper types.
+`Wire` passes the identity of a named binding. `Route` captures a choice constructor for a later input or event.
+Both are parameter contracts, so a UI or other consumer can decide how to use them.
 
 ### Wires
 
@@ -1050,36 +932,58 @@ See @../templates (Templates).
     label = forward_name(name)
 ]
 
-`Wire of T` accepts a named mutable/immutable local or compatible wire parameter, preserving identity across reassignment without markers. An ordinary `T` receiver reads the current value under normal alias/`copy` rules. Wires grant no mutation and reject field projections, lookups, literals, calls and computations.
+`Wire of T` accepts a named immutable/mutable local or compatible wire parameter and preserves its identity through reassignment.
+Reading it as `T` uses ordinary **shared read-only** access. Only whole named bindings can form wires.
 
 ### Routes
 
+A route allows a consumer to turn input into an ordinary choice message. This example shows the parameter interface a UI builder might expose.
+The `text_input` and `button` functions below stand in for UI components. They show route formation, not a built-in event runtime.
+
 [codeblock, $code("moth"):
     TodoMessage ::
-        Rename | id I32, value String |,
+        Rename | id I32, text String |,
         Delete | id I32 |,
     ;
 
+    text_input |value Wire of String, on_change Route of String -> TodoMessage|:
+        io.line(value)  -- illustrative UI component
+    ;
+
+    button |label String, on_click Route of TodoMessage|:
+        io.line(label)  -- illustrative UI component
+    ;
+
+    update_title |current String, message TodoMessage| -> String:
+        return if message is:
+            Rename(id, text) => then text
+            Delete(id) => then ""
+        ;
+    ;
+
     todo_id = 42
+    title ~= "Draft"
+    text_input(title, TodoMessage::Rename(todo_id))
+    button("Delete", TodoMessage::Delete(todo_id))
+
+    -- When the text input supplies "Revised", the route produces this message:
+    changed = TodoMessage::Rename(42, "Revised")
+    title = update_title(title, changed)
 ]
 
-A route parameter accepts only a direct choice constructor or an unchanged compatible route parameter:
+`Route of String -> TodoMessage` captures `todo_id` once. The future `String` fills the remaining `text` field.
+The resulting message can be handled by ordinary Moth code, as `update_title` demonstrates.
+`Route of TodoMessage` captures a complete constructor, so the Delete action needs no future input.
+Compatible route parameters can forward routes unchanged.
 
-[table:
-    [th: [: Parameter contract] [: Constructor argument]]
-    [td: [: `on_input Route of String -> TodoMessage`] [: `TodoMessage::Rename(todo_id)`]]
-    [td: [: `on_click Route of TodoMessage`] [: `TodoMessage::Delete(todo_id)`]]
-]
-
-`Route of Message` takes no future input, while `Route of Input -> Message` takes one. Contracts match input/output types exactly. Captures evaluate when the route forms and fill a leading payload prefix. Future input fills the remaining trailing payload in declaration order. Route parameters forward unchanged to compatible parameters. Elsewhere, constructors require complete arguments.
-
-These contracts annotate parameters only, never locals, fields, choice payloads, collections/maps, aliases, defaults or return slots. Normal access and lifetime rules apply. Routes cannot be invoked, composed, compared, serialised or sent through channels. Wiring adds no automatic observation, template updates or event delivery.
+Wires and routes can only appear as parameter capabilities. Their reads and captures follow ordinary access and lifetime rules.
+UI event delivery needs a builder or library that implements it.
 
 See @https://github.com/nyejames/moth/blob/main/docs/src/docs/wiring/wiring.mtf (Wiring contract).
 
 ## Dependencies and aliases
 
-Bind declarations with `@path`, without an `import` keyword:
+Moth has no `import` keyword. Use a top-level `@path` to bind names or namespaces:
 
 [codeblock, $code("moth"):
     @core/math sin, cos, PI
@@ -1088,50 +992,44 @@ Bind declarations with `@path`, without an `import` keyword:
     @vendor/drawing.js as drawing
 ]
 
-Selections bind file-local names. Entry `as` renames one selection. Clause `as` names a namespace and forbids selections. Bindings span the file and cannot shadow names.
+`as` after one selection renames that binding. After the path it binds a namespace without selections.
+Bare `@core/math` binds `math`, used as `math.sin(1.0)`. Namespaces are not first-class values. Selections are flat names, not path components.
 
-The path and first selection share a physical line. Commas continue lists and require another selection:
+Paths resolve relative to the **module root**, not the importing file. Omit `.moth`, `.mtf` and `.md` extensions for source dependencies,
+but retain extensions for providers such as `.js`. A path may bind an owned file, visible child module or support package.
+Module boundaries expose only exports. `@./`, `@/` and `../` are invalid dependency paths.
+Root filenames (`@*.moth`, `+*.moth`) can't be imported directly.
 
-[codeblock, $code("moth"):
-    @core/math sin,
-        cos
-]
+Selections are file-local and can't shadow existing names. Commas permit multiline selection lists, with the path and first selection on the same
+line. Source clauses bind available providers. They don't acquire or install packages.
 
-Bare `@core/math` binds `math`. Source namespaces allow shallow access such as `math.sin(1.0)`, not passing as values. External package namespaces may nest. Explicit-extension dependencies such as `.js` require `as` or a direct selection.
-
-- Resolve from the owning module root.
-- Omit `.moth`, `.mtf` and `.md` extensions, but keep provider extensions such as `.js`.
-- Bind same-module files, module directories or registered packages, never `@*.moth`, `+*.moth` or `config.moth` files.
-- Reject `@./`, `@/`, parent traversal and `@@`.
-- Stop at child-module/support-package boundaries and use exports.
-- Select flat names after the path, never `@core/math/sin`.
-
-Clauses bind available files/packages without acquiring packages. Only direct external dependencies are source-visible. See @../packages (Packages and dependencies).
+See @../packages (Packages and dependencies).
 
 ## File values and resources
 
-Explicit-extension file expressions produce `String`, without a `Path` type:
+An explicit-extension file value is an ordinary `String`, not a separate path type:
 
 [codeblock, $code("moth"):
     logo #= @assets/logo.svg
     image #= [$html:<img src="[logo]" alt="Moth">]
 ]
 
-`.mtf`/`.md` give content strings. `.moth` has no file value. Other accepted extensions give resource strings with ordinary storage, parameter, return and export rules.
+`.mtf` and `.md` provide content strings. Other accepted extensions provide resource strings that can be stored, passed, returned and exported.
+`.moth` has **no file value**. Paths resolve from the module root and can't cross private module or package boundaries.
+Export a String to share a resource across them.
 
-Paths follow module-root resolution and child-module/support-package boundaries. Share resources across boundaries through exported Strings or function results. Physical paths must name existing regular files. `@./`, parent traversal, `@@`, absolute paths such as `@/logo.svg` and file values in `config.moth` are invalid.
+Resource URLs receive their final characters from the consuming output. Constants can carry resources, but compile-time operations can't inspect an
+unresolved URL. Physical targets must exist even in inactive branches. Only resources actually used in output are emitted.
 
-Resource URLs depend on their output. Constants can hold resources, but compile-time operations cannot inspect unresolved URL characters. Physical references must resolve even in unused constants or inactive branches. Only resources used by output are emitted.
-
-Bare `@/` gives `origin` or `/` by default, names no file and remains invalid in dependencies. External/protocol-relative URLs stay literal and untracked.
+Bare `@/` is a site-root string, not a file or valid dependency path. Ordinary absolute paths, `@./`, parent traversal and physical file values in
+`config.moth` are invalid.
 
 See @../resources (File paths and resource values).
 
 ## Modules, exports and packages
 
-One directory-scoped `@*.moth` roots a normal module. The suffix carries no meaning. Ordinary `.moth` files and unrooted subdirectories belong to that module.
-
-Module files can bind helper-file declarations. Other modules see only the root's `export:` block:
+A directory-scoped `@*.moth` is a normal module root. The filename suffix is cosmetic.
+Ordinary `.moth` files and unrooted subdirectories belong to that module. Other modules see only what its root exports:
 
 [codeblock, $code("moth"):
     private_label #= "Moth"
@@ -1147,21 +1045,68 @@ Module files can bind helper-file declarations. Other modules see only the root'
     ;
 ]
 
-A root allows one non-empty `export:`. Export functions, structs, choices, aliases, traits, constants or direct dependency selections, never runtime bindings, fragments, statements or whole namespaces. Public signatures cannot expose private types, traits or required evidence. A trait is public at its owner when its module root exports it, directly or by re-export, or a provider's public interface supplies it; the publishing module need not re-export an imported trait. Receiver types expose their methods, while aliases alone do not expose private implementation methods.
+A root can have one non-empty `export:` block for public declarations and direct re-exports.
+Runtime statements, fragments and whole namespaces aren't exports. Public signatures can't expose private types or required private trait evidence.
+Methods are visible wherever their receiver type is visible. They can't be imported or exported separately.
 
-A source-tree `+*.moth` creates a directory-named support package: `src/shared/+package.moth` gives `@shared`. It uses `export:` and forbids top-level runtime work/pages. Support packages share code between normal siblings, which cannot depend directly on one another.
+A `+*.moth` root creates a named support package, such as `src/shared/+package.moth` exposed as `@shared`.
+Its `export:` facade lets normal sibling modules share code, while preserving private implementation boundaries.
+It is visible to its nearest normal owner and normal siblings/descendants in that scope.
 
-A support package serves its nearest normal owner, normal siblings and their descendants, excluding its private implementation subtree and same-scope support packages. Consumers cannot traverse its public boundary into implementation files.
+An optional project-root `+*.moth` beside `config.moth` exposes the project's **external** package API. Internal modules can't import this facade.
+Neither exported signatures nor reachable exported implementations may depend on private `@project` values.
 
-One optional project-root `+*.moth` beside `config.moth` exposes the external API. Internal modules cannot bind this facade. It has no page/runtime entry, and neither its public API nor reachable implementations may depend on private `@project` values.
+For example, a project might contain:
+
+[codeblock, $code("text"):
+    my-site/
+      config.moth
+      src/
+        @site.moth
+        helpers.moth
+        tools/format.moth
+        vendor/format.js
+        shared/
+          +package.moth
+          badge.moth
+        pages/
+          @pages.moth
+          article/
+            @article.moth
+]
+
+From `src/@site.moth` (or `src/helpers.moth`), imports can bind:
+
+[codeblock, $code("moth"):
+    @tools/format format_title   -- ordinary file, same module
+    @pages page_heading          -- child module's exported name
+    @shared badge                -- support package's exported name
+    @core/math PI                -- Core package
+    @html table                  -- HTML builder package
+    @charts plot                 -- registered external dependency
+    @vendor/format.js emphasize  -- builder-provided JS binding
+]
+
+The nested `src/pages/article/@article.moth` can import the same support package and Builder packages:
+
+[codeblock, $code("moth"):
+    @shared badge
+    @html table
+]
+
+Even an ordinary file nested under `src/tools/` imports `@tools/format`, because paths always start at its module root.
+The `@pages` and `@shared` imports see only their exported facades.
+`@charts` assumes a declared project dependency. The `.js` binding requires an HTML builder capable of importing JavaScript.
 
 See @../project-structure (Project structure) and @../packages (Package visibility).
 
 ## Directives and project configuration
 
-`$name(arguments)` invokes a registered directive with compile-time positional/named arguments. With no arguments, write bare `$html_builder` or `$page`, never empty `()`. Unknown, unavailable or misplaced directives cause errors. Source cannot define, alias, import or override semantic directives.
+`$name(arguments)` invokes a registered compile-time directive. With no arguments, write the bare directive (`$html_builder`), not empty parentheses.
+Directives are provided by the compiler or selected builder, not defined in source.
 
-Project-root `config.moth` contains compile-time helpers and directives, without dependencies, functions, runtime work or file values:
+Project-root `config.moth` contains compile-time values and configuration. It requires one `$project` and the selected builder's config.
+Source imports, functions and runtime work belong in ordinary modules:
 
 [codeblock, $code("moth"):
     $config
@@ -1171,13 +1116,13 @@ Project-root `config.moth` contains compile-time helpers and directives, without
     $html_builder
 ]
 
-Use exactly one `$project` and, for HTML directory projects, one `$html_builder`. Required project fields: `name` and `version` Strings. Defaults: `entry_root = "src"`, `author = none`, `license = none`. `entry_root` names a relative directory below the project root. Only predefined fields are valid. `name`, `entry_root` and `template_const_loop_iteration_limit` cannot depend on inputs, even through helpers.
-
-`$html_builder` configures HTML output, not builder/target selection. Defaults include `dev_output = "dev"`, `release_output = "release"` and `origin = "/"`. See @../project-structure/#project-config (Project configuration).
+`$project` requires `name` and `version` Strings. Its `entry_root` defaults to `"src"` beneath the project root. Only predefined fields are accepted.
+`$html_builder` configures HTML output, not source-level target selection. Its default output folders are `dev` and `release`, with `origin = "/"`.
 
 ### Build inputs
 
-`$config` attaches to one following explicitly typed top-level `#` declaration across whitespace/comments, never another item or block boundary. Dangling/duplicate markers cause errors.
+`$config` marks the next **explicitly typed top-level constant** as a build input. The initializer supplies a fallback.
+Without one, an ordinary input is required while an optional input defaults to `none`.
 
 [codeblock, $code("moth"):
     $config
@@ -1190,50 +1135,56 @@ Use exactly one `$project` and, for HTML directory projects, one `$html_builder`
     label #String?
 ]
 
-Initialisers provide fallbacks. Without one, non-optional inputs are required
-and optional inputs resolve to `none`. Input types are `String`, `Bool`, `Char`,
-all eight exact integers and all three exact binary floats, with one optional
-layer. `Byte` and `Dec` remain excluded. Inferred `#=`, local, parameter,
-field and mutable declarations cannot declare inputs.
-
-Config-file fallbacks may use earlier permitted helpers. Module-source
-fallbacks accept primitive literals or `none`. Matching input names within a
-project/package must agree on type, optionality, required/default state and
-default value. Ordinary constants and `$project` fields neither declare nor
-satisfy inputs. Dependencies own separate input namespaces.
-
-Repeat `--input name=value` for multiple inputs. Names use lower_snake_case.
-Parsing splits at the first `=`, preserving later equals signs. Numeric
-spelling stays raw until the exact input contract is known, so an integer
-outside `I32` can materialise directly for `U64` and a whole literal can
-materialise directly for `F32`. A decimal/exponent spelling does not satisfy
-an integer contract. Non-numeric fallback and quote validation follow the
-build-input contract:
+Inputs support `String`, `Bool`, `Char`, exact fixed-width integers, binary floats and one optional layer.
+`Byte`, `Dec`, mutable bindings and inferred `#=` declarations can't be inputs.
+Source-module input defaults must be primitive literals or `none`, while `config.moth` may use earlier compile-time helpers.
 
 [codeblock, $code("bash"):
-    moth build . --input count=4_294_967_296
-    moth build . --input ratio=1
     moth build . --input api_url=https://example.com --input analytics=true
+    moth build . --input count=4_294_967_296
     moth build . --input 'label="true"'
 ]
 
-Already typed values must match the exact contract, except a present `T` can
-satisfy `T?`.
+CLI numeric spellings are resolved directly against their declared exact type, without an `I32`/`F64` intermediary.
+Quotes distinguish a String such as `"true"` from the Bool `true`. Inputs sharing a name in a project/package must agree on type,
+optionality and fallback. Dependencies resolve their own inputs.
 
-Read predefined project fields explicitly:
+Project metadata is available only through explicit imports:
 
 [codeblock, $code("moth"):
     @project version
     footer #= [: Version [version]]
 ]
 
-`@project` cannot be directly re-exported. Helpers/inputs do not become project fields.
+`@project` exposes predefined fields, not arbitrary config helpers or inputs.
+Input-dependent values can't determine `name`, `entry_root` or `template_const_loop_iteration_limit`.
 
-See @../project-structure/#build-inputs (Build inputs) and @../directives (Directives).
+See @../project-structure/#project-config (Project configuration), @../project-structure/#build-inputs (Build inputs) and
+@../directives (Directives).
+
+## Commands and project builders
+
+[codeblock, $code("bash"):
+    moth new html my-site
+    cd my-site
+    moth check .
+    moth dev .
+    moth build . --release
+]
+
+`check` validates the project and required target capabilities without writing output. `dev` serves the development build.
+`build --release` writes configured release output.
+
+Modular project builders supply packages, capabilities and output conventions. HTML turns `$page` roots into documents and routes.
+Other builders, such as Lappet, supply their own packages and decide how to consume top-level work.
+Source can't query the OS, architecture, backend or physical target. The selected target must support every reachable required capability.
 
 ## Pages and top-level work
 
-Declare `$page` once on a normal module root or explicitly selected single-file root:
+The **HTML project builder** uses `$page` to mark a normal module root as a page and activate its top-level runtime work or direct output.
+Other builders can define their own entry or runtime purpose directives instead.
+
+For an HTML page:
 
 [codeblock, $code("moth"):
     $page(title = "Moth")
@@ -1246,44 +1197,33 @@ Declare `$page` once on a normal module root or explicitly selected single-file 
     [: Hello, [name].]
 ]
 
-Arguments, in order: `title`, `description`, `lang`, `favicon`, `body_style`, `head`. Each takes compile-time `String?`, defaulting to `none` for no override. `head` inserts HTML and metadata accepts resource strings. Same-file references must name earlier constants.
+`$page` applies to the whole root. It accepts compile-time optional `title`, `description`, `lang`, `favicon`, `body_style` and `head` settings.
+Helpers, support roots, facades and `config.moth` can't declare pages. Declaration-only roots and documentation/comment templates need no page
+purpose.
 
-`$page` applies to the whole root, supplying the purpose required for runtime bindings, calls and direct output. Declaration-only roots and documentation/comment templates need no purpose. Helpers, support roots, facades, `config.moth` and `export:` cannot declare pages.
+Direct constant fragments become static HTML. Runtime work runs once at page startup, and runtime fragments publish only after successful completion.
+An error leaves static fragments in place but doesn't roll back earlier side effects.
+The release page shows a generic failure notice, not application error text.
 
-Entry work runs once at startup. Dependencies neither run it nor insert fragments. Built-in `Error!` permits compatible top-level `!`. Custom errors require recovery.
+Routes derive from directory structure: `src/guide/@page.moth` creates `guide/index.html`. Root filenames have no route significance.
+HTML builds need at least one page. `check` can validate a declaration-only, zero-page project while still rejecting unpurposed runtime work.
 
-Direct const fragments fold into static HTML. Plain fragments run at startup and publish only on success, with static/runtime output in source order. Failure preserves static fragments, publishes no runtime fragments and does not roll back earlier side effects. Release pages show a generic safe notice, never the application's Error message as HTML.
-
-Directories determine routes: `src/guide/@page.moth` produces `guide/index.html`, independent of root filename. `index.moth` has no special role. `check` accepts declaration-only/zero-page projects but rejects unpurposed runtime work. HTML `build`/`dev` require a page below `entry_root`, without a mandatory homepage. Single-file HTML needs `$page`.
-
-See @../project-structure (Pages, metadata and entry behaviour).
-
-## Commands and project builders
-
-[codeblock, $code("bash"):
-    moth new html my-site
-    cd my-site
-    moth check .
-    moth dev .
-    moth build . --release
-]
-
-`check` validates the project and required target capabilities without writing output. `dev` serves the development build. `build --release` writes configured release output.
-
-Modular project builders supply packages, capabilities and output conventions. HTML turns page roots into documents/routes. Other builders provide their own source/host packages. Source cannot query/select OS, architecture, backend or physical target. The selected target must support every reachable required capability.
+See @../project-structure (Pages and entry behaviour).
 
 ## Core IO and foreign functions
 
-The prelude exposes `io` as `@core/io`. `io.print`, `io.line`, `io.debug`, `io.warn` and `io.error` each take one String and return nothing. `io.line` completes a line or output record and `io.print` doesn't request line termination. Format other values with templates:
+The prelude exposes `io` from `@core/io`: `io.print`, `io.line`, `io.debug`, `io.warn` and `io.error` accept a single `String`.
+Format other types with templates:
 
 [codeblock, $code("moth"):
     count = 3
     io.line([: Count: [count]])
 ]
 
-`io.set_title(text)` takes one String, returns nothing and declares no error channel. It sets the title of the current user-facing host surface and requires a host title capability. HTML-JS realises it as the live document title, without initial prefix/postfix, leaving static metadata and routes unchanged.
+`io.set_title(text)` changes the host's displayed title when the selected environment supports it.
+For HTML it updates the live document title without rewriting static page metadata.
 
-Annotated JavaScript files expose typed free functions:
+Foreign packages depend on the selected builder and target. For example, the HTML builder can bind JavaScript files to typed Moth functions:
 
 [codeblock, $code("js"):
     /**
@@ -1302,30 +1242,21 @@ Annotated JavaScript files expose typed free functions:
     ;
 ]
 
-Annotations name Moth functions independently of JS exports. Signatures use
-positional typed parameters and zero or one success result with an optional
-final `Error!`. Numeric annotations name exact Moth widths, not profile-selected
-types. Existing supported slot shapes remain unchanged. `U32` uses the full
-unsigned 32-bit `Number` range. `F32` parameters need exact finite binary32
-values and results round once, preserve signed zero and reject non-finite
-values. `I64`/`U64` use `BigInt` inside Moth JavaScript and the safe-`Number`
-foreign bridge. Every supported external float result validates against its
-resolved exact precision before Moth code can observe it.
+Annotations declare typed Moth functions independently of JavaScript export names.
+They accept positional typed parameters, up to one success result and an optional `Error!`.
+Foreign calls check supported value conversions, including exact numeric types and finite float results.
+`@moth.opaque` declares foreign handles and `@moth.const` declares supported static exports.
+Foreign code can't retain borrowed Moth storage.
 
-Declare same-file opaque types with `@moth.opaque` before use. `@moth.const name U32` annotates one exported unsigned decimal literal without running JavaScript. Constant-only dependencies emit no JS asset or authored runtime imports.
+JavaScript bindings provide typed free functions without callbacks or async. Use ordinary Moth wrapper types for methods.
+Other builders need their own providers and supported ABIs. Lappet, for example, doesn't execute JavaScript.
 
-Core Math exposes F64 constants and signatures only. Additional Math
-precisions, generic helpers and Math WebAssembly lowering remain deferred.
-These contracts add no WebAssembly capability.
-
-Receiver methods, callbacks, async, options, collections, generics, multiple success results, shared-type imports, nested annotation paths and borrowed views remain unavailable.
-
-Foreign code cannot retain Moth-storage references. Opaque handles represent foreign identities with declared resource lifecycles. WIT provides a value-only foreign Wasm boundary, separate from native Moth imports.
+Annotated `.wat` files use the same `@moth.sig` signatures for WebAssembly text functions, where the builder provides a suitable ABI adapter.
+WIT describes a separate foreign Wasm component boundary. Native Moth packages use Moth interfaces rather than WIT.
 
 See @../packages/core/io (Core IO) and @../packages (Foreign binding contracts).
 
-## Language boundaries and further reference
+## Further reference
 
-Moth has no general closures/function values, macros, reflection/type values or operator overloading. For choice narrowing, nested payload patterns, recursive choices and async/channel design, consult @../design-scope (Design scope) and the @https://github.com/nyejames/moth/blob/main/docs/src/docs/wiring/wiring.mtf (Wiring and channel contract).
-
-For exact rules beyond this cheatsheet, start with @../language-overview (Language overview), @../memory (Memory) and the topic links above.
+For full syntax and semantic details, see @../language-overview (Language overview), @../memory (Memory) and the topic references above.
+For deliberately excluded features and future language directions, see @../design-scope (Design scope).
