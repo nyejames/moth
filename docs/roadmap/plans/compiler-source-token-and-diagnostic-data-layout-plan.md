@@ -108,8 +108,14 @@ ACTIVE_PLAN:
 - Execution order: Phase 4 runs as the steps in `PHASE_4_EXECUTION_ORDER` below. The slice
   checklists remain the acceptance contract. Only their order and grouping changed, under the
   architecture document's repository-discovered corrections rule.
-- NEXT_SUBSTEP: P4.5 slice S8 of `PHASE_4_5_SEQUENCE`: `just validate`, `just clippy-features`,
-  `just bench-data-layout-check`, docs and changelog. S7 is complete. S7b is accepted in "Phase 4
+- NEXT_SUBSTEP: P4.6 (4G producer sweep, 4I): producers construct `DiagnosticDraft` directly, tests
+  use typed views, and the legacy adapter and old model are deleted. P4.5 is complete. S8 is
+  accepted in "Phase 4 P4.5 S8: validation and boundary docs": `just validate` passes (unit,
+  integration 2982/2982, docs check), `just clippy-features` passes, and a same-worktree five-run
+  `just bench-data-layout-check` at S7b records median-of-run-medians of 43.109 ms diagnosed and
+  10.867 ms warning-heavy (Phase 4 baseline 44.77 / 11.93 ms). The style guide and the data-layout
+  design's failure-carrier paragraphs name `PreparedFailure`, `BoundaryAccumulator` and
+  `BoundaryFailure`. S7 is complete. S7b is accepted in "Phase 4
   P4.5 S7b: delete CompilerMessages": backends, output, build orchestration and command exits
   return `PreparedFailure` or `CompilerError`, `BuildOutputFailure::Write` carries
   `PreparedFailure`, and `CompilerMessages`, `RenderSourceContext`, `RenderPathContext`, the
@@ -242,9 +248,9 @@ PHASE_4_MIGRATION_STATE:
   `InvalidConfig` reasons (dropped under the overflow rule). P4.6's producer sweep does not move
   them into drafts; it deletes a field only where the legacy payload was its last reader
   (failure classification still reads the witness codes).
-- Foreign-site contexts: the diagnostic store keeps a deduplicated `Vec<FrozenIdentityHandle>`
-  behind its 8-byte cold rows. P4.5 replaces it with the report-owned context references of the
-  frozen report.
+- Foreign-site contexts: the diagnostic store still keeps a deduplicated
+  `Vec<FrozenIdentityHandle>` behind its 8-byte cold rows after P4.5; P4.6 replaces it with the
+  report-owned context references of the frozen report.
 - Type-display fallback: resolved by S6. Every capture point snapshots types with its owning
   environment; render reads only snapshots. An owner that captured without an environment or path
   table (for example `CatchOnNonFallible` in finalization, or path-free successful warnings)

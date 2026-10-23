@@ -1888,23 +1888,23 @@ transitional carrier does not implement the separate `InfrastructureFailure` res
 panic boundary or tooling host isolation. The data-layout programme still owns that migration under
 `Lane 2`'s context contract and `Lane 3`'s self-contained bug facts.
 
-`CompilerMessages` keeps one optional boxed `InfrastructureErrors` beside the plain diagnostic
-stream. Its primary cause and ordered additional causes retain each original message, `ErrorType`,
-optional host path, source provenance and metadata without concatenation or field merging.
-Appending an aggregate flattens its causes in production order and keeps the first cause primary.
-This cold allocation never boxes the high-volume user diagnostic lane or widens its common records.
+`PreparedFailure::{Infrastructure, Mixed}` and `BoundaryFailure.infrastructure` carry one boxed
+`InfrastructureErrors` beside the prepared diagnostic batch or the frozen reports. Its primary
+cause and ordered additional causes retain each original message, `ErrorType`, optional host
+path, source provenance and metadata without concatenation or field merging. Appending an
+aggregate flattens its causes in production order and keeps the first cause primary. This cold
+allocation never boxes the high-volume user diagnostic lane or widens its common records.
 
 Cause-indexed ranges pair retained source facts with explicit `Source(Arc<SourceDatabase>)` or
-`Frozen(Arc<FrozenIdentityContext>)` owners, independently of diagnostic ranges. Append shifts cause
-ranges with their causes. Fallback source attachment fills only unpaired causes, never replaces a
-package owner and never rebinds frozen facts through a mutable identity table. A bare compact ID or
-coincident path cannot establish source ownership.
+`Frozen(Arc<FrozenIdentityContext>)` owners, independently of diagnostic ranges.
+`BoundaryAccumulator::append_infrastructure` attaches the caller's source owner once, and append
+shifts cause ranges with their causes. Fallback source attachment fills only unpaired causes,
+never replaces a package owner and never rebinds frozen facts through a mutable identity table. A
+bare compact ID or coincident path cannot establish source ownership.
 
-`freeze_source_contexts` moves source and string ownership rather than deep-cloning tables. It
-validates domains and acquires every required source before moving identity data, restoring source
-pairings if acquisition fails. If a later freeze step fails, the vessel still retains all diagnostic
-and cause owners. Terminal handoffs append the freeze failure and return the original
-`CompilerMessages`, preserving prior diagnostics, causes and context rather than replacing them.
+The command-owned `BoundaryAccumulator` takes ownership of every source database it freezes, so
+terminal handoffs move their source owner into it rather than cloning it; one freeze produces the
+`BoundaryFailure`, preserving prior diagnostics, causes and context in production order.
 
 #### Current failure presentation
 
