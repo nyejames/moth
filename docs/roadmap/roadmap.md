@@ -35,6 +35,8 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 - [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Paused until diagnostic layout and bounded diagnostic recovery complete. Consume delivered exact numeric conflict/default-range, narrow-operation and authored safety-catch diagnostics. Native result arity and narrow propagation-context work are delivered with the compact typed-expression foundation. Resume with a fresh inventory and only the remaining catch-recovery presentation work, without rebuilding transferred fixes.
 
+- [Synthetic entry function identity](./plans/synthetic-entry-function-identity-plan.md) - Queued: replace the named implicit `start` with a typed AST entry and HIR `FunctionId`, freeing `start` as an ordinary user name. Preserve module activation, config diagnostics and JS/Wasm ABI. Activate after diagnostic improvements.
+
 - [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) - Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
 
 - [General directives and project configuration](./plans/general-directives-and-project-config-plan.md) - Queued: consume the shared MON argument owner, all fixed numeric input types and delivered destination-aware command literal materialisation for general directives, explicit $config contracts and strict $project/$html_builder configuration
