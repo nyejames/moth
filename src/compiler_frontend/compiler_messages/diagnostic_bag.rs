@@ -97,9 +97,9 @@ impl From<CompilerDiagnostic> for DiagnosticBag {
     }
 }
 
-/// Shared prepared failure lane preserving diagnosed vs infrastructure outcomes.
+/// One pre-freeze failure lane for diagnosed and infrastructure outcomes.
 ///
-/// WHAT: carries prepared diagnosed facts, an owned infrastructure aggregate, or both when source
+/// WHAT: carries prepared diagnostic facts, owned infrastructure errors, or both when source
 /// finalization races a semantic failure.
 /// WHY: owning sites capture diagnostics before they leave the type/path context that produced
 /// them; only the final boundary assembles source ownership and freezes reports.
@@ -154,8 +154,8 @@ impl PreparedFailure {
         }
     }
 
-    #[cfg(test)]
     /// Preserve prior warnings beside an infrastructure failure, in their original order.
+    #[cfg(test)]
     pub(crate) fn with_infrastructure_and_warnings(
         error: CompilerError,
         warning_diagnostics: Vec<CompilerDiagnostic>,

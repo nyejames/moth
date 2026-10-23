@@ -12,10 +12,11 @@ use crate::command_timing_scope;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{
-    BoundaryFailure, CompilerError, CompilerErrorMetadataKey, CompilerMessages, ErrorType,
+    BoundaryFailure, CompilerError, CompilerErrorMetadataKey, ErrorType,
 };
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
-use crate::compiler_frontend::display_messages::print_boundary_messages;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::dev_server::error_page::{
     format_compiler_messages, render_compiler_error_page, render_runtime_error_page,
@@ -23,6 +24,7 @@ use crate::projects::dev_server::error_page::{
 use crate::projects::dev_server::sse;
 use crate::projects::dev_server::state::DevServerState;
 use crate::projects::dev_server::watch;
+use crate::projects::print_boundary_messages;
 use crate::projects::routing::{HtmlSiteConfig, parse_html_site_config};
 #[cfg(feature = "detailed_timers")]
 use crate::timing_scope;
@@ -83,7 +85,7 @@ pub trait DevBuildExecutor: Send {
         &mut self,
         build_result: &mut BuildResult,
         entry_file: &Path,
-    ) -> Result<OutputWriteSummary, BoundaryFailure>;
+    ) -> Result<OutputWriteSummary, PreparedFailure>;
 }
 pub struct ProjectBuildExecutor {
     builder: ProjectBuilder,
@@ -99,14 +101,19 @@ impl ProjectBuildExecutor {
         }
     }
 }
+fn boundary_failure_from_error(error: CompilerError) -> BoundaryFailure {
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(&StringTable::new());
+    accumulator.append_infrastructure(error.into(), None);
+    accumulator.finish(InstallMode::Unfrozen)
+}
+
 impl DevBuildExecutor for ProjectBuildExecutor {
     fn build(&mut self, entry_file: &Path, flags: &[Flag]) -> Result<BuildResult, BoundaryFailure> {
         let entry_path = entry_file.to_str().ok_or_else(|| {
-            let error = CompilerError::file_error(
+            boundary_failure_from_error(CompilerError::file_error(
                 entry_file,
                 "Dev server entry path contains invalid UTF-8 and cannot be compiled.",
-            );
-            into_boundary_failure(CompilerMessages::from_error(error, Default::default()))
+            ))
         })?;
 
         build::build_project(&self.builder, entry_path, flags, &self.build_config_inputs)
@@ -116,8 +123,8 @@ impl DevBuildExecutor for ProjectBuildExecutor {
         &mut self,
         build_result: &mut BuildResult,
         entry_file: &Path,
-    ) -> Result<OutputWriteSummary, BoundaryFailure> {
-        let output_result = crate::timed_stage!(crate::timing::TimingMetric::BuildOutputTotal, {
+    ) -> Result<OutputWriteSummary, PreparedFailure> {
+        crate::timed_stage!(crate::timing::TimingMetric::BuildOutputTotal, {
             let output_plan = if let Some(plan) = build_result.directory_output_plan.as_ref() {
                 OutputPlan::Directory(plan.clone())
             } else {
@@ -141,8 +148,7 @@ impl DevBuildExecutor for ProjectBuildExecutor {
                 },
                 build_result.warning_accumulator.string_table_mut(),
             )
-        });
-        output_result.map_err(|messages| build_result.take_output_failure_messages(messages))
+        })
     }
 }
 
@@ -378,8 +384,10 @@ fn build_once(
     start: std::time::Instant,
 ) -> BuildOutcome {
     let build_result_outcome = compiled.and_then(|mut build_result| {
-        executor.write_outputs(&mut build_result, entry_file)?;
-        Ok(build_result)
+        match executor.write_outputs(&mut build_result, entry_file) {
+            Ok(_) => Ok(build_result),
+            Err(failure) => Err(build_result.take_output_failure(failure)),
+        }
     });
     let build_duration =
         crate::capture_command_duration!(crate::timing::TimingMetric::CommandDevBuildWrite, start,);
@@ -425,10 +433,11 @@ fn build_once(
     ) {
         Ok(config) => config,
         Err(error) => {
-            // WHY: the diagnostic's IDs already name the build's root table; merging an empty
-            //       table is the identity remap, so no table clone is needed.
-            let messages = error.into_messages(StringTable::new());
-            let failure = build_result.take_output_failure_messages(messages);
+            let failure = {
+                let root_string_table = build_result.warning_accumulator.string_table_mut();
+                error.into_prepared_failure(root_string_table)
+            };
+            let failure = build_result.take_output_failure(failure);
             return BuildOutcome {
                 build_succeeded: false,
                 build_duration,
@@ -493,8 +502,7 @@ fn build_once(
             CompilerErrorMetadataKey::CompilationStage,
             "Dev entry publication".to_string(),
         );
-        let messages = CompilerMessages::from_error(error, Default::default());
-        let failure = build_result.take_output_failure_messages(messages);
+        let failure = build_result.take_output_failure(PreparedFailure::from(error));
         let diagnostics_summary = format_compiler_messages(&failure);
         BuildOutcome {
             build_succeeded: false,
@@ -528,9 +536,8 @@ fn dev_server_project_root(entry_file: &Path) -> PathBuf {
 }
 
 /// Constructs a host-operation failure. Typed compiler and filesystem failures bypass this helper.
-pub fn dev_server_error_messages(path: &Path, msg: impl Into<String>) -> CompilerMessages {
-    let error = CompilerError::file_error(path, msg.into()).with_error_type(ErrorType::DevServer);
-    CompilerMessages::from_error(error, Default::default())
+pub fn dev_server_error(path: &Path, msg: impl Into<String>) -> CompilerError {
+    CompilerError::file_error(path, msg.into()).with_error_type(ErrorType::DevServer)
 }
 
 #[cfg(test)]

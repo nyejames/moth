@@ -3,11 +3,13 @@
 use super::{
     escape_html, format_compiler_messages, render_compiler_error_page, render_runtime_error_page,
 };
-use crate::compiler_frontend::compiler_messages::compiler_errors::{
-    BoundaryFailure, CompilerMessages,
+use crate::compiler_frontend::compiler_errors::BoundaryFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticBag, InvalidConfigReason,
 };
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceSpan,
 };
@@ -15,9 +17,21 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
 use std::sync::Arc;
 
-fn boundary_failure(mut messages: CompilerMessages) -> BoundaryFailure {
-    messages.mark_frozen();
-    into_boundary_failure(messages)
+fn boundary_failure(
+    diagnostic: CompilerDiagnostic,
+    string_table: StringTable,
+    source_database: Option<Arc<SourceDatabase>>,
+) -> BoundaryFailure {
+    let batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        string_table,
+        None,
+        false,
+        None,
+    );
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, source_database.map(|source| (source, None)));
+    accumulator.finish(InstallMode::Frozen)
 }
 
 #[test]
@@ -46,9 +60,8 @@ fn formatted_compiler_messages_include_typed_diagnostics() {
         InvalidConfigReason::UnsupportedScalarValue,
         None,
     );
-    let messages = CompilerMessages::from_diagnostic(diagnostic, StringTable::new());
-
-    let formatted = format_compiler_messages(&boundary_failure(messages));
+    let failure = boundary_failure(diagnostic, StringTable::new(), None);
+    let formatted = format_compiler_messages(&failure);
 
     assert!(formatted.contains("MOTH-CONFIG-0001"));
     assert!(formatted.contains("Unsupported value"));
@@ -90,10 +103,8 @@ fn compiler_error_page_links_to_project_relative_resolved_source_path() {
         InvalidConfigReason::UnsupportedScalarValue,
         Some(source_span),
     );
-    let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
-    messages.set_source_database(Arc::new(source_database));
-
-    let page = render_compiler_error_page(&boundary_failure(messages), &root, "/docs", 7);
+    let failure = boundary_failure(diagnostic, string_table, Some(Arc::new(source_database)));
+    let page = render_compiler_error_page(&failure, &root, "/docs", 7);
 
     // The browser card should not visibly show MOTH-* codes but should
     // carry them as data attributes for debugging.

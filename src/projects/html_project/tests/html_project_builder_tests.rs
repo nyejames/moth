@@ -12,9 +12,16 @@ use crate::build_system::output::{
     WriteOptions, write_project_outputs,
 };
 use crate::compiler_frontend::Flag;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidConfigReason};
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidConfigView, decode_invalid_config,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticSeverity, InvalidConfigReason, PreparedFailure,
+};
 use crate::compiler_frontend::external_packages::ExternalPackageId;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, PublicFoldedValue,
@@ -65,12 +72,30 @@ fn project_resource_origin(resource_path: &str) -> StableResourceOriginId {
     )
 }
 
+fn freeze_prepared_failure(
+    failure: PreparedFailure,
+    string_table: &StringTable,
+) -> BoundaryFailure {
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(string_table);
+    match failure {
+        PreparedFailure::Diagnosed(batch) => accumulator.append_prepared(batch, None),
+        PreparedFailure::Infrastructure(errors) => {
+            accumulator.append_infrastructure(errors, None);
+        }
+        PreparedFailure::Mixed { batch, error } => {
+            accumulator.append_prepared(batch, None);
+            accumulator.append_infrastructure(error, None);
+        }
+    }
+    accumulator.finish(InstallMode::Frozen)
+}
+
 fn build_with_test_modules(
     builder: &HtmlProjectBuilder,
     entry_points: Vec<PathBuf>,
     config: &Config,
     flags: &[Flag],
-) -> Result<Project, CompilerMessages> {
+) -> Result<Project, BoundaryFailure> {
     let mut string_table = StringTable::new();
     let modules: Vec<Module> = entry_points
         .into_iter()
@@ -79,13 +104,15 @@ fn build_with_test_modules(
     let project_compilation =
         crate::build_system::test_support::project_compilation_from_test_modules(modules)
             .expect("test modules should assemble entries");
-    builder.build_backend(
-        project_compilation,
-        config,
-        BuildProfile::from_flags(flags),
-        flags,
-        &mut string_table,
-    )
+    builder
+        .build_backend(
+            project_compilation,
+            config,
+            BuildProfile::from_flags(flags),
+            flags,
+            &mut string_table,
+        )
+        .map_err(|failure| freeze_prepared_failure(failure, &string_table))
 }
 
 fn project_compilation(modules: Vec<Module>) -> ProjectCompilation {
@@ -93,20 +120,32 @@ fn project_compilation(modules: Vec<Module>) -> ProjectCompilation {
         .expect("test modules should assemble entries")
 }
 
-fn first_invalid_config_reason(messages: &CompilerMessages) -> &InvalidConfigReason {
+fn first_invalid_config_reason<'a>(
+    failure: &'a BoundaryFailure,
+) -> (InvalidConfigReason, DiagnosticRenderContext<'a>) {
     assert!(
-        messages.primary_infrastructure_error().is_none(),
+        failure.infrastructure_errors().is_none(),
         "project policy failures should stay as typed config diagnostics"
     );
 
-    let diagnostic = messages
-        .first_error()
+    let (report, diagnostic) = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
         .expect("expected an error-severity diagnostic");
-    let DiagnosticPayload::InvalidConfig { reason, .. } = &diagnostic.payload else {
-        panic!("expected an invalid config diagnostic");
-    };
-
-    reason
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("expected an invalid config diagnostic");
+    let (_, reason) = decode_invalid_config(&facts, diagnostic.string_ids())
+        .expect("invalid config diagnostic should retain typed facts");
+    (reason, DiagnosticRenderContext::for_report(report))
+}
+fn prepared_invalid_config_reason(
+    failure: PreparedFailure,
+    string_table: &StringTable,
+) -> InvalidConfigReason {
+    let failure = freeze_prepared_failure(failure, string_table);
+    first_invalid_config_reason(&failure).0
 }
 
 #[test]
@@ -318,9 +357,9 @@ fn resource_destination_collision_preflights_before_read() {
         &mut string_table,
     );
 
-    let messages = result.expect_err("an existing destination should fail emission");
+    let failure = result.expect_err("an existing destination should fail emission");
     assert!(matches!(
-        first_invalid_config_reason(&messages),
+        prepared_invalid_config_reason(failure, &string_table),
         InvalidConfigReason::ResourceOutputPathReserved { .. }
     ));
     assert!(output_files.is_empty(), "a failed preflight emits no files");
@@ -526,11 +565,11 @@ fn duplicate_output_paths_are_rejected() {
         Err(messages) => messages,
         Ok(_) => panic!("duplicate output paths should fail"),
     };
-    let reason = first_invalid_config_reason(&err);
+    let (reason, context) = first_invalid_config_reason(&err);
     let InvalidConfigReason::DuplicateHtmlOutputPath { output_path, .. } = reason else {
         panic!("expected duplicate HTML output-path config reason");
     };
-    assert_eq!(err.string_table.resolve(*output_path), "index.html");
+    assert_eq!(context.string_table.resolve(output_path), "index.html");
 }
 
 #[test]
@@ -902,7 +941,7 @@ fn directory_build_requires_homepage_at_entry_root() {
         Err(messages) => messages,
         Ok(_) => panic!("missing homepage should fail"),
     };
-    let reason = first_invalid_config_reason(&err);
+    let (reason, context) = first_invalid_config_reason(&err);
     let InvalidConfigReason::MissingHtmlHomepage {
         entry_root: reported_entry_root,
     } = reason
@@ -910,7 +949,7 @@ fn directory_build_requires_homepage_at_entry_root() {
         panic!("expected missing HTML homepage config reason");
     };
     assert_eq!(
-        err.string_table.resolve(*reported_entry_root),
+        context.string_table.resolve(reported_entry_root),
         portable_path_text(&entry_root)
     );
 }
@@ -1073,20 +1112,14 @@ fn builder_rejects_invalid_origin_config() {
         Err(messages) => messages,
         Ok(_) => panic!("invalid origin should fail"),
     };
-    let diagnostic = messages
-        .first_error()
-        .expect("invalid origin should produce a diagnostic");
-    let DiagnosticPayload::InvalidConfig {
-        reason: InvalidConfigReason::InvalidProjectSettingValue { expected, .. },
-        ..
-    } = &diagnostic.payload
-    else {
+    let (reason, context) = first_invalid_config_reason(&messages);
+    let InvalidConfigReason::InvalidProjectSettingValue { expected, .. } = reason else {
         panic!("invalid origin should remain a typed config diagnostic");
     };
     assert!(
-        messages
+        context
             .string_table
-            .resolve(*expected)
+            .resolve(expected)
             .contains("starts with '/'")
     );
 }

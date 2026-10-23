@@ -2,10 +2,13 @@
 
 use crate::backends::error_types::BackendErrorType;
 use crate::compiler_frontend::compiler_errors::{
-    BoundaryFailure, CompilerError, CompilerErrorMetadataKey, CompilerMessages, ErrorType,
+    BoundaryFailure, CompilerError, CompilerErrorMetadataKey, ErrorType,
 };
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::display_messages::format_infrastructure_errors;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_boundary_messages_html;
 use crate::compiler_frontend::compiler_messages::render::infrastructure::{
     INFRASTRUCTURE_FAILURE_CODE, INFRASTRUCTURE_FAILURE_TITLE,
@@ -33,8 +36,27 @@ const OPERATIONAL_INTRODUCTION: &str =
     "OPERATIONAL FAILURE: Moth could not complete a filesystem, host or tooling operation.";
 const ISSUE_URL: &str = "https://github.com/nyejames/moth/issues";
 
-fn render_views(messages: CompilerMessages) -> (BoundaryFailure, [String; 3]) {
-    let failure = into_boundary_failure(messages);
+fn failure_with_causes(causes: impl IntoIterator<Item = CompilerError>) -> BoundaryFailure {
+    let mut accumulator = BoundaryAccumulator::new();
+    for cause in causes {
+        accumulator.append_infrastructure(cause.into(), None);
+    }
+    accumulator.finish(InstallMode::Frozen)
+}
+
+fn failure_with_prepared_batch(
+    batch: PreparedDiagnosticBatch,
+    infrastructure_error: Option<CompilerError>,
+) -> BoundaryFailure {
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, None);
+    if let Some(error) = infrastructure_error {
+        accumulator.append_infrastructure(error.into(), None);
+    }
+    accumulator.finish(InstallMode::Frozen)
+}
+
+fn render_failure(failure: BoundaryFailure) -> (BoundaryFailure, [String; 3]) {
     let rendered = [
         format_infrastructure_errors(failure.infrastructure_errors().expect("outer failure")),
         format_terse_boundary_messages(&failure).join("\n"),
@@ -43,11 +65,14 @@ fn render_views(messages: CompilerMessages) -> (BoundaryFailure, [String; 3]) {
     (failure, rendered)
 }
 
+fn render_views(error: CompilerError) -> (BoundaryFailure, [String; 3]) {
+    render_failure(failure_with_causes([error]))
+}
+
 /// Let a boundary regression carry its actual failure through the production render paths.
 pub(crate) fn assert_compiler_bug_views(error: CompilerError, invariant_detail: &str) {
     let original = error.msg.clone();
-    let messages = CompilerMessages::from_error(error, StringTable::new());
-    let (failure, [terminal, terse, html]) = render_views(messages);
+    let (failure, [terminal, terse, html]) = render_views(error);
     for view in [&terminal, &terse, &html] {
         assert!(view.contains(BUG_INTRODUCTION), "{view}");
         assert!(view.contains(BUG_GUIDANCE), "{view}");
@@ -90,8 +115,7 @@ fn every_cause_type_has_truthful_introduction_in_all_views() {
             CompilerErrorMetadataKey::PrimarySuggestion,
             "specific next action".into(),
         );
-        let messages = CompilerMessages::from_error(error, StringTable::new());
-        let (failure, [terminal, terse, html]) = render_views(messages);
+        let (failure, [terminal, terse, html]) = render_views(error);
         let expected = if compiler_bug {
             BUG_INTRODUCTION
         } else {
@@ -173,11 +197,9 @@ fn mixed_and_same_class_causes_render_in_production_order_after_append() {
             CompilerErrorMetadataKey::CompilationStage,
             "second stage".into(),
         );
-        let mut messages = CompilerMessages::from_error(primary, StringTable::new());
-        let mut appended = CompilerMessages::from_error(additional, StringTable::new());
-        appended.set_infrastructure_error(CompilerError::compiler_error("third cause detail"));
-        messages.append_messages_preserving_context(appended);
-        let (failure, [terminal, terse, html]) = render_views(messages);
+        let third = CompilerError::compiler_error("third cause detail");
+        let (failure, [terminal, terse, html]) =
+            render_failure(failure_with_causes([primary, additional, third]));
         for view in [&terminal, &terse, &html] {
             let first = view.find("first cause detail").expect("first detail");
             let second = view.find("second cause detail").expect("second detail");
@@ -241,15 +263,14 @@ fn hostile_causes_are_escaped_without_losing_raw_details_or_terse_fields() {
     ] {
         primary.new_metadata_entry(key, guidance.into());
     }
-    let mut messages = CompilerMessages::from_error(primary, StringTable::new());
     let mut additional = CompilerError::new(detail, Some(unpaired_span), ErrorType::Compiler);
     additional.host_path = Some(PathBuf::from(path));
     additional.new_metadata_entry(
         CompilerErrorMetadataKey::SuggestedReplacement,
         guidance.into(),
     );
-    messages.set_infrastructure_error(additional);
-    let (failure, [terminal, terse, html]) = render_views(messages);
+    let (failure, [terminal, terse, html]) =
+        render_failure(failure_with_causes([primary, additional]));
     assert!(terminal.contains(detail));
     assert!(terminal.contains(guidance));
     for escaped in [
@@ -287,8 +308,7 @@ fn permission_denial_is_operational_without_platform_permission_assumptions() {
         "permission denied reading provider",
     );
     let error = CompilerError::file_error(Path::new("provider.js"), denied.to_string());
-    let messages = CompilerMessages::from_error(error, StringTable::new());
-    let (_, [terminal, terse, html]) = render_views(messages);
+    let (_, [terminal, terse, html]) = render_views(error);
     for view in [terminal, terse, html] {
         assert!(view.contains(OPERATIONAL_INTRODUCTION), "{view}");
         assert!(
@@ -342,11 +362,16 @@ fn normal_import_config_and_type_diagnostics_keep_codes_without_infrastructure_b
         .collect();
     let path_table = Arc::new(paths.snapshot_table());
 
-    let mut messages = CompilerMessages::from_diagnostics(diagnostics.clone(), strings.clone());
-    messages
-        .attach_path_table_if_missing(Arc::clone(&path_table))
-        .expect("path context");
-    let failure = into_boundary_failure(messages);
+    let make_batch = || {
+        PreparedDiagnosticBatch::capture_from_bag(
+            DiagnosticBag::from_diagnostics(diagnostics.clone()),
+            strings.clone(),
+            None,
+            true,
+            Some(Arc::clone(&path_table)),
+        )
+    };
+    let failure = failure_with_prepared_batch(make_batch(), None);
     let terse = format_terse_boundary_messages(&failure);
     let html = render_boundary_messages_html(&failure, Path::new("."));
     assert_eq!(terse.len(), 4);
@@ -360,15 +385,13 @@ fn normal_import_config_and_type_diagnostics_keep_codes_without_infrastructure_b
         assert!(!view.contains("MOTH-INFRA-0001"), "{view}");
     }
 
-    let mut messages = CompilerMessages::from_diagnostics(diagnostics, strings);
-    messages
-        .attach_path_table_if_missing(path_table)
-        .expect("path context");
-    messages.set_infrastructure_error(CompilerError::file_error(
-        Path::new("output.html"),
-        "late output write failed",
-    ));
-    let failure = into_boundary_failure(messages);
+    let failure = failure_with_prepared_batch(
+        make_batch(),
+        Some(CompilerError::file_error(
+            Path::new("output.html"),
+            "late output write failed",
+        )),
+    );
     let with_infrastructure = format_terse_boundary_messages(&failure);
     assert_eq!(&with_infrastructure[..3], &terse[..3]);
     assert!(with_infrastructure[3].starts_with("E|MOTH-INFRA-0001|"));

@@ -11,11 +11,11 @@ use crate::build_system::path_validation::check_if_valid_path;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{
-    BoundaryFailure, CompilerError, CompilerErrorMetadataKey, CompilerMessages,
+    BoundaryFailure, CompilerError, CompilerErrorMetadataKey,
 };
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::projects::dev_server::DevServerOptions;
-use crate::projects::dev_server::build_loop::{ProjectBuildExecutor, dev_server_error_messages};
+use crate::projects::dev_server::build_loop::{ProjectBuildExecutor, dev_server_error};
 use crate::projects::dev_server::state::DevServerState;
 use crate::projects::dev_server::watch;
 use crate::projects::settings::LANGUAGE_SOURCE_EXTENSION;
@@ -89,7 +89,7 @@ fn run_dev_server_with_messages(
 
     let bind_addr = format!("{}:{}", options.host, options.port);
     let listener = TcpListener::bind(&bind_addr).map_err(|error| {
-        dev_server_error_messages(
+        dev_server_error(
             &entry_target,
             format!("Failed to start dev server on {bind_addr}: {error}"),
         )
@@ -183,7 +183,11 @@ pub(crate) fn resolve_dev_runtime_paths(
             CompilerErrorMetadataKey::CompilationStage,
             "Dev server bootstrap".to_string(),
         );
-        return Err(CompilerMessages::from_error(error, StringTable::new()).into());
+        return Err(BootstrapFailure::Prepared {
+            failure: PreparedFailure::from(error),
+            string_table: bootstrap.string_table,
+            source_database: bootstrap.project_source_files,
+        });
     };
     let owner = OutputOwner {
         builder: builder.backend.builder_kind(),
@@ -201,35 +205,29 @@ pub(crate) fn resolve_dev_runtime_paths(
     })
 }
 
-pub(crate) fn validate_dev_entry_path(entry_path: &str) -> Result<PathBuf, CompilerMessages> {
+pub(crate) fn validate_dev_entry_path(entry_path: &str) -> Result<PathBuf, CompilerError> {
     let resolved_path = if entry_path.trim().is_empty() {
         std::env::current_dir().map_err(|error| {
-            dev_server_error_messages(
+            dev_server_error(
                 Path::new("."),
                 format!("Failed to resolve current directory: {error}"),
             )
         })?
     } else {
-        check_if_valid_path(entry_path)
-            .map_err(|error| CompilerMessages::from_error(error, StringTable::new()))?
+        check_if_valid_path(entry_path)?
     };
 
     if resolved_path.is_dir() {
         return match resolved_path.canonicalize() {
             Ok(canonical_path) => Ok(canonical_path),
-            Err(error) => {
-                let error = CompilerError::file_error(
-                    &resolved_path,
-                    format!("Failed to canonicalize dev entry path: {error}"),
-                );
-
-                Err(CompilerMessages::from_error(error, StringTable::new()))
-            }
+            Err(error) => Err(CompilerError::file_error(
+                &resolved_path,
+                format!("Failed to canonicalize dev entry path: {error}"),
+            )),
         };
     }
-
     if !resolved_path.is_file() {
-        return Err(dev_server_error_messages(
+        return Err(dev_server_error(
             &resolved_path,
             "Dev server entry path must resolve to either a project directory or a .moth file.",
         ));
@@ -240,7 +238,7 @@ pub(crate) fn validate_dev_entry_path(entry_path: &str) -> Result<PathBuf, Compi
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| ext == LANGUAGE_SOURCE_EXTENSION);
     if !is_moth_file {
-        return Err(dev_server_error_messages(
+        return Err(dev_server_error(
             &resolved_path,
             "Dev server currently only supports .moth file entries.",
         ));
@@ -248,13 +246,9 @@ pub(crate) fn validate_dev_entry_path(entry_path: &str) -> Result<PathBuf, Compi
 
     match resolved_path.canonicalize() {
         Ok(canonical_path) => Ok(canonical_path),
-        Err(error) => {
-            let error = CompilerError::file_error(
-                &resolved_path,
-                format!("Failed to canonicalize dev entry path: {error}"),
-            );
-
-            Err(CompilerMessages::from_error(error, StringTable::new()))
-        }
+        Err(error) => Err(CompilerError::file_error(
+            &resolved_path,
+            format!("Failed to canonicalize dev entry path: {error}"),
+        )),
     }
 }

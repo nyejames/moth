@@ -22,9 +22,10 @@ use crate::compiler_frontend::build_config::{
     BuildCommandLocation, BuildConfigInputEntry, BuildConfigInputSet, BuildConfigInputValue,
     BuildConfigValueLocation, BuildInputName, PrimitiveBuildValue,
 };
-use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_messages::diagnostic_severity::DiagnosticSeverity;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_boundary_messages;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
@@ -444,8 +445,9 @@ fn run_frontend_benchmark_with_owner_internal(
     let valid_path = match check_if_valid_path(normalized) {
         Ok(path) => path,
         Err(error) => {
-            let messages =
-                into_boundary_failure(CompilerMessages::from_error(error, StringTable::new()));
+            let mut accumulator = BoundaryAccumulator::with_root_string_table(&StringTable::new());
+            accumulator.append_infrastructure(error.into(), None);
+            let messages = accumulator.finish(InstallMode::Unfrozen);
             let mut diagnostic_codes = collect_diagnostic_codes(&messages);
             if messages.has_infrastructure_error() {
                 diagnostic_codes.push("MOTH-INFRA-0001".to_owned());
@@ -453,7 +455,7 @@ fn run_frontend_benchmark_with_owner_internal(
             return Err(frontend_benchmark_error(
                 FrontendBenchmarkFailureKind::PathValidation,
                 diagnostic_codes,
-                format_compiler_messages(&messages),
+                format_boundary_failure(&messages),
             ));
         }
     };
@@ -474,7 +476,7 @@ fn run_frontend_benchmark_with_owner_internal(
             return Err(frontend_benchmark_error(
                 FrontendBenchmarkFailureKind::Bootstrap,
                 diagnostic_codes,
-                format_compiler_messages(&messages),
+                format_boundary_failure(&messages),
             ));
         }
     };
@@ -545,7 +547,7 @@ fn run_frontend_benchmark_with_owner_internal(
         return Err(frontend_benchmark_error_with_retention(
             FrontendBenchmarkFailureKind::Compilation,
             diagnostic_codes,
-            format_compiler_messages(&messages),
+            format_boundary_failure(&messages),
             retention,
         ));
     }
@@ -610,7 +612,7 @@ fn run_frontend_benchmark_with_owner_internal(
     ))
 }
 
-fn format_compiler_messages(messages: &BoundaryFailure) -> String {
+fn format_boundary_failure(messages: &BoundaryFailure) -> String {
     let mut lines = format_terse_boundary_messages(messages);
     if lines.is_empty() {
         lines.push(format!("{} error(s) found", messages.error_count()));

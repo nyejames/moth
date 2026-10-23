@@ -34,14 +34,14 @@ use crate::build_system::resource_unions::{
 
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
 use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::{
-    BoundaryAccumulator, into_boundary_failure,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ProjectContextEscapeReason};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, PreparedFailure, ProjectContextEscapeReason,
+};
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::reachability::{
     HirReachability, collect_reachability_from_function_link_facts,
@@ -73,38 +73,6 @@ use std::sync::Arc;
 
 const FILE_MIN_UNIQUE_SYMBOLS_CAPACITY: usize = 32;
 
-fn attach_source_database(
-    messages: &mut CompilerMessages,
-    source_database: Option<&Arc<SourceDatabase>>,
-) {
-    let Some(source_database) = source_database else {
-        return;
-    };
-
-    // A frontend aggregate can already contain package-specific ranges. Attach the project
-    // database only as a fallback for diagnostics that have no retained source owner. The guard
-    // avoids a redundant whole-set association when every diagnostic already has an owner;
-    // source_database_for_diagnostic takes the first matching association, so earlier package
-    // ranges still win whenever this fallback is attached.
-    if messages
-        .diagnostics()
-        .enumerate()
-        .any(|(index, _)| messages.source_database_for_diagnostic(index).is_none())
-    {
-        messages.set_source_database(Arc::clone(source_database));
-    }
-}
-
-fn attach_owned_source_database(
-    messages: &mut CompilerMessages,
-    source_database: &mut Option<SourceDatabase>,
-) {
-    if let Some(source_database) = source_database.take() {
-        let source_database = Arc::new(source_database);
-        attach_source_database(messages, Some(&source_database));
-    }
-}
-
 /// Join prepared successful frontend warnings to the build's mutable root table.
 pub(crate) fn build_warning_accumulator(
     warnings: Vec<SuccessfulWarningBatch>,
@@ -125,25 +93,63 @@ pub(crate) fn build_warning_accumulator(
     accumulator
 }
 
-#[cfg(test)]
-pub(crate) fn build_warning_accumulator_from_diagnostics(
-    warnings: Vec<CompilerDiagnostic>,
-    string_table: StringTable,
-    source_contexts: Vec<crate::compiler_frontend::compiler_errors::RenderSourceContext>,
-) -> BoundaryAccumulator {
-    let mut messages = CompilerMessages::from_diagnostics(warnings, string_table);
-    messages.install_source_contexts(source_contexts, 0);
-    let mut accumulator = BoundaryAccumulator::new();
-    accumulator.append(messages);
-    accumulator
+fn append_prepared_failure(
+    accumulator: &mut BoundaryAccumulator,
+    failure: PreparedFailure,
+    source_database: Option<Arc<SourceDatabase>>,
+) {
+    match failure {
+        PreparedFailure::Diagnosed(batch) => {
+            accumulator.append_prepared(batch, source_database.map(|source| (source, None)))
+        }
+        PreparedFailure::Infrastructure(errors) => {
+            accumulator.append_infrastructure(errors, source_database);
+        }
+        PreparedFailure::Mixed { batch, error } => {
+            accumulator.append_prepared(
+                batch,
+                source_database
+                    .as_ref()
+                    .map(|source| (Arc::clone(source), None)),
+            );
+            accumulator.append_infrastructure(error, source_database);
+        }
+    }
 }
 
-fn finalize_backend_failure_messages(
-    backend_messages: CompilerMessages,
+fn prepared_failure_to_boundary(
+    failure: PreparedFailure,
+    root_string_table: &StringTable,
+    source_database: Option<Arc<SourceDatabase>>,
+    install: InstallMode,
+) -> BoundaryFailure {
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(root_string_table);
+    append_prepared_failure(&mut accumulator, failure, source_database);
+    accumulator.finish(install)
+}
+
+fn boundary_failure_from_compiler_error(
+    error: CompilerError,
+    root_string_table: &StringTable,
+) -> BoundaryFailure {
+    prepared_failure_to_boundary(
+        PreparedFailure::from(error),
+        root_string_table,
+        None,
+        InstallMode::Unfrozen,
+    )
+}
+
+fn finalize_backend_failure(
+    backend_failure: PreparedFailure,
     mut warnings: BoundaryAccumulator,
     project_source_database: Option<Arc<SourceDatabase>>,
 ) -> BoundaryFailure {
-    warnings.append(backend_messages);
+    append_prepared_failure(
+        &mut warnings,
+        backend_failure,
+        project_source_database.clone(),
+    );
     if let Some(source_database) = project_source_database {
         warnings.set_project_source_database(source_database);
     }
@@ -177,7 +183,13 @@ pub struct ProjectCompilation {
     source_packages: CompletedSourcePackageRegistry,
     entries: Vec<EntryAssembly>,
     /// Optional project package-facade assembly selected from the public package surface.
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "P4.5 S7b package-target backends in the next sub-slice consume this assembly"
+        )
+    )]
     // retained for future package-target backends; assembly still owns liveness
     package_assembly: Option<PackageAssembly>,
     source_function_names: Arc<std::collections::HashMap<OriginFunctionId, String>>,
@@ -244,28 +256,28 @@ impl ProjectAssemblyError {
         }
     }
 
-    pub(crate) fn into_messages(self, string_table: &mut StringTable) -> CompilerMessages {
+    pub(crate) fn into_prepared_failure(
+        self,
+        root_string_table: &mut StringTable,
+    ) -> PreparedFailure {
         match self {
             Self::Diagnostic {
                 mut diagnostic,
                 string_table: diagnostic_table,
             } => {
-                let remap = string_table.merge_from(&diagnostic_table);
+                let remap = root_string_table.merge_from(&diagnostic_table);
                 diagnostic.remap_string_ids(&remap);
-                CompilerMessages::from_diagnostics(vec![diagnostic], string_table.clone())
+                match PreparedDiagnosticBatch::capture_from_root_string_table(
+                    DiagnosticBag::from(diagnostic),
+                    root_string_table,
+                    None,
+                    || None,
+                ) {
+                    Ok(batch) => PreparedFailure::Diagnosed(batch),
+                    Err(error) => PreparedFailure::from(error),
+                }
             }
-            Self::Infrastructure(error) => {
-                CompilerMessages::from_error(error, string_table.clone())
-            }
-        }
-    }
-    pub(crate) fn into_owned_messages(self) -> CompilerMessages {
-        match self {
-            Self::Diagnostic {
-                diagnostic,
-                string_table,
-            } => CompilerMessages::from_diagnostics(vec![diagnostic], string_table),
-            Self::Infrastructure(error) => CompilerMessages::from_error(error, StringTable::new()),
+            Self::Infrastructure(error) => PreparedFailure::from(error),
         }
     }
 }
@@ -682,7 +694,13 @@ impl ProjectCompilation {
         std::mem::take(&mut self.resource_inputs)
     }
 
-    #[allow(dead_code)] // package-target consumers are not threaded into HTML rendering in this slice
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "P4.5 S7b package-target backends in the next sub-slice consume this accessor"
+        )
+    )]
     pub(crate) fn package_assembly(&self) -> Option<&PackageAssembly> {
         self.package_assembly.as_ref()
     }
@@ -1418,7 +1436,13 @@ pub(crate) fn validate_frontend_facade_boundaries(
 ///
 /// The facade has no implicit `start`. Its exported function origins seed reachability, while
 /// exported folded values and selected descendant interfaces contribute metadata-only resources.
-#[allow(dead_code)] // package-target fields are consumed by later package backends
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "P4.5 S7b package-target backends in the next sub-slice consume this assembly"
+    )
+)]
 pub(crate) struct PackageAssembly {
     facade_module_ref: CompiledModuleRef,
     facade_reachability: HirReachability,
@@ -1426,7 +1450,13 @@ pub(crate) struct PackageAssembly {
     linked_modules: Vec<LinkedModuleAssembly>,
     resource_union: ResourceOriginUnion,
 }
-#[allow(dead_code)] // package-target fields are consumed by later package backends
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "P4.5 S7b package-target backends in the next sub-slice consume this API"
+    )
+)]
 impl PackageAssembly {
     pub(crate) fn resource_union(&self) -> &ResourceOriginUnion {
         &self.resource_union
@@ -1514,7 +1544,7 @@ pub trait BackendBuilder {
         build_profile: BuildProfile,
         flags: &[Flag], // Settings only relevant to this build
         string_table: &mut StringTable,
-    ) -> Result<Project, CompilerMessages>;
+    ) -> Result<Project, PreparedFailure>;
 
     /// Validate the project configuration
     fn validate_project_config(
@@ -1558,22 +1588,39 @@ impl ProjectBuilder {
 
 #[derive(Debug)]
 pub(crate) enum BootstrapFailure {
-    Legacy(CompilerMessages),
+    Prepared {
+        failure: PreparedFailure,
+        string_table: StringTable,
+        source_database: Option<Arc<SourceDatabase>>,
+    },
     Boundary(BoundaryFailure),
 }
 
 impl BootstrapFailure {
     pub(crate) fn into_boundary_failure(self) -> BoundaryFailure {
         match self {
-            Self::Legacy(messages) => into_boundary_failure(messages),
+            Self::Prepared {
+                failure,
+                string_table,
+                source_database,
+            } => prepared_failure_to_boundary(
+                failure,
+                &string_table,
+                source_database,
+                InstallMode::Frozen,
+            ),
             Self::Boundary(failure) => failure,
         }
     }
 }
 
-impl From<CompilerMessages> for BootstrapFailure {
-    fn from(messages: CompilerMessages) -> Self {
-        Self::Legacy(messages)
+impl From<CompilerError> for BootstrapFailure {
+    fn from(error: CompilerError) -> Self {
+        Self::Prepared {
+            failure: PreparedFailure::from(error),
+            string_table: StringTable::new(),
+            source_database: None,
+        }
     }
 }
 
@@ -1597,7 +1644,6 @@ pub(crate) struct BuildBootstrap {
     /// WHY: declaration-owned and grouped-project `#Config` resolution plus later source-contract
     ///       barriers consume exactly this set; command and programmatic paths own production up
     ///       to here and the compiler config service reads it from here.
-    #[allow(dead_code)] // consumed by the build-configuration resolution phases
     pub(crate) build_config_inputs: BuildConfigInputSet,
 }
 
@@ -1709,21 +1755,22 @@ impl BuildResult {
         Some(warnings.finish(InstallMode::Frozen))
     }
 
-    /// Aggregate a late output-plan/write failure with warnings before freezing one source owner.
+    /// Aggregate a late prepared output failure with warnings before freezing one source owner.
     ///
-    /// The project fallback is attached after the late vessel so earlier package and late rows
-    /// keep their existing first-owner precedence.
-    pub(crate) fn take_output_failure_messages(
-        &mut self,
-        late_messages: CompilerMessages,
-    ) -> BoundaryFailure {
+    /// The output batch is appended before the project fallback, preserving earlier package-row
+    /// precedence while pairing late diagnostics with the build root.
+    pub(crate) fn take_output_failure(&mut self, failure: PreparedFailure) -> BoundaryFailure {
         let mut warnings =
             std::mem::replace(&mut self.warning_accumulator, BoundaryAccumulator::new());
-        warnings.append(late_messages);
-        if let Some(source_database) = self.source_database.take() {
+        let source_database = self.source_database.take();
+        append_prepared_failure(
+            &mut warnings,
+            failure,
+            source_database.as_ref().map(Arc::clone),
+        );
+        if let Some(source_database) = source_database {
             warnings.set_project_source_database(source_database);
         }
-        warnings.extend_project_source_context_to_diagnostics();
         warnings.finish(InstallMode::Frozen)
     }
 }
@@ -1746,10 +1793,8 @@ pub fn build_project(
     let valid_path = match check_if_valid_path(entry_path) {
         Ok(path) => path,
         Err(error) => {
-            return Err(into_boundary_failure(CompilerMessages::from_error(
-                error,
-                StringTable::new(),
-            )));
+            let string_table = StringTable::new();
+            return Err(boundary_failure_from_compiler_error(error, &string_table));
         }
     };
 
@@ -1793,11 +1838,13 @@ pub fn build_project(
     let mut project_compilation = match ProjectCompilation::from_frontend(frontend_compilation) {
         Ok(project_compilation) => project_compilation,
         Err(error) => {
-            let mut messages = error.into_messages(&mut string_table);
-            if let Some(source_database) = project_source_files.take() {
-                messages.set_source_database(source_database);
-            }
-            return Err(into_boundary_failure(messages));
+            let failure = error.into_prepared_failure(&mut string_table);
+            return Err(prepared_failure_to_boundary(
+                failure,
+                &string_table,
+                project_source_files.take(),
+                InstallMode::Frozen,
+            ));
         }
     };
     let mut warning_accumulator = collect_success_warnings(&mut project_compilation, string_table);
@@ -1818,12 +1865,9 @@ pub fn build_project(
     );
     let mut project = match project_result {
         Ok(project) => project,
-        Err(compiler_messages) => {
-            let failure = finalize_backend_failure_messages(
-                compiler_messages,
-                warning_accumulator,
-                project_source_files.take(),
-            );
+        Err(failure) => {
+            let failure =
+                finalize_backend_failure(failure, warning_accumulator, project_source_files.take());
             return Err(failure);
         }
     };
@@ -1839,11 +1883,8 @@ pub fn build_project(
             let error = CompilerError::compiler_error(
                 "Directory output settings were not available after bootstrap validation.",
             );
-            return Err(finalize_backend_failure_messages(
-                CompilerMessages::from_error(
-                    error,
-                    crate::compiler_frontend::symbols::string_interning::StringTable::new(),
-                ),
+            return Err(finalize_backend_failure(
+                PreparedFailure::from(error),
                 warning_accumulator,
                 project_source_files.take(),
             ));
@@ -1906,9 +1947,11 @@ pub(crate) fn bootstrap_project_build(
     let style_directives = match StyleDirectiveRegistry::merged(&frontend_style_directives) {
         Ok(style_directives) => style_directives,
         Err(error) => {
-            let mut messages = CompilerMessages::from_error(error, string_table.clone());
-            attach_owned_source_database(&mut messages, &mut project_source_files);
-            return Err(BootstrapFailure::Legacy(messages));
+            return Err(BootstrapFailure::Prepared {
+                failure: PreparedFailure::from(error),
+                string_table,
+                source_database: project_source_files.take().map(Arc::new),
+            });
         }
     };
     // WHAT: Load and validate project config before compilation begins (Stage 0).
@@ -1925,9 +1968,12 @@ pub(crate) fn bootstrap_project_build(
         &mut project_source_files,
     ) {
         Ok(settings) => settings,
-        Err(ProjectConfigFailure::Legacy(mut messages)) => {
-            attach_owned_source_database(&mut messages, &mut project_source_files);
-            return Err(BootstrapFailure::Legacy(messages));
+        Err(ProjectConfigFailure::Prepared(failure)) => {
+            return Err(BootstrapFailure::Prepared {
+                failure,
+                string_table,
+                source_database: project_source_files.take().map(Arc::new),
+            });
         }
         Err(ProjectConfigFailure::Boundary(failure)) => {
             return Err(BootstrapFailure::Boundary(failure));
@@ -1939,9 +1985,12 @@ pub(crate) fn bootstrap_project_build(
         .backend
         .validate_project_config(&config, &mut string_table)
     {
-        let mut messages = error.into_messages(string_table.clone());
-        attach_owned_source_database(&mut messages, &mut project_source_files);
-        return Err(BootstrapFailure::Legacy(messages));
+        let failure = error.into_prepared_failure(&string_table);
+        return Err(BootstrapFailure::Prepared {
+            failure,
+            string_table,
+            source_database: project_source_files.take().map(Arc::new),
+        });
     }
 
     Ok(BuildBootstrap {

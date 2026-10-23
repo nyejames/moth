@@ -16,11 +16,20 @@ use crate::compiler_frontend::analysis::borrow_checker::{
 #[cfg(test)]
 use crate::compiler_frontend::analysis::borrow_checker::{BoracleModuleReport, solve_hir_module};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::module_compilation::BoracleModuleInput;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
+fn boundary_failure_from_error(
+    error: CompilerError,
+    root_string_table: &StringTable,
+) -> BoundaryFailure {
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(root_string_table);
+    accumulator.append_infrastructure(error.into(), None);
+    accumulator.finish(InstallMode::Unfrozen)
+}
 
 /// Run the feature-gated Boracle source service for one single-file entry.
 pub fn run_boracle(
@@ -36,7 +45,7 @@ pub fn run_boracle(
             rule_selection,
         },
     )
-    .map_err(|error| into_boundary_failure(CompilerMessages::from_error_ref(error, &string_table)))
+    .map_err(|error| boundary_failure_from_error(error, &string_table))
 }
 
 /// Solve the same compiler-owned source payload as [`run_boracle`] without flattening the typed
@@ -44,17 +53,13 @@ pub fn run_boracle(
 #[cfg(test)]
 fn solve_boracle(path: &str) -> Result<BoracleModuleReport, BoundaryFailure> {
     let (input, string_table) = compile_boracle_input(path)?;
-    solve_hir_module(&input).map_err(|error| {
-        into_boundary_failure(CompilerMessages::from_error_ref(error, &string_table))
-    })
+    solve_hir_module(&input).map_err(|error| boundary_failure_from_error(error, &string_table))
 }
 
 fn compile_boracle_input(path: &str) -> Result<(BoracleModuleInput, StringTable), BoundaryFailure> {
     let normalized_path = if path.trim().is_empty() { "." } else { path };
-    let valid_path = check_if_valid_path(normalized_path).map_err(|error| {
-        into_boundary_failure(CompilerMessages::from_error(error, StringTable::new()))
-    })?;
-
+    let valid_path = check_if_valid_path(normalized_path)
+        .map_err(|error| boundary_failure_from_error(error, &StringTable::new()))?;
     let project_builder = ProjectBuilder::new(HtmlProjectBuilder::new());
     let BuildBootstrap {
         config,
@@ -69,10 +74,7 @@ fn compile_boracle_input(path: &str) -> Result<(BoracleModuleInput, StringTable)
         let error = CompilerError::compiler_error(
             "Boracle source mode currently accepts one .moth file, not a directory project",
         );
-        return Err(into_boundary_failure(CompilerMessages::from_error_ref(
-            error,
-            &string_table,
-        )));
+        return Err(boundary_failure_from_error(error, &string_table));
     }
 
     let input = compile_single_file_boracle(

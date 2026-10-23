@@ -2,9 +2,11 @@ use super::{ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceSpan};
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 
 use crate::builder_surface::SourceFileKindRegistry;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_boundary_messages_html;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
@@ -86,10 +88,16 @@ fn source_span_selects_exact_source_when_logical_paths_are_ambiguous() {
         LocalSpan::exact(0, 6, &mut span_builder).expect("primary span should fit inline");
     let diagnostic =
         CompilerDiagnostic::unknown_value_name(name, Some(SourceSpan::new(entry_id, local_span)));
-    let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
-    messages.set_source_database(Arc::new(database));
-
-    let failure = into_boundary_failure(messages);
+    let prepared = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        string_table,
+        None,
+        false,
+        None,
+    );
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(prepared, Some((Arc::new(database), None)));
+    let failure = accumulator.finish(InstallMode::Frozen);
     let rendered = render_boundary_messages_html(&failure, temporary_directory.path());
     assert!(
         !rendered.contains("root config snapshot"),

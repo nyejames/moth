@@ -1,12 +1,19 @@
 use super::*;
 use crate::build_system::resource_unions::ResourceOriginUnion;
 use crate::builder_surface::PackageOrigin;
-use crate::compiler_frontend::compiler_errors::{CompilerMessages, RenderSourceContext};
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::compiler_errors::BoundaryFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidConfigView, decode_invalid_config,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, dev_server::render_boundary_messages_html,
 };
-use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidConfigReason};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticBag, DiagnosticSeverity, InvalidConfigReason, PreparedFailure,
+};
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::reachability::{HirReachability, ReachableResourceUse};
@@ -25,14 +32,54 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-fn invalid_config_reason(messages: &CompilerMessages) -> &InvalidConfigReason {
-    let diagnostic = messages
-        .first_error()
-        .expect("expected an error-severity diagnostic");
-    match &diagnostic.payload {
-        DiagnosticPayload::InvalidConfig { reason, .. } => reason,
-        _ => panic!("expected an invalid config diagnostic"),
+fn freeze_prepared_failure(
+    failure: PreparedFailure,
+    string_table: &StringTable,
+    project_source: Option<Arc<SourceDatabase>>,
+    package_source: Option<(Arc<SourceDatabase>, StablePackageIdentity)>,
+) -> BoundaryFailure {
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(string_table);
+    match failure {
+        PreparedFailure::Diagnosed(batch) => {
+            accumulator.append_prepared(batch, project_source.map(|source| (source, None)));
+        }
+        PreparedFailure::Infrastructure(errors) => {
+            accumulator.append_infrastructure(errors, project_source);
+        }
+        PreparedFailure::Mixed { batch, error } => {
+            accumulator.append_prepared(batch, project_source.clone().map(|source| (source, None)));
+            accumulator.append_infrastructure(error, project_source);
+        }
     }
+    if let Some((source_database, domain)) = package_source {
+        let source_row = PreparedDiagnosticBatch::capture_from_bag(
+            DiagnosticBag::new(),
+            StringTable::new(),
+            None,
+            false,
+            None,
+        );
+        accumulator.append_prepared(source_row, Some((source_database, Some(domain))));
+    }
+    accumulator.finish(InstallMode::Frozen)
+}
+
+fn invalid_config_reason(
+    failure: PreparedFailure,
+    string_table: &StringTable,
+) -> InvalidConfigReason {
+    let failure = freeze_prepared_failure(failure, string_table, None, None);
+    let (_, diagnostic) = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("expected an error-severity diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("expected an invalid config diagnostic");
+    decode_invalid_config(&facts, diagnostic.string_ids())
+        .expect("invalid config view should retain its typed reason")
+        .1
 }
 fn module_resource_origin(
     package_name: &str,
@@ -208,19 +255,15 @@ fn distinct_origins_colliding_at_provider_path_report_both_spans() {
         output_path,
         existing_origin,
         conflicting_origin,
-    } = invalid_config_reason(&error)
+    } = invalid_config_reason(error, &string_table)
     else {
         panic!("expected a resource output path collision reason");
     };
-    assert_eq!(string_table.resolve(*output_path), "shared/logo.svg");
+    assert_eq!(string_table.resolve(output_path), "shared/logo.svg");
+    assert!(string_table.resolve(existing_origin).contains("name 'one'"));
     assert!(
         string_table
-            .resolve(*existing_origin)
-            .contains("name 'one'")
-    );
-    assert!(
-        string_table
-            .resolve(*conflicting_origin)
+            .resolve(conflicting_origin)
             .contains("name 'two'")
     );
 }
@@ -266,18 +309,18 @@ fn distinct_module_origins_with_same_package_name_report_roles() {
         existing_origin,
         conflicting_origin,
         ..
-    } = invalid_config_reason(&error)
+    } = invalid_config_reason(error, &string_table)
     else {
         panic!("expected a resource output path collision reason");
     };
     assert!(
         string_table
-            .resolve(*existing_origin)
+            .resolve(existing_origin)
             .contains("role 'normal'")
     );
     assert!(
         string_table
-            .resolve(*conflicting_origin)
+            .resolve(conflicting_origin)
             .contains("role 'support'")
     );
 }
@@ -325,28 +368,28 @@ fn distinct_provider_origins_with_same_package_name_report_package_origins() {
         existing_origin,
         conflicting_origin,
         ..
-    } = invalid_config_reason(&error)
+    } = invalid_config_reason(error, &string_table)
     else {
         panic!("expected a resource output path collision reason");
     };
     assert!(
         string_table
-            .resolve(*existing_origin)
+            .resolve(existing_origin)
             .contains("package origin 'builder'")
     );
     assert!(
         string_table
-            .resolve(*conflicting_origin)
+            .resolve(conflicting_origin)
             .contains("package origin 'dependency'")
     );
     assert!(
         string_table
-            .resolve(*existing_origin)
+            .resolve(existing_origin)
             .contains("name 'shared'")
     );
     assert!(
         string_table
-            .resolve(*conflicting_origin)
+            .resolve(conflicting_origin)
             .contains("name 'shared'")
     );
 }
@@ -376,13 +419,13 @@ fn reserved_html_output_rejects_resource_planning() {
         output_path,
         origin,
         artefact_kind,
-    } = invalid_config_reason(&error)
+    } = invalid_config_reason(error, &string_table)
     else {
         panic!("expected a reserved resource output path reason");
     };
-    assert_eq!(string_table.resolve(*output_path), "index.html");
-    assert_eq!(string_table.resolve(*artefact_kind), "HTML page");
-    assert!(string_table.resolve(*origin).contains("index.html"));
+    assert_eq!(string_table.resolve(output_path), "index.html");
+    assert_eq!(string_table.resolve(artefact_kind), "HTML page");
+    assert!(string_table.resolve(origin).contains("index.html"));
 }
 
 #[test]
@@ -411,18 +454,18 @@ fn reserved_javascript_glue_output_rejects_resource_planning() {
         output_path,
         origin,
         artefact_kind,
-    } = invalid_config_reason(&error)
+    } = invalid_config_reason(error, &string_table)
     else {
         panic!("expected a reserved resource output path reason");
     };
     assert_eq!(
-        string_table.resolve(*output_path),
+        string_table.resolve(output_path),
         glue_path.to_str().unwrap()
     );
-    assert_eq!(string_table.resolve(*artefact_kind), "JavaScript");
+    assert_eq!(string_table.resolve(artefact_kind), "JavaScript");
     assert!(
         string_table
-            .resolve(*origin)
+            .resolve(origin)
             .contains("module-0123456789abcdef.js")
     );
 }
@@ -484,7 +527,7 @@ fn resource_collision_render_keeps_project_primary_and_package_secondary_domains
         ResourceUseKind::Executable,
     )
     .expect("the package origin should claim the output first");
-    let mut messages = plan
+    let prepared_failure = plan
         .plan_origin(
             project_origin,
             Some(project_site),
@@ -493,18 +536,12 @@ fn resource_collision_render_keeps_project_primary_and_package_secondary_domains
             ResourceUseKind::Executable,
         )
         .expect_err("the two provider origins should collide at their declared output path");
-
-    messages.set_source_database(Arc::new(project_database));
-    messages.install_source_contexts(
-        std::iter::once(RenderSourceContext {
-            diagnostic_range: 0..1,
-            source_database: Arc::new(package_database),
-            domain: Some(package_identity),
-        }),
-        0,
+    let failure = freeze_prepared_failure(
+        prepared_failure,
+        &string_table,
+        Some(Arc::new(project_database)),
+        Some((Arc::new(package_database), package_identity)),
     );
-    messages.mark_frozen();
-    let failure = into_boundary_failure(messages);
     let (report, diagnostic) = failure
         .reports
         .iter()
@@ -612,7 +649,7 @@ fn reserved_package_resource_render_uses_package_extended_span_table() {
     let mut plan = HtmlResourceOutputPlan::new("app");
     plan.reserve_builder_output_path(Path::new("index.html"), "HTML page", &mut string_table)
         .expect("builder output should reserve the page path");
-    let mut messages = plan
+    let prepared_failure = plan
         .plan_origin(
             package_origin,
             Some(package_site),
@@ -621,18 +658,12 @@ fn reserved_package_resource_render_uses_package_extended_span_table() {
             ResourceUseKind::Executable,
         )
         .expect_err("the package resource should collide with the reserved page path");
-
-    messages.set_source_database(Arc::new(project_database));
-    messages.install_source_contexts(
-        std::iter::once(RenderSourceContext {
-            diagnostic_range: 0..1,
-            source_database: Arc::new(package_database),
-            domain: Some(package_identity),
-        }),
-        0,
+    let failure = freeze_prepared_failure(
+        prepared_failure,
+        &string_table,
+        Some(Arc::new(project_database)),
+        Some((Arc::new(package_database), package_identity)),
     );
-    messages.mark_frozen();
-    let failure = into_boundary_failure(messages);
     let (report, diagnostic) = failure
         .reports
         .iter()

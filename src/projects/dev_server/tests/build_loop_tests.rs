@@ -1,8 +1,7 @@
 //! Tests for build-loop state transitions and queued rebuild behavior.
 
 use super::{
-    DevBuildExecutor, ProjectBuildExecutor, dev_server_error_messages, run_builds_until_stable,
-    run_single_build_cycle,
+    DevBuildExecutor, ProjectBuildExecutor, run_builds_until_stable, run_single_build_cycle,
 };
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{
@@ -18,14 +17,14 @@ use crate::compiler_frontend::build_config::{
     BuildCommandLocation, BuildConfigInputEntry, BuildConfigInputSet, BuildConfigValueLocation,
     BuildInputName, PrimitiveBuildValue,
 };
-use crate::compiler_frontend::compiler_errors::{
-    BoundaryFailure, CompilerError, CompilerMessages, ErrorType,
-};
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticSeverity, NamingConvention,
+    CompilerDiagnostic, DiagnosticBag, DiagnosticSeverity, NamingConvention, PreparedFailure,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -42,6 +41,59 @@ use std::sync::{Arc, Mutex};
 
 fn naming_convention_warning(name: StringId) -> CompilerDiagnostic {
     CompilerDiagnostic::identifier_naming_convention(name, NamingConvention::CamelCase, None)
+}
+fn warning_accumulator(
+    warnings: Vec<CompilerDiagnostic>,
+    string_table: StringTable,
+) -> BoundaryAccumulator {
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(&string_table);
+    let batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from_diagnostics(warnings),
+        string_table,
+        None,
+        false,
+        None,
+    );
+    accumulator.append_prepared(batch, None);
+    accumulator
+}
+
+fn append_prepared_failure(
+    accumulator: &mut BoundaryAccumulator,
+    failure: PreparedFailure,
+    source_database: Option<Arc<crate::compiler_frontend::source::SourceDatabase>>,
+) {
+    match failure {
+        PreparedFailure::Diagnosed(batch) => {
+            accumulator.append_prepared(batch, source_database.map(|source| (source, None)));
+        }
+        PreparedFailure::Infrastructure(errors) => {
+            accumulator.append_infrastructure(errors, source_database);
+        }
+        PreparedFailure::Mixed { batch, error } => {
+            accumulator
+                .append_prepared(batch, source_database.clone().map(|source| (source, None)));
+            accumulator.append_infrastructure(error, source_database);
+        }
+    }
+}
+
+fn freeze_prepared_failure(failure: PreparedFailure) -> BoundaryFailure {
+    let mut accumulator = BoundaryAccumulator::new();
+    append_prepared_failure(&mut accumulator, failure, None);
+    accumulator.finish(InstallMode::Frozen)
+}
+
+fn infrastructure_failure(error: CompilerError) -> BoundaryFailure {
+    freeze_prepared_failure(PreparedFailure::Infrastructure(error.into()))
+}
+
+fn dev_server_failure(path: &Path, message: &str) -> PreparedFailure {
+    PreparedFailure::Infrastructure(
+        CompilerError::file_error(path, message)
+            .with_error_type(ErrorType::DevServer)
+            .into(),
+    )
 }
 
 fn test_build_output_owner() -> OutputOwner {
@@ -65,11 +117,7 @@ fn html_build_result() -> BuildResult {
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
-        warning_accumulator: crate::build_system::build::build_warning_accumulator_from_diagnostics(
-            Vec::new(),
-            StringTable::new(),
-            Vec::new(),
-        ),
+        warning_accumulator: BoundaryAccumulator::with_root_string_table(&StringTable::new()),
         source_database: None,
         output_owner: test_build_output_owner(),
         directory_output_plan: None,
@@ -107,11 +155,7 @@ fn multi_page_html_build_result() -> BuildResult {
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("project")),
-        warning_accumulator: crate::build_system::build::build_warning_accumulator_from_diagnostics(
-            Vec::new(),
-            StringTable::new(),
-            Vec::new(),
-        ),
+        warning_accumulator: BoundaryAccumulator::with_root_string_table(&StringTable::new()),
         source_database: None,
         output_owner: test_build_output_owner(),
         directory_output_plan: None,
@@ -135,11 +179,7 @@ fn html_build_result_with_warning() -> BuildResult {
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
-        warning_accumulator: crate::build_system::build::build_warning_accumulator_from_diagnostics(
-            vec![warning],
-            string_table,
-            Vec::new(),
-        ),
+        warning_accumulator: warning_accumulator(vec![warning], string_table),
         source_database: None,
         output_owner: test_build_output_owner(),
         directory_output_plan: None,
@@ -167,11 +207,7 @@ fn directory_build_result(project_root: &Path, output_folder: &str) -> BuildResu
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(project_root.to_path_buf()),
-        warning_accumulator: crate::build_system::build::build_warning_accumulator_from_diagnostics(
-            Vec::new(),
-            StringTable::new(),
-            Vec::new(),
-        ),
+        warning_accumulator: BoundaryAccumulator::with_root_string_table(&StringTable::new()),
         source_database: None,
         output_owner: owner,
         directory_output_plan: Some(ValidatedOutputPlan {
@@ -188,7 +224,7 @@ struct FakeExecutor {
     responses: Mutex<Vec<Result<BuildResult, BoundaryFailure>>>,
     call_count: AtomicUsize,
     on_call: Option<Box<dyn Fn(usize) + Send + Sync>>,
-    on_write: Option<Box<dyn Fn() -> Result<(), CompilerMessages> + Send>>,
+    on_write: Option<Box<dyn Fn() -> Result<(), PreparedFailure> + Send>>,
 }
 
 impl FakeExecutor {
@@ -235,7 +271,7 @@ impl DevBuildExecutor for FakeExecutor {
         &mut self,
         build_result: &mut BuildResult,
         entry_file: &Path,
-    ) -> Result<OutputWriteSummary, BoundaryFailure> {
+    ) -> Result<OutputWriteSummary, PreparedFailure> {
         let project_root = entry_file
             .parent()
             .map(Path::to_path_buf)
@@ -257,10 +293,9 @@ impl DevBuildExecutor for FakeExecutor {
                 write_mode: WriteMode::AlwaysWrite,
             },
             build_result.warning_accumulator.string_table_mut(),
-        )
-        .map_err(|messages| build_result.take_output_failure_messages(messages))?;
+        )?;
         if let Some(callback) = &self.on_write {
-            callback().map_err(|messages| build_result.take_output_failure_messages(messages))?;
+            callback()?;
         }
         Ok(summary)
     }
@@ -276,7 +311,7 @@ impl BackendBuilder for InvalidOutputWarningBuilder {
         _build_profile: BuildProfile,
         _flags: &[crate::compiler_frontend::Flag],
         string_table: &mut StringTable,
-    ) -> Result<Project, CompilerMessages> {
+    ) -> Result<Project, PreparedFailure> {
         Ok(Project {
             output_files: vec![OutputFile::new(
                 PathBuf::from("../escape.js"),
@@ -392,11 +427,8 @@ fn failed_build_marks_state_and_stores_error_page() {
     let root = _temp.path().to_path_buf();
 
     let state = Arc::new(DevServerState::new(root.join("dev")));
-    let messages = into_boundary_failure(CompilerMessages::from_error(
-        CompilerError::compiler_error("boom"),
-        StringTable::new(),
-    ));
-    let mut executor = FakeExecutor::new(vec![Err(messages)]);
+    let failure = infrastructure_failure(CompilerError::compiler_error("boom"));
+    let mut executor = FakeExecutor::new(vec![Err(failure)]);
 
     let report =
         run_single_build_cycle(&state, &mut executor, &root.join("main.moth"), &Vec::new());
@@ -809,9 +841,9 @@ fn project_build_executor_preserves_warnings_when_output_write_fails() {
     let mut compiled = executor
         .build(&entry_file, &[])
         .expect("source should compile");
-    let messages = match executor.write_outputs(&mut compiled, &entry_file) {
+    let prepared_failure = match executor.write_outputs(&mut compiled, &entry_file) {
         Ok(_) => panic!("invalid output path should fail writing"),
-        Err(messages) => messages,
+        Err(failure) => failure,
     };
 
     #[cfg(feature = "timers")]
@@ -829,14 +861,15 @@ fn project_build_executor_preserves_warnings_when_output_write_fails() {
         "the failed output-plan/write span must finish before warning extension"
     );
 
-    assert_eq!(messages.error_count(), 1);
-    assert_eq!(messages.warning_count(), 1);
-    let mut warnings = messages.reports.iter_severity(DiagnosticSeverity::Warning);
+    let failure = compiled.take_output_failure(prepared_failure);
+    assert_eq!(failure.error_count(), 1);
+    assert_eq!(failure.warning_count(), 1);
+    let mut warnings = failure.reports.iter_severity(DiagnosticSeverity::Warning);
     let (warning_report, warning) = warnings
         .next()
         .expect("failed output write should preserve its warning");
     assert!(warnings.next().is_none());
-    let error = &messages
+    let error = &failure
         .infrastructure_errors()
         .expect("output write failure should be wrapped for rendering")
         .primary;
@@ -1076,9 +1109,11 @@ fn failed_dev_build_still_drains_timing_snapshot() {
     let root = _temp.path().to_path_buf();
 
     let state = Arc::new(DevServerState::new(root.join("dev")));
-    let mut executor = FakeExecutor::new(vec![Err(into_boundary_failure(
-        dev_server_error_messages(&root.join("main.moth"), "synthetic failure"),
-    ))]);
+    let failure = freeze_prepared_failure(dev_server_failure(
+        &root.join("main.moth"),
+        "synthetic failure",
+    ));
+    let mut executor = FakeExecutor::new(vec![Err(failure)]);
 
     let report =
         run_single_build_cycle(&state, &mut executor, &root.join("main.moth"), &Vec::new());
@@ -1466,10 +1501,7 @@ fn output_write_failure_publishes_diagnostics_not_partial_success() {
         // A late emission/finalisation failure can leave bytes changed without completing a batch.
         fs::write(output.join("index.html"), "<html>partial-generation-2")
             .expect("leave partially written page");
-        Err(dev_server_error_messages(
-            &output,
-            "publication write failed",
-        ))
+        Err(dev_server_failure(&output, "publication write failed"))
     }));
     let failed = run_single_build_cycle(&state, &mut next, &entry, &[]);
     assert!(!failed.build_ok);
@@ -1535,7 +1567,7 @@ impl DevBuildExecutor for RecordingProjectExecutor {
         &mut self,
         build_result: &mut BuildResult,
         entry_file: &Path,
-    ) -> Result<OutputWriteSummary, BoundaryFailure> {
+    ) -> Result<OutputWriteSummary, PreparedFailure> {
         let summary = self.inner.write_outputs(build_result, entry_file)?;
         self.last_write = Some(summary.clone());
         Ok(summary)

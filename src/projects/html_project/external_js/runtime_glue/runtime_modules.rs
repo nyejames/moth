@@ -5,8 +5,7 @@
 //!      them at the build level avoids redundant output.
 
 use crate::build_system::build::{FileKind, OutputFile};
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::projects::html_project::external_js::runtime_emission_plan::HtmlExternalRuntimeEmissionPlan;
 use crate::projects::html_project::external_js::runtime_glue::paths::runtime_module_output_path;
 use crate::projects::html_project::external_js::runtime_module_registry::RuntimeModuleRegistry;
@@ -21,8 +20,7 @@ use std::path::PathBuf;
 pub(crate) fn emit_build_runtime_modules(
     plan: &HtmlExternalRuntimeEmissionPlan,
     occupied_output_paths: &mut HashSet<PathBuf>,
-    string_table: &StringTable,
-) -> Result<Vec<OutputFile>, CompilerMessages> {
+) -> Result<Vec<OutputFile>, CompilerError> {
     let registry = RuntimeModuleRegistry::v1();
     let mut files = Vec::with_capacity(plan.runtime_module_specifiers().len());
 
@@ -32,10 +30,7 @@ pub(crate) fn emit_build_runtime_modules(
                 "Generated JS runtime module '{}' is required but is not registered.",
                 specifier
             );
-            return Err(CompilerMessages::from_error(
-                CompilerError::compiler_error(message),
-                string_table.clone(),
-            ));
+            return Err(CompilerError::compiler_error(message));
         };
 
         let runtime_path = runtime_module_output_path(specifier);
@@ -44,10 +39,7 @@ pub(crate) fn emit_build_runtime_modules(
                 "Generated JS runtime module output path '{}' conflicts with an existing output.",
                 runtime_path.display()
             );
-            return Err(CompilerMessages::from_error(
-                CompilerError::compiler_error(message),
-                string_table.clone(),
-            ));
+            return Err(CompilerError::compiler_error(message));
         }
 
         files.push(OutputFile::new(

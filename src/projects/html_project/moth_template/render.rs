@@ -10,7 +10,6 @@
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::prepared_failure_from_root_messages;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -64,8 +63,7 @@ pub(super) fn render_structural_content(
                 context.clone(),
                 string_table,
                 ResourceUseKind::Executable,
-            )
-            .map_err(|messages| prepared_failure_from_root_messages(messages, string_table))?;
+            )?;
         }
     }
 

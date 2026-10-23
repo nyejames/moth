@@ -8,14 +8,12 @@ use super::{CheckCommandReport, CheckOutcome, run_check_command};
 use crate::build_system::build::{ProjectBuilder, build_project};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
-#[cfg(feature = "timers")]
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 #[cfg(feature = "timers")]
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
-use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 #[cfg(feature = "timers")]
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_tests::test_fs::assert_path_missing;
 use crate::compiler_tests::test_support::run_stack_budgeted_child;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
@@ -637,7 +635,7 @@ fn check_command_total_excludes_renderer_work() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
 
     let outcome = CheckOutcome {
-        messages: into_boundary_failure(CompilerMessages::empty(StringTable::new())),
+        messages: BoundaryAccumulator::new().finish(InstallMode::Frozen),
         status: crate::projects::ProjectCommandStatus::Success,
     };
     let scripted_duration = Duration::from_millis(37);

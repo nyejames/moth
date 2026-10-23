@@ -19,8 +19,9 @@ use crate::build_system::create_project_modules::file_reference_resolution::{
 };
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticBag, PreparedFailure,
 };
@@ -737,6 +738,35 @@ fn append_infrastructure_cause(failure: PreparedFailure, error: CompilerError) -
     }
 }
 
+fn prepared_infrastructure_failure_with_warnings(
+    error: CompilerError,
+    warnings: DiagnosticBag,
+    string_table: &StringTable,
+    path_fork: &PathInternerFork,
+) -> PreparedFailure {
+    let warning_diagnostics = warnings.into_diagnostics();
+    if warning_diagnostics.is_empty() {
+        return PreparedFailure::from(error);
+    }
+
+    match PreparedDiagnosticBatch::capture_with_required_paths(
+        DiagnosticBag::from_diagnostics(warning_diagnostics),
+        string_table.clone(),
+        None,
+        || Some(Arc::new(path_fork.snapshot_table())),
+    ) {
+        Ok(batch) => PreparedFailure::Mixed {
+            batch,
+            error: error.into(),
+        },
+        Err(capture_error) => {
+            let mut errors = InfrastructureErrors::new(error);
+            errors.push(capture_error);
+            PreparedFailure::Infrastructure(Box::new(errors))
+        }
+    }
+}
+
 fn finish_source_owner(
     failure: PreparedFailure,
     source_builder: SourceDatabaseBuilder,
@@ -758,7 +788,7 @@ fn finish_source_owner(
 /// Diagnosed preparation keeps the producer's typed warning and diagnostic until this boundary.
 /// Once no later producer can append a row, every known source is finalized under the exclusive
 /// owner, its original builders and the failed producer's delta builder are installed, and the
-/// finalized database is attached to the message set.
+/// finalized database is retained until the prepared failure is paired at the boundary.
 #[allow(
     clippy::too_many_arguments,
     reason = "failure finalization keeps the failed path, failure payload, failed builder, discovered sources, entry path, resolver, and mutable string/path state as separate inputs"
@@ -809,12 +839,11 @@ fn finalize_discovery_failure(
     ) {
         Ok(source_id) => source_id,
         Err(error) => {
-            let failure = PreparedFailure::with_infrastructure_and_warnings(
+            let failure = prepared_infrastructure_failure_with_warnings(
                 error,
-                prior_warnings.into_diagnostics(),
+                prior_warnings,
                 string_table,
-                None,
-                || Some(Arc::new(path_fork.snapshot_table())),
+                path_fork,
             );
             return finish_source_owner(failure, source_builder);
         }
@@ -839,12 +868,11 @@ fn finalize_discovery_failure(
         }
         FileFrontendPrepareFailure::Infrastructure(mut error) => {
             rebind_error_source(&mut error, source_id);
-            PreparedFailure::with_infrastructure_and_warnings(
+            prepared_infrastructure_failure_with_warnings(
                 error,
-                prior_warnings.into_diagnostics(),
+                prior_warnings,
                 string_table,
-                None,
-                || Some(Arc::new(path_fork.snapshot_table())),
+                path_fork,
             )
         }
     };

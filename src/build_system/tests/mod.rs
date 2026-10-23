@@ -12,9 +12,12 @@ use crate::build_system::output::{
 use crate::builder_surface::BuilderSurface;
 use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::Flag;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticPayload, InvalidConfigReason, NamingConvention,
+    CompilerDiagnostic, DiagnosticBag, InvalidConfigReason, NamingConvention, PreparedFailure,
 };
 use crate::compiler_frontend::module_compilation::ModuleRootActivity;
 use crate::compiler_frontend::source::SourceSpan;
@@ -156,10 +159,29 @@ fn module_root_activity_html_policy_requires_any_root_activity() {
 fn write_project_outputs(
     project: &Project,
     options: &WriteOptions,
-) -> Result<OutputWriteSummary, CompilerMessages> {
+) -> Result<OutputWriteSummary, BoundaryFailure> {
     let mut project = project.clone();
     let mut string_table = StringTable::default();
-    write_project_outputs_with_table(&mut project, options, &mut string_table)
+    match write_project_outputs_with_table(&mut project, options, &mut string_table) {
+        Ok(summary) => Ok(summary),
+        Err(failure) => Err(freeze_prepared_failure(failure, string_table)),
+    }
+}
+
+fn freeze_prepared_failure(
+    failure: PreparedFailure,
+    root_string_table: StringTable,
+) -> BoundaryFailure {
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(&root_string_table);
+    match failure {
+        PreparedFailure::Diagnosed(batch) => accumulator.append_prepared(batch, None),
+        PreparedFailure::Infrastructure(errors) => accumulator.append_infrastructure(errors, None),
+        PreparedFailure::Mixed { batch, error } => {
+            accumulator.append_prepared(batch, None);
+            accumulator.append_infrastructure(error, None);
+        }
+    }
+    accumulator.finish(InstallMode::Frozen)
 }
 
 fn always_write_options(output_root: PathBuf, project_entry_dir: Option<PathBuf>) -> WriteOptions {
@@ -231,7 +253,7 @@ impl BackendBuilder for WarningBuilder {
         _build_profile: BuildProfile,
         _flags: &[Flag],
         string_table: &mut StringTable,
-    ) -> Result<Project, CompilerMessages> {
+    ) -> Result<Project, PreparedFailure> {
         Ok(Project {
             output_files: vec![OutputFile::new(
                 PathBuf::from("generated.js"),
@@ -276,12 +298,9 @@ impl BackendBuilder for LateFailureBuilder {
         _config: &Config,
         _build_profile: BuildProfile,
         _flags: &[Flag],
-        string_table: &mut StringTable,
-    ) -> Result<Project, CompilerMessages> {
-        Err(CompilerMessages::from_error_ref(
-            CompilerError::compiler_error("injected late backend failure"),
-            string_table,
-        ))
+        _string_table: &mut StringTable,
+    ) -> Result<Project, PreparedFailure> {
+        Err(CompilerError::compiler_error("injected late backend failure").into())
     }
 
     fn validate_project_config(
@@ -325,7 +344,7 @@ impl BackendBuilder for EntryTrackingBuilder {
         _build_profile: BuildProfile,
         _flags: &[Flag],
         _string_table: &mut StringTable,
-    ) -> Result<Project, CompilerMessages> {
+    ) -> Result<Project, PreparedFailure> {
         self.module_count.store(
             project_compilation.module_count(),
             std::sync::atomic::Ordering::SeqCst,
@@ -370,7 +389,7 @@ impl BackendBuilder for ValidationTrackingBuilder {
         _build_profile: BuildProfile,
         _flags: &[Flag],
         _string_table: &mut StringTable,
-    ) -> Result<Project, CompilerMessages> {
+    ) -> Result<Project, PreparedFailure> {
         self.built.store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(Project {
             output_files: vec![],
@@ -411,7 +430,7 @@ impl BackendBuilder for FailingValidationBuilder {
         _build_profile: BuildProfile,
         _flags: &[Flag],
         _string_table: &mut StringTable,
-    ) -> Result<Project, CompilerMessages> {
+    ) -> Result<Project, PreparedFailure> {
         panic!("should not call build_backend if validation fails");
     }
 
@@ -447,7 +466,7 @@ impl BackendBuilder for NoDirectiveBuilder {
         _build_profile: BuildProfile,
         _flags: &[Flag],
         _string_table: &mut StringTable,
-    ) -> Result<Project, CompilerMessages> {
+    ) -> Result<Project, PreparedFailure> {
         Ok(Project {
             output_files: vec![OutputFile::new(
                 PathBuf::from("index.html"),
@@ -488,7 +507,7 @@ impl BackendBuilder for MultiModuleDiagnosticBuilder {
         _build_profile: BuildProfile,
         _flags: &[Flag],
         string_table: &mut StringTable,
-    ) -> Result<Project, CompilerMessages> {
+    ) -> Result<Project, PreparedFailure> {
         project_compilation
             .modules()
             .find(|module| module.metadata.entry_point.ends_with("src/@page.moth"))
@@ -504,10 +523,14 @@ impl BackendBuilder for MultiModuleDiagnosticBuilder {
             None,
         );
 
-        Err(CompilerMessages::from_diagnostics(
-            vec![error, warning],
-            string_table.clone(),
-        ))
+        let batch = PreparedDiagnosticBatch::capture_from_root_string_table(
+            DiagnosticBag::from_diagnostics(vec![error, warning]),
+            string_table,
+            None,
+            || None,
+        )
+        .map_err(PreparedFailure::from)?;
+        Err(PreparedFailure::Diagnosed(batch))
     }
 
     fn validate_project_config(

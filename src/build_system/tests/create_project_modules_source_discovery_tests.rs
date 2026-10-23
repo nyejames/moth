@@ -321,18 +321,12 @@ fn stage0_missing_source_load_preserves_file_error_shape() {
     let root = _temp.path().to_path_buf();
 
     let missing_source = root.join("missing.md");
-    let mut string_table = StringTable::new();
-
-    let messages = load_missing_source_path_for_test(
+    let error = load_missing_source_path_for_test(
         missing_source.clone(),
         crate::builder_surface::SourceFileKind::PlainMarkdown,
-        &mut string_table,
     )
     .expect_err("missing source read should fail");
 
-    let error = messages
-        .primary_infrastructure_error()
-        .expect("expected infrastructure file error");
     assert!(
         error
             .msg
@@ -360,24 +354,23 @@ fn stage0_serial_missing_source_load_retains_siblings_and_finalizes_failures() {
     fs::write(&loaded, "# Loaded sibling\n").expect("should write loaded source");
 
     let mut string_table = StringTable::new();
-    let messages = match load_missing_source_paths_with_registered_paths_for_test(
-        vec![
-            first_missing.clone(),
-            loaded.clone(),
-            second_missing.clone(),
-        ],
-        SourceFileKind::PlainMarkdown,
-        &mut string_table,
-    ) {
-        Ok(_) => panic!("a serial missing-source failure should be reported"),
-        Err(messages) => messages,
-    };
+    let (prepared_failure, source_files) =
+        match load_missing_source_paths_with_registered_paths_for_test(
+            vec![
+                first_missing.clone(),
+                loaded.clone(),
+                second_missing.clone(),
+            ],
+            SourceFileKind::PlainMarkdown,
+            &mut string_table,
+        ) {
+            Ok(_) => panic!("a serial missing-source failure should be reported"),
+            Err((failure, Some(source_files))) => (failure, source_files),
+            Err((failure, None)) => {
+                panic!("source loading should retain its finalized source owner: {failure:?}")
+            }
+        };
 
-    let source_files = messages
-        .infrastructure_errors()
-        .expect("source loading should retain its infrastructure causes")
-        .source_database_for_cause(0)
-        .expect("mixed source loading should publish its finalized source context");
     let first_missing_id = source_files
         .get_by_canonical_path(&first_missing)
         .expect("first missing source should retain its registration slot")
@@ -401,8 +394,17 @@ fn stage0_serial_missing_source_load_retains_siblings_and_finalizes_failures() {
     assert!(source_files.source_load_error(first_missing_id).is_some());
     assert!(source_files.source_load_error(second_missing_id).is_some());
 
-    let error = messages
-        .primary_infrastructure_error()
+    let boundary = prepared_failure_boundary(
+        prepared_failure,
+        Some(Arc::new(source_files)),
+        &string_table,
+    );
+    let errors = boundary
+        .infrastructure_errors()
+        .expect("source loading should retain its infrastructure causes");
+    let error = errors
+        .iter()
+        .next()
         .expect("the first read failure should retain the infrastructure error lane");
     let host_path = error
         .host_path
@@ -412,6 +414,26 @@ fn stage0_serial_missing_source_load_retains_siblings_and_finalizes_failures() {
         host_path.ends_with("z_first_missing.md"),
         "the first input-order read failure should be reported first: {host_path:?}"
     );
+
+    let frozen_source = errors
+        .frozen_identity_for_cause(0)
+        .expect("the infrastructure cause should retain its frozen source domain");
+    assert_eq!(
+        frozen_source
+            .get(loaded_id)
+            .and_then(|slot| slot.canonical_os_path.as_deref()),
+        Some(loaded.as_path()),
+        "the frozen cause domain should retain the loaded sibling's source identity",
+    );
+    assert_eq!(
+        frozen_source.retained_text(loaded_id),
+        Some("# Loaded sibling\n"),
+        "the frozen cause domain should retain the successful sibling snapshot",
+    );
+    assert!(frozen_source.get(first_missing_id).is_some());
+    assert!(frozen_source.retained_text(first_missing_id).is_none());
+    assert!(frozen_source.get(second_missing_id).is_some());
+    assert!(frozen_source.retained_text(second_missing_id).is_none());
 }
 
 #[test]
@@ -431,25 +453,25 @@ fn stage0_parallel_missing_source_load_retains_siblings_and_finalizes_failures()
         .collect::<Vec<_>>();
     let mut string_table = StringTable::new();
 
-    let messages = match load_missing_source_paths_with_registered_paths_for_test(
-        source_paths.clone(),
-        SourceFileKind::PlainMarkdown,
-        &mut string_table,
-    ) {
-        Ok(_) => panic!("parallel missing-source failures should be reported"),
-        Err(messages) => messages,
-    };
-
-    let source_files = messages
-        .infrastructure_errors()
-        .expect("parallel source loading should retain its infrastructure causes")
-        .source_database_for_cause(0)
-        .expect("parallel source loading should publish its finalized source context");
+    let (prepared_failure, source_files) =
+        match load_missing_source_paths_with_registered_paths_for_test(
+            source_paths.clone(),
+            SourceFileKind::PlainMarkdown,
+            &mut string_table,
+        ) {
+            Ok(_) => panic!("parallel missing-source failures should be reported"),
+            Err((failure, Some(source_files))) => (failure, source_files),
+            Err((failure, None)) => {
+                panic!("parallel loading should retain its finalized source owner: {failure:?}")
+            }
+        };
+    let mut source_ids = Vec::with_capacity(source_paths.len());
     for (index, path) in source_paths.iter().enumerate() {
         let source_id = source_files
             .get_by_canonical_path(path)
             .expect("every parallel source should retain its registration slot")
             .id;
+        source_ids.push(source_id);
         if index == 1 || index == source_count - 1 {
             assert!(
                 source_files.retained_text(source_id).is_none(),
@@ -469,8 +491,17 @@ fn stage0_parallel_missing_source_load_retains_siblings_and_finalizes_failures()
         }
     }
 
-    let error = messages
-        .primary_infrastructure_error()
+    let boundary = prepared_failure_boundary(
+        prepared_failure,
+        Some(Arc::new(source_files)),
+        &string_table,
+    );
+    let errors = boundary
+        .infrastructure_errors()
+        .expect("parallel source loading should retain its infrastructure causes");
+    let error = errors
+        .iter()
+        .next()
         .expect("the parallel read failure should retain the infrastructure error lane");
     let host_path = error
         .host_path
@@ -480,6 +511,32 @@ fn stage0_parallel_missing_source_load_retains_siblings_and_finalizes_failures()
         host_path.ends_with("asset_1.md"),
         "parallel failures should be reported in deterministic input order: {host_path:?}"
     );
+
+    let frozen_source = errors
+        .frozen_identity_for_cause(0)
+        .expect("the parallel cause should retain its frozen source domain");
+    for (index, (path, source_id)) in source_paths.iter().zip(source_ids).enumerate() {
+        let slot = frozen_source
+            .get(source_id)
+            .expect("every source identity should remain in the frozen cause domain");
+        assert_eq!(
+            slot.canonical_os_path.as_deref(),
+            Some(path.as_path()),
+            "frozen source {index} should preserve its exact registered identity",
+        );
+        if index == 1 || index == source_count - 1 {
+            assert!(
+                frozen_source.retained_text(source_id).is_none(),
+                "failed source {index} must remain unloaded in the frozen domain"
+            );
+        } else {
+            assert_eq!(
+                frozen_source.retained_text(source_id),
+                Some(format!("# Asset {index}\n").as_str()),
+                "successful source {index} must retain its snapshot in the frozen domain"
+            );
+        }
+    }
 }
 
 #[test]

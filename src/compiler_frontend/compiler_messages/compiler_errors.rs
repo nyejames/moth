@@ -1,8 +1,7 @@
 //! # Compiler Error Handling System
 //!
-//! This module owns `CompilerError` (internal/tooling failures) and `CompilerMessages`
-//! (render-boundary aggregation). User-facing source diagnostics live in
-//! `compiler_diagnostic.rs` as `CompilerDiagnostic`.
+//! This module owns `CompilerError`, infrastructure causes, and the frozen boundary failure.
+//! User-facing source diagnostics live in `compiler_diagnostic.rs` as `CompilerDiagnostic`.
 //!
 //! ## Architecture
 //!
@@ -10,9 +9,8 @@
 //! Frontend/compiler stages
 //!   -> CompilerDiagnostic { kind, severity, primary_span, primary owner, labels, payload }
 //!   -> DiagnosticBag accumulates one or many diagnostics locally
-//!   -> CompilerMessages owns ordered diagnostics + frozen identity range rows plus
-//!      transitional table/source rows at stage/build boundaries
-//!   -> renderers produce terminal/dev-server/terse output
+//!   -> PreparedFailure carries prepared diagnostics and infrastructure failures before freeze
+//!   -> BoundaryFailure owns the frozen reports returned to renderers
 //!
 //! CompilerError
 //!   -> target ownership: internal/tooling/compiler failure only
@@ -52,7 +50,7 @@
 //!
 //! ### Consistent Patterns
 //! - Stage-local accumulation: `DiagnosticBag`.
-//! - Boundary transport: `CompilerMessages`.
+//! - Pre-freeze transport: `PreparedFailure`.
 //! - Internal failure: `CompilerError` + immediate print.
 //!
 //! ## Error Flow Through Compilation Pipeline
@@ -74,85 +72,23 @@
 //!     ↓
 //! Backend Lowering → CompilerError (Backend) — internal only
 //!     ↓
-//! CompilerMessages (ordered diagnostics + render contexts + transitional StringTable)
+//! PreparedFailure -> BoundaryAccumulator -> frozen BoundaryFailure
 //! ```
 
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-#[cfg(test)]
-use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
-use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
-use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
-    FrozenIdentityContext, FrozenIdentityHandle, SourceDatabase, SourceSpan, SpanCapacityError,
+    FrozenIdentityContext, SourceDatabase, SourceSpan, SpanCapacityError,
 };
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathTable};
-use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathTable};
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 // -------------------------
-//  Compiler Message Set
+//  Infrastructure and Boundary Failure
 // -------------------------
-
-#[derive(Debug)]
-pub struct CompilerMessages {
-    /// Ordered diagnostics at a build/render boundary.
-    ///
-    /// WHAT: stores errors and warnings in the order the compiler produced them.
-    /// WHY: renderers, tests, dev-server summaries, and CLI output all consume this one sequence
-    /// instead of consulting parallel message stores.
-    pub(crate) diagnostics: Vec<CompilerDiagnostic>,
-
-    /// Ordered infrastructure causes beside the diagnostic stream. Several causes still describe
-    /// one aborted compilation. Cold ownership keeps common diagnostics and this vessel compact.
-    pub(crate) infrastructure_errors: Option<Box<InfrastructureErrors>>,
-
-    /// Interned diagnostic strings owned by this boundary.
-    ///
-    /// The table is separately allocated because the message vessel crosses many `Result`
-    /// boundaries and must remain below the large-error threshold without boxing individual
-    /// `CompilerDiagnostic` values.
-    pub string_table: Box<StringTable>,
-
-    /// Freeze state of this vessel, read by the boundary converter.
-    ///
-    /// WHAT: `Frozen` once a production boundary has finalised the identity rows its diagnostics
-    /// render against; `Unfrozen` while the vessel is premerge or carries no such rows.
-    /// WHY: the mode travels with the vessel through merges, so the converter takes no separate
-    /// install argument. A merge that absorbs a frozen vessel becomes frozen.
-    pub(crate) install_mode: InstallMode,
-
-    /// Per-diagnostic source snapshots used by diagnostic renderers (transitional).
-    ///
-    /// A message set may aggregate diagnostics from several independently retained source
-    /// databases, so this association is range-bound rather than one flat database for the whole
-    /// set. Each range is shifted alongside its diagnostics during aggregation.
-    pub(crate) render_source_contexts: Vec<RenderSourceContext>,
-
-    /// Per-diagnostic path-table snapshots used by transitional diagnostic renderers.
-    ///
-    /// A row is retained only when a direct path payload or type-render context consumes paths.
-    /// Path-free diagnostics without type contexts retain no caller-supplied table. Retained rows
-    /// remain separate from source/frozen contexts because diagnosed lanes may finish before a
-    /// source database or boundary path builder exists.
-    pub(crate) render_path_contexts: Option<Box<[RenderPathContext]>>,
-}
-
-const _: () = assert!(std::mem::size_of::<CompilerMessages>() <= 128);
-#[derive(Debug, Clone)]
-pub(crate) struct RenderSourceContext {
-    pub(crate) diagnostic_range: Range<usize>,
-    pub(crate) source_database: Arc<SourceDatabase>,
-    pub(crate) domain: Option<StablePackageIdentity>,
-}
-#[derive(Debug, Clone)]
-pub(crate) struct RenderPathContext {
-    pub(crate) diagnostic_range: Range<usize>,
-    pub(crate) path_table: Arc<PathTable>,
-}
 
 /// Rare failure causes and their explicitly paired source owners. Cause ranges, unlike diagnostic
 /// ranges, remain meaningful when a failed compilation produced no diagnostic at all.
@@ -163,25 +99,25 @@ pub struct InfrastructureErrors {
     source_contexts: Vec<InfrastructureSourceContext>,
 }
 
-/// Boundary failure carrying frozen user diagnostics and the transitional infrastructure lane.
+/// Boundary failure carrying frozen user diagnostics and infrastructure causes.
 #[derive(Debug)]
 pub struct BoundaryFailure {
     pub(crate) reports: DiagnosticReportSet,
-    /// Transitional infrastructure lane deleted by Phase 5 slices 5C, 5E, W5 and 5F.
+    /// Infrastructure lane retained for callers that still distinguish infrastructure failures.
     pub(crate) infrastructure: Option<Box<InfrastructureErrors>>,
 }
 
 const _: () = assert!(std::mem::size_of::<BoundaryFailure>() <= 56);
 
 impl BoundaryFailure {
-    /// Count error records plus one for the infrastructure lane, matching `CompilerMessages`.
+    /// Count error records plus one for the infrastructure cause.
     pub(crate) fn error_count(&self) -> usize {
         let record_errors = usize::try_from(self.reports.counts().errors)
             .expect("a report set's error count fits in usize");
         record_errors + usize::from(self.has_infrastructure_error())
     }
 
-    /// Count warning records, matching `CompilerMessages`.
+    /// Count warning records in the frozen report set.
     pub(crate) fn warning_count(&self) -> usize {
         usize::try_from(self.reports.counts().warnings)
             .expect("a report set's warning count fits in usize")
@@ -217,11 +153,34 @@ struct InfrastructureSourceContext {
 #[derive(Debug)]
 enum InfrastructureSourceOwner {
     Source(Arc<SourceDatabase>),
-    #[cfg_attr(
-        not(feature = "data_layout_memory_probe"),
-        allow(dead_code, reason = "P4.5 S3.3b build_project")
-    )]
+    #[cfg(any(test, feature = "data_layout_memory_probe"))]
     Frozen(Arc<FrozenIdentityContext>),
+    #[cfg(not(any(test, feature = "data_layout_memory_probe")))]
+    Frozen,
+}
+
+impl InfrastructureSourceOwner {
+    fn frozen(identity: Arc<FrozenIdentityContext>) -> Self {
+        #[cfg(any(test, feature = "data_layout_memory_probe"))]
+        {
+            Self::Frozen(identity)
+        }
+        #[cfg(not(any(test, feature = "data_layout_memory_probe")))]
+        {
+            let _ = identity;
+            Self::Frozen
+        }
+    }
+
+    fn is_frozen(&self) -> bool {
+        match self {
+            Self::Source(_) => false,
+            #[cfg(any(test, feature = "data_layout_memory_probe"))]
+            Self::Frozen(_) => true,
+            #[cfg(not(any(test, feature = "data_layout_memory_probe")))]
+            Self::Frozen => true,
+        }
+    }
 }
 
 impl InfrastructureErrors {
@@ -265,8 +224,7 @@ impl InfrastructureErrors {
             .enumerate()
             .filter_map(move |(index, error)| {
                 let frozen = contexts.iter().any(|context| {
-                    context.cause_range.contains(&index)
-                        && matches!(context.owner, InfrastructureSourceOwner::Frozen(_))
+                    context.cause_range.contains(&index) && context.owner.is_frozen()
                 });
                 (!frozen).then_some(error)
             })
@@ -288,8 +246,8 @@ impl InfrastructureErrors {
             }));
     }
 
-    pub(crate) fn set_source_database(&mut self, source_database: Arc<SourceDatabase>) {
-        // Attach only unpaired causes. A later project fallback must not replace a package owner.
+    /// Pair currently unowned causes with the source that produced them.
+    pub(crate) fn pair_unowned_causes(&mut self, source_database: Arc<SourceDatabase>) {
         for index in 0..1 + self.additional.len() {
             if !self
                 .source_contexts
@@ -302,18 +260,6 @@ impl InfrastructureErrors {
                 });
             }
         }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn source_database_for_cause(&self, index: usize) -> Option<&SourceDatabase> {
-        self.source_contexts.iter().find_map(|context| {
-            if context.cause_range.contains(&index)
-                && let InfrastructureSourceOwner::Source(source) = &context.owner
-            {
-                return Some(source.as_ref());
-            }
-            None
-        })
     }
 
     #[cfg(test)]
@@ -332,11 +278,14 @@ impl InfrastructureErrors {
     pub(crate) fn take_source_rows(&mut self) -> Vec<(Range<usize>, Arc<SourceDatabase>)> {
         std::mem::take(&mut self.source_contexts)
             .into_iter()
-            .map(|context| match context.owner {
-                InfrastructureSourceOwner::Source(database) => (context.cause_range, database),
-                InfrastructureSourceOwner::Frozen(_) => {
-                    panic!("pre-frozen infrastructure source owner reached the boundary converter")
+            .map(|context| {
+                if context.owner.is_frozen() {
+                    panic!("pre-frozen infrastructure source owner reached the boundary converter");
                 }
+                let InfrastructureSourceOwner::Source(database) = context.owner else {
+                    unreachable!("unfrozen infrastructure source owner must be a database")
+                };
+                (context.cause_range, database)
             })
             .collect()
     }
@@ -354,7 +303,7 @@ impl InfrastructureErrors {
             .into_iter()
             .map(|(cause_range, identity)| InfrastructureSourceContext {
                 cause_range,
-                owner: InfrastructureSourceOwner::Frozen(identity),
+                owner: InfrastructureSourceOwner::frozen(identity),
             })
             .collect();
     }
@@ -366,517 +315,11 @@ impl From<CompilerError> for Box<InfrastructureErrors> {
     }
 }
 
-impl CompilerMessages {
-    pub fn empty(string_table: StringTable) -> Self {
-        Self {
-            diagnostics: Vec::new(),
-            infrastructure_errors: None,
-            string_table: Box::new(string_table),
-            install_mode: InstallMode::Unfrozen,
-            render_source_contexts: Vec::new(),
-            render_path_contexts: None,
-        }
-    }
-
-    pub(crate) fn from_diagnostics(
-        diagnostics: Vec<CompilerDiagnostic>,
-        string_table: StringTable,
-    ) -> Self {
-        Self {
-            diagnostics,
-            infrastructure_errors: None,
-            string_table: Box::new(string_table),
-            install_mode: InstallMode::Unfrozen,
-            render_source_contexts: Vec::new(),
-            render_path_contexts: None,
-        }
-    }
-
-    /// Retain the path table that issued diagnostics before the local compiler owner is dropped.
-    ///
-    /// Each path-table snapshot is range-bound to the diagnostics it serves. A caller-supplied
-    /// table is retained only when a diagnostic payload renders path identities. Path-free
-    /// diagnostics have no path consumer, so their supplied table is discarded instead of
-    /// being retained incidentally.
-    ///
-    /// When retention is required, pairing validates both the path identities the payloads
-    /// render (each payload path and every ancestor its resolver walks) and every non-root node
-    /// in the table. The latter is required because later aggregation remaps the complete
-    /// retained table, including nodes no current payload dereferences. A missing required path
-    /// or a component the paired string table cannot resolve returns a typed `CompilerError`
-    /// instead of silently dropping or corrupting the context. Same-index ownership across
-    /// foreign domains is not detectable from bare tables; the provider/materialisation boundary
-    /// solves it by retaining each table with its source `FrozenStringTable` and rebasing by
-    /// spelling.
-    #[cfg(test)]
-    pub(crate) fn attach_path_table_if_missing(
-        &mut self,
-        path_table: Arc<PathTable>,
-    ) -> Result<(), CompilerError> {
-        if self.diagnostics.is_empty()
-            || self
-                .render_path_contexts
-                .as_ref()
-                .is_some_and(|contexts| !contexts.is_empty())
-        {
-            return Ok(());
-        }
-
-        let mut required_paths = Vec::new();
-        for diagnostic in &self.diagnostics {
-            diagnostic
-                .payload
-                .required_path_payload_paths(&mut required_paths);
-        }
-        if required_paths.is_empty() {
-            return Ok(());
-        }
-
-        if let Some(index) =
-            unpaired_path_table_component_index(&path_table, &self.string_table, &required_paths)
-        {
-            return Err(CompilerError::compiler_error(format!(
-                "diagnostic path table is not pairable with this string table: path node \
-                 {index} is unaddressable or carries a component StringId the string table \
-                 cannot resolve"
-            )));
-        }
-
-        self.render_path_contexts = Some(
-            vec![RenderPathContext {
-                diagnostic_range: 0..self.diagnostics.len(),
-                path_table,
-            }]
-            .into_boxed_slice(),
-        );
-        Ok(())
-    }
-
-    /// Explicit first-cause access for consumers whose contract concerns only the primary failure.
-    #[cfg(test)]
-    pub(crate) fn primary_infrastructure_error(&self) -> Option<&CompilerError> {
-        self.infrastructure_errors
-            .as_ref()
-            .map(|errors| &errors.primary)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn infrastructure_errors(&self) -> Option<&InfrastructureErrors> {
-        self.infrastructure_errors.as_deref()
-    }
-
-    /// Append one cause without merging its message or provenance into an unrelated failure.
-    pub(crate) fn set_infrastructure_error(&mut self, error: CompilerError) {
-        match self.infrastructure_errors.as_mut() {
-            Some(errors) => errors.push(error),
-            None => self.infrastructure_errors = Some(error.into()),
-        }
-    }
-
-    pub(crate) fn append_infrastructure_errors(&mut self, errors: Box<InfrastructureErrors>) {
-        match self.infrastructure_errors.as_mut() {
-            Some(existing) => existing.append(*errors),
-            None => self.infrastructure_errors = Some(errors),
-        }
-    }
-
-    #[cfg(test)]
-    pub fn has_errors(&self) -> bool {
-        self.infrastructure_errors.is_some()
-            || self
-                .diagnostics
-                .iter()
-                .any(|d| d.severity == DiagnosticSeverity::Error)
-    }
-
-    /// Count diagnostics with `Error` severity.
-    #[cfg(test)]
-    pub fn error_count(&self) -> usize {
-        self.diagnostics
-            .iter()
-            .filter(|d| d.severity == DiagnosticSeverity::Error)
-            .count()
-            + usize::from(self.infrastructure_errors.is_some())
-    }
-
-    /// Count diagnostics with `Warning` severity.
-    #[cfg(test)]
-    pub fn warning_count(&self) -> usize {
-        self.diagnostics
-            .iter()
-            .filter(|d| d.severity == DiagnosticSeverity::Warning)
-            .count()
-    }
-
-    #[cfg(test)]
-    pub fn has_warnings(&self) -> bool {
-        self.diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Warning)
-    }
-
-    /// Iterate over every diagnostic in compiler production order.
-    ///
-    /// WHAT: exposes the single boundary diagnostic stream without implying an error-only mirror.
-    /// WHY: renderers and reports often need to preserve ordering while applying their own
-    /// severity policy locally.
-    pub(crate) fn diagnostics(&self) -> impl Iterator<Item = &CompilerDiagnostic> {
-        self.diagnostics.iter()
-    }
-
-    /// Borrow the ordered diagnostic stream for render helpers that need a slice.
-    pub(crate) fn diagnostic_slice(&self) -> &[CompilerDiagnostic] {
-        &self.diagnostics
-    }
-
-    /// Append test-only diagnostics while preserving the existing message sequence.
-    #[cfg(test)]
-    pub(crate) fn extend_diagnostics(
-        &mut self,
-        diagnostics: impl IntoIterator<Item = CompilerDiagnostic>,
-    ) {
-        self.diagnostics.extend(diagnostics);
-    }
-
-    /// Record that this vessel's identity rows are final, so the boundary converter installs them.
-    ///
-    /// WHAT: sets the install mode to `Frozen`. The mode travels with the vessel through merges.
-    /// WHY: production boundaries freeze once through the run accumulator; this setter now only
-    /// builds frozen legacy fixtures for the parity oracle and render tests.
-    #[cfg(test)]
-    pub(crate) fn mark_frozen(&mut self) {
-        self.install_mode = InstallMode::Frozen;
-    }
-
-    /// Fill missing diagnostic span owners without replacing mixed-domain provenance.
-    pub(crate) fn set_frozen_identity_handle_if_missing(
-        &mut self,
-        frozen_identity_handle: FrozenIdentityHandle,
-    ) {
-        for diagnostic in &mut self.diagnostics {
-            diagnostic.attach_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
-        }
-    }
-
-    /// Iterate over diagnostics with `Error` severity.
-    #[cfg(test)]
-    pub(crate) fn error_diagnostics(&self) -> impl Iterator<Item = &CompilerDiagnostic> {
-        self.diagnostics
-            .iter()
-            .filter(|d| d.severity == DiagnosticSeverity::Error)
-    }
-
-    /// Return the first error-severity diagnostic, preserving diagnostic order.
-    #[cfg(test)]
-    pub(crate) fn first_error(&self) -> Option<&CompilerDiagnostic> {
-        self.error_diagnostics().next()
-    }
-
-    /// Wrap a single `CompilerDiagnostic` into a `CompilerMessages` container with no warnings.
-    ///
-    /// WHY: frontend stages emit `CompilerDiagnostic` values directly and need a clean boundary
-    /// conversion into the message container expected by build-system callers.
-    pub fn from_diagnostic(diagnostic: CompilerDiagnostic, string_table: StringTable) -> Self {
-        Self {
-            diagnostics: vec![diagnostic],
-            infrastructure_errors: None,
-            string_table: Box::new(string_table),
-            install_mode: InstallMode::Unfrozen,
-            render_source_contexts: Vec::new(),
-            render_path_contexts: None,
-        }
-    }
-
-    /// Wrap a single `CompilerDiagnostic` while cloning the caller's active `StringTable`.
-    pub fn from_diagnostic_ref(diagnostic: CompilerDiagnostic, string_table: &StringTable) -> Self {
-        Self::from_diagnostic(diagnostic, string_table.clone())
-    }
-    /// Carry a single `CompilerError` on the outer infrastructure lane with no warnings.
-    ///
-    /// WHY: Several build/backend modules need to surface a `CompilerError` through the richer
-    /// `CompilerMessages` type at a boundary. Centralising this avoids repeated inline struct
-    /// literals scattered across callers. The error stays typed: no diagnostic payload is
-    /// fabricated and its message, source span, host path, type and metadata are preserved as-is.
-    ///
-    /// The table remains owned by `CompilerMessages` for diagnostic payloads and render contexts;
-    /// it is never attached to or remapped through the infrastructure error.
-    pub fn from_error(error: CompilerError, string_table: StringTable) -> Self {
-        Self {
-            diagnostics: Vec::new(),
-            infrastructure_errors: Some(error.into()),
-            string_table: Box::new(string_table),
-            install_mode: InstallMode::Unfrozen,
-            render_source_contexts: Vec::new(),
-            render_path_contexts: None,
-        }
-    }
-
-    /// Wrap one error while cloning the caller's active `StringTable`.
-    ///
-    /// WHAT: snapshots the current table state into the returned message container.
-    /// WHY: frontend/build boundaries often only borrow the shared table, but diagnostics still
-    /// need the full interned payload context accumulated so far.
-    pub fn from_error_ref(error: CompilerError, string_table: &StringTable) -> Self {
-        Self::from_error(error, string_table.clone())
-    }
-
-    /// Carry already-collected warnings plus one infrastructure error on the outer lane.
-    ///
-    /// WHAT: carries forward the caller's warning set on the diagnostic stream and clones the
-    /// current `StringTable`.
-    /// WHY: these helpers receive warnings that were produced before the failure. Keeping that
-    /// order makes `CompilerMessages` a true production-order diagnostic stream with the typed
-    /// failure reported beside it. The error retains its own typed provenance and does not
-    /// borrow or remap the warning table.
-    pub fn from_error_with_warnings(
-        error: CompilerError,
-        warning_diagnostics: Vec<CompilerDiagnostic>,
-        string_table: &StringTable,
-    ) -> Self {
-        Self {
-            diagnostics: warning_diagnostics,
-            infrastructure_errors: Some(error.into()),
-            string_table: Box::new(string_table.clone()),
-            install_mode: InstallMode::Unfrozen,
-            render_source_contexts: Vec::new(),
-            render_path_contexts: None,
-        }
-    }
-
-    /// Wrap already-collected warnings plus one typed diagnostic while preserving table context.
-    ///
-    /// WHAT: carries forward the caller's warning set and a clone of the current `StringTable`,
-    /// then stores the typed boundary diagnostic directly in `diagnostics`.
-    /// WHY: frontend stages that emit `CompilerDiagnostic` need to preserve structured payloads
-    /// so that boundary renderers can resolve `StringId` values through the shared `StringTable`.
-    pub fn from_diagnostic_with_warnings(
-        diagnostic: CompilerDiagnostic,
-        warning_diagnostics: Vec<CompilerDiagnostic>,
-        string_table: &StringTable,
-    ) -> Self {
-        let mut diagnostics = warning_diagnostics;
-        diagnostics.push(diagnostic);
-        Self {
-            diagnostics,
-            infrastructure_errors: None,
-            string_table: Box::new(string_table.clone()),
-            install_mode: InstallMode::Unfrozen,
-            render_source_contexts: Vec::new(),
-            render_path_contexts: None,
-        }
-    }
-
-    /// Carry a filesystem failure while retaining the caller's table for any surrounding
-    /// diagnostics.
-    pub fn file_error(path: &Path, msg: impl Into<String>, string_table: &StringTable) -> Self {
-        Self::from_error(CompilerError::file_error(path, msg), string_table.clone())
-    }
-
-    /// Pair the producing source owner with current diagnostics and previously unpaired causes.
-    /// Infrastructure ownership uses cause indices, never a fabricated diagnostic-zero row.
-    /// Source rows remain mutable through aggregation; the boundary converter remaps their
-    /// identity domains before freezing reports in the vessel's single conversion.
-    pub(crate) fn set_source_database(&mut self, source_database: Arc<SourceDatabase>) {
-        if let Some(errors) = self.infrastructure_errors.as_mut() {
-            errors.set_source_database(Arc::clone(&source_database));
-        }
-        if !self.diagnostics.is_empty() {
-            self.render_source_contexts.push(RenderSourceContext {
-                diagnostic_range: 0..self.diagnostics.len(),
-                source_database,
-                domain: None,
-            });
-        }
-    }
-
-    /// Install precomputed source contexts for diagnostics appended at `diagnostic_offset`.
-    ///
-    /// Successful-build warnings are collected before the final project-owned warnings are
-    /// appended, while output failures may prepend their own diagnostics. Shifting each retained
-    /// range at installation keeps the context indices tied to the warning vector in either case.
-    pub(crate) fn install_source_contexts(
-        &mut self,
-        source_contexts: impl IntoIterator<Item = RenderSourceContext>,
-        diagnostic_offset: usize,
-    ) {
-        self.render_source_contexts
-            .extend(source_contexts.into_iter().map(|mut source_context| {
-                source_context.diagnostic_range.start += diagnostic_offset;
-                source_context.diagnostic_range.end += diagnostic_offset;
-                source_context
-            }));
-    }
-
-    /// Prepend diagnostics that were produced before this message set.
-    ///
-    /// WHAT: shifts every stored source and path render-context range forward by the
-    ///       prepended length.
-    /// WHY: frontend/build aggregation often carries warnings from earlier stages into a later
-    ///      failure. Those warnings must stay before the failure without disconnecting diagnostics
-    ///      from their retained source snapshot or path table.
-    // The compiler-source-token-and-diagnostic-data-layout plan retains direct-template warning
-    // contexts. Test-gated template pipelines and diagnostic aggregation tests consume this method.
-    #[cfg_attr(not(test), allow(dead_code, reason = "P4.6 tests move to typed views"))]
-    pub(crate) fn prepend_diagnostics_preserving_context(
-        &mut self,
-        prior_diagnostics: impl IntoIterator<Item = CompilerDiagnostic>,
-    ) {
-        let mut prior_diagnostics = prior_diagnostics.into_iter().collect::<Vec<_>>();
-        let shift = prior_diagnostics.len();
-
-        if shift == 0 {
-            return;
-        }
-
-        prior_diagnostics.append(&mut self.diagnostics);
-        self.diagnostics = prior_diagnostics;
-
-        for source_context in &mut self.render_source_contexts {
-            source_context.diagnostic_range.start += shift;
-            source_context.diagnostic_range.end += shift;
-        }
-
-        if let Some(path_contexts) = self.render_path_contexts.as_mut() {
-            for path_context in path_contexts.iter_mut() {
-                path_context.diagnostic_range.start += shift;
-                path_context.diagnostic_range.end += shift;
-            }
-        }
-    }
-    /// Append another boundary message set while preserving its render contexts.
-    ///
-    /// WHAT: moves diagnostics and all source and path render-context ranges from `messages`
-    ///       into this set, offsets the appended ranges by the current diagnostic count, and
-    ///       remaps diagnostic and path facts into this set's table.
-    /// WHY: this is the retired production merge. It survives only as the parity oracle that S4a's
-    ///      accumulator tests compare against; every production tail now appends to the run
-    ///      accumulator and freezes once.
-    #[cfg(test)]
-    pub(crate) fn append_messages_preserving_context(&mut self, messages: CompilerMessages) {
-        let CompilerMessages {
-            mut diagnostics,
-            infrastructure_errors,
-            string_table,
-            install_mode,
-            mut render_source_contexts,
-            mut render_path_contexts,
-        } = messages;
-        let remap = self.string_table.merge_from(string_table.as_ref());
-        remap_diagnostics(&mut diagnostics, &remap);
-        remap_path_contexts(render_path_contexts.as_deref_mut(), &remap);
-
-        let shift = self.diagnostics.len();
-        self.diagnostics.append(&mut diagnostics);
-
-        for mut source_context in render_source_contexts.drain(..) {
-            source_context.diagnostic_range.start += shift;
-            source_context.diagnostic_range.end += shift;
-            self.render_source_contexts.push(source_context);
-        }
-
-        if let Some(mut path_contexts) = render_path_contexts {
-            for path_context in &mut path_contexts {
-                path_context.diagnostic_range.start += shift;
-                path_context.diagnostic_range.end += shift;
-            }
-            let mut combined = self
-                .render_path_contexts
-                .take()
-                .map(|boxed| boxed.into_vec())
-                .unwrap_or_default();
-            combined.extend(path_contexts.into_vec());
-            self.render_path_contexts = Some(combined.into_boxed_slice());
-        }
-
-        if install_mode == InstallMode::Frozen {
-            self.mark_frozen();
-        }
-
-        if let Some(errors) = infrastructure_errors {
-            self.append_infrastructure_errors(errors);
-        }
-    }
-    /// Remap premerge facts into another mutable string-table domain.
-    ///
-    /// Diagnostics and path contexts move through the supplied string-table remap. The boundary
-    /// converter owns identity installation, so no fact is exempt here.
-    pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        remap_diagnostics(&mut self.diagnostics, remap);
-        remap_path_contexts(self.render_path_contexts.as_deref_mut(), remap);
-    }
-
-    /// Remap complete logical paths carried by diagnostics and renderer-owned path contexts.
-    ///
-    /// Diagnostics and path contexts belong to the worker fork and are rewritten through the same
-    /// `PathIdRemap` used by the rest of the module facts.
-    pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
-        if remap.is_identity() {
-            return;
-        }
-        for diagnostic in &mut self.diagnostics {
-            diagnostic.remap_path_ids(remap);
-        }
-    }
-
-    /// Resolve the source database that produced one diagnostic.
-    ///
-    /// The first matching association wins, and that ordering is load-bearing: build and check
-    /// attach the project database over the whole message set as a fallback, so a package's own
-    /// association must already be present to take precedence. Rendering a colliding logical path
-    /// against the wrong database shows a different file's text.
-    pub(crate) fn source_database_for_diagnostic(
-        &self,
-        diagnostic_index: usize,
-    ) -> Option<&SourceDatabase> {
-        self.render_source_contexts
-            .iter()
-            .find(|source_context| source_context.diagnostic_range.contains(&diagnostic_index))
-            .map(|source_context| source_context.source_database.as_ref())
-    }
-    #[cfg(test)]
-    pub(crate) fn path_table_for_diagnostic(&self, diagnostic_index: usize) -> Option<&PathTable> {
-        self.render_path_contexts
-            .as_deref()
-            .and_then(|contexts| {
-                contexts
-                    .iter()
-                    .find(|context| context.diagnostic_range.contains(&diagnostic_index))
-            })
-            .map(|context| context.path_table.as_ref())
-    }
-
-    /// Rebuild the legacy diagnostic context for test-only render parity checks.
-    ///
-    /// Production rendering uses compact report views; this adapter remains only for legacy
-    /// baselines until P4.6 moves the remaining tests to typed views.
-    #[cfg(test)]
-    pub(crate) fn diagnostic_render_context(
-        &self,
-        diagnostic_index: usize,
-    ) -> crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext<'_> {
-        crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext::new(
-            self.string_table.as_ref(),
-        )
-        .with_optional_source_database(self.source_database_for_diagnostic(diagnostic_index))
-        .with_optional_path_table(self.path_table_for_diagnostic(diagnostic_index))
-    }
-}
-
 /// Find the first defect that makes retaining a path table unsafe.
 ///
-/// WHAT: one pairing check shared by the diagnosed batch and message-set attach boundaries.
-/// WHY: `PathTable::contains` only proves numeric addressability, while later aggregation
-///      remaps every component in a retained table. This checks each payload path and every
-///      ancestor its renderer walks for addressability and string resolution, then checks every
-///      non-root table node so unused components are also safe for that complete remap.
-///      Same-index ownership across foreign domains is not detectable from bare
-///      `PathTable`+`StringTable` pairs and is intentionally not attempted here: the
-///      provider/materialisation boundary retains each path table with its source
-///      `FrozenStringTable` and re-interns by spelling through
-///      [`ModuleMaterialisationContext::rebased_for_requester`]. Payloads without path
-///      identities contribute no required chains; callers skip retention entirely when they
-///      have no path payloads and no type-render contexts. The root node's component is
-///      deliberately uninterpreted and is skipped.
+/// This checks required payload paths, their ancestors, and every non-root node that a retained
+/// table remaps. Foreign domains are handled by the provider/materialisation boundary, which
+/// retains each table with its frozen string table and rebases by spelling.
 pub(crate) fn unpaired_path_table_component_index(
     path_table: &PathTable,
     string_table: &StringTable,
@@ -907,32 +350,6 @@ pub(crate) fn unpaired_path_table_component_index(
             .is_none()
             .then_some(index)
     })
-}
-
-fn remap_diagnostics(diagnostics: &mut [CompilerDiagnostic], remap: &StringIdRemap) {
-    if remap.is_identity() {
-        return;
-    }
-
-    for diagnostic in diagnostics {
-        diagnostic.remap_string_ids(remap);
-    }
-}
-
-/// Remap the string IDs of each path table in place.
-///
-/// A path table shared with another owner is copied on write by `Arc::make_mut`.
-fn remap_path_contexts(path_contexts: Option<&mut [RenderPathContext]>, remap: &StringIdRemap) {
-    if remap.is_identity() {
-        return;
-    }
-    let Some(path_contexts) = path_contexts else {
-        return;
-    };
-
-    for context in path_contexts {
-        Arc::make_mut(&mut context.path_table).remap_string_ids(remap);
-    }
 }
 
 #[derive(Debug, Eq, Hash, PartialEq, Clone)]

@@ -16,8 +16,9 @@ use crate::build_system::path_validation::check_if_valid_path;
 use crate::capture_command_duration;
 use crate::command_timing_scope;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_errors::BoundaryFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::finish_command_timing;
 use crate::projects::{ProjectCommandCompletion, ProjectCommandStatus, ProjectDiagnosticCounts};
@@ -137,7 +138,9 @@ fn execute_check_messages(
     let valid_path = match check_if_valid_path(normalized_path) {
         Ok(path) => path,
         Err(error) => {
-            return into_boundary_failure(CompilerMessages::from_error(error, StringTable::new()));
+            let mut accumulator = BoundaryAccumulator::with_root_string_table(&StringTable::new());
+            accumulator.append_infrastructure(error.into(), None);
+            return accumulator.finish(InstallMode::Unfrozen);
         }
     };
 

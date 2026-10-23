@@ -6,6 +6,7 @@ use super::*;
 use crate::build_system::build::{ProjectBuilder, ProjectCompilation, build_project};
 use crate::build_system::output::output_path_identity;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::external_packages::{
     CanonicalBindingSymbolIdentity, ExternalAbiType, ExternalJsLowering, ExternalReturnSlot,
     ExternalSymbolCategory, ExternalSymbolId, ExternalSymbolPath,
@@ -716,7 +717,7 @@ impl BackendBuilder for RegisteredJsPackageBuilder {
         build_profile: BuildProfile,
         flags: &[Flag],
         string_table: &mut StringTable,
-    ) -> Result<Project, CompilerMessages> {
+    ) -> Result<Project, PreparedFailure> {
         let providers = [
             (
                 "binding.js",

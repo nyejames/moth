@@ -1870,9 +1870,6 @@ fn rejects_invalid_export_request_with_structured_diagnostic() {
         &path_fork.snapshot_table(),
     )
     .expect_err("invalid request should produce a lowering diagnostic");
-    let error = error
-        .primary_infrastructure_error()
-        .expect("Wasm lowering failure should be wrapped for rendering");
     assert!(
         error
             .msg
@@ -2189,9 +2186,6 @@ fn rejects_validated_float_guards_with_unsupported_source_types() {
             &path_fork.snapshot_table(),
         )
         .expect_err("unsupported binary-float validation sources must fail lowering");
-        let error = error
-            .primary_infrastructure_error()
-            .expect("Wasm lowering failure should be wrapped for rendering");
         assert_eq!(
             error.error_type,
             ErrorType::Backend(BackendErrorType::LirTransformation),
@@ -2728,9 +2722,6 @@ fn rejects_unsupported_host_call_with_diagnostic() {
         &path_fork.snapshot_table(),
     )
     .expect_err("unsupported host call should produce diagnostic");
-    let error = error
-        .primary_infrastructure_error()
-        .expect("Wasm lowering failure should be wrapped for rendering");
     assert!(error.msg.contains("<synthetic>"));
 }
 
@@ -2875,9 +2866,6 @@ fn selected_function_policy_ignores_unselected_host_calls_and_assertions() {
         &path_fork.snapshot_table(),
     )
     .expect_err("an unselected function must not become a Wasm export");
-    let error = error
-        .primary_infrastructure_error()
-        .expect("Wasm request validation should fail before lowering");
     assert!(error.msg.contains("absent from the selected function plan"));
 }
 

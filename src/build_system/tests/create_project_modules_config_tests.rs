@@ -1,5 +1,4 @@
 use super::*;
-use crate::build_system::project_config::ProjectConfigFailure;
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::ValueReceiverContext;
@@ -8,23 +7,14 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::project_
     InvalidConfigCode, InvalidConfigView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidPathView;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
-fn project_config_boundary(failure: ProjectConfigFailure) -> BoundaryFailure {
-    match failure {
-        ProjectConfigFailure::Legacy(messages) => into_boundary_failure(messages),
-        ProjectConfigFailure::Boundary(failure) => failure,
-    }
-}
-
 fn assert_project_config_identity(
-    failure: ProjectConfigFailure,
+    boundary: BoundaryFailure,
     expected_code: &str,
     expected_reason_key: Option<&str>,
 ) -> BoundaryFailure {
-    let boundary = project_config_boundary(failure);
     assert!(
         boundary
             .reports
@@ -140,7 +130,11 @@ fn config_span_tables_finalize_for_success_and_diagnosed_results() {
             &mut string_table,
         );
         if diagnosed {
-            let failure = result.expect_err("invalid output settings should diagnose");
+            let failure = project_config_failure_boundary(
+                result.expect_err("invalid output settings should diagnose"),
+                None,
+                &string_table,
+            );
             assert_project_config_identity(
                 failure,
                 "MOTH-CONFIG-0001",
@@ -413,8 +407,12 @@ fn directory_projects_require_config_moth() {
     let _path_fork = PathInternerFork::empty();
     let mut source_files = Some(SourceDatabase::empty());
 
-    let failure = load_project_config(&mut config, &services, &mut string_table, &mut source_files)
-        .expect_err("a directory project without config.moth must fail");
+    let failure = project_config_failure_boundary(
+        load_project_config(&mut config, &services, &mut string_table, &mut source_files)
+            .expect_err("a directory project without config.moth must fail"),
+        source_files.take(),
+        &string_table,
+    );
     assert_project_config_identity(
         failure,
         "MOTH-CONFIG-0001",

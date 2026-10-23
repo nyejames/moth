@@ -239,7 +239,7 @@ fn compile_prepared_config_source(
     )
     .map_err(|failure| match failure {
         HeaderPreparationFailure::Diagnosed(bag) => capture_header_diagnostics(
-            DiagnosticBag::from_diagnostics(classify_header_diagnostics(bag, request.file_id)),
+            classify_header_diagnostics(bag, request.file_id),
             string_table,
             path_fork,
         ),
@@ -257,7 +257,7 @@ fn compile_prepared_config_source(
     )
     .map_err(|failure| match failure {
         HeaderPreparationFailure::Diagnosed(bag) => capture_header_diagnostics(
-            DiagnosticBag::from_diagnostics(classify_header_diagnostics(bag, request.file_id)),
+            classify_header_diagnostics(bag, request.file_id),
             string_table,
             path_fork,
         ),
@@ -321,11 +321,8 @@ fn compile_prepared_config_source(
     // this service and never reach build-side validation.
     let config_rejections =
         reject_authored_config_dialect(&ast, authored_scope, path_fork, string_table);
-    if !config_rejections.is_empty() {
-        return Err(capture_config_diagnostics(
-            DiagnosticBag::from_diagnostics(config_rejections),
-            string_table,
-        ));
+    if config_rejections.has_errors() {
+        return Err(capture_config_diagnostics(config_rejections, string_table));
     }
 
     let declarations = project_authored_config_declarations(
@@ -415,14 +412,14 @@ fn reject_authored_config_dialect(
     authored_scope: PathId,
     path_fork: &PathInternerFork,
     string_table: &StringTable,
-) -> Vec<CompilerDiagnostic> {
+) -> DiagnosticBag {
     let mut rejections =
         reject_authored_config_start_body(ast, authored_scope, path_fork, string_table);
-    rejections.extend(reject_mutable_config_bindings(
-        ast,
-        authored_scope,
-        path_fork,
-    ));
+    for rejection in
+        reject_mutable_config_bindings(ast, authored_scope, path_fork).into_diagnostics()
+    {
+        rejections.push(rejection);
+    }
     rejections
 }
 
@@ -436,8 +433,8 @@ fn reject_authored_config_start_body(
     authored_scope: PathId,
     path_fork: &PathInternerFork,
     string_table: &StringTable,
-) -> Vec<CompilerDiagnostic> {
-    let mut rejections = Vec::new();
+) -> DiagnosticBag {
+    let mut rejections = DiagnosticBag::new();
 
     for node in &ast.nodes {
         let NodeKind::Function(path, _, body) = &node.kind else {
@@ -498,8 +495,8 @@ fn reject_mutable_config_bindings(
     ast: &Ast,
     authored_scope: PathId,
     path_fork: &PathInternerFork,
-) -> Vec<CompilerDiagnostic> {
-    let mut rejections = Vec::new();
+) -> DiagnosticBag {
+    let mut rejections = DiagnosticBag::new();
 
     for row in ast.const_values.iter_module_constant_views() {
         let (path, metadata) = (row.path, row.metadata);
@@ -869,38 +866,38 @@ fn prepare_config_file(
         }
     };
 
-    let mut diagnosed = Vec::new();
+    let mut diagnosed = DiagnosticBag::new();
     for dependency_clause in &output.file_dependency_clauses {
-        diagnosed.push(config_diagnostic(
+        let mut diagnostic = config_diagnostic(
             None,
             InvalidConfigReason::ConfigImportUnsupported,
             Some(dependency_clause.dependency.span),
-        ));
-    }
-    for file_reference in output.structural_file_references.iter() {
-        diagnosed.push(config_diagnostic(
-            None,
-            InvalidConfigReason::FileValuePathUnsupported,
-            Some(file_reference.span),
-        ));
-    }
-    diagnosed.extend(validate_authored_config_surface(
-        &output.headers,
-        path_fork,
-        string_table,
-    ));
-    for diagnostic in &mut diagnosed {
+        );
         diagnostic
             .capture_preparation_span(request.file_id)
             .map_err(PreparedFailure::from)?;
+        diagnosed.push(diagnostic);
     }
-    if diagnosed.is_empty() {
-        Ok(output)
+    for file_reference in output.structural_file_references.iter() {
+        let mut diagnostic = config_diagnostic(
+            None,
+            InvalidConfigReason::FileValuePathUnsupported,
+            Some(file_reference.span),
+        );
+        diagnostic
+            .capture_preparation_span(request.file_id)
+            .map_err(PreparedFailure::from)?;
+        diagnosed.push(diagnostic);
+    }
+    for diagnostic in validate_authored_config_surface(&output.headers, path_fork, request.file_id)?
+        .into_diagnostics()
+    {
+        diagnosed.push(diagnostic);
+    }
+    if diagnosed.has_errors() {
+        Err(capture_config_diagnostics(diagnosed, string_table))
     } else {
-        Err(capture_config_diagnostics(
-            DiagnosticBag::from_diagnostics(diagnosed),
-            string_table,
-        ))
+        Ok(output)
     }
 }
 
@@ -952,9 +949,9 @@ fn collect_authored_config_key_name_provenance(
 fn validate_authored_config_surface(
     headers: &[Header],
     path_fork: &PathInternerFork,
-    _string_table: &StringTable,
-) -> Vec<CompilerDiagnostic> {
-    let mut errors = Vec::new();
+    authored_file_id: SourceId,
+) -> Result<DiagnosticBag, PreparedFailure> {
+    let mut errors = DiagnosticBag::new();
 
     for header in headers {
         let reason = match &header.kind {
@@ -976,15 +973,19 @@ fn validate_authored_config_surface(
         };
 
         if let Some(reason) = reason {
-            errors.push(config_diagnostic(
+            let mut diagnostic = config_diagnostic(
                 path_fork.component(header.declaration_path),
                 reason,
                 header.name_span,
-            ));
+            );
+            diagnostic
+                .capture_preparation_span(authored_file_id)
+                .map_err(PreparedFailure::from)?;
+            errors.push(diagnostic);
         }
     }
 
-    errors
+    Ok(errors)
 }
 
 // -------------------------
@@ -992,20 +993,16 @@ fn validate_authored_config_surface(
 // -------------------------
 
 /// Re-route an authored duplicate declaration to the config key vocabulary.
-fn classify_header_diagnostics(
-    bag: DiagnosticBag,
-    authored_file_id: SourceId,
-) -> Vec<CompilerDiagnostic> {
-    bag.into_diagnostics()
-        .into_iter()
-        .map(|diagnostic| {
-            if is_authored_config_duplicate(&diagnostic, authored_file_id) {
-                config_duplicate_diagnostic(diagnostic)
-            } else {
-                diagnostic
-            }
-        })
-        .collect()
+fn classify_header_diagnostics(bag: DiagnosticBag, authored_file_id: SourceId) -> DiagnosticBag {
+    let mut classified = DiagnosticBag::new();
+    for diagnostic in bag.into_diagnostics() {
+        if is_authored_config_duplicate(&diagnostic, authored_file_id) {
+            classified.push(config_duplicate_diagnostic(diagnostic));
+        } else {
+            classified.push(diagnostic);
+        }
+    }
+    classified
 }
 
 /// Config displays one key label for duplicates, retaining its captured authored span.

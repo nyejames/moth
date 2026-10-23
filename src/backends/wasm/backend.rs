@@ -10,9 +10,7 @@ use crate::backends::wasm::request::{
 use crate::backends::wasm::result::WasmLirBackendResult;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowFacts;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
-use crate::compiler_frontend::compiler_messages::compiler_errors::{
-    CompilerError, CompilerMessages, ErrorType,
-};
+use crate::compiler_frontend::compiler_messages::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::module::HirModule;
@@ -28,11 +26,10 @@ pub(crate) fn lower_hir_to_wasm_lir(
     string_table: &StringTable,
     type_environment: &TypeEnvironment,
     path_table: &PathTable,
-) -> Result<WasmLirBackendResult, CompilerMessages> {
+) -> Result<WasmLirBackendResult, CompilerError> {
     // WHAT: fail fast on builder/backend contract issues.
     // WHY: avoid partial lowering and keep diagnostics deterministic.
-    validate_request(hir_module, request)
-        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+    validate_request(hir_module, request)?;
 
     // WHAT: perform full module lowering using HIR + borrow side tables.
     // WHY: LIR is the stable inspection and emission seam for the experimental Wasm backend.
@@ -63,7 +60,7 @@ pub(crate) fn lower_hir_to_wasm_module(
     string_table: &StringTable,
     type_environment: &TypeEnvironment,
     path_table: &PathTable,
-) -> Result<WasmLirBackendResult, CompilerMessages> {
+) -> Result<WasmLirBackendResult, CompilerError> {
     // WHAT: preserve the LIR lowering entry and layer byte emission on top.
     // WHY: this keeps debug and diagnostics workflows stable while emission matures.
     let mut result = lower_hir_to_wasm_lir(
@@ -81,8 +78,7 @@ pub(crate) fn lower_hir_to_wasm_module(
 
     // WHAT: perform pure Wasm encoding from already-lowered LIR.
     // WHY: emitter must stay backend-encoding focused and avoid reinterpreting frontend semantics.
-    let emit_result = emit_lir_to_wasm_module(&result.lir_module, request)
-        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+    let emit_result = emit_lir_to_wasm_module(&result.lir_module, request)?;
     result.wasm_bytes = Some(emit_result.wasm_bytes);
 
     if request.debug_flags.show_wasm_sections {

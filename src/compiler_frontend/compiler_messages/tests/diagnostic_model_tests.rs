@@ -14,13 +14,14 @@ use super::{
     InvalidSignatureMemberReason, InvalidStandaloneStatementReason, InvalidStatementPositionReason,
     InvalidStringEscapeReason, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
     InvalidTraitConformanceReason, InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason,
-    NameNamespace, NamespaceTypeValueMisuseKind, PathKind, ReceiverCallKind, RuleDiagnosticKind,
-    SyntaxDiagnosticKind, TokenTag, TypeAnnotationContext, TypeDiagnosticKind, TypeMismatchContext,
-    UnsupportedBackendFeatureReason, ValueReceiverContext, is_well_formed_reason_key,
+    NameNamespace, NamespaceTypeValueMisuseKind, PathKind, PreparedFailure, ReceiverCallKind,
+    RuleDiagnosticKind, SyntaxDiagnosticKind, TokenTag, TypeAnnotationContext, TypeDiagnosticKind,
+    TypeMismatchContext, UnsupportedBackendFeatureReason, ValueReceiverContext,
+    is_well_formed_reason_key,
 };
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_errors::{
-    BoundaryFailure, CompilerError, CompilerErrorMetadataKey, CompilerMessages, ErrorType,
+    BoundaryFailure, CompilerError, CompilerErrorMetadataKey, ErrorType, InfrastructureErrors,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
     calls_data::{InvalidCallShapeView, InvalidReceiverCallView},
@@ -29,7 +30,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::{
         InvalidReceiverDeclarationView, InvalidTraitConformanceShape, InvalidTraitConformanceView,
     },
     imports::NotExportedByPublicSurfaceView,
-    names_declarations::DuplicateDeclarationView,
+    names_declarations::{DuplicateDeclarationView, UnknownValueNameView},
     project_config::LegacyDependencyClauseView,
     token_lexical::ExpectedTokenView,
     types_borrows_targets::{SharedMutableConflictView, TypeMismatchView},
@@ -73,16 +74,8 @@ fn exact_span(
     )
 }
 
-fn unknown_name_diagnostic(
-    name: StringId,
-    namespace: NameNamespace,
-    span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::new(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
-        span,
-        DiagnosticPayload::UnknownName { name, namespace },
-    )
+fn unknown_name_diagnostic(name: StringId, span: Option<SourceSpan>) -> CompilerDiagnostic {
+    CompilerDiagnostic::unknown_value_name(name, span)
 }
 
 fn capture_rebased_batch(
@@ -113,8 +106,7 @@ fn finish_prepared_batch(
     prepared: PreparedDiagnosticBatch,
     string_table: StringTable,
 ) -> BoundaryFailure {
-    let mut accumulator = BoundaryAccumulator::new();
-    accumulator.append(CompilerMessages::empty(string_table));
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(&string_table);
     accumulator.append_prepared(prepared, None);
     accumulator.finish(InstallMode::Frozen)
 }
@@ -294,7 +286,7 @@ fn explicit_severity_can_override_descriptor_default() {
         .try_intern_portable_path("main.moth", &mut string_table)
         .expect("test path fits");
     let diagnostic = CompilerDiagnostic::with_severity(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
+        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownValueName),
         DiagnosticSeverity::Warning,
         span(source_path),
         DiagnosticPayload::UnknownName {
@@ -520,7 +512,7 @@ fn reasonless_payloads_have_no_reason_key() {
         .try_intern_portable_path("main.moth", &mut string_table)
         .expect("test path fits");
     let diagnostic = CompilerDiagnostic::new(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
+        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownValueName),
         span(source_path),
         DiagnosticPayload::UnknownName {
             name: string_table.intern("missing"),
@@ -573,13 +565,9 @@ fn diagnostic_bag_tracks_errors_warnings_and_order() {
     let source_path = path_fork
         .try_intern_portable_path("main.moth", &mut string_table)
         .expect("test path fits");
-    let first = unknown_name_diagnostic(
-        string_table.intern("missing"),
-        NameNamespace::Value,
-        span(source_path),
-    );
+    let first = unknown_name_diagnostic(string_table.intern("missing"), span(source_path));
     let second = CompilerDiagnostic::with_severity(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
+        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownValueName),
         DiagnosticSeverity::Warning,
         span(source_path),
         DiagnosticPayload::UnknownName {
@@ -601,19 +589,15 @@ fn diagnostic_bag_tracks_errors_warnings_and_order() {
 }
 
 #[test]
-fn compiler_messages_counts_and_order_come_from_structured_diagnostics() {
+fn diagnostic_bag_counts_and_orders_structured_diagnostics() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let source_path = path_fork
         .try_intern_portable_path("main.moth", &mut string_table)
         .expect("test path fits");
-    let error = unknown_name_diagnostic(
-        string_table.intern("missing"),
-        NameNamespace::Value,
-        span(source_path),
-    );
+    let error = unknown_name_diagnostic(string_table.intern("missing"), span(source_path));
     let warning = CompilerDiagnostic::with_severity(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
+        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownValueName),
         DiagnosticSeverity::Warning,
         span(source_path),
         DiagnosticPayload::UnknownName {
@@ -621,34 +605,51 @@ fn compiler_messages_counts_and_order_come_from_structured_diagnostics() {
             namespace: NameNamespace::Value,
         },
     );
+    let bag = DiagnosticBag::from_diagnostics(vec![warning.clone(), error.clone()]);
 
-    let messages =
-        CompilerMessages::from_diagnostics(vec![warning.clone(), error.clone()], string_table);
+    assert!(bag.has_errors());
+    assert!(bag.has_warnings());
+    assert_eq!(bag.errors().count(), 1);
+    assert_eq!(bag.warnings().count(), 1);
+    assert_eq!(bag.diagnostics(), &[warning, error]);
 
-    assert!(messages.has_errors());
-    assert!(messages.has_warnings());
-    assert_eq!(messages.error_count(), 1);
-    assert_eq!(messages.warning_count(), 1);
-
-    let diagnostics = messages.diagnostics.to_vec();
-    assert_eq!(diagnostics, vec![warning, error]);
-    assert!(messages.infrastructure_errors().is_none());
+    let prepared = PreparedDiagnosticBatch::capture_from_bag(bag, string_table, None, false, None);
+    let failure = finish_prepared_batch(prepared, StringTable::new());
+    assert_eq!(failure.reports.counts().errors, 1);
+    assert_eq!(failure.reports.counts().warnings, 1);
+    let ordered = failure
+        .reports
+        .iter()
+        .map(|(report, view)| {
+            let facts = view
+                .family_view::<UnknownValueNameView>()
+                .expect("both records use the unknown-value family");
+            (
+                view.severity(),
+                report.context().strings().resolve(facts.name).to_owned(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ordered,
+        [
+            (DiagnosticSeverity::Warning, String::from("maybe_unused")),
+            (DiagnosticSeverity::Error, String::from("missing")),
+        ]
+    );
+    assert!(failure.infrastructure_errors().is_none());
 }
 
 #[test]
-fn compiler_messages_with_warnings_keep_typed_diagnostics_off_error_mirrors() {
+fn prepared_diagnostic_with_warnings_keeps_typed_diagnostics_off_error_mirrors() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let source_path = path_fork
         .try_intern_portable_path("main.moth", &mut string_table)
         .expect("test path fits");
-    let error = unknown_name_diagnostic(
-        string_table.intern("missing"),
-        NameNamespace::Value,
-        span(source_path),
-    );
+    let error = unknown_name_diagnostic(string_table.intern("missing"), span(source_path));
     let warning = CompilerDiagnostic::with_severity(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
+        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownValueName),
         DiagnosticSeverity::Warning,
         span(source_path),
         DiagnosticPayload::UnknownName {
@@ -657,27 +658,50 @@ fn compiler_messages_with_warnings_keep_typed_diagnostics_off_error_mirrors() {
         },
     );
 
-    let messages = CompilerMessages::from_diagnostic_with_warnings(
-        error.clone(),
-        vec![warning.clone()],
+    let PreparedFailure::Diagnosed(prepared) = PreparedFailure::with_diagnostic_and_warnings(
+        error,
+        vec![warning],
         &string_table,
+        None,
+        || None,
+    ) else {
+        panic!("warning plus diagnosed failure should remain a prepared diagnostic batch");
+    };
+    let failure = finish_prepared_batch(prepared, StringTable::new());
+    assert_eq!(failure.reports.counts().errors, 1);
+    assert_eq!(failure.reports.counts().warnings, 1);
+    assert!(failure.infrastructure_errors().is_none());
+    let ordered = failure
+        .reports
+        .iter()
+        .map(|(report, view)| {
+            let facts = view
+                .family_view::<UnknownValueNameView>()
+                .expect("both records use the unknown-value family");
+            (
+                view.severity(),
+                report.context().strings().resolve(facts.name).to_owned(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ordered,
+        [
+            (DiagnosticSeverity::Warning, String::from("maybe_unused")),
+            (DiagnosticSeverity::Error, String::from("missing")),
+        ]
     );
-
-    assert_eq!(messages.error_count(), 1);
-    assert_eq!(messages.warning_count(), 1);
-    assert_eq!(messages.diagnostics.to_vec(), vec![warning, error]);
-    assert!(messages.infrastructure_errors().is_none());
 }
 
 #[test]
-fn compiler_messages_with_infrastructure_error_preserve_warning_production_order() {
+fn prepared_infrastructure_failure_preserves_warning_production_order() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let source_path = path_fork
         .try_intern_portable_path("main.moth", &mut string_table)
         .expect("test path fits");
     let warning = CompilerDiagnostic::with_severity(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
+        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownValueName),
         DiagnosticSeverity::Warning,
         span(source_path),
         DiagnosticPayload::UnknownName {
@@ -685,22 +709,49 @@ fn compiler_messages_with_infrastructure_error_preserve_warning_production_order
             namespace: NameNamespace::Value,
         },
     );
-    let error = CompilerError::compiler_error("backend failed after warnings");
+    let PreparedFailure::Mixed { batch, error } = PreparedFailure::with_infrastructure_and_warnings(
+        CompilerError::compiler_error("backend failed after warnings"),
+        vec![warning],
+        &string_table,
+        None,
+        || None,
+    ) else {
+        panic!("warning plus infrastructure failure should keep both prepared lanes");
+    };
 
-    let messages =
-        CompilerMessages::from_error_with_warnings(error, vec![warning.clone()], &string_table);
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, None);
+    accumulator.append_infrastructure(error, None);
+    let failure = accumulator.finish(InstallMode::Frozen);
 
-    assert_eq!(messages.error_count(), 1);
-    assert_eq!(messages.warning_count(), 1);
-    assert_eq!(messages.diagnostics.to_vec(), vec![warning]);
-    let error = messages
-        .primary_infrastructure_error()
-        .expect("outer infrastructure failure must be preserved");
-    assert_eq!(error.msg.as_str(), "backend failed after warnings");
+    assert_eq!(failure.error_count(), 1);
+    assert_eq!(failure.warning_count(), 1);
+    assert_eq!(
+        failure
+            .infrastructure_errors()
+            .expect("outer infrastructure failure must be preserved")
+            .iter()
+            .map(|cause| cause.msg.as_str())
+            .collect::<Vec<_>>(),
+        ["backend failed after warnings"]
+    );
+    let (report, view) = failure
+        .reports
+        .iter()
+        .next()
+        .expect("the warning remains a typed report");
+    let facts = view
+        .family_view::<UnknownValueNameView>()
+        .expect("the warning keeps its typed family");
+    assert_eq!(view.severity(), DiagnosticSeverity::Warning);
+    assert_eq!(
+        report.context().strings().resolve(facts.name),
+        "maybe_unused"
+    );
 }
 
-fn assert_infrastructure_causes(messages: &CompilerMessages, expected: &[CompilerError]) {
-    let causes = messages
+fn assert_infrastructure_causes(failure: &BoundaryFailure, expected: &[CompilerError]) {
+    let causes = failure
         .infrastructure_errors()
         .expect("infrastructure causes should remain")
         .iter()
@@ -714,14 +765,14 @@ fn assert_infrastructure_causes(messages: &CompilerMessages, expected: &[Compile
         assert_eq!(cause.metadata, expected.metadata);
     }
     assert_eq!(
-        messages.error_count(),
+        failure.error_count(),
         1,
         "causes describe one aborted compilation"
     );
 }
 
 #[test]
-fn infrastructure_setter_and_message_append_preserve_every_ordered_cause() {
+fn append_infrastructure_preserves_every_ordered_cause() {
     for (first_type, second_type) in [
         (ErrorType::Compiler, ErrorType::File),
         (ErrorType::File, ErrorType::Compiler),
@@ -752,15 +803,15 @@ fn infrastructure_setter_and_message_append_preserve_every_ordered_cause() {
             make_error(2, second_type),
             make_error(3, first_type),
         ];
-        let mut messages = CompilerMessages::empty(StringTable::new());
-        messages.set_infrastructure_error(expected[0].clone());
-        messages.set_infrastructure_error(expected[1].clone());
-        assert_infrastructure_causes(&messages, &expected[..2]);
-
-        let mut incoming = CompilerMessages::from_error(expected[2].clone(), StringTable::new());
-        incoming.set_infrastructure_error(expected[3].clone());
-        messages.append_messages_preserving_context(incoming);
-        assert_infrastructure_causes(&messages, &expected);
+        let mut first = InfrastructureErrors::new(expected[0].clone());
+        first.push(expected[1].clone());
+        let mut incoming = InfrastructureErrors::new(expected[2].clone());
+        incoming.push(expected[3].clone());
+        let mut accumulator = BoundaryAccumulator::new();
+        accumulator.append_infrastructure(Box::new(first), None);
+        accumulator.append_infrastructure(Box::new(incoming), None);
+        let failure = accumulator.finish(InstallMode::Frozen);
+        assert_infrastructure_causes(&failure, &expected);
     }
 }
 
@@ -862,8 +913,7 @@ fn capture_with_required_paths_skips_foreign_table_without_path_payloads() {
 
     let mut aggregate_table = StringTable::new();
     aggregate_table.intern("aggregate-padding");
-    let mut accumulator = BoundaryAccumulator::new();
-    accumulator.append(CompilerMessages::empty(aggregate_table));
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(&aggregate_table);
     accumulator.append_prepared(prepared, None);
     let failure = accumulator.finish(InstallMode::Frozen);
     let rendered = terse::format_terse_boundary_messages(&failure);
@@ -943,8 +993,7 @@ fn not_exported_by_public_surface_remaps_path_and_surface_name_after_prepared_ca
 
     let mut aggregate_table = StringTable::new();
     aggregate_table.intern("collision-padding");
-    let mut accumulator = BoundaryAccumulator::new();
-    accumulator.append(CompilerMessages::empty(aggregate_table));
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(&aggregate_table);
     accumulator.append_prepared(prepared, None);
     let failure = accumulator.finish(InstallMode::Frozen);
     let (report, view) = failure
@@ -1008,8 +1057,7 @@ fn capture_from_bag_preserves_nominal_type_rendering_without_path_payloads() {
 
     let mut aggregate_table = StringTable::new();
     aggregate_table.intern("aggregate-padding");
-    let mut accumulator = BoundaryAccumulator::new();
-    accumulator.append(CompilerMessages::empty(aggregate_table));
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(&aggregate_table);
     accumulator.append_prepared(prepared, None);
     let failure = accumulator.finish(InstallMode::Frozen);
     let (_, view) = failure
@@ -4051,8 +4099,7 @@ fn failure_writeback_label_keeps_target_type_in_frozen_prepared_output() {
 
     let mut aggregate_table = StringTable::new();
     aggregate_table.intern("aggregate-padding");
-    let mut accumulator = BoundaryAccumulator::new();
-    accumulator.append(CompilerMessages::empty(aggregate_table));
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(&aggregate_table);
     accumulator.append_prepared(prepared, Some((Arc::new(sources), None)));
     let failure = accumulator.finish(InstallMode::Frozen);
     let mut found_writeback_type = false;

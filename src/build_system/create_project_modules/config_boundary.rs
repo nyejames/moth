@@ -775,12 +775,11 @@ fn describe_build_config_contract(fact: &BuildConfigContractFact) -> String {
 /// Map one compiler-owned barrier failure onto the typed premerge config diagnostic lane.
 ///
 /// WHAT: converts a [`BuildConfigResolutionError`] into a [`PreparedFailure`] without
-///       constructing the final `CompilerMessages` vessel. User-facing failures capture a
-///       prepared batch at this owning boundary; the declaration-owned config handoff invariant
-///       stays a typed infrastructure error.
+///       constructing the final frozen report. User-facing failures capture a prepared batch at
+///       this owning boundary; the declaration-owned config handoff invariant stays a typed
+///       infrastructure error.
 /// WHY: configuration resolution is a Stage 0 boundary operation whose failures must travel
-///      typed until the final merge boundary owns the single vessel conversion. Moving the
-///      table into the prepared batch keeps every interned diagnostic id valid without cloning.
+///      through the typed prepared lane until final source pairing and report freeze.
 pub(super) fn build_config_resolution_failure(
     error: BuildConfigResolutionError,
     fallback_span: Option<SourceSpan>,

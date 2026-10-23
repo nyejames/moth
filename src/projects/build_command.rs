@@ -13,8 +13,8 @@ use crate::capture_command_duration;
 use crate::command_timing_scope;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError, CompilerMessages};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::finish_command_timing;
 use crate::projects::{ProjectCommandCompletion, ProjectCommandStatus, ProjectDiagnosticCounts};
 use std::env;
@@ -62,7 +62,7 @@ impl BuildCommandOutcome {
 
 enum BuildOutputFailure {
     Plan(CompilerError),
-    Write(CompilerMessages),
+    Write(PreparedFailure),
 }
 
 /// Execute, classify and write one build before presenting its outcome to the caller.
@@ -179,17 +179,14 @@ fn write_build_outputs_with_plan(
                 warnings,
             }
         }
-        Err(BuildOutputFailure::Write(messages)) => BuildCommandOutcome::Failure {
-            messages: build_result.take_output_failure_messages(messages),
+        Err(BuildOutputFailure::Write(failure)) => BuildCommandOutcome::Failure {
+            messages: build_result.take_output_failure(failure),
             diagnostic_counts: None,
         },
-        Err(BuildOutputFailure::Plan(error)) => {
-            let messages = CompilerMessages::from_error(error, StringTable::new());
-            BuildCommandOutcome::Failure {
-                messages: build_result.take_output_failure_messages(messages),
-                diagnostic_counts: None,
-            }
-        }
+        Err(BuildOutputFailure::Plan(error)) => BuildCommandOutcome::Failure {
+            messages: build_result.take_output_failure(PreparedFailure::from(error)),
+            diagnostic_counts: None,
+        },
     }
 }
 

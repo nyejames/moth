@@ -23,8 +23,12 @@ use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::ProjectContextEscapeView;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticPayload, ProjectContextEscapeReason, RuleDiagnosticKind,
+    DiagnosticCategory, DiagnosticSeverity, PreparedFailure, ProjectContextEscapeReason,
 };
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalPackageRegistry};
 use crate::compiler_frontend::folded_value::{
@@ -72,17 +76,27 @@ fn assert_project_context_diagnostic(
     expected_reason: ProjectContextEscapeReason,
 ) {
     let mut string_table = StringTable::new();
-    let messages = error.into_messages(&mut string_table);
-    assert_eq!(messages.error_count(), 1);
-
-    let diagnostics = messages.diagnostics().collect::<Vec<_>>();
-    assert_eq!(diagnostics.len(), 1);
-    let diagnostic = diagnostics[0];
+    let PreparedFailure::Diagnosed(batch) = error.into_prepared_failure(&mut string_table) else {
+        panic!("project-context assembly failure should retain its prepared diagnostic batch");
+    };
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(&string_table);
+    accumulator.append_prepared(batch, None);
+    let failure = accumulator.finish(InstallMode::Frozen);
+    assert_eq!(failure.error_count(), 1);
     assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Rule(RuleDiagnosticKind::ProjectContextEscape)
+        failure.reports.iter().count(),
+        1,
+        "the frozen report set should contain exactly one record",
     );
-    assert_eq!(diagnostic.identity().code, "MOTH-RULE-0086");
+
+    let errors = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
+    assert_eq!(errors.len(), 1);
+    let diagnostic = errors[0].1;
+    assert_eq!(diagnostic.category(), DiagnosticCategory::Rule);
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0086");
     let expected_reason_key = match expected_reason {
         ProjectContextEscapeReason::ExportedDeclaration => {
             "project_context_escape.exported_declaration"
@@ -91,13 +105,13 @@ fn assert_project_context_diagnostic(
             "project_context_escape.reachable_executable"
         }
     };
-    assert_eq!(diagnostic.identity().reason_key, Some(expected_reason_key));
-    assert!(matches!(
-        &diagnostic.payload,
-        DiagnosticPayload::ProjectContextEscape { reason } if *reason == expected_reason
-    ));
-    assert_eq!(
-        diagnostic.primary_span, None,
+    assert_eq!(diagnostic.reason_key(), Some(expected_reason_key));
+    let facts = diagnostic
+        .family_view::<ProjectContextEscapeView>()
+        .expect("project-context escape should retain typed rule facts");
+    assert_eq!(facts.reason, expected_reason);
+    assert!(
+        matches!(diagnostic.primary_site(), SiteRef::Absent),
         "synthetic assembly fixtures have no authored source span",
     );
 }
@@ -914,9 +928,26 @@ fn package_union_follows_facade_export_and_excludes_hidden_child_export() {
         ResourceInputRegistry::new(),
     )
     .expect("synthetic package boundary should assemble");
-    let paths = compilation
+    let assembly = compilation
         .package_assembly()
-        .expect("facade should produce package assembly")
+        .expect("facade should produce package assembly");
+    assert!(matches!(
+        assembly.facade_module_ref(),
+        crate::build_system::create_project_modules::compiled_boundary::CompiledModuleRef::Project(
+            _
+        )
+    ));
+    assert_eq!(assembly.selected_modules().len(), 1);
+    assert!(assembly.linked_modules().is_empty());
+    assert_eq!(
+        assembly
+            .facade_reachability()
+            .backend_selection()
+            .function_count(),
+        0
+    );
+
+    let paths = assembly
         .resource_union()
         .iter()
         .map(|origin| origin.logical_path().as_str().to_owned())
@@ -1044,14 +1075,30 @@ fn package_union_roots_receiver_method_from_facade_closed_nominal() {
         ResourceInputRegistry::new(),
     )
     .expect("synthetic nominal package should assemble");
-    let paths = compilation
+    let assembly = compilation
         .package_assembly()
-        .expect("facade should produce package assembly")
+        .expect("facade should produce package assembly");
+    assert!(matches!(
+        assembly.facade_module_ref(),
+        crate::build_system::create_project_modules::compiled_boundary::CompiledModuleRef::Project(
+            _
+        )
+    ));
+    assert_eq!(assembly.selected_modules().len(), 1);
+    assert_eq!(assembly.linked_modules().len(), 1);
+    assert_eq!(
+        assembly
+            .facade_reachability()
+            .backend_selection()
+            .function_count(),
+        0
+    );
+
+    let paths = assembly
         .resource_union()
         .iter()
         .map(|origin| origin.logical_path().as_str().to_owned())
         .collect::<Vec<_>>();
-
     assert!(
         paths.iter().any(|path| path == "assets/card.svg"),
         "receiver method reachable from the facade's closed nominal should be rooted: {paths:?}"

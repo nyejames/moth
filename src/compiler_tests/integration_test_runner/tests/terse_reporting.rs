@@ -18,12 +18,13 @@ use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project};
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
 use crate::builder_surface::PackageOrigin;
-use crate::compiler_frontend::compiler_errors::RenderSourceContext;
-use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_errors::BoundaryFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, NameNamespace,
-    NamingConvention, RuleDiagnosticKind,
+    CompilerDiagnostic, DiagnosticBag, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
+    NameNamespace, NamingConvention, RuleDiagnosticKind,
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
@@ -87,7 +88,6 @@ fn expected_failure_case(case_id: &str, backend_id: BackendId) -> TestCaseSpec {
 /// carries `build_result: Some(_)`. This fixture preserves that invariant
 /// without coupling to semantic build pipeline internals.
 fn minimal_build_result() -> BuildResult {
-    let string_table = StringTable::new();
     BuildResult {
         project: Project {
             output_files: vec![OutputFile::new(
@@ -101,11 +101,7 @@ fn minimal_build_result() -> BuildResult {
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
-        warning_accumulator: crate::build_system::build::build_warning_accumulator_from_diagnostics(
-            Vec::new(),
-            string_table,
-            Vec::new(),
-        ),
+        warning_accumulator: BoundaryAccumulator::new(),
         source_database: None,
         output_owner: OutputOwner {
             builder: BuilderKind::Html,
@@ -195,9 +191,16 @@ fn error_and_warning_messages() -> BoundaryFailure {
             namespace: NameNamespace::Value,
         },
     );
-
-    let messages = CompilerMessages::from_diagnostics(vec![error_diag, warning_diag], string_table);
-    into_boundary_failure(messages)
+    let batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from_diagnostics(vec![error_diag, warning_diag]),
+        string_table,
+        None,
+        false,
+        None,
+    );
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, None);
+    accumulator.finish(InstallMode::Frozen)
 }
 
 fn build_result_with_warning(
@@ -217,11 +220,18 @@ fn build_result_with_warning(
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
-        warning_accumulator: crate::build_system::build::build_warning_accumulator_from_diagnostics(
-            vec![warning],
-            string_table,
-            Vec::new(),
-        ),
+        warning_accumulator: {
+            let batch = PreparedDiagnosticBatch::capture_from_bag(
+                DiagnosticBag::from(warning),
+                string_table,
+                None,
+                false,
+                None,
+            );
+            let mut accumulator = BoundaryAccumulator::new();
+            accumulator.append_prepared(batch, None);
+            accumulator
+        },
         source_database: None,
         output_owner: OutputOwner {
             builder: BuilderKind::Html,
@@ -297,16 +307,27 @@ fn terse_build_result_warning_uses_donor_context_after_terminal_finalization() {
     ));
 
     let mut build_result = minimal_build_result();
-    build_result.warning_accumulator =
-        crate::build_system::build::build_warning_accumulator_from_diagnostics(
-            vec![warning],
-            string_table,
-            vec![RenderSourceContext {
-                diagnostic_range: 0..0,
-                source_database: Arc::clone(&package_database),
-                domain: Some(package_identity),
-            }],
-        );
+    let batch = PreparedDiagnosticBatch::capture_from_root_string_table(
+        DiagnosticBag::from(warning),
+        &string_table,
+        None,
+        || None,
+    )
+    .expect("the test warning should capture in the root string domain");
+    let mut warning_accumulator = BoundaryAccumulator::with_root_string_table(&string_table);
+    warning_accumulator.append_prepared(batch, None);
+    let package_source_batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::new(),
+        StringTable::new(),
+        None,
+        false,
+        None,
+    );
+    warning_accumulator.append_prepared(
+        package_source_batch,
+        Some((Arc::clone(&package_database), Some(package_identity))),
+    );
+    build_result.warning_accumulator = warning_accumulator;
     build_result.source_database = Some(Arc::clone(&project_database));
     drop(package_database);
     drop(project_database);

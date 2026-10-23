@@ -7,11 +7,17 @@ use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidDependencyClauseView;
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, DiagnosticSeverity, InvalidDependencyClauseReason,
+#[cfg(unix)]
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidConfigView, decode_invalid_config,
 };
 #[cfg(unix)]
-use crate::compiler_frontend::compiler_messages::{InvalidConfigReason, InvalidOutputFolderReason};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticCategory, InvalidConfigReason, InvalidOutputFolderReason,
+};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticSeverity, InvalidDependencyClauseReason, PreparedFailure,
+};
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveHandlerSpec, StyleDirectiveSpec, TemplateHeadCompatibility,
 };
@@ -31,7 +37,7 @@ impl BackendBuilder for NoopBuilder {
         _build_profile: crate::build_system::BuildProfile,
         _flags: &[Flag],
         _string_table: &mut StringTable,
-    ) -> Result<Project, crate::compiler_frontend::compiler_errors::CompilerMessages> {
+    ) -> Result<Project, PreparedFailure> {
         panic!("build_backend should not run in dev-server output-dir tests");
     }
 
@@ -62,7 +68,7 @@ impl BackendBuilder for ConflictingDirectiveBuilder {
         _build_profile: crate::build_system::BuildProfile,
         _flags: &[Flag],
         _string_table: &mut StringTable,
-    ) -> Result<Project, crate::compiler_frontend::compiler_errors::CompilerMessages> {
+    ) -> Result<Project, PreparedFailure> {
         panic!("build_backend should not run in dev-server output-dir tests");
     }
 
@@ -121,19 +127,16 @@ fn entry_path_validation_accepts_moth_files() {
 fn entry_path_validation_preserves_missing_file_cause() {
     let directory = tempfile::tempdir().expect("should create temp dir");
     let missing_path = directory.path().join("missing.moth");
-    let messages = validate_dev_entry_path(
+    let error = validate_dev_entry_path(
         missing_path
             .to_str()
             .expect("temp path should be valid UTF-8"),
     )
     .expect_err("missing dev entry must fail at path validation");
 
-    let error = messages
-        .primary_infrastructure_error()
-        .expect("missing entry should retain its filesystem failure");
     assert_eq!(error.error_type, ErrorType::File);
     assert_eq!(error.host_path.as_deref(), Some(missing_path.as_path()));
-    assert_eq!(messages.error_count(), 1);
+    assert_eq!(error.msg, "Path does not exist");
 }
 
 #[test]
@@ -220,21 +223,34 @@ fn resolve_dev_runtime_paths_rejects_symlinked_output_roots() {
         let builder = ProjectBuilder::new(NoopBuilder);
         let failure = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new())
             .expect_err("dev startup must reject symlinked output roots");
-        let crate::build_system::build::BootstrapFailure::Legacy(messages) = failure else {
-            panic!("output validation should retain its legacy diagnostic carrier");
-        };
-        assert!(messages.error_diagnostics().any(|diagnostic| {
-            matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidConfig {
-                    reason: InvalidConfigReason::InvalidOutputFolder {
-                        reason,
-                        ..
-                    },
-                    ..
-                } if *reason == expected_reason
-            )
-        }));
+        assert!(matches!(
+            &failure,
+            crate::build_system::build::BootstrapFailure::Prepared {
+                failure: PreparedFailure::Diagnosed(_),
+                ..
+            }
+        ));
+        let boundary = failure.into_boundary_failure();
+        assert_eq!(boundary.error_count(), 1);
+        let errors = boundary
+            .reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .collect::<Vec<_>>();
+        assert_eq!(errors.len(), 1);
+        let diagnostic = errors[0].1;
+        assert_eq!(diagnostic.category(), DiagnosticCategory::Config);
+        let facts = diagnostic
+            .family_view::<InvalidConfigView>()
+            .expect("output validation should retain typed invalid-config facts");
+        let (_, reason) = decode_invalid_config(&facts, diagnostic.string_ids())
+            .expect("invalid-config facts should decode to the output-folder reason");
+        assert!(matches!(
+            reason,
+            InvalidConfigReason::InvalidOutputFolder {
+                reason,
+                ..
+            } if reason == expected_reason
+        ));
 
         fs::remove_dir_all(&outside).expect("should remove target root");
     }
@@ -297,12 +313,11 @@ fn resolve_dev_runtime_paths_return_style_directive_merge_failures() {
     let builder = ProjectBuilder::new(ConflictingDirectiveBuilder);
     let failure = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new())
         .expect_err("conflicting directives should fail bootstrap");
-    let crate::build_system::build::BootstrapFailure::Legacy(messages) = failure else {
-        panic!("directive merge failures should retain their legacy diagnostic carrier");
-    };
-    assert_eq!(messages.error_count(), 1);
-    let error = messages
-        .primary_infrastructure_error()
-        .expect("directive conflict should be wrapped for rendering");
+    let boundary = failure.into_boundary_failure();
+    assert_eq!(boundary.error_count(), 1);
+    let error = boundary
+        .infrastructure_errors()
+        .and_then(|errors| errors.iter().next())
+        .expect("directive conflict should remain an infrastructure failure");
     assert!(error.msg.contains("cannot override") || error.msg.contains("already exists"));
 }

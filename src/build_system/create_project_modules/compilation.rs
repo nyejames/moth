@@ -16,7 +16,7 @@ use crate::compiler_frontend::build_config::{
     BuildConfigContractFact, BuildConfigInputSet, BuildConfigResolutionError,
     ResolvedBuildConfigMap,
 };
-use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
@@ -197,7 +197,7 @@ pub(super) fn publish_compiled_module(
     // `merge_delta_from` has already rebased local strings into the caller-owned run root table,
     // which is the same root the build warning accumulator later receives. Rebase prepared facts
     // now and leave each batch with an empty table so append does not scan the module prefix.
-    // The legacy success-warning lane had no path row, so it did not apply a type environment.
+    // The prior successful-warning lane had no path row, so it did not apply a type environment.
     let capture_rebased_warnings = |diagnostics| {
         let mut batch = PreparedDiagnosticBatch::capture_from_bag(
             DiagnosticBag::from_diagnostics(diagnostics),
@@ -400,37 +400,38 @@ impl From<SourceDatabaseError> for BoundaryPremergeFailure {
 /// Consume a terminal prepared failure with its package owner or project fallback.
 pub(super) fn prepared_failure_to_boundary(
     failure: PreparedFailure,
-    _string_table: &StringTable,
+    string_table: &StringTable,
     package_source: Option<Box<SourceDatabase>>,
     project_source: Option<Arc<SourceDatabase>>,
 ) -> BoundaryFailure {
     let source = package_source
         .map(|source| Arc::new(*source))
         .or(project_source);
-    let mut accumulator = BoundaryAccumulator::new();
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(string_table);
+    append_prepared_failure(&mut accumulator, failure, source);
+    accumulator.finish(InstallMode::Unfrozen)
+}
+
+fn append_prepared_failure(
+    accumulator: &mut BoundaryAccumulator,
+    failure: PreparedFailure,
+    source: Option<Arc<SourceDatabase>>,
+) {
     match failure {
         PreparedFailure::Diagnosed(batch) => {
             accumulator.append_prepared(batch, source.map(|source| (source, None)));
         }
         PreparedFailure::Infrastructure(errors) => {
-            let mut messages = CompilerMessages::empty(StringTable::empty_unallocated());
-            messages.append_infrastructure_errors(errors);
-            if let Some(source) = source {
-                messages.set_source_database(source);
-            }
-            accumulator.append(messages);
+            accumulator.append_infrastructure(errors, source);
         }
         PreparedFailure::Mixed { batch, error } => {
-            accumulator.append_prepared(batch, source.clone().map(|source| (source, None)));
-            let mut messages = CompilerMessages::empty(StringTable::empty_unallocated());
-            messages.append_infrastructure_errors(error);
-            if let Some(source) = source {
-                messages.set_source_database(source);
-            }
-            accumulator.append(messages);
+            accumulator.append_prepared(
+                batch,
+                source.as_ref().map(|source| (Arc::clone(source), None)),
+            );
+            accumulator.append_infrastructure(error, source);
         }
     }
-    accumulator.finish(InstallMode::Unfrozen)
 }
 
 /// Convert one typed boundary failure after its last source owner has finalized.
@@ -1206,8 +1207,8 @@ pub(crate) fn compile_directory_frontend(
 /// WHAT: runs package/project discovery, source loading, deferred check-only preparation,
 ///       provider publication and graph validation with typed failures, retaining a finished
 ///       package snapshot beside package-scoped failures.
-/// WHY: the terminal wrapper above owns the single final boundary conversion; this lane never
-///      constructs a vessel early and never clones a diagnostic table solely to transport a failure.
+/// WHY: the terminal wrapper above owns the single final boundary freeze; this lane keeps
+///      prepared failures typed and avoids cloning a diagnostic table solely to transport them.
 #[allow(
     clippy::too_many_arguments,
     reason = "premerge directory orchestration keeps configuration, profile, output settings, directives, mutable builder/string/source owners, build-config inputs and mode separate"

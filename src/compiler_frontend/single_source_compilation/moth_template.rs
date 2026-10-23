@@ -23,7 +23,7 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueVisit;
 use crate::compiler_frontend::ast::{
     Ast, AstBuildContext, AstBuildInput, FileValueResolutionServices, Stage0ResolutionFacts,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
@@ -182,6 +182,34 @@ fn append_infrastructure_cause(failure: PreparedFailure, error: CompilerError) -
     }
 }
 
+fn prepared_infrastructure_failure_with_warnings(
+    error: CompilerError,
+    warnings: DiagnosticBag,
+    string_table: &StringTable,
+) -> PreparedFailure {
+    let warning_diagnostics = warnings.into_diagnostics();
+    if warning_diagnostics.is_empty() {
+        return PreparedFailure::from(error);
+    }
+
+    match PreparedDiagnosticBatch::capture_with_required_paths(
+        DiagnosticBag::from_diagnostics(warning_diagnostics),
+        string_table.clone(),
+        None,
+        || None,
+    ) {
+        Ok(batch) => PreparedFailure::Mixed {
+            batch,
+            error: error.into(),
+        },
+        Err(capture_error) => {
+            let mut errors = InfrastructureErrors::new(error);
+            errors.push(capture_error);
+            PreparedFailure::Infrastructure(Box::new(errors))
+        }
+    }
+}
+
 fn finish_source_owner(
     failure: PreparedFailure,
     source_builder: SourceDatabaseBuilder,
@@ -197,6 +225,7 @@ fn finish_source_owner(
         },
     }
 }
+
 /// Compile one Moth template source to its folded `content` value.
 ///
 /// The service stops at folded AST data, so the projection side results of AST construction are
@@ -284,14 +313,12 @@ pub(crate) fn compile_moth_template_source(
     }
 
     if bundle_input && direct_source_code.is_some() {
-        let failure = PreparedFailure::with_infrastructure_and_warnings(
+        let failure = prepared_infrastructure_failure_with_warnings(
             CompilerError::compiler_error(
                 "Moth template file-value bundle must own the retained source text",
             ),
-            preparation_warnings.into_diagnostics(),
+            preparation_warnings,
             string_table,
-            None,
-            || None,
         );
         return Err(finish_source_owner(failure, source_builder));
     }
@@ -302,14 +329,12 @@ pub(crate) fn compile_moth_template_source(
     {
         Some(source_identity) => source_identity.id,
         None => {
-            let failure = PreparedFailure::with_infrastructure_and_warnings(
+            let failure = prepared_infrastructure_failure_with_warnings(
                 CompilerError::compiler_error(
                     "Moth template source file table does not contain its own source",
                 ),
-                preparation_warnings.into_diagnostics(),
+                preparation_warnings,
                 string_table,
-                None,
-                || None,
             );
             return Err(finish_source_owner(failure, source_builder));
         }
@@ -318,25 +343,21 @@ pub(crate) fn compile_moth_template_source(
         .first()
         .is_some_and(|prepared_entry| prepared_entry.file_id != entry_file_id)
     {
-        let failure = PreparedFailure::with_infrastructure_and_warnings(
+        let failure = prepared_infrastructure_failure_with_warnings(
             CompilerError::compiler_error(
                 "Moth template bundle entry does not match its registered source identity",
             ),
-            preparation_warnings.into_diagnostics(),
+            preparation_warnings,
             string_table,
-            None,
-            || None,
         );
         return Err(finish_source_owner(failure, source_builder));
     }
     if !bundle_input {
         let Some(source_code) = direct_source_code.take() else {
-            let failure = PreparedFailure::with_infrastructure_and_warnings(
+            let failure = prepared_infrastructure_failure_with_warnings(
                 CompilerError::compiler_error("Moth template source has no retained source text"),
-                preparation_warnings.into_diagnostics(),
+                preparation_warnings,
                 string_table,
-                None,
-                || None,
             );
             return Err(finish_source_owner(failure, source_builder));
         };
@@ -344,19 +365,22 @@ pub(crate) fn compile_moth_template_source(
             .sources_mut()
             .retain_text(entry_file_id, source_code)
         {
-            return Err(PreparedFailure::from(error).into());
+            let failure = prepared_infrastructure_failure_with_warnings(
+                error,
+                preparation_warnings,
+                string_table,
+            );
+            return Err(finish_source_owner(failure, source_builder));
         }
     } else if source_builder
         .sources()
         .retained_text(entry_file_id)
         .is_none()
     {
-        let failure = PreparedFailure::with_infrastructure_and_warnings(
+        let failure = prepared_infrastructure_failure_with_warnings(
             CompilerError::compiler_error("Moth template source has no retained source text"),
-            preparation_warnings.into_diagnostics(),
+            preparation_warnings,
             string_table,
-            None,
-            || None,
         );
         return Err(finish_source_owner(failure, source_builder));
     }
@@ -392,17 +416,26 @@ pub(crate) fn compile_moth_template_source(
                     diagnostic,
                     ..
                 } = error;
-                let failure = PreparedFailure::with_diagnostic_and_warnings(
-                    diagnostic,
-                    warnings.into_diagnostics(),
-                    string_table,
+                let mut diagnostics = preparation_warnings;
+                for warning in warnings.into_diagnostics() {
+                    diagnostics.push(warning);
+                }
+                diagnostics.push(diagnostic);
+                let failure = PreparedFailure::capture_diagnosed(
+                    diagnostics,
+                    string_table.clone(),
                     None,
-                    || None,
+                    false,
+                    None,
                 );
                 return Err(finish_source_owner(failure, source_builder));
             }
             Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
-                let failure = PreparedFailure::from(error);
+                let failure = prepared_infrastructure_failure_with_warnings(
+                    error,
+                    preparation_warnings,
+                    string_table,
+                );
                 return Err(finish_source_owner(failure, source_builder));
             }
         };
@@ -412,12 +445,10 @@ pub(crate) fn compile_moth_template_source(
         }
         all_prepared.push(prepared);
         if let Err(error) = freeze_result {
-            let failure = PreparedFailure::with_infrastructure_and_warnings(
+            let failure = prepared_infrastructure_failure_with_warnings(
                 error,
-                preparation_warnings.into_diagnostics(),
+                preparation_warnings,
                 string_table,
-                None,
-                || None,
             );
             return Err(finish_source_owner(failure, source_builder));
         }
@@ -427,12 +458,10 @@ pub(crate) fn compile_moth_template_source(
         .iter()
         .find_map(|prepared_source| prepared_source.require_frozen_path_syntax().err())
     {
-        let failure = PreparedFailure::with_infrastructure_and_warnings(
+        let failure = prepared_infrastructure_failure_with_warnings(
             error,
-            preparation_warnings.into_diagnostics(),
+            preparation_warnings,
             string_table,
-            None,
-            || None,
         );
         return Err(finish_source_owner(failure, source_builder));
     }
@@ -449,7 +478,7 @@ pub(crate) fn compile_moth_template_source(
         Err(failure) => {
             let failure = capture_prior_diagnostics_in_batch(
                 failure,
-                preparation_warnings.into_diagnostics(),
+                preparation_warnings,
                 string_table,
                 &path_fork,
             );
@@ -466,7 +495,7 @@ pub(crate) fn compile_moth_template_source(
         resolved_references,
         source_builder,
         module_origin,
-        preparation_warnings.into_diagnostics(),
+        preparation_warnings,
     );
 
     match semantic_result {
@@ -588,10 +617,11 @@ fn order_template_headers(
 
 fn capture_prior_diagnostics_in_batch(
     failure: PreparedFailure,
-    prior_diagnostics: Vec<CompilerDiagnostic>,
+    prior_diagnostics: DiagnosticBag,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
 ) -> PreparedFailure {
+    let prior_diagnostics = prior_diagnostics.into_diagnostics();
     if prior_diagnostics.is_empty() {
         return failure;
     }
@@ -634,7 +664,7 @@ fn fold_template_semantics(
     resolved_references: Option<ResolvedFileReferenceTable>,
     source_builder: SourceDatabaseBuilder,
     module_origin: Option<StableModuleOriginIdentity>,
-    prior_diagnostics: Vec<CompilerDiagnostic>,
+    prior_diagnostics: DiagnosticBag,
 ) -> TemplateSemanticOutcome {
     let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
     let frozen_identity_handle = module_origin
@@ -680,12 +710,15 @@ fn fold_template_semantics(
         }
     };
     let mut warnings = prior_diagnostics;
-    warnings.append(&mut ast.warnings);
-    let warning_batch = if warnings.is_empty() {
+    for warning in ast.warnings.drain(..) {
+        warnings.push(warning);
+    }
+    let warning_diagnostics = warnings.into_diagnostics();
+    let warning_batch = if warning_diagnostics.is_empty() {
         None
     } else {
         match PreparedDiagnosticBatch::capture_from_root_string_table(
-            DiagnosticBag::from_diagnostics(warnings),
+            DiagnosticBag::from_diagnostics(warning_diagnostics),
             string_table,
             None,
             || Some(Arc::new(path_fork.snapshot_table())),

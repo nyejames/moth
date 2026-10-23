@@ -1322,8 +1322,7 @@ fn emit_build_runtime_modules_dedupes_by_specifier() {
         module_b.link_facts.external_import_candidates.as_slice(),
     ]);
     let mut occupied = HashSet::new();
-    let string_table = StringTable::new();
-    let files = emit_build_runtime_modules(&plan, &mut occupied, &string_table)
+    let files = emit_build_runtime_modules(&plan, &mut occupied)
         .expect("runtime module emission should succeed");
 
     // Only one runtime module emitted despite two modules requiring it.
@@ -1342,15 +1341,10 @@ fn emit_build_runtime_modules_rejects_unregistered_specifier() {
         .external_import_candidates
         .as_slice()]);
     let mut occupied = HashSet::new();
-    let string_table = StringTable::new();
-    let error = match emit_build_runtime_modules(&plan, &mut occupied, &string_table) {
+    let error = match emit_build_runtime_modules(&plan, &mut occupied) {
         Ok(_) => panic!("unregistered runtime module should fail"),
         Err(error) => error,
     };
-    let error = error
-        .primary_infrastructure_error()
-        .expect("runtime module failure should be an infrastructure error");
-
     assert!(
         error.msg.contains("@moth/missing"),
         "expected unregistered module name in error"

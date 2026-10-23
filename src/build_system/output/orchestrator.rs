@@ -10,8 +10,8 @@ use super::manifest::{OutputCleanupFinalization, finalize_output_cleanup, prepar
 use super::policy::OutputPlan;
 use super::writer::{OutputWriteSummary, emit_prepared_output_files, prepare_output_write};
 use crate::build_system::build::Project;
-use crate::build_system::utils::file_error_messages;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::build_system::utils::file_error;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use std::fs;
@@ -41,7 +41,7 @@ pub(crate) fn write_project_outputs(
     project: &mut Project,
     options: &WriteOptions,
     string_table: &mut StringTable,
-) -> Result<OutputWriteSummary, CompilerMessages> {
+) -> Result<OutputWriteSummary, PreparedFailure> {
     timing_scope!(
         timing_guard_output_write_total,
         crate::timing::TimingMetric::OutputWriteTotal
@@ -55,13 +55,13 @@ fn write_project_outputs_inner(
     project: &mut Project,
     options: &WriteOptions,
     string_table: &mut StringTable,
-) -> Result<OutputWriteSummary, CompilerMessages> {
+) -> Result<OutputWriteSummary, PreparedFailure> {
     // ---------------------------------------
     //  Preflight the complete output batch
     // ---------------------------------------
     // WHAT: validate every ordinary and deferred destination, reject duplicate paths, compute the
     // complete managed-path set, and prepare canonical destinations before any filesystem mutation.
-    let prepared_write = prepare_output_write(project, &options.output_plan, string_table)?;
+    let prepared_write = prepare_output_write(project, &options.output_plan)?;
 
     // ---------------------------------------
     //  Prepare cleanup and create output root
@@ -84,13 +84,12 @@ fn write_project_outputs_inner(
     )?;
 
     fs::create_dir_all(output_root).map_err(|error| {
-        file_error_messages(
+        file_error(
             output_root,
             format!(
                 "Failed to create output root '{}': {error}",
                 output_root.display()
             ),
-            string_table,
         )
     })?;
 
@@ -99,8 +98,7 @@ fn write_project_outputs_inner(
     // ---------------------------------------
     // Deferred resources are materialised here, after the complete batch and output root have
     // passed central validation.
-    let write_summary =
-        emit_prepared_output_files(project, &prepared_write, options.write_mode, string_table)?;
+    let write_summary = emit_prepared_output_files(project, &prepared_write, options.write_mode)?;
 
     // ---------------------------------------
     //  Finalize cleanup and write manifest
@@ -116,7 +114,6 @@ fn write_project_outputs_inner(
         owner: output_owner,
         cleanup_policy: &project.cleanup_policy,
         write_mode: options.write_mode,
-        string_table,
     };
     finalize_output_cleanup(&cleanup_state, &finalization)?;
 

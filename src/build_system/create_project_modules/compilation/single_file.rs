@@ -16,11 +16,11 @@ use crate::compiler_frontend::module_compilation::compile_module_for_boracle;
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-#[cfg(feature = "boracle")]
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
 #[cfg(feature = "boracle")]
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+#[cfg(feature = "boracle")]
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticBag, PreparedFailure, SourceSpanCapacityResource,
@@ -73,6 +73,12 @@ use super::{
     canonical, compile_source_package_inventories, discover_source_package_inventories,
     prepare_source_package_check_only_jobs,
 };
+#[cfg(feature = "boracle")]
+fn compiler_error_boundary(error: CompilerError, string_table: &StringTable) -> BoundaryFailure {
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(string_table);
+    accumulator.append_infrastructure(error.into(), None);
+    accumulator.finish(InstallMode::Unfrozen)
+}
 
 #[allow(
     clippy::too_many_arguments,
@@ -114,14 +120,12 @@ pub(crate) fn compile_single_file_frontend_with_inputs(
     match result {
         SingleFileFrontendResult::Project(compilation) => Ok(*compilation),
         #[cfg(feature = "boracle")]
-        SingleFileFrontendResult::Boracle(_) => {
-            Err(into_boundary_failure(CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(
-                    "normal single-file compilation unexpectedly returned a Boracle payload",
-                ),
-                string_table,
-            )))
-        }
+        SingleFileFrontendResult::Boracle(_) => Err(compiler_error_boundary(
+            CompilerError::compiler_error(
+                "normal single-file compilation unexpectedly returned a Boracle payload",
+            ),
+            string_table,
+        )),
     }
 }
 #[cfg(feature = "boracle")]
@@ -160,12 +164,12 @@ pub(crate) fn compile_single_file_boracle_frontend(
         SingleFileFrontendResult::Boracle(input) => Ok(*input),
         SingleFileFrontendResult::Project(compilation) => {
             if !compilation.has_diagnosed_or_blocked() {
-                return Err(into_boundary_failure(CompilerMessages::from_error_ref(
+                return Err(compiler_error_boundary(
                     CompilerError::compiler_error(
                         "Boracle source compilation unexpectedly returned a clean project payload",
                     ),
                     string_table,
-                )));
+                ));
             }
             // The canonical scheduler retains failed package reports and blocks their consumer.
             // Render only after the synthetic source owner has finalised its span tables.

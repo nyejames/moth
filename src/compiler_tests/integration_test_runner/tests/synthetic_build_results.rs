@@ -14,7 +14,7 @@ use crate::build_system::BuildProfile;
 use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project};
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::projects::settings::Config;
 use std::path::PathBuf;
 /// The smallest document that satisfies the ordered HTML shell contract.
@@ -49,11 +49,7 @@ pub(super) fn build_result_with_output_files(files: Vec<(PathBuf, FileKind)>) ->
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
-        warning_accumulator: crate::build_system::build::build_warning_accumulator_from_diagnostics(
-            Vec::new(),
-            StringTable::new(),
-            Vec::new(),
-        ),
+        warning_accumulator: BoundaryAccumulator::new(),
         source_database: None,
         output_owner: OutputOwner {
             builder: BuilderKind::Html,

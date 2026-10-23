@@ -797,6 +797,7 @@ fn source_finish_failures_preserve_every_cause_and_original_provenance() {
     };
     use crate::compiler_frontend::source::{LocalSpan, SourceDatabase, SourceId, SourceSpan};
 
+    let root_string_table = StringTable::new();
     for mixed in [false, true] {
         let primary_span = SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start());
         let mut primary =
@@ -806,20 +807,22 @@ fn source_finish_failures_preserve_every_cause_and_original_provenance() {
             "semantic compilation".to_owned(),
         );
         let mut errors = InfrastructureErrors::new(primary);
-        errors.set_source_database(Arc::new(SourceDatabase::empty()));
+        errors.pair_unowned_causes(Arc::new(SourceDatabase::empty()));
+        let error = Box::new(errors);
+
         let failure = if mixed {
             PreparedFailure::Mixed {
-                batch: PreparedDiagnosticBatch::capture_from_bag(
+                batch: PreparedDiagnosticBatch::capture_from_root_string_table(
                     DiagnosticBag::from(CompilerDiagnostic::unexpected_trailing_comma(None)),
-                    StringTable::new(),
+                    &root_string_table,
                     None,
-                    false,
-                    None,
-                ),
-                error: Box::new(errors),
+                    || None,
+                )
+                .expect("fixture diagnostic should capture in the root string domain"),
+                error,
             }
         } else {
-            PreparedFailure::Infrastructure(Box::new(errors))
+            PreparedFailure::Infrastructure(error)
         };
         let mut finish = CompilerError::file_error(
             std::path::Path::new("finish-source.moth"),
@@ -834,7 +837,7 @@ fn source_finish_failures_preserve_every_cause_and_original_provenance() {
             failure,
             CompilerError::compiler_error("second finish failure"),
         );
-        let errors = match failure {
+        let errors = match &failure {
             PreparedFailure::Infrastructure(errors) if !mixed => errors,
             PreparedFailure::Mixed { batch, error } if mixed => {
                 assert_eq!(batch.diagnostic_count(), 1);
@@ -856,7 +859,6 @@ fn source_finish_failures_preserve_every_cause_and_original_provenance() {
                 .map(String::as_str),
             Some("semantic compilation"),
         );
-        assert!(errors.source_database_for_cause(0).is_some());
         assert_eq!(causes[1].msg, "first finish failure");
         assert_eq!(causes[1].error_type, ErrorType::File);
         assert_eq!(causes[1].source_span, None);
@@ -871,9 +873,27 @@ fn source_finish_failures_preserve_every_cause_and_original_provenance() {
                 .map(String::as_str),
             Some("source finalization"),
         );
-        assert!(errors.source_database_for_cause(1).is_none());
         assert_eq!(causes[2].msg, "second finish failure");
         assert!(causes[2].metadata.is_empty());
+        drop(causes);
+
+        let boundary = super::prepared_failure_to_boundary(failure, &root_string_table, None, None);
+        let errors = boundary
+            .infrastructure_errors()
+            .expect("every infrastructure cause should remain at the boundary");
+        assert_eq!(errors.iter().count(), 3);
+        assert!(
+            errors.frozen_identity_for_cause(0).is_some(),
+            "the original cause should retain its frozen source domain",
+        );
+        assert!(
+            errors.frozen_identity_for_cause(1).is_none(),
+            "finish causes should not inherit the original cause's source domain",
+        );
+        assert!(
+            errors.frozen_identity_for_cause(2).is_none(),
+            "finish causes should not inherit the original cause's source domain",
+        );
     }
 }
 
@@ -1331,6 +1351,7 @@ fn canonical_tail_retains_donor_only_package_identity() {
 fn published_warning_paths_remap_to_preserve_original_spelling() {
     use crate::build_system::create_project_modules::compiled_boundary::CompiledGraphBoundary;
     use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
+    use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
     use crate::compiler_frontend::compiler_messages::{
         CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
         ImportDiagnosticKind,
@@ -1434,16 +1455,7 @@ fn published_warning_paths_remap_to_preserve_original_spelling() {
         Arc::clone(&frozen_string_table),
     );
     let mut boundary = boundary.finish().expect("the test boundary should finish");
-    let mut warning_accumulator =
-        crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator::new();
-    let root_batch = crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch::capture_from_bag(
-        DiagnosticBag::new(),
-        string_table,
-        None,
-        false,
-        None,
-    );
-    warning_accumulator.append_prepared(root_batch, None);
+    let mut warning_accumulator = BoundaryAccumulator::with_root_string_table(&string_table);
     for warning in boundary.take_successful_warnings() {
         warning_accumulator.append_prepared(warning.batch, warning.source);
     }

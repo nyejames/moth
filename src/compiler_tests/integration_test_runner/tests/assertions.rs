@@ -20,12 +20,12 @@ use super::synthetic_build_results::{
     build_result_with_output_files, success_test_case,
 };
 use crate::build_system::build::{BuildResult, FileKind};
-use crate::compiler_frontend::compiler_messages::compiler_errors::{
-    BoundaryFailure, CompilerMessages,
-};
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_errors::BoundaryFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidOutputFolderReason,
+    CompilerDiagnostic, DiagnosticBag, InvalidAssignmentTargetReason, InvalidOutputFolderReason,
 };
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceSpan,
@@ -43,9 +43,21 @@ fn test_span(source: SourceId, start: u32, length: u32) -> SourceSpan {
     )
 }
 
-fn boundary_failure(mut messages: CompilerMessages) -> BoundaryFailure {
-    messages.mark_frozen();
-    into_boundary_failure(messages)
+fn boundary_failure(
+    diagnostics: Vec<CompilerDiagnostic>,
+    string_table: StringTable,
+    source_database: Option<Arc<SourceDatabase>>,
+) -> BoundaryFailure {
+    let batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from_diagnostics(diagnostics),
+        string_table,
+        None,
+        false,
+        None,
+    );
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, source_database.map(|source| (source, None)));
+    accumulator.finish(InstallMode::Frozen)
 }
 
 fn diagnostic_messages(codes: &[&str]) -> BoundaryFailure {
@@ -67,10 +79,7 @@ fn diagnostic_messages(codes: &[&str]) -> BoundaryFailure {
         })
         .collect();
 
-    boundary_failure(CompilerMessages::from_diagnostics(
-        diagnostics,
-        string_table,
-    ))
+    boundary_failure(diagnostics, string_table, None)
 }
 
 fn diagnostic_expectation(
@@ -104,7 +113,7 @@ fn failure_message_contains_uses_structured_render_output() {
         None,
         None,
     );
-    let messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
+    let failure = boundary_failure(vec![diagnostic], string_table, None);
     let expectation = FailureExpectation {
         warnings: WarningExpectation::Ignore,
         diagnostic_codes: vec!["MOTH-RULE-0044".to_string()],
@@ -114,7 +123,7 @@ fn failure_message_contains_uses_structured_render_output() {
         message_contains: vec!["Cannot reassign `value`".to_string()],
     };
 
-    let result = validate_failure_result(boundary_failure(messages), &expectation, Path::new("."));
+    let result = validate_failure_result(failure, &expectation, Path::new("."));
 
     assert!(result.passed, "{:?}", result.failure_reason);
 }
@@ -148,8 +157,11 @@ fn failure_message_contains_includes_rendered_label_text() {
         Some(test_span(source_id, 0, 1)),
         None,
     );
-    let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
-    messages.set_source_database(Arc::new(source_database));
+    let failure = boundary_failure(
+        vec![diagnostic],
+        string_table,
+        Some(Arc::new(source_database)),
+    );
     let expectation = FailureExpectation {
         warnings: WarningExpectation::Ignore,
         diagnostic_codes: vec!["MOTH-RULE-0044".to_string()],
@@ -159,7 +171,7 @@ fn failure_message_contains_includes_rendered_label_text() {
         message_contains: vec!["immutable binding declared here".to_string()],
     };
 
-    let result = validate_failure_result(boundary_failure(messages), &expectation, Path::new("."));
+    let result = validate_failure_result(failure, &expectation, Path::new("."));
 
     assert!(result.passed, "{:?}", result.failure_reason);
 }
@@ -316,9 +328,11 @@ fn structured_diagnostic_messages(fixture_root: &Path) -> BoundaryFailure {
         Some(primary_span),
     );
 
-    let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
-    messages.set_source_database(Arc::new(source_database));
-    boundary_failure(messages)
+    boundary_failure(
+        vec![diagnostic],
+        string_table,
+        Some(Arc::new(source_database)),
+    )
 }
 
 fn structured_diagnostic_expectation(assertion: DiagnosticAssertion) -> FailureExpectation {
@@ -400,9 +414,11 @@ fn relative_structured_diagnostic_messages(scope: &str, fixture_root: &Path) -> 
         None,
         Some(test_span(source_id, 7, 1)),
     );
-    let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
-    messages.set_source_database(Arc::new(source_database));
-    boundary_failure(messages)
+    boundary_failure(
+        vec![diagnostic],
+        string_table,
+        Some(Arc::new(source_database)),
+    )
 }
 
 #[test]
@@ -589,12 +605,16 @@ fn warning_build_result(codes: &[&str]) -> BuildResult {
             other => panic!("test warning code is not constructed: {other}"),
         })
         .collect();
-    result.warning_accumulator =
-        crate::build_system::build::build_warning_accumulator_from_diagnostics(
-            warnings,
-            string_table,
-            Vec::new(),
-        );
+    let batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from_diagnostics(warnings),
+        string_table,
+        None,
+        false,
+        None,
+    );
+    let mut warning_accumulator = BoundaryAccumulator::new();
+    warning_accumulator.append_prepared(batch, None);
+    result.warning_accumulator = warning_accumulator;
     result
 }
 
@@ -716,7 +736,7 @@ fn exact_warning_codes_match_warnings_retained_in_failed_compilation_messages() 
     let string_table = StringTable::new();
     let warning = CompilerDiagnostic::unreachable_match_arm(None);
     let error = CompilerDiagnostic::unexpected_trailing_comma(None);
-    let messages = CompilerMessages::from_diagnostics(vec![error, warning], string_table);
+    let failure = boundary_failure(vec![error, warning], string_table, None);
     // diagnostic_codes owns the error contract only; warning_codes independently owns the
     // warning. A warning code must never appear in diagnostic_codes for a failed compilation.
     let expectation = FailureExpectation {
@@ -728,7 +748,7 @@ fn exact_warning_codes_match_warnings_retained_in_failed_compilation_messages() 
         diagnostic_match_reason: None,
     };
 
-    let result = validate_failure_result(boundary_failure(messages), &expectation, Path::new("."));
+    let result = validate_failure_result(failure, &expectation, Path::new("."));
 
     assert!(result.passed, "{:?}", result.failure_reason);
 }
@@ -738,7 +758,7 @@ fn warnings_ignore_truly_ignores_warnings_on_a_failed_compilation() {
     let string_table = StringTable::new();
     let warning = CompilerDiagnostic::unreachable_match_arm(None);
     let error = CompilerDiagnostic::unexpected_trailing_comma(None);
-    let messages = CompilerMessages::from_diagnostics(vec![error, warning], string_table);
+    let failure = boundary_failure(vec![error, warning], string_table, None);
     let expectation = FailureExpectation {
         warnings: WarningExpectation::Ignore,
         message_contains: Vec::new(),
@@ -748,7 +768,7 @@ fn warnings_ignore_truly_ignores_warnings_on_a_failed_compilation() {
         diagnostic_match_reason: None,
     };
 
-    let result = validate_failure_result(boundary_failure(messages), &expectation, Path::new("."));
+    let result = validate_failure_result(failure, &expectation, Path::new("."));
 
     assert!(result.passed, "{:?}", result.failure_reason);
 }
@@ -758,7 +778,7 @@ fn warning_code_cannot_satisfy_failure_diagnostic_codes() {
     let string_table = StringTable::new();
     let warning = CompilerDiagnostic::unreachable_match_arm(None);
     let error = CompilerDiagnostic::unexpected_trailing_comma(None);
-    let messages = CompilerMessages::from_diagnostics(vec![error, warning], string_table);
+    let failure = boundary_failure(vec![error, warning], string_table, None);
     // Authoring the warning code as a diagnostic code must fail: the warning is not in the
     // error-severity stream, so the multiset reports it as missing.
     let expectation = FailureExpectation {
@@ -770,7 +790,7 @@ fn warning_code_cannot_satisfy_failure_diagnostic_codes() {
         diagnostic_match_reason: None,
     };
 
-    let result = validate_failure_result(boundary_failure(messages), &expectation, Path::new("."));
+    let result = validate_failure_result(failure, &expectation, Path::new("."));
 
     assert!(
         !result.passed,
@@ -791,7 +811,7 @@ fn warning_prose_cannot_satisfy_error_message_contains() {
     let string_table = StringTable::new();
     let warning = CompilerDiagnostic::unreachable_match_arm(None);
     let error = CompilerDiagnostic::unexpected_trailing_comma(None);
-    let messages = CompilerMessages::from_diagnostics(vec![error, warning], string_table);
+    let failure = boundary_failure(vec![error, warning], string_table, None);
     // The unreachable-match-arm warning prose must not satisfy message_contains because the
     // fragment check only inspects error-severity diagnostics.
     let expectation = FailureExpectation {
@@ -803,7 +823,7 @@ fn warning_prose_cannot_satisfy_error_message_contains() {
         diagnostic_match_reason: None,
     };
 
-    let result = validate_failure_result(boundary_failure(messages), &expectation, Path::new("."));
+    let result = validate_failure_result(failure, &expectation, Path::new("."));
 
     assert!(
         !result.passed,

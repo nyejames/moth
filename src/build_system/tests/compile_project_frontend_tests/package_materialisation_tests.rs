@@ -4,7 +4,8 @@ use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::BoundaryFailure;
+use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReport;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
@@ -3006,7 +3007,7 @@ impl BackendBuilder for SuccessfulPackageWarningBuilder {
         _build_profile: BuildProfile,
         _flags: &[crate::compiler_frontend::Flag],
         _string_table: &mut StringTable,
-    ) -> Result<Project, CompilerMessages> {
+    ) -> Result<Project, PreparedFailure> {
         Ok(Project {
             output_files: Vec::new(),
             entry_page_rel: None,

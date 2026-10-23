@@ -153,13 +153,6 @@ impl<'a> DiagnosticRenderContext<'a> {
         }
         self
     }
-    #[cfg(test)]
-    pub(crate) fn with_optional_path_table(mut self, path_table: Option<&'a PathTable>) -> Self {
-        if let Some(path_table) = path_table {
-            self.path_context = Some(DiagnosticPathContext::Table(path_table));
-        }
-        self
-    }
 
     #[cfg(test)]
     pub(crate) fn with_path_fork(mut self, path_fork: &'a PathInternerFork) -> Self {

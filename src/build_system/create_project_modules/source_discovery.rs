@@ -7,8 +7,8 @@
 //! `PreparedSourceInput` values for downstream compilation stages.
 //! Stage 0 returns move-only typed failures in `SourceDiscoveryError`: a plain `CompilerDiagnostic`
 //! for diagnosed input and a typed `CompilerError` for infrastructure failures, plus a finalized
-//! form pairing a `PreparedFailure` with its finished `SourceDatabase`. Production discovery never
-//! constructs `CompilerMessages`; the parent single-file/test tail owns that single conversion.
+//! form pairing a `PreparedFailure` with its finished `SourceDatabase`. The final boundary appends
+//! that failure with its source owner directly to the accumulator.
 
 use crate::builder_surface::external_import_providers::cache::ExternalImportCacheKey;
 use crate::builder_surface::external_import_providers::cache::ExternalImportProviderCache;
@@ -161,9 +161,8 @@ pub(super) struct CollectedReachableInputs {
 /// WHAT: carries the typed premerge failure plus the finished source database when
 ///       discovery finalization already finalized its owner before failing. Plain
 ///       pre-finalization failures carry `None` because no finished owner exists yet.
-/// WHY: the single-file final boundary converts the inner failure once and attaches the
-///      finished database as the render source context, instead of dropping snapshots on
-///      a diagnosed discovery failure.
+/// WHY: the single-file terminal boundary pairs the typed failure with its finalized source
+///      database exactly once, preserving snapshots for diagnosed discovery failures.
 #[derive(Debug)]
 pub(super) struct CollectReachableInputsError {
     failure: Box<PreparedFailure>,

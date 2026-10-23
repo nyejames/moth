@@ -8,8 +8,11 @@ use crate::compiler_frontend::build_config::{
     ConfigResolutionRecord, FoldedConfigProjectFieldDependency,
 };
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
+use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticBag, InvalidConfigReason, PreparedFailure,
+};
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::module_compilation::{
     DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS, FrontendOptions,
@@ -208,14 +211,19 @@ pub enum ProjectConfigError {
 }
 
 impl ProjectConfigError {
-    pub fn into_messages(self, string_table: StringTable) -> CompilerMessages {
+    pub fn into_prepared_failure(self, root_string_table: &StringTable) -> PreparedFailure {
         match self {
             ProjectConfigError::Diagnostic(diagnostic) => {
-                CompilerMessages::from_diagnostic(diagnostic, string_table)
+                PreparedDiagnosticBatch::capture_from_root_string_table(
+                    DiagnosticBag::from(diagnostic),
+                    root_string_table,
+                    None,
+                    || None,
+                )
+                .map(PreparedFailure::Diagnosed)
+                .unwrap_or_else(PreparedFailure::from)
             }
-            ProjectConfigError::Infrastructure(error) => {
-                CompilerMessages::from_error(*error, string_table)
-            }
+            ProjectConfigError::Infrastructure(error) => PreparedFailure::from(*error),
         }
     }
 

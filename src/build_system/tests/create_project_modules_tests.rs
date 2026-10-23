@@ -30,16 +30,17 @@ use crate::builder_surface::external_import_providers::registry::ExternalImportP
 use crate::builder_surface::{PackageOrigin, SourceFileKind};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
-use crate::compiler_frontend::compiler_errors::{
-    BoundaryFailure, CompilerError, CompilerMessages, ErrorType,
-};
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidConfigView;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DependencyClauseKind, InvalidCompileTimePathReason,
+    CompilerDiagnostic, DependencyClauseKind, DiagnosticBag, InvalidCompileTimePathReason,
     InvalidDependencyClauseReason, PathKind, PreparedFailure,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -199,61 +200,54 @@ fn source_database_for_test(
 fn prepared_failure_boundary(
     failure: PreparedFailure,
     source_database: Option<Arc<SourceDatabase>>,
+    root_string_table: &StringTable,
 ) -> BoundaryFailure {
-    let mut accumulator = crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator::new();
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(root_string_table);
     match failure {
         PreparedFailure::Diagnosed(batch) => {
             accumulator.append_prepared(batch, source_database.map(|database| (database, None)));
         }
-        PreparedFailure::Infrastructure(infrastructure) => {
-            let mut messages = CompilerMessages::empty(StringTable::new());
-            messages.append_infrastructure_errors(infrastructure);
-            if let Some(source_database) = source_database {
-                messages.set_source_database(source_database);
-            }
-            accumulator.append(messages);
+        PreparedFailure::Infrastructure(errors) => {
+            accumulator.append_infrastructure(errors, source_database);
         }
         PreparedFailure::Mixed { batch, error } => {
             accumulator.append_prepared(
                 batch,
-                source_database.clone().map(|database| (database, None)),
+                source_database
+                    .as_ref()
+                    .map(|database| (Arc::clone(database), None)),
             );
-            let mut messages = CompilerMessages::empty(StringTable::new());
-            messages.append_infrastructure_errors(error);
-            if let Some(source_database) = source_database {
-                messages.set_source_database(source_database);
-            }
-            accumulator.append(messages);
+            accumulator.append_infrastructure(error, source_database);
         }
     }
-    accumulator.finish(
-        crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode::Unfrozen,
-    )
+    accumulator.finish(InstallMode::Unfrozen)
 }
 
-fn legacy_messages_boundary(messages: CompilerMessages) -> BoundaryFailure {
-    crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure(
-        messages,
-    )
+fn project_config_failure_boundary(
+    failure: ProjectConfigFailure,
+    source_database: Option<SourceDatabase>,
+    root_string_table: &StringTable,
+) -> BoundaryFailure {
+    match failure {
+        ProjectConfigFailure::Prepared(failure) => {
+            prepared_failure_boundary(failure, source_database.map(Arc::new), root_string_table)
+        }
+        ProjectConfigFailure::Boundary(failure) => failure,
+    }
 }
 
-const STAGE0_PARALLEL_SOURCE_PREPARE_MIN_FILES: usize = 16;
-
-fn should_parallelize_owned_source_preparation(source_count: usize) -> bool {
-    source_count >= STAGE0_PARALLEL_SOURCE_PREPARE_MIN_FILES
-}
+type TestSourceLoadFailure = (PreparedFailure, Option<SourceDatabase>);
 
 fn load_missing_source_path_for_test(
     source_path: PathBuf,
     _source_kind: SourceFileKind,
-    string_table: &mut StringTable,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), CompilerError> {
     match super::source_loading::read_source_code(&source_path) {
         Ok(_) => Ok(()),
-        Err(error) => {
-            let error = super::source_loading::source_read_error(&source_path, error);
-            Err(CompilerMessages::from_error_ref(error, string_table))
-        }
+        Err(error) => Err(super::source_loading::source_read_error(
+            &source_path,
+            error,
+        )),
     }
 }
 
@@ -261,17 +255,18 @@ fn load_missing_source_paths_for_test(
     source_paths: Vec<PathBuf>,
     source_kind: SourceFileKind,
     string_table: &mut StringTable,
-) -> Result<(SourceDatabase, Vec<PreparedSourceInput>), CompilerMessages> {
+) -> Result<(SourceDatabase, Vec<PreparedSourceInput>), TestSourceLoadFailure> {
     let canonical_paths = source_paths
         .into_iter()
         .map(|path| {
             fs::canonicalize(&path).map_err(|error| {
-                CompilerMessages::from_error_ref(
+                (
                     CompilerError::file_error(
                         &path,
                         format!("failed to canonicalize test source path: {error}"),
-                    ),
-                    string_table,
+                    )
+                    .into(),
+                    None,
                 )
             })
         })
@@ -291,11 +286,11 @@ fn load_missing_source_paths_with_registered_paths_for_test(
     source_paths: Vec<PathBuf>,
     source_kind: SourceFileKind,
     string_table: &mut StringTable,
-) -> Result<(SourceDatabase, Vec<PreparedSourceInput>), CompilerMessages> {
+) -> Result<(SourceDatabase, Vec<PreparedSourceInput>), TestSourceLoadFailure> {
     let entry_path = source_paths.first().ok_or_else(|| {
-        CompilerMessages::from_error_ref(
-            CompilerError::compiler_error("test source loading requires at least one path"),
-            string_table,
+        (
+            CompilerError::compiler_error("test source loading requires at least one path").into(),
+            None,
         )
     })?;
     let registration_index = SourceRegistrationIndex::from_rows(
@@ -310,13 +305,19 @@ fn load_missing_source_paths_with_registered_paths_for_test(
         string_table,
     )
     .map_err(|error| match error {
-        SourceDatabaseError::Capacity(capacity) => CompilerMessages::from_diagnostic(
-            CompilerDiagnostic::source_table_capacity(capacity.resource()),
-            string_table.clone(),
+        SourceDatabaseError::Capacity(capacity) => (
+            PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+                DiagnosticBag::from(CompilerDiagnostic::source_table_capacity(
+                    capacity.resource(),
+                )),
+                string_table.clone(),
+                None,
+                false,
+                None,
+            )),
+            None,
         ),
-        SourceDatabaseError::Infrastructure(error) => {
-            CompilerMessages::from_error_ref(error, string_table)
-        }
+        SourceDatabaseError::Infrastructure(error) => (error.into(), None),
     })?;
 
     let mut selected_source_texts = super::source_loading::SelectedSourceTextMap::default();
@@ -333,32 +334,31 @@ fn load_missing_source_paths_with_registered_paths_for_test(
         .err();
     let load_error = first_read_error.or(retain_error);
     if let Some(error) = load_error {
-        let mut messages = CompilerMessages::from_error_ref(error, string_table);
         let source_files = source_owner
             .finish()
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-        messages.set_source_database(Arc::new(source_files));
-        return Err(messages);
+            .map_err(|error| (error.into(), None))?;
+        return Err((error.into(), Some(source_files)));
     }
 
     let source_files = source_owner
         .finish()
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        .map_err(|error| (error.into(), None))?;
     let mut input_files = Vec::with_capacity(source_paths.len());
     for source_path in &source_paths {
-        let source_id = source_files
+        let Some(source_id) = source_files
             .get_by_canonical_path(source_path)
             .map(|record| record.id)
-            .ok_or_else(|| {
-                CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error("test source has no registered source identity"),
-                    string_table,
-                )
-            })?;
+        else {
+            return Err((
+                CompilerError::compiler_error("test source has no registered source identity")
+                    .into(),
+                Some(source_files),
+            ));
+        };
         if source_files.retained_text(source_id).is_none() {
-            return Err(CompilerMessages::from_error_ref(
-                CompilerError::compiler_error("test source loading left input slot empty"),
-                string_table,
+            return Err((
+                CompilerError::compiler_error("test source loading left input slot empty").into(),
+                Some(source_files),
             ));
         }
         let source = match source_kind {
@@ -366,11 +366,12 @@ fn load_missing_source_paths_with_registered_paths_for_test(
                 PreparedSourceKind::Deferred
             }
             SourceFileKind::Moth => {
-                return Err(CompilerMessages::from_error_ref(
+                return Err((
                     CompilerError::compiler_error(
                         "test missing-source helper cannot create an unprepared Moth input",
-                    ),
-                    string_table,
+                    )
+                    .into(),
+                    Some(source_files),
                 ));
             }
         };
@@ -378,6 +379,12 @@ fn load_missing_source_paths_with_registered_paths_for_test(
     }
 
     Ok((source_files, input_files))
+}
+
+const STAGE0_PARALLEL_SOURCE_PREPARE_MIN_FILES: usize = 16;
+
+fn should_parallelize_owned_source_preparation(source_count: usize) -> bool {
+    source_count >= STAGE0_PARALLEL_SOURCE_PREPARE_MIN_FILES
 }
 
 fn prepared_entry_file_path(
@@ -476,7 +483,7 @@ fn parse_project_config_for_test(
     config: &mut Config,
     config_path: &std::path::Path,
     style_directives: &StyleDirectiveRegistry,
-) -> Result<(), ProjectConfigFailure> {
+) -> Result<(), BoundaryFailure> {
     let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
     let mut string_table = StringTable::new();
     let mut source_files = Some(SourceDatabase::empty());
@@ -494,13 +501,14 @@ fn parse_project_config_for_test(
         &mut string_table,
     )
     .map(|_| ())
+    .map_err(|failure| project_config_failure_boundary(failure, source_files.take(), &string_table))
 }
 
 fn parse_project_config_for_test_with_html_keys(
     config: &mut Config,
     config_path: &std::path::Path,
     style_directives: &StyleDirectiveRegistry,
-) -> Result<(), ProjectConfigFailure> {
+) -> Result<(), BoundaryFailure> {
     let frontend_surface =
         crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new()
             .frontend_surface();
@@ -520,6 +528,7 @@ fn parse_project_config_for_test_with_html_keys(
         &mut string_table,
     )
     .map(|_| ())
+    .map_err(|failure| project_config_failure_boundary(failure, source_files.take(), &string_table))
 }
 
 fn parse_project_config_for_test_with_packages(
@@ -527,7 +536,7 @@ fn parse_project_config_for_test_with_packages(
     config_path: &std::path::Path,
     style_directives: &StyleDirectiveRegistry,
     frontend_surface: &crate::builder_surface::BuilderSurface,
-) -> Result<(), ProjectConfigFailure> {
+) -> Result<(), BoundaryFailure> {
     let mut string_table = StringTable::new();
     let mut source_files = Some(SourceDatabase::empty());
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
@@ -544,6 +553,7 @@ fn parse_project_config_for_test_with_packages(
         &mut string_table,
     )
     .map(|_| ())
+    .map_err(|failure| project_config_failure_boundary(failure, source_files.take(), &string_table))
 }
 
 fn discover_modules_for_test(
@@ -583,7 +593,7 @@ fn discover_modules_for_test_with_resource_inputs(
         &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
         &mut string_table,
     )
-    .map_err(|failure| prepared_failure_boundary(failure, None))?;
+    .map_err(|failure| prepared_failure_boundary(failure, None, &string_table))?;
     let source_files = source_database_for_test(&source_tree_index, resolver, &mut string_table);
     let path_fork = source_files.fork_path_interner();
     let mut source_owner = SourceDatabaseBuilder::new(source_files);
@@ -603,7 +613,7 @@ fn discover_modules_for_test_with_resource_inputs(
         &external_import_providers,
         &mut string_table,
     )
-    .map_err(|failure| prepared_failure_boundary(failure, None))?;
+    .map_err(|failure| prepared_failure_boundary(failure, None, &string_table))?;
     let module_namespace_set = ModuleNamespaceSet::build(
         &source_tree_index,
         &project_module_graph,
@@ -646,28 +656,31 @@ fn discover_modules_for_test_with_resource_inputs(
     let retain_result = selected_source_texts.retain_into(source_owner.sources_mut());
     source_owner.adopt_pending_span_builders();
     if let Err(error) = retain_result {
-        let source_files = source_owner.finish().map_err(|error| {
-            legacy_messages_boundary(CompilerMessages::from_error_ref(error, &string_table))
-        })?;
-        let mut messages = CompilerMessages::from_error_ref(error, &string_table);
-        messages.set_source_database(Arc::new(source_files));
-        return Err(legacy_messages_boundary(messages));
+        let source_files = source_owner
+            .finish()
+            .map_err(|error| prepared_failure_boundary(error.into(), None, &string_table))?;
+        return Err(prepared_failure_boundary(
+            error.into(),
+            Some(Arc::new(source_files)),
+            &string_table,
+        ));
     }
     let schedule = match schedule_result {
         Ok(schedule) => schedule,
         Err(failure) => {
-            let source_files = source_owner.finish().map_err(|error| {
-                legacy_messages_boundary(CompilerMessages::from_error_ref(error, &string_table))
-            })?;
+            let source_files = source_owner
+                .finish()
+                .map_err(|error| prepared_failure_boundary(error.into(), None, &string_table))?;
             return Err(prepared_failure_boundary(
                 failure,
                 Some(Arc::new(source_files)),
+                &string_table,
             ));
         }
     };
-    let source_files = source_owner.finish().map_err(|error| {
-        legacy_messages_boundary(CompilerMessages::from_error_ref(error, &string_table))
-    })?;
+    let source_files = source_owner
+        .finish()
+        .map_err(|error| prepared_failure_boundary(error.into(), None, &string_table))?;
     Ok((schedule, resource_inputs, source_files))
 }
 
@@ -702,7 +715,7 @@ fn discover_modules_for_test_with_providers(
         external_import_providers,
         &mut string_table,
     )
-    .map_err(|failure| prepared_failure_boundary(failure, None))?;
+    .map_err(|failure| prepared_failure_boundary(failure, None, &string_table))?;
     let source_files = source_database_for_test(&source_tree_index, resolver, &mut string_table);
     let path_fork = source_files.fork_path_interner();
     let mut source_owner = SourceDatabaseBuilder::new(source_files);
@@ -720,7 +733,7 @@ fn discover_modules_for_test_with_providers(
         external_import_providers,
         &mut string_table,
     )
-    .map_err(|failure| prepared_failure_boundary(failure, None))?;
+    .map_err(|failure| prepared_failure_boundary(failure, None, &string_table))?;
     let module_namespace_set = ModuleNamespaceSet::build(
         &source_tree_index,
         &project_module_graph,
@@ -764,22 +777,25 @@ fn discover_modules_for_test_with_providers(
     let retain_result = selected_source_texts.retain_into(source_owner.sources_mut());
     source_owner.adopt_pending_span_builders();
     if let Err(error) = retain_result {
-        let source_files = source_owner.finish().map_err(|error| {
-            legacy_messages_boundary(CompilerMessages::from_error_ref(error, &string_table))
-        })?;
-        let mut messages = CompilerMessages::from_error_ref(error, &string_table);
-        messages.set_source_database(Arc::new(source_files));
-        return Err(legacy_messages_boundary(messages));
+        let source_files = source_owner
+            .finish()
+            .map_err(|error| prepared_failure_boundary(error.into(), None, &string_table))?;
+        return Err(prepared_failure_boundary(
+            error.into(),
+            Some(Arc::new(source_files)),
+            &string_table,
+        ));
     }
     match schedule_result {
         Ok(schedule) => Ok(schedule),
         Err(failure) => {
-            let source_files = source_owner.finish().map_err(|error| {
-                legacy_messages_boundary(CompilerMessages::from_error_ref(error, &string_table))
-            })?;
+            let source_files = source_owner
+                .finish()
+                .map_err(|error| prepared_failure_boundary(error.into(), None, &string_table))?;
             Err(prepared_failure_boundary(
                 failure,
                 Some(Arc::new(source_files)),
+                &string_table,
             ))
         }
     }

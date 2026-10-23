@@ -9,7 +9,11 @@ use crate::build_system::output::manifest::{
     BuildManifest, ManifestReadResult, ManifestRecoveryReason,
 };
 use crate::build_system::output::{BuilderKind, OutputOwner, WriteMode, WriteOptions};
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_errors::BoundaryFailure;
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidConfigCode, InvalidConfigView,
+};
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_boundary_messages;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
@@ -20,8 +24,21 @@ use crate::build_system::output::manifest::{
     validate_output_root_is_safe, write_build_manifest,
 };
 use crate::compiler_tests::test_fs::{assert_directory, assert_path_missing};
+
 use crate::compiler_tests::test_support::unused_temp_path;
 use std::collections::{BTreeSet, HashSet};
+
+fn assert_output_owner_conflict(failure: &BoundaryFailure) {
+    let (_, diagnostic) = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("owner conflict diagnostic should exist");
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("owner conflict should retain typed invalid-config facts");
+    assert_eq!(facts.reason, InvalidConfigCode::OutputManifestOwnerConflict);
+}
 
 fn html_owner(profile: BuildProfile) -> OutputOwner {
     OutputOwner {
@@ -307,7 +324,6 @@ fn cleanup_preserves_current_explicit_directory_after_removing_stale_child() {
         html_owner(BuildProfile::Dev),
         &html_cleanup_policy(),
         WriteMode::AlwaysWrite,
-        &StringTable::new(),
     )
     .expect("should write valid prior manifest");
 
@@ -386,7 +402,6 @@ fn cleanup_preserves_parent_directories_when_non_managed_files_remain() {
         html_owner(BuildProfile::Dev),
         &html_cleanup_policy(),
         WriteMode::AlwaysWrite,
-        &StringTable::new(),
     )
     .expect("should write v4 manifest");
 
@@ -423,8 +438,7 @@ fn validate_output_root_rejects_dangerous_paths() {
     ];
 
     for dangerous in dangerous_paths {
-        let result =
-            validate_output_root_is_safe(&dangerous, &project_dir, None, &StringTable::new());
+        let result = validate_output_root_is_safe(&dangerous, &project_dir, None);
         assert!(
             result.is_err(),
             "should reject dangerous path: {}",
@@ -439,7 +453,7 @@ fn validate_output_root_accepts_project_subdirectory() {
     let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("dev")).expect("should create output dir");
 
-    let result = validate_output_root_is_safe(&root.join("dev"), &root, None, &StringTable::new());
+    let result = validate_output_root_is_safe(&root.join("dev"), &root, None);
     assert!(
         result.is_ok(),
         "should accept output root inside project directory"
@@ -808,22 +822,12 @@ fn foreign_profile_in_recoverable_v4_manifest_fails_without_mutation() {
             )],
             Some(PathBuf::from("index.html")),
         );
-        let messages = write_project_outputs(
+        let failure = write_project_outputs(
             &project,
             &always_write_options(output_root.clone(), Some(project_dir.clone())),
         )
         .expect_err("foreign profile ownership must fail before mutation");
-        assert!(matches!(
-            &messages
-                .error_diagnostics()
-                .next()
-                .expect("owner conflict diagnostic should exist")
-                .payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::OutputManifestOwnerConflict { .. },
-                ..
-            }
-        ));
+        assert_output_owner_conflict(&failure);
         assert_eq!(
             fs::read(output_root.join("index.html")).expect("output should remain"),
             previous_output
@@ -857,22 +861,12 @@ fn foreign_profile_with_invalid_utf8_path_record_fails_without_mutation() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    let messages = write_project_outputs(
+    let failure = write_project_outputs(
         &project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
     )
     .expect_err("foreign owner must fail even when a path record is not UTF-8");
-    assert!(matches!(
-        &messages
-            .error_diagnostics()
-            .next()
-            .expect("owner conflict diagnostic should exist")
-            .payload,
-        DiagnosticPayload::InvalidConfig {
-            reason: InvalidConfigReason::OutputManifestOwnerConflict { .. },
-            ..
-        }
-    ));
+    assert_output_owner_conflict(&failure);
     assert_eq!(
         fs::read(output_root.join("index.html")).expect("output should remain"),
         previous_output
@@ -970,22 +964,12 @@ fn foreign_owner_with_case_variant_manifest_paths_fails_without_mutation() {
         )],
         Some(PathBuf::from("index.html")),
     );
-    let messages = write_project_outputs(
+    let failure = write_project_outputs(
         &project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
     )
     .expect_err("foreign owner must fail before touching ambiguous manifest outputs");
-    assert!(matches!(
-        &messages
-            .error_diagnostics()
-            .next()
-            .expect("owner conflict diagnostic should exist")
-            .payload,
-        DiagnosticPayload::InvalidConfig {
-            reason: InvalidConfigReason::OutputManifestOwnerConflict { .. },
-            ..
-        }
-    ));
+    assert_output_owner_conflict(&failure);
     assert_eq!(
         fs::read(output_root.join("Pages/app.js")).expect("output should remain"),
         previous_output
@@ -1044,22 +1028,12 @@ fn assert_foreign_manifest_owner_fails_without_mutation(builder: &str, profile: 
         )],
         Some(PathBuf::from("index.html")),
     );
-    let messages = write_project_outputs(
+    let failure = write_project_outputs(
         &project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
     )
     .expect_err("foreign manifest ownership must fail before output mutation");
-    assert!(matches!(
-        &messages
-            .error_diagnostics()
-            .next()
-            .expect("owner conflict diagnostic should exist")
-            .payload,
-        DiagnosticPayload::InvalidConfig {
-            reason: InvalidConfigReason::OutputManifestOwnerConflict { .. },
-            ..
-        }
-    ));
+    assert_output_owner_conflict(&failure);
     assert_eq!(
         fs::read(output_root.join("index.html")).expect("index should remain"),
         previous_index
@@ -1186,7 +1160,6 @@ fn write_build_manifest_produces_sorted_output() {
         html_owner(BuildProfile::Dev),
         &html_cleanup_policy(),
         WriteMode::AlwaysWrite,
-        &StringTable::new(),
     )
     .expect("should write manifest");
 
@@ -1224,7 +1197,6 @@ fn manifest_paths_round_trip_leading_and_interior_spaces() {
         html_owner(BuildProfile::Dev),
         &html_cleanup_policy(),
         WriteMode::AlwaysWrite,
-        &StringTable::new(),
     )
     .expect("should write space-preserving manifest");
 
@@ -1507,19 +1479,9 @@ fn dev_then_release_against_same_v4_root_fails_without_mutation() {
         ),
     );
 
-    let messages = result.expect_err("profile ownership conflict should fail the write");
-    assert_eq!(messages.error_count(), 1);
-    assert!(matches!(
-        &messages
-            .error_diagnostics()
-            .next()
-            .expect("conflict diagnostic should exist")
-            .payload,
-        DiagnosticPayload::InvalidConfig {
-            reason: InvalidConfigReason::OutputManifestOwnerConflict { .. },
-            ..
-        }
-    ));
+    let failure = result.expect_err("profile ownership conflict should fail the write");
+    assert_eq!(failure.error_count(), 1);
+    assert_output_owner_conflict(&failure);
     assert_eq!(
         fs::read(output_root.join("index.html"))
             .expect("output should remain")
@@ -1572,29 +1534,25 @@ fn builder_owner_conflict_fails_without_mutation() {
         }),
         write_mode: WriteMode::AlwaysWrite,
     };
-    let messages = crate::build_system::output::write_project_outputs(
+    let prepared_failure = crate::build_system::output::write_project_outputs(
         &mut project,
         &conflicting_options,
         &mut string_table,
     )
     .expect_err("a foreign builder must not claim the output root");
-    let diagnostic = messages
-        .error_diagnostics()
+    let failure = freeze_prepared_failure(prepared_failure, std::mem::take(&mut string_table));
+    assert_output_owner_conflict(&failure);
+    let (_, diagnostic) = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
         .next()
         .expect("owner conflict diagnostic should exist");
     assert!(matches!(
-        &diagnostic.payload,
-        DiagnosticPayload::InvalidConfig {
-            reason: InvalidConfigReason::OutputManifestOwnerConflict { .. },
-            ..
-        }
+        diagnostic.primary_site(),
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent
     ));
-    assert_eq!(
-        diagnostic.primary_span, None,
-        "single-file output plans carry no authored config span",
-    );
     assert!(
-        format_terse_boundary_messages(&into_boundary_failure(messages))
+        format_terse_boundary_messages(&failure)
             .iter()
             .any(|line| line.contains("already owned")),
         "owner-conflict diagnostics should retain their reason text"
@@ -1625,7 +1583,6 @@ fn manifest_reader_returns_manifest_owner_without_comparing_active_owner() {
         },
         &generic_policy,
         WriteMode::AlwaysWrite,
-        &StringTable::new(),
     )
     .expect("should write manifest");
 

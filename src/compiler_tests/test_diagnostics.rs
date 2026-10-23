@@ -7,9 +7,14 @@
 //!   cannot satisfy the intended contract.
 
 use crate::compiler_frontend::compiler_errors::{
-    CompilerErrorMetadataKey, CompilerMessages, ErrorType,
+    BoundaryFailure, CompilerError, CompilerErrorMetadataKey, ErrorType, InfrastructureErrors,
 };
-use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticBag, DiagnosticSeverity, PreparedFailure,
+};
 
 /// Assert that the diagnostic codes of all error-severity diagnostics match
 /// the expected multiset exactly.
@@ -19,11 +24,11 @@ use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 /// WHY: `error_count() > 0` or `is_err()` accepts any error. Exact codes prove
 ///   the intended diagnostic, not just that some error happened.
 #[track_caller]
-pub fn assert_exact_diagnostic_codes(messages: &CompilerMessages, expected: &[&str]) {
-    let mut actual: Vec<&str> = messages
-        .diagnostics()
-        .filter(|d| d.severity == DiagnosticSeverity::Error)
-        .map(|d| d.kind.code())
+pub fn assert_exact_diagnostic_codes(failure: &BoundaryFailure, expected: &[&str]) {
+    let mut actual: Vec<&str> = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .map(|(_, diagnostic)| diagnostic.descriptor().code)
         .collect();
     actual.sort_unstable();
     let mut expected_sorted: Vec<&str> = expected.to_vec();
@@ -34,37 +39,38 @@ pub fn assert_exact_diagnostic_codes(messages: &CompilerMessages, expected: &[&s
     );
 }
 
-/// Assert that `messages` carries no outer infrastructure failure.
+/// Assert that `failure` carries no infrastructure causes.
 #[track_caller]
-pub fn assert_no_infrastructure_errors(messages: &CompilerMessages) {
+pub fn assert_no_infrastructure_errors(failure: &BoundaryFailure) {
     assert!(
-        messages.infrastructure_errors().is_none(),
+        failure.infrastructure_errors().is_none(),
         "expected no infrastructure errors, found: {:?}",
-        messages.infrastructure_errors()
+        failure.infrastructure_errors()
     );
 }
 
-/// Assert that `messages` contains no user-facing error diagnostic and exactly one outer
-/// infrastructure failure of the expected `ErrorType`.
+/// Assert that `failure` contains no user-facing error diagnostic and exactly one
+/// infrastructure cause of the expected `ErrorType`.
 ///
-/// WHAT: verifies the diagnostic stream holds no `Error` diagnostic, the outer lane is present,
-///   and its `ErrorType` matches.
+/// WHAT: verifies the frozen diagnostic stream holds no `Error` diagnostic, the infrastructure
+///   lane is present, and its `ErrorType` matches.
 /// WHY: `assert_exact_infrastructure_error` should not pass when additional user-facing
 ///   error diagnostics accompany the expected failure. A missing-file failure should
 ///   produce exactly one File infrastructure failure, not that plus an unrelated
 ///   semantic error.
 #[track_caller]
-pub fn assert_exact_infrastructure_error(messages: &CompilerMessages, expected_type: &ErrorType) {
-    let user_errors: Vec<_> = messages
-        .diagnostics()
-        .filter(|d| d.severity == DiagnosticSeverity::Error)
+pub fn assert_exact_infrastructure_error(failure: &BoundaryFailure, expected_type: &ErrorType) {
+    let user_errors: Vec<_> = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .map(|(_, diagnostic)| diagnostic.descriptor().code)
         .collect();
     assert!(
         user_errors.is_empty(),
         "expected no user-facing error diagnostics, found: {user_errors:?}"
     );
 
-    let Some(errors) = messages.infrastructure_errors() else {
+    let Some(errors) = failure.infrastructure_errors() else {
         panic!("expected one outer infrastructure error, found none");
     };
     assert_eq!(
@@ -72,29 +78,29 @@ pub fn assert_exact_infrastructure_error(messages: &CompilerMessages, expected_t
         1,
         "expected exactly one infrastructure cause"
     );
-    let error = &errors.primary;
     assert_eq!(
-        &error.error_type, expected_type,
+        &errors.primary.error_type, expected_type,
         "infrastructure error type mismatch"
     );
 }
 
-/// Assert that `messages` carries exactly one outer infrastructure failure of type `File`
+/// Assert that `failure` carries exactly one infrastructure failure of type `File`
 /// with the expected `OutputRejectionReason` metadata value.
 ///
-/// WHAT: extracts the `OutputRejectionReason` metadata from the outer `CompilerError` and
-///   compares it against the expected reason string.
+/// WHAT: extracts the `OutputRejectionReason` metadata from the infrastructure `CompilerError`
+///   and compares it against the expected reason string.
 /// WHY: all output-writer rejections share `ErrorType::File`. The typed reason
 ///   seam distinguishes between distinct safety contracts (invalid path,
 ///   duplicate destination, symlink escape, etc.) so a test for one contract
 ///   cannot pass when a different contract is violated.
 #[track_caller]
-pub fn assert_output_rejection(messages: &CompilerMessages, expected_reason: &str) {
-    assert_exact_infrastructure_error(messages, &ErrorType::File);
+pub fn assert_output_rejection(failure: &BoundaryFailure, expected_reason: &str) {
+    assert_exact_infrastructure_error(failure, &ErrorType::File);
 
-    let error = messages
-        .primary_infrastructure_error()
-        .expect("exact infrastructure failure must be present");
+    let error = &failure
+        .infrastructure_errors()
+        .expect("exact infrastructure failure must be present")
+        .primary;
     // An absent reason is a defect in the production seam, not a reason value to compare
     // against: without it the test would silently degrade to "some File error happened".
     let actual_reason = error
@@ -114,115 +120,125 @@ pub fn assert_output_rejection(messages: &CompilerMessages, expected_reason: &st
     );
 }
 
+fn boundary_failure(failure: PreparedFailure) -> BoundaryFailure {
+    let mut accumulator = BoundaryAccumulator::new();
+    match failure {
+        PreparedFailure::Diagnosed(batch) => accumulator.append_prepared(batch, None),
+        PreparedFailure::Infrastructure(errors) => {
+            accumulator.append_infrastructure(errors, None);
+        }
+        PreparedFailure::Mixed { batch, error } => {
+            accumulator.append_prepared(batch, None);
+            accumulator.append_infrastructure(error, None);
+        }
+    }
+    accumulator.finish(InstallMode::Frozen)
+}
+
+fn diagnostic_failure(
+    diagnostics: Vec<crate::compiler_frontend::compiler_messages::CompilerDiagnostic>,
+    table: crate::compiler_frontend::symbols::string_interning::StringTable,
+) -> BoundaryFailure {
+    boundary_failure(PreparedFailure::Diagnosed(
+        PreparedDiagnosticBatch::capture_from_bag(
+            DiagnosticBag::from_diagnostics(diagnostics),
+            table,
+            None,
+            false,
+            None,
+        ),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler_frontend::compiler_messages::{
-        CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, RuleDiagnosticKind,
-    };
+    use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
     use crate::compiler_frontend::symbols::string_interning::StringTable;
     use crate::compiler_tests::test_support::assert_panics_with;
 
-    fn messages_with_errors(
+    fn failure_with_diagnostics(
         diagnostics: Vec<CompilerDiagnostic>,
         table: StringTable,
-    ) -> CompilerMessages {
-        CompilerMessages::from_diagnostics(diagnostics, table)
+    ) -> BoundaryFailure {
+        diagnostic_failure(diagnostics, table)
+    }
+
+    fn infrastructure_failure(error: CompilerError) -> BoundaryFailure {
+        boundary_failure(PreparedFailure::Infrastructure(error.into()))
     }
 
     #[test]
     fn assert_exact_diagnostic_codes_matches_single_error() {
-        let table = StringTable::new();
-        let diagnostic = CompilerDiagnostic::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
-            None,
-            DiagnosticPayload::None,
-        );
-        let messages = messages_with_errors(vec![diagnostic], table);
-        assert_exact_diagnostic_codes(&messages, &["MOTH-RULE-0001"]);
+        let mut table = StringTable::new();
+        let diagnostic = CompilerDiagnostic::unknown_value_name(table.intern("missing"), None);
+        let failure = failure_with_diagnostics(vec![diagnostic], table);
+        assert_exact_diagnostic_codes(&failure, &["MOTH-RULE-0034"]);
     }
 
     #[test]
     fn assert_exact_diagnostic_codes_rejects_wrong_count() {
-        let table = StringTable::new();
-        let diagnostic = CompilerDiagnostic::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
-            None,
-            DiagnosticPayload::None,
-        );
-        let messages = messages_with_errors(vec![diagnostic], table);
+        let mut table = StringTable::new();
+        let diagnostic = CompilerDiagnostic::unknown_value_name(table.intern("missing"), None);
+        let failure = failure_with_diagnostics(vec![diagnostic], table);
         assert_panics_with("diagnostic codes must match exactly", || {
-            assert_exact_diagnostic_codes(&messages, &["MOTH-RULE-0001", "MOTH-RULE-0001"]);
+            assert_exact_diagnostic_codes(&failure, &["MOTH-RULE-0034", "MOTH-RULE-0034"]);
         });
     }
 
     #[test]
-    fn assert_no_infrastructure_errors_accepts_clean_messages() {
-        let table = StringTable::new();
-        let messages = messages_with_errors(vec![], table);
-        assert_no_infrastructure_errors(&messages);
+    fn assert_no_infrastructure_errors_accepts_clean_failure() {
+        let failure = failure_with_diagnostics(vec![], StringTable::new());
+        assert_no_infrastructure_errors(&failure);
     }
 
     #[test]
     fn assert_no_infrastructure_errors_rejects_infra_error() {
-        let table = StringTable::new();
-        let messages = CompilerMessages::from_error(
-            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                "test failure",
-            ),
-            table,
-        );
+        let failure = infrastructure_failure(CompilerError::compiler_error("test failure"));
         assert_panics_with("expected no infrastructure errors", || {
-            assert_no_infrastructure_errors(&messages);
+            assert_no_infrastructure_errors(&failure);
         });
     }
 
     #[test]
     fn assert_exact_infrastructure_error_matches_type() {
-        let table = StringTable::new();
-        let error = crate::compiler_frontend::compiler_errors::CompilerError::file_error(
-            std::path::Path::new("missing.moth"),
-            "file not found",
-        );
-        let messages = CompilerMessages::from_error(error, table);
-        assert_exact_infrastructure_error(&messages, &ErrorType::File);
-        let mut messages = messages;
-        messages.set_infrastructure_error(
-            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                "later failure",
-            ),
-        );
+        let error =
+            CompilerError::file_error(std::path::Path::new("missing.moth"), "file not found");
+        assert_exact_infrastructure_error(&infrastructure_failure(error.clone()), &ErrorType::File);
+
+        let mut errors = InfrastructureErrors::new(error);
+        errors.push(CompilerError::compiler_error("later failure"));
+        let failure = boundary_failure(PreparedFailure::Infrastructure(Box::new(errors)));
         assert_panics_with("expected exactly one infrastructure cause", || {
-            assert_exact_infrastructure_error(&messages, &ErrorType::File);
+            assert_exact_infrastructure_error(&failure, &ErrorType::File);
         });
     }
 
     #[test]
     fn assert_exact_infrastructure_error_rejects_additional_rule_error() {
-        let table = StringTable::new();
-        let rule_diagnostic = CompilerDiagnostic::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
-            None,
-            DiagnosticPayload::None,
-        );
-        let mut messages = CompilerMessages::from_error(
-            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                "file not found",
-            ),
+        let mut table = StringTable::new();
+        let diagnostic = CompilerDiagnostic::unknown_value_name(table.intern("missing"), None);
+        let batch = PreparedDiagnosticBatch::capture_from_bag(
+            DiagnosticBag::from(diagnostic),
             table,
+            None,
+            false,
+            None,
         );
-        messages.extend_diagnostics(vec![rule_diagnostic]);
+        let failure = boundary_failure(PreparedFailure::Mixed {
+            batch,
+            error: CompilerError::compiler_error("file not found").into(),
+        });
         assert_panics_with("expected no user-facing error diagnostics", || {
-            assert_exact_infrastructure_error(&messages, &ErrorType::File);
+            assert_exact_infrastructure_error(&failure, &ErrorType::File);
         });
     }
 
     #[test]
     fn assert_exact_infrastructure_error_rejects_missing_outer() {
-        let table = StringTable::new();
-        let messages = messages_with_errors(vec![], table);
+        let failure = failure_with_diagnostics(vec![], StringTable::new());
         assert_panics_with("expected one outer infrastructure error", || {
-            assert_exact_infrastructure_error(&messages, &ErrorType::File);
+            assert_exact_infrastructure_error(&failure, &ErrorType::File);
         });
     }
 }

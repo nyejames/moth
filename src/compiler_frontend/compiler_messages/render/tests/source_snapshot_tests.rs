@@ -7,9 +7,11 @@ use crate::build_system::create_project_modules::{
 use crate::builder_surface::{BuilderSurface, PackageOrigin};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_boundary_messages_html;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_diagnostics_html_with_context;
 use crate::compiler_frontend::compiler_messages::render::terminal::{
@@ -66,10 +68,16 @@ fn rendered_source_frame_uses_retained_snapshot_after_disk_mutation() {
         LocalSpan::exact(0, 6, &mut span_builder).expect("primary span should fit inline");
     let diagnostic =
         CompilerDiagnostic::unknown_value_name(name, Some(SourceSpan::new(source_id, local_span)));
-    let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
-    messages.set_source_database(Arc::new(source_database));
-
-    let failure = into_boundary_failure(messages);
+    let prepared = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        string_table,
+        None,
+        false,
+        None,
+    );
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(prepared, Some((Arc::new(source_database), None)));
+    let failure = accumulator.finish(InstallMode::Frozen);
     let rendered = render_boundary_messages_html(&failure, temporary_directory.path());
 
     assert!(
@@ -79,6 +87,44 @@ fn rendered_source_frame_uses_retained_snapshot_after_disk_mutation() {
     assert!(
         !rendered.contains("newer disk version"),
         "the source frame must not reread the mutated source file: {rendered}"
+    );
+}
+
+#[test]
+fn unresolved_source_span_without_owner_has_no_frozen_position_or_frame() {
+    let temporary_directory = tempfile::tempdir().expect("temporary directory should exist");
+    let mut string_table = StringTable::new();
+    let name = string_table.intern("undefined_thing");
+    let diagnostic = CompilerDiagnostic::unknown_value_name(
+        name,
+        Some(inline_span(SourceId::from_index(1), 0, 5)),
+    );
+    let prepared = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        string_table,
+        None,
+        false,
+        None,
+    );
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(prepared, None);
+    let failure = accumulator.finish(InstallMode::Frozen);
+    let (report, view) = failure
+        .reports
+        .iter()
+        .next()
+        .expect("the unresolved diagnostic should remain in the frozen report");
+    let context = DiagnosticRenderContext::for_report(report);
+    assert!(
+        context.site_position(view.primary_site()).is_none(),
+        "a source span without an owning database must remain position-less"
+    );
+
+    let rendered = render_boundary_messages_html(&failure, temporary_directory.path());
+    assert!(rendered.contains("undefined_thing"));
+    assert!(
+        !rendered.contains("source-frame"),
+        "an unresolved source span must not fabricate a source frame: {rendered}"
     );
 }
 
@@ -385,7 +431,7 @@ fn message_less_label_on_a_compact_family_renders_only_its_location() {
 }
 
 #[test]
-fn aggregated_diagnostics_keep_their_own_snapshot_across_prepend_and_append() {
+fn aggregated_diagnostics_keep_their_own_snapshot_across_prepared_appends() {
     let alpha_directory = tempfile::tempdir().expect("should create alpha directory");
     let beta_directory = tempfile::tempdir().expect("should create beta directory");
     let mut string_table = StringTable::new();
@@ -409,32 +455,37 @@ fn aggregated_diagnostics_keep_their_own_snapshot_across_prepend_and_append() {
     let beta_name = string_table.intern("beta_value");
     let mut alpha_builder = ExtendedSpanBuilder::new();
     let alpha_span = LocalSpan::exact(0, 5, &mut alpha_builder).unwrap();
-    let mut alpha_messages = CompilerMessages::from_diagnostic(
-        CompilerDiagnostic::unknown_value_name(
-            alpha_name,
-            Some(SourceSpan::new(alpha_source, alpha_span)),
-        ),
-        string_table.clone(),
-    );
-    alpha_messages.set_source_database(Arc::new(alpha_database));
     let mut beta_builder = ExtendedSpanBuilder::new();
     let beta_span = LocalSpan::exact(0, 4, &mut beta_builder).unwrap();
-    let mut beta_messages = CompilerMessages::from_diagnostic(
-        CompilerDiagnostic::unknown_value_name(
+    let alpha_batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from_diagnostics(vec![
+            CompilerDiagnostic::unreachable_match_arm(None),
+            CompilerDiagnostic::unknown_value_name(
+                alpha_name,
+                Some(SourceSpan::new(alpha_source, alpha_span)),
+            ),
+        ]),
+        string_table.clone(),
+        None,
+        false,
+        None,
+    );
+    let beta_batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(CompilerDiagnostic::unknown_value_name(
             beta_name,
             Some(SourceSpan::new(beta_source, beta_span)),
-        ),
+        )),
         string_table,
+        None,
+        false,
+        None,
     );
-    beta_messages.set_source_database(Arc::new(beta_database));
 
-    // Both aggregation directions shift the recorded ranges.
-    alpha_messages.prepend_diagnostics_preserving_context(vec![
-        CompilerDiagnostic::unreachable_match_arm(None),
-    ]);
-    alpha_messages.append_messages_preserving_context(beta_messages);
-
-    let failure = into_boundary_failure(alpha_messages);
+    // Direct prepared appends preserve push order and each batch's source snapshot.
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(alpha_batch, Some((Arc::new(alpha_database), None)));
+    accumulator.append_prepared(beta_batch, Some((Arc::new(beta_database), None)));
+    let failure = accumulator.finish(InstallMode::Frozen);
     let rendered = render_boundary_messages_html(&failure, alpha_directory.path());
     let alpha_frame = rendered
         .split("<article")
@@ -454,6 +505,7 @@ fn aggregated_diagnostics_keep_their_own_snapshot_across_prepend_and_append() {
         "the beta diagnostic must render its own snapshot: {beta_frame}"
     );
 }
+
 #[test]
 fn rendered_source_lines_match_tokenizer_line_breaks() {
     let cases: &[(&str, &[&str])] = &[
@@ -551,10 +603,16 @@ fn rendered_crlf_source_line_matches_str_lines() {
     let name = string_table.intern("undefined_thing");
     let diagnostic =
         CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 0, 5)));
-    let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
-    messages.set_source_database(Arc::new(source_database));
-
-    let failure = into_boundary_failure(messages);
+    let prepared = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        string_table,
+        None,
+        false,
+        None,
+    );
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(prepared, Some((Arc::new(source_database), None)));
+    let failure = accumulator.finish(InstallMode::Frozen);
     let rendered = render_boundary_messages_html(&failure, temporary_directory.path());
     assert!(
         rendered.contains(r#"<span class="source-line">hello</span>"#),

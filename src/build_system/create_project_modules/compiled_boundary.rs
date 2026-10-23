@@ -13,13 +13,11 @@
 //! `ModuleId` values inside [`CompiledModuleArtifact`], or mutate package root metadata.
 
 use crate::build_system::build::ProjectAssemblyError;
-use crate::compiler_frontend::compiler_errors::{
-    BoundaryFailure, CompilerError, CompilerMessages, RenderSourceContext,
-};
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticBag};
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PreparedFailure};
 #[cfg(feature = "data_layout_memory_probe")]
 use crate::compiler_frontend::instrumentation::MemoryLedgerSnapshot;
 use crate::compiler_frontend::module_compilation::{CompiledModuleArtifact, Module};
@@ -33,7 +31,6 @@ use crate::compiler_frontend::source::{FrozenIdentityContext, SourceDatabaseRete
 use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::ops::Range;
 use std::sync::Arc;
 
 use super::generated_store::BoundaryGeneratedFunctionStore;
@@ -48,60 +45,6 @@ pub(crate) struct SuccessfulWarningBatch {
     pub(crate) source: Option<(Arc<SourceDatabase>, Option<StablePackageIdentity>)>,
 }
 
-fn install_frontend_source_context(
-    messages: &mut CompilerMessages,
-    local_range: Range<usize>,
-    diagnostic_offset: usize,
-    source: Option<&Arc<SourceDatabase>>,
-    domain: Option<StablePackageIdentity>,
-    can_freeze: &mut bool,
-) {
-    if local_range.is_empty() {
-        return;
-    }
-    if let Some(source) = source {
-        messages.install_source_contexts(
-            [RenderSourceContext {
-                diagnostic_range: local_range,
-                source_database: Arc::clone(source),
-                domain,
-            }],
-            0,
-        );
-    } else {
-        let global_range =
-            (diagnostic_offset + local_range.start)..(diagnostic_offset + local_range.end);
-        if diagnostic_range_requires_source_identity(messages.diagnostic_slice(), &local_range) {
-            messages.set_infrastructure_error(CompilerError::compiler_error(format!(
-                "diagnostic range {global_range:?} has no finalized source identity",
-            )));
-        }
-        *can_freeze = false;
-    }
-}
-
-#[cfg(feature = "data_layout_memory_probe")]
-fn record_frontend_diagnostic_metrics(
-    messages: &CompilerMessages,
-    diagnostic_records: &mut usize,
-    diagnostic_label_slots: &mut usize,
-) {
-    *diagnostic_records += messages.diagnostics.len();
-    *diagnostic_label_slots += messages
-        .diagnostics
-        .iter()
-        .map(|diagnostic| diagnostic.labels.len())
-        .sum::<usize>();
-}
-fn diagnostic_range_requires_source_identity(
-    diagnostics: &[CompilerDiagnostic],
-    range: &std::ops::Range<usize>,
-) -> bool {
-    diagnostics[range.clone()].iter().any(|diagnostic| {
-        diagnostic.primary_span.is_some()
-            || diagnostic.labels.iter().any(|label| label.span.is_some())
-    })
-}
 struct PreparedAppendMetrics {
     diagnostic_count: usize,
     missing_source_error: bool,
@@ -139,7 +82,7 @@ fn append_prepared_frontend_diagnostics(
             let error = CompilerError::compiler_error(format!(
                 "diagnostic range {global_range:?} has no finalized source identity",
             ));
-            accumulator.append(CompilerMessages::from_error(error, StringTable::new()));
+            accumulator.append_infrastructure(error.into(), None);
         }
         accumulator.append_prepared(batch, None);
         return PreparedAppendMetrics {
@@ -1091,16 +1034,15 @@ impl TransientPreparedBatch {
         }
     }
 }
-/// Storage retained by the final diagnostic render boundary.
+/// Storage retained by the final diagnostic report boundary.
 ///
-/// The source fields count only frozen source owners reachable from the returned diagnostic
-/// vessel. Diagnostic fields count records and label slots, while `retained_identity_contexts`
-/// counts distinct frozen identity allocations reachable through range rows or donor-only handles.
-/// The `path_table_*` fields count distinct path-table owners reachable from that same returned
-/// vessel: the frozen identity contexts behind range rows or donor-only handles, explicit
-/// `RenderPathContext` tables, and any transitional source-context table still present after
-/// freezing. Successful-module executable views are deliberately not counted; a table only
-/// reachable from executable rows without a diagnostic owner is not report-retained storage.
+/// The source fields count only frozen source owners reachable from the returned report.
+/// Diagnostic fields count records and label slots, while `retained_identity_contexts` counts
+/// distinct frozen identity allocations reachable through source rows or donor-only handles.
+/// The `path_table_*` fields count distinct path-table owners reachable from that same report:
+/// frozen identity contexts behind source rows or donor-only handles, explicit path rows, and
+/// retained path tables. Successful-module executable views are deliberately not counted; a table
+/// only reachable from executable rows without a diagnostic owner is not report-retained storage.
 /// The `source_tokens_*`, construction, donor-snapshot and generic-owner fields are command-scoped
 /// ledger observations and can remain nonzero for clean results even though report-retention
 /// fields stay zero.
@@ -1420,6 +1362,8 @@ impl ProjectFrontendCompilation {
 
         let project_domain = project.structure.stable_package_identity().cloned();
         let project_source = project_source.or(project_source_database);
+        let trailing_facade_failure =
+            trailing_facade_failure.map(|failure| failure.into_prepared_failure(string_table));
         let mut accumulator = BoundaryAccumulator::new();
         let mut diagnostic_count = 0;
         let mut can_freeze = true;
@@ -1561,32 +1505,48 @@ impl ProjectFrontendCompilation {
             diagnostic_count += metrics.diagnostic_count;
             saw_infrastructure |= metrics.missing_source_error;
         }
-        if let Some(facade_failure) = trailing_facade_failure {
-            let mut messages = facade_failure.into_owned_messages();
-            if let (Some(errors), Some(source)) = (
-                messages.infrastructure_errors.as_mut(),
-                project_source.as_ref(),
-            ) {
-                errors.set_source_database(Arc::clone(source));
+        if let Some(failure) = trailing_facade_failure {
+            match failure {
+                PreparedFailure::Diagnosed(batch) => {
+                    let metrics = append_prepared_frontend_diagnostics(
+                        &mut accumulator,
+                        batch,
+                        project_source.as_ref().map(|source| (source, None)),
+                        diagnostic_count,
+                        &mut can_freeze,
+                    );
+                    #[cfg(feature = "data_layout_memory_probe")]
+                    {
+                        diagnostic_records += metrics.diagnostic_count;
+                        diagnostic_label_slots += metrics.label_count;
+                    }
+                    diagnostic_count += metrics.diagnostic_count;
+                    saw_infrastructure |= metrics.missing_source_error;
+                }
+                PreparedFailure::Infrastructure(errors) => {
+                    accumulator
+                        .append_infrastructure(errors, project_source.as_ref().map(Arc::clone));
+                    saw_infrastructure = true;
+                }
+                PreparedFailure::Mixed { batch, error } => {
+                    let metrics = append_prepared_frontend_diagnostics(
+                        &mut accumulator,
+                        batch,
+                        project_source.as_ref().map(|source| (source, None)),
+                        diagnostic_count,
+                        &mut can_freeze,
+                    );
+                    #[cfg(feature = "data_layout_memory_probe")]
+                    {
+                        diagnostic_records += metrics.diagnostic_count;
+                        diagnostic_label_slots += metrics.label_count;
+                    }
+                    diagnostic_count += metrics.diagnostic_count;
+                    accumulator
+                        .append_infrastructure(error, project_source.as_ref().map(Arc::clone));
+                    saw_infrastructure = true;
+                }
             }
-            let end = messages.diagnostics.len();
-            install_frontend_source_context(
-                &mut messages,
-                0..end,
-                diagnostic_count,
-                project_source.as_ref(),
-                None,
-                &mut can_freeze,
-            );
-            #[cfg(feature = "data_layout_memory_probe")]
-            record_frontend_diagnostic_metrics(
-                &messages,
-                &mut diagnostic_records,
-                &mut diagnostic_label_slots,
-            );
-            diagnostic_count += end;
-            saw_infrastructure |= messages.infrastructure_errors.is_some();
-            accumulator.append(messages);
         }
 
         #[cfg(feature = "data_layout_memory_probe")]
@@ -1615,30 +1575,31 @@ impl ProjectFrontendCompilation {
 
         // Preserve donor rows after every diagnostic range, including identities referenced only
         // by a foreign frozen handle. Empty rows do not change diagnostic pairing.
-        let mut donor_messages = CompilerMessages::empty(StringTable::new());
         if let Some(source) = project_source.as_ref() {
-            donor_messages.install_source_contexts(
-                [RenderSourceContext {
-                    diagnostic_range: 0..0,
-                    source_database: Arc::clone(source),
-                    domain: project_domain,
-                }],
-                0,
+            let donor = PreparedDiagnosticBatch::capture_from_bag(
+                DiagnosticBag::new(),
+                StringTable::empty_unallocated(),
+                None,
+                false,
+                None,
             );
+            accumulator.append_prepared(donor, Some((Arc::clone(source), project_domain.clone())));
         }
         for (package, source) in source_packages.iter().zip(&package_source_arcs) {
             if let Some(source) = source {
-                donor_messages.install_source_contexts(
-                    [RenderSourceContext {
-                        diagnostic_range: 0..0,
-                        source_database: Arc::clone(source),
-                        domain: Some(package.package_identity.clone()),
-                    }],
-                    0,
+                let donor = PreparedDiagnosticBatch::capture_from_bag(
+                    DiagnosticBag::new(),
+                    StringTable::empty_unallocated(),
+                    None,
+                    false,
+                    None,
+                );
+                accumulator.append_prepared(
+                    donor,
+                    Some((Arc::clone(source), Some(package.package_identity.clone()))),
                 );
             }
         }
-        accumulator.append(donor_messages);
 
         // The accumulator must own the only source handles before it unwraps its source rows.
         drop(project_source);

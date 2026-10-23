@@ -9,6 +9,7 @@ use crate::build_system::output::output_path::{
 };
 use crate::build_system::output::output_path_identity;
 use crate::compiler_frontend::compiler_messages::InvalidOutputFolderReason;
+use crate::compiler_tests::test_diagnostics::assert_output_rejection;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -190,8 +191,9 @@ fn config_and_write_time_containment_share_canonical_classification() {
     use std::os::unix::fs::symlink;
 
     use crate::build_system::output::manifest::validate_output_root_is_safe;
-    use crate::compiler_frontend::symbols::string_interning::StringTable;
-    use crate::compiler_tests::test_diagnostics::assert_output_rejection;
+    use crate::compiler_frontend::compiler_errors::InfrastructureErrors;
+    use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+    use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 
     let _project_temp = tempfile::tempdir().expect("should create project temp dir");
     let project_root = _project_temp.path().to_path_buf();
@@ -212,14 +214,16 @@ fn config_and_write_time_containment_share_canonical_classification() {
         validate_directory_output_root_containment(&folder.resolved_path, &project_root, None,),
         expected
     );
-    let messages = validate_output_root_is_safe(
+    let error = validate_output_root_is_safe(
         &folder.resolved_path,
         &project_root,
         Some(&project_root.join("src")),
-        &StringTable::new(),
     )
     .expect_err("symlink output root should be rejected");
-    assert_output_rejection(&messages, "output-root-not-inside-project");
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_infrastructure(Box::new(InfrastructureErrors::new(error)), None);
+    let failure = accumulator.finish(InstallMode::Frozen);
+    assert_output_rejection(&failure, "output-root-not-inside-project");
 }
 
 // -------------------------

@@ -64,7 +64,7 @@ pub(crate) struct HtmlPageMetadataPlan {
 ///
 /// WHAT: carries an authored-source rejection separately from an internal folded-string
 ///       failure while the HTML builder still owns its string table.
-/// WHY: the builder boundary maps each lane into `CompilerMessages` without converting
+/// WHY: the builder maps each lane into `PreparedFailure` without converting
 ///      the infrastructure failure into a user diagnostic.
 #[derive(Debug)]
 pub(crate) enum PageMetadataError {

@@ -108,10 +108,14 @@ ACTIVE_PLAN:
 - Execution order: Phase 4 runs as the steps in `PHASE_4_EXECUTION_ORDER` below. The slice
   checklists remain the acceptance contract. Only their order and grouping changed, under the
   architecture document's repository-discovered corrections rule.
-- NEXT_SUBSTEP: P4.5 slice S7b of `PHASE_4_5_SEQUENCE`: migrate backends, output, build
-  orchestration and command exits off `CompilerMessages`, then delete it, the remaining
-  `Render*Context` producer API and legacy boundary types; re-home build-result items, probes and
-  metrics. S7a is accepted in "Phase 4 P4.5 S7a: frontend producers return PreparedFailure":
+- NEXT_SUBSTEP: P4.5 slice S8 of `PHASE_4_5_SEQUENCE`: `just validate`, `just clippy-features`,
+  `just bench-data-layout-check`, docs and changelog. S7 is complete. S7b is accepted in "Phase 4
+  P4.5 S7b: delete CompilerMessages": backends, output, build orchestration and command exits
+  return `PreparedFailure` or `CompilerError`, `BuildOutputFailure::Write` carries
+  `PreparedFailure`, and `CompilerMessages`, `RenderSourceContext`, `RenderPathContext`, the
+  vessel-only methods and the legacy boundary variants are deleted; probes read prepared batches
+  and frozen reports. `clippy.toml` is lowered to `large-error-threshold = 225` (largest `Err`
+  224 bytes). S7a is accepted in "Phase 4 P4.5 S7a: frontend producers return PreparedFailure":
   `PreparedFailure` (renamed from `PremergeFailure`, absorbing `AstDiagnosticFailure`) is the one
   pre-freeze failure carrier, `ConfigCompilationFailure` is deleted, every frontend, header,
   template and single-source producer is off the vessel, and `BoundaryAccumulator` gains

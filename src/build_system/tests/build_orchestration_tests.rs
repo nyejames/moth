@@ -18,15 +18,17 @@ use crate::build_system::output::{
 use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{
-    BoundaryFailure, CompilerMessages, RenderSourceContext,
+use crate::compiler_frontend::compiler_errors::BoundaryFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidConfigCode, InvalidConfigView,
 };
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticCategory, DiagnosticLabel, DiagnosticLabelMessage,
-    DiagnosticPayload, DiagnosticSeverity, InvalidConfigReason,
+    CompilerDiagnostic, DiagnosticBag, DiagnosticCategory, DiagnosticLabel, DiagnosticLabelMessage,
+    DiagnosticSeverity, PreparedFailure,
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
@@ -99,6 +101,32 @@ fn assert_invalid_project_setting(
         has_expected_diagnostic,
         "expected invalid project setting diagnostic for {expected_key}={expected_value}"
     );
+}
+
+fn prepared_warning_accumulator(
+    diagnostic: CompilerDiagnostic,
+    root_string_table: crate::compiler_frontend::symbols::string_interning::StringTable,
+    source_database: Arc<SourceDatabase>,
+    domain: StablePackageIdentity,
+) -> BoundaryAccumulator {
+    let batch = PreparedDiagnosticBatch::capture_from_root_string_table(
+        DiagnosticBag::from(diagnostic),
+        &root_string_table,
+        None,
+        || None,
+    )
+    .expect("fixture warning should capture in the build root string domain");
+    let mut accumulator = BoundaryAccumulator::with_root_string_table(&root_string_table);
+    accumulator.append_prepared(batch, None);
+    let donor_batch = PreparedDiagnosticBatch::capture_from_root_string_table(
+        DiagnosticBag::new(),
+        &root_string_table,
+        None,
+        || None,
+    )
+    .expect("empty donor batch should capture in the build root string domain");
+    accumulator.append_prepared(donor_batch, Some((source_database, Some(domain))));
+    accumulator
 }
 
 #[test]
@@ -248,14 +276,11 @@ fn build_result_warning_handoff_resolves_generated_donor_source_context() {
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(project_temp.path().to_path_buf()),
-        warning_accumulator: crate::build_system::build::build_warning_accumulator_from_diagnostics(
-            vec![warning],
+        warning_accumulator: prepared_warning_accumulator(
+            warning,
             string_table,
-            vec![RenderSourceContext {
-                diagnostic_range: 0..0,
-                source_database: Arc::clone(&package_database),
-                domain: Some(package_identity),
-            }],
+            Arc::clone(&package_database),
+            package_identity,
         ),
         source_database: Some(Arc::clone(&project_database)),
         output_owner: OutputOwner {
@@ -370,14 +395,11 @@ fn build_result_warning_handoff_keeps_related_package_label_out_of_default_conte
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(project_temp.path().to_path_buf()),
-        warning_accumulator: crate::build_system::build::build_warning_accumulator_from_diagnostics(
-            vec![diagnostic],
+        warning_accumulator: prepared_warning_accumulator(
+            diagnostic,
             string_table,
-            vec![RenderSourceContext {
-                diagnostic_range: 0..0,
-                source_database: Arc::clone(&package_database),
-                domain: Some(package_identity),
-            }],
+            Arc::clone(&package_database),
+            package_identity,
         ),
         source_database: Some(Arc::clone(&project_database)),
         output_owner: OutputOwner {
@@ -1622,43 +1644,47 @@ fn validated_output_settings_reject_canonical_root_aliases() {
     )
     .expect_err("canonical output-root aliases must be rejected");
 
-    let diagnostic = errors
-        .iter()
-        .find(|diagnostic| {
-            matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidConfig {
-                    reason: InvalidConfigReason::OutputFoldersNotDistinct { .. },
-                    ..
-                }
-            )
-        })
-        .expect("canonical alias should produce an output-folder collision diagnostic");
-    let DiagnosticPayload::InvalidConfig {
-        reason:
-            InvalidConfigReason::OutputFoldersNotDistinct {
-                dev_folder,
-                release_folder,
-            },
-        ..
-    } = &diagnostic.payload
-    else {
-        unreachable!("the diagnostic was matched above");
-    };
-    assert_eq!(string_table.resolve(*dev_folder), "dev-alias");
-    assert_eq!(string_table.resolve(*release_folder), "release-alias");
-    assert_eq!(
-        diagnostic.primary_span, None,
-        "synthetic Config values have no authored source span",
-    );
-    let diagnostic_code = diagnostic.kind.code();
-    let messages = CompilerMessages::from_diagnostics(errors, string_table.clone());
-    let failure = into_boundary_failure(messages);
+    let batch = PreparedDiagnosticBatch::capture_from_root_string_table(
+        DiagnosticBag::from_diagnostics(errors),
+        &string_table,
+        None,
+        || None,
+    )
+    .expect("output settings should capture in the build root string domain");
+    let failure = freeze_prepared_failure(PreparedFailure::Diagnosed(batch), string_table);
     let (report, view) = failure
         .reports
         .iter()
-        .find(|(_, view)| view.descriptor().code == diagnostic_code)
+        .find(|(_, view)| {
+            view.family_view::<InvalidConfigView>()
+                .is_some_and(|facts| facts.reason == InvalidConfigCode::OutputFoldersNotDistinct)
+        })
         .expect("output-folder collision should remain in the boundary report");
+    let facts = view
+        .family_view::<InvalidConfigView>()
+        .expect("output-folder collision should retain typed config facts");
+    assert_eq!(facts.reason, InvalidConfigCode::OutputFoldersNotDistinct);
+    let strings = view.string_ids();
+    assert_eq!(
+        DiagnosticRenderContext::for_report(report)
+            .string_table
+            .resolve(*strings.first().expect("dev output fact should be retained")),
+        "dev-alias",
+    );
+    assert_eq!(
+        DiagnosticRenderContext::for_report(report)
+            .string_table
+            .resolve(
+                *strings
+                    .get(1)
+                    .expect("release output fact should be retained")
+            ),
+        "release-alias",
+    );
+    assert!(matches!(
+        view.primary_site(),
+        crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent
+    ));
     assert_eq!(
         view.reason_key(),
         Some("invalid_config.output_folders_not_distinct")
@@ -1912,6 +1938,7 @@ fn deferred_resource_file_ancestor_conflict_stays_unhashed() {
         panic!("a deferred resource below a file output must be rejected");
     };
 
+    let messages = freeze_prepared_failure(messages, string_table);
     assert_output_rejection(&messages, "file-ancestor-conflict");
     assert_eq!(
         project.resource_inputs.records()[0].content(),
@@ -1964,6 +1991,7 @@ fn deferred_resource_symlink_destination_conflict_stays_unhashed() {
         panic!("canonical aliases must reject a deferred resource before emission");
     };
 
+    let messages = freeze_prepared_failure(messages, string_table);
     assert_output_rejection(&messages, "canonical-destination-collision");
     assert_eq!(
         project.resource_inputs.records()[0].content(),
@@ -2553,8 +2581,8 @@ fn late_output_failure_keeps_authored_setting_source_owner() {
     let setting_span = second_plan
         .setting_span
         .expect("validated output plan should retain its authored setting span");
-    let late_messages = write_project_outputs(
-        &second_build.project,
+    let late_messages = write_project_outputs_with_table(
+        &mut second_build.project,
         &WriteOptions {
             output_plan: OutputPlan::Directory(ValidatedOutputPlan {
                 output_root: second_plan.output_root.clone(),
@@ -2568,10 +2596,11 @@ fn late_output_failure_keeps_authored_setting_source_owner() {
             }),
             write_mode: WriteMode::AlwaysWrite,
         },
+        second_build.warning_accumulator.string_table_mut(),
     )
     .expect_err("a foreign output owner should produce a late diagnostic");
 
-    let failure = second_build.take_output_failure_messages(late_messages);
+    let failure = second_build.take_output_failure(late_messages);
     assert!(!failure.has_infrastructure_error(), "{failure:?}");
     let (report, view) = failure
         .reports

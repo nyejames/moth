@@ -1,10 +1,9 @@
-//! Prepared diagnostics that cross the pre-freeze boundary without a legacy vessel.
+//! Prepared diagnostics that cross the pre-freeze boundary as a compact batch.
 //!
 //! WHAT: owns family drafts with captured type-display snapshots, the batch-local string table,
 //! explicit path rows, and frozen-identity handles collected during Pass A.
-//! WHY: a captured batch joins the run accumulator without a message vessel or
-//! retaining its live type environment.
-use super::compiler_errors::{CompilerError, RenderPathContext};
+//! WHY: the boundary accumulator can merge prepared facts without retaining live stage context.
+use super::compiler_errors::CompilerError;
 use super::diagnostic_bag::DiagnosticBag;
 use super::diagnostics::legacy_adapter::{PreparedDiagnostic, prepare_diagnostic};
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
@@ -12,16 +11,23 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
+use std::ops::Range;
 use std::sync::Arc;
+
+#[derive(Debug, Clone)]
+pub(super) struct PreparedPathRow {
+    pub(super) diagnostic_range: Range<usize>,
+    pub(super) path_table: Arc<PathTable>,
+}
 
 /// Batch-local string, path, and frozen-identity ownership.
 pub(super) struct PreparedBatchIdentity {
     pub(super) string_table: StringTable,
-    pub(super) path_rows: Vec<RenderPathContext>,
+    pub(super) path_rows: Vec<PreparedPathRow>,
     pub(super) required_handles: Vec<FrozenIdentityHandle>,
 }
 
-/// Move-only premerge diagnostics ready to append directly to a boundary run.
+/// Move-only pre-freeze diagnostics ready to append directly to a boundary run.
 ///
 /// The boxed identity side store keeps this carrier at most 48 bytes. Each draft owns its captured
 /// type snapshot so append remaps the pair in place without a second conversion.
@@ -87,7 +93,7 @@ impl PreparedDiagnosticBatch {
             prepared.push(item);
         }
         let path_rows = match path_table {
-            Some(path_table) if has_path_row => vec![RenderPathContext {
+            Some(path_table) if has_path_row => vec![PreparedPathRow {
                 diagnostic_range: 0..diagnostics.len(),
                 path_table,
             }],

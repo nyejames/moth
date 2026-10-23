@@ -13,7 +13,11 @@ use crate::build_system::output::{
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 #[cfg(feature = "timers")]
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, NamingConvention};
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticBag, NamingConvention,
+};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::settings::Config;
@@ -39,6 +43,15 @@ fn build_result_with_warnings(
     warnings: Vec<CompilerDiagnostic>,
     string_table: StringTable,
 ) -> BuildResult {
+    let batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from_diagnostics(warnings),
+        string_table,
+        None,
+        false,
+        None,
+    );
+    let mut warning_accumulator = BoundaryAccumulator::new();
+    warning_accumulator.append_prepared(batch, None);
     BuildResult {
         project: Project {
             output_files: vec![OutputFile::new(
@@ -52,11 +65,7 @@ fn build_result_with_warnings(
             resource_inputs: ResourceInputRegistry::new(),
         },
         config: Config::new(PathBuf::from("main.moth")),
-        warning_accumulator: crate::build_system::build::build_warning_accumulator_from_diagnostics(
-            warnings,
-            string_table,
-            Vec::new(),
-        ),
+        warning_accumulator,
         source_database: None,
         output_owner: OutputOwner {
             builder: BuilderKind::Html,

@@ -91,8 +91,9 @@ use crate::build_system::output::ValidatedDirectoryOutputSettings;
 
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_errors::BoundaryFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::instrumentation::{log_frontend_counters, reset_frontend_counters};
 #[cfg(feature = "boracle")]
 use crate::compiler_frontend::module_compilation::BoracleModuleInput;
@@ -130,7 +131,7 @@ pub(crate) use compiled_boundary::ProjectFrontendCompilation;
 /// Production build/check/dev callers use [`compile_project_frontend_with_inputs`] so the typed
 /// input set remains attached to its owning command boundary. This entry point remains useful for
 /// compiler-internal callers that deliberately compile a config-free fixture.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn compile_project_frontend(
     config: &mut Config,
     build_profile: BuildProfile,
@@ -223,10 +224,9 @@ pub(crate) fn compile_project_frontend_with_inputs(
                     "Found a file without an extension set. Moth files use .{LANGUAGE_SOURCE_EXTENSION}"
                 ),
             );
-            Err(into_boundary_failure(CompilerMessages::from_error_ref(
-                err,
-                string_table,
-            )))
+            let mut accumulator = BoundaryAccumulator::with_root_string_table(string_table);
+            accumulator.append_infrastructure(err.into(), None);
+            Err(accumulator.finish(InstallMode::Unfrozen))
         }
     });
 
@@ -253,10 +253,9 @@ pub(crate) fn compile_single_file_boracle(
             &config.entry_dir,
             format!("Boracle source mode requires a .{LANGUAGE_SOURCE_EXTENSION} file entry"),
         );
-        return Err(into_boundary_failure(CompilerMessages::from_error_ref(
-            error,
-            string_table,
-        )));
+        let mut accumulator = BoundaryAccumulator::with_root_string_table(string_table);
+        accumulator.append_infrastructure(error.into(), None);
+        return Err(accumulator.finish(InstallMode::Unfrozen));
     };
 
     compilation::compile_single_file_boracle_frontend(

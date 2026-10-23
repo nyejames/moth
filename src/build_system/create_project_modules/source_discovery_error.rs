@@ -8,9 +8,8 @@
 //! syntax bucket while still allowing real file errors to stay on `CompilerError`.
 //!
 //! Finalized failures additionally preserve the finished [`SourceDatabase`] beside the typed
-//! [`PreparedFailure`] so the single-file final boundary can convert once with source context
-//! attached. Production discovery never constructs [`CompilerMessages`]; that vessel is built
-//! exactly once by the final render-test tails and the parent single-file boundary.
+//! [`PreparedFailure`]. The final boundary appends that failure with its source owner directly to the
+//! accumulator and freezes the report once.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
@@ -28,8 +27,8 @@ use std::sync::Arc;
 ///       finalized before the failure escaped.
 /// WHY: discovery finalization moves every retained snapshot and original span builder into
 ///      the final owner before any fallible identity transformation, so a terminal failure
-///      must not drop that owner. The parent single-file/test tail converts the inner
-///      [`PreparedFailure`] once and attaches this database as the render source context.
+///      must retain that owner until it appends the prepared failure to the source-aware
+///      accumulator and freezes the report once.
 #[derive(Debug)]
 pub(crate) struct FinalizedDiscoveryFailure {
     pub(crate) failure: PreparedFailure,
@@ -67,15 +66,15 @@ impl SourceDiscoveryError {
         )))
     }
 
-    /// Convert the discovery failure into the premerge lane without an intermediate vessel.
+    /// Convert the discovery failure into the premerge lane without freezing a report.
     ///
     /// WHAT: moves a diagnostic plus the caller's local table into a prepared batch, or
     ///       propagates a prepared failure or infrastructure error typed. The table moves via
     ///       `mem::take`; no clone carries diagnostics. Required path identities retain their
     ///       issuing path snapshot with the prepared batch.
     /// WHY: inventory preparation aborts on the first discovery failure and discards its
-    ///      discovery owner, so the batch becomes the sole table owner. The final boundary owns
-    ///      the single render conversion.
+    ///      discovery owner, so the batch becomes the sole table owner. The finalized boundary
+    ///      later pairs that failure with its source row and freezes one report.
     /// A finalized failure already owns a finished source database this lane cannot carry:
     /// [`PreparedFailure`] has no source owner, so converting here would drop the finished owner.
     /// Finalized failures must be matched explicitly and split with

@@ -243,11 +243,10 @@ fn no_runtime_fragments_still_emits_start_call() {
     let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
     let page_metadata_plan = HtmlPageMetadataPlan::default();
     let html = render_html_document(
-        &mut crate::projects::html_project::js_path::HtmlDocumentRenderInput {
+        &crate::projects::html_project::js_path::HtmlDocumentRenderInput {
             hir_module: &module.executable.hir,
             page_metadata_plan: &page_metadata_plan,
             const_fragments: &[],
-            string_table: &mut string_table,
             structural_url_renderer: &renderer,
             document_config: &HtmlDocumentConfig::default(),
             route: &route,
@@ -295,7 +294,6 @@ fn inline_js_bundle_with_closing_script_tag_is_escaped_in_html() {
         String::from("start_entry"),
     )]);
 
-    let mut string_table = crate::compiler_frontend::symbols::string_interning::StringTable::new();
     let route =
         derive_logical_html_path(Path::new("@page.moth"), None).expect("root route should resolve");
     let plan = HtmlResourceOutputPlan::new("");
@@ -303,11 +301,10 @@ fn inline_js_bundle_with_closing_script_tag_is_escaped_in_html() {
     let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
     let page_metadata_plan = HtmlPageMetadataPlan::default();
     let html = render_html_document(
-        &mut crate::projects::html_project::js_path::HtmlDocumentRenderInput {
+        &crate::projects::html_project::js_path::HtmlDocumentRenderInput {
             hir_module: &hir_module,
             page_metadata_plan: &page_metadata_plan,
             const_fragments: &[],
-            string_table: &mut string_table,
             structural_url_renderer: &renderer,
             document_config: &HtmlDocumentConfig::default(),
             route: &route,

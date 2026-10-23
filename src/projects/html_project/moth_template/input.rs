@@ -382,7 +382,8 @@ fn reject_duplicate_source_paths(
     path_fork: &mut PathInternerFork,
 ) -> Result<(), PreparedFailure> {
     let mut seen_paths = HashSet::new();
-    let mut diagnostics = Vec::new();
+    let mut diagnostics = DiagnosticBag::new();
+    let mut has_duplicates = false;
 
     for unit in units {
         let normalized = normalize_path_for_identity(&unit.source_path);
@@ -392,14 +393,15 @@ fn reject_duplicate_source_paths(
             diagnostics.push(CompilerDiagnostic::duplicate_moth_template_input_path(
                 path, None, None,
             ));
+            has_duplicates = true;
         }
     }
 
-    if diagnostics.is_empty() {
+    if !has_duplicates {
         Ok(())
     } else {
         Err(PreparedFailure::capture_diagnosed(
-            DiagnosticBag::from_diagnostics(diagnostics),
+            diagnostics,
             string_table.clone(),
             None,
             true,

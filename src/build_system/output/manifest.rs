@@ -8,11 +8,13 @@
 use crate::build_system::build_profile::BuildProfile;
 use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
 use crate::build_system::utils::{
-    file_error_messages, file_error_with_rejection_reason, should_skip_unchanged_write,
+    file_error, file_error_with_rejection_reason, should_skip_unchanged_write,
 };
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidConfigReason, InvalidOutputFolderReason,
+    CompilerDiagnostic, DiagnosticBag, InvalidConfigReason, InvalidOutputFolderReason,
+    PreparedFailure,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -72,7 +74,6 @@ pub(crate) struct OutputCleanupFinalization<'a> {
     pub(crate) owner: OutputOwner,
     pub(crate) cleanup_policy: &'a CleanupPolicy,
     pub(crate) write_mode: WriteMode,
-    pub(crate) string_table: &'a StringTable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,10 +155,10 @@ pub(crate) fn prepare_output_cleanup(
     owner: OutputOwner,
     setting_span: Option<SourceSpan>,
     cleanup_policy: &CleanupPolicy,
-    string_table: &StringTable,
-) -> Result<PreparedOutputCleanup, CompilerMessages> {
+    string_table: &mut StringTable,
+) -> Result<PreparedOutputCleanup, PreparedFailure> {
     let manifest_read_result = if let Some(project_root) = project_root {
-        validate_output_root_is_safe(output_root, project_root, entry_root, string_table)?;
+        validate_output_root_is_safe(output_root, project_root, entry_root)?;
         let manifest_read_result = read_build_manifest(output_root, cleanup_policy);
         let existing_owner = match &manifest_read_result {
             ManifestReadResult::Valid(manifest) => Some((
@@ -171,7 +172,7 @@ pub(crate) fn prepare_output_cleanup(
             ManifestReadResult::ForeignOwner {
                 builder, profile, ..
             } => {
-                return Err(manifest_owner_conflict_messages(
+                return Err(manifest_owner_conflict_failure(
                     output_root,
                     builder,
                     profile,
@@ -186,7 +187,7 @@ pub(crate) fn prepare_output_cleanup(
             && (existing_builder != owner.builder.manifest_name()
                 || existing_profile != build_profile_manifest_name(owner.profile))
         {
-            return Err(manifest_owner_conflict_messages(
+            return Err(manifest_owner_conflict_failure(
                 output_root,
                 existing_builder,
                 existing_profile,
@@ -213,7 +214,7 @@ pub(crate) fn prepare_output_cleanup(
 pub(crate) fn finalize_output_cleanup(
     cleanup_state: &PreparedOutputCleanup,
     finalization: &OutputCleanupFinalization<'_>,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), CompilerError> {
     let Some(manifest_read_result) = cleanup_state.manifest_read_result.as_ref() else {
         return Ok(());
     };
@@ -246,7 +247,6 @@ pub(crate) fn finalize_output_cleanup(
         finalization.owner,
         finalization.cleanup_policy,
         finalization.write_mode,
-        finalization.string_table,
     )
 }
 
@@ -257,8 +257,7 @@ pub(crate) fn finalize_output_cleanup(
 /// Validate an output path before writing or deleting under the output root.
 pub(crate) fn validate_relative_output_path(
     relative_output_path: &Path,
-    string_table: &StringTable,
-) -> Result<PathBuf, CompilerMessages> {
+) -> Result<PathBuf, CompilerError> {
     if relative_output_path
         .to_str()
         .is_some_and(|path| path.contains(['\r', '\n']))
@@ -267,7 +266,6 @@ pub(crate) fn validate_relative_output_path(
             relative_output_path,
             "Output paths cannot contain line-break characters.",
             super::writer::OutputRejectionReason::InvalidRelativeOutputPath,
-            string_table,
         ));
     }
 
@@ -295,7 +293,6 @@ pub(crate) fn validate_relative_output_path(
             relative_output_path,
             message,
             super::writer::OutputRejectionReason::InvalidRelativeOutputPath,
-            string_table,
         )
     })
 }
@@ -308,8 +305,7 @@ pub(crate) fn validate_output_root_is_safe(
     output_root: &Path,
     project_root: &Path,
     entry_root: Option<&Path>,
-    string_table: &StringTable,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), CompilerError> {
     // WHAT: Canonicalize the output root, falling back to the nearest existing ancestor.
     // WHY: Symlinks or relative segments could disguise a dangerous target path.
     let canonical_root = canonicalize_output_path(output_root).map_err(|_| {
@@ -317,7 +313,6 @@ pub(crate) fn validate_output_root_is_safe(
             output_root,
             "Build output root contains a dangling symlink component and cannot be used safely.",
             super::writer::OutputRejectionReason::OutputRootDanglingSymlink,
-            string_table,
         )
     })?;
 
@@ -330,7 +325,6 @@ pub(crate) fn validate_output_root_is_safe(
                 output_root.display()
             ),
             super::writer::OutputRejectionReason::OutputRootDangerousSystemPath,
-            string_table,
         ));
     }
 
@@ -361,7 +355,6 @@ pub(crate) fn validate_output_root_is_safe(
                 output_root,
                 message,
                 super::writer::OutputRejectionReason::OutputRootNotInsideProject,
-                string_table,
             ));
         }
 
@@ -375,7 +368,6 @@ pub(crate) fn validate_output_root_is_safe(
             project_root,
             "Project root contains a dangling symlink component and cannot validate output safety.",
             super::writer::OutputRejectionReason::OutputRootInspectionFailed,
-            string_table,
         )
     })?;
     let project_parent = canonical_project.parent().unwrap_or(&canonical_project);
@@ -394,7 +386,6 @@ pub(crate) fn validate_output_root_is_safe(
                 project_root.display()
             ),
             super::writer::OutputRejectionReason::OutputRootNotAdjacentToProject,
-            string_table,
         ));
     }
 
@@ -489,19 +480,17 @@ pub(crate) fn write_build_manifest(
     owner: OutputOwner,
     cleanup_policy: &CleanupPolicy,
     write_mode: WriteMode,
-    string_table: &StringTable,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), CompilerError> {
     if let Some(path) = current_paths
         .iter()
         .find(|path| !is_lossless_portable_relative_path(path))
     {
-        return Err(file_error_messages(
+        return Err(file_error(
             path,
             format!(
                 "Managed output path '{}' cannot be represented safely in the build manifest.",
                 path.display()
             ),
-            string_table,
         ));
     }
 
@@ -534,13 +523,12 @@ pub(crate) fn write_build_manifest(
     }
 
     fs::write(manifest_destination, content).map_err(|error| {
-        file_error_messages(
+        file_error(
             manifest_destination,
             format!(
                 "Failed to write build manifest '{}': {error}",
                 manifest_destination.display()
             ),
-            string_table,
         )
     })
 }
@@ -855,24 +843,30 @@ fn describe_extension_set(extensions: &BTreeSet<String>) -> String {
     }
 }
 
-fn manifest_owner_conflict_messages(
+fn manifest_owner_conflict_failure(
     output_root: &Path,
     existing_builder: &str,
     existing_profile: &str,
     active_owner: OutputOwner,
     setting_span: Option<SourceSpan>,
-    string_table: &StringTable,
-) -> CompilerMessages {
-    let mut diagnostic_table = string_table.clone();
+    root_string_table: &mut StringTable,
+) -> PreparedFailure {
     let reason = InvalidConfigReason::OutputManifestOwnerConflict {
-        output_root: diagnostic_table.intern(&output_root.to_string_lossy()),
-        existing_builder: diagnostic_table.intern(existing_builder),
-        existing_profile: diagnostic_table.intern(existing_profile),
-        active_builder: diagnostic_table.intern(active_owner.builder.manifest_name()),
-        active_profile: diagnostic_table.intern(build_profile_manifest_name(active_owner.profile)),
+        output_root: root_string_table.intern(&output_root.to_string_lossy()),
+        existing_builder: root_string_table.intern(existing_builder),
+        existing_profile: root_string_table.intern(existing_profile),
+        active_builder: root_string_table.intern(active_owner.builder.manifest_name()),
+        active_profile: root_string_table.intern(build_profile_manifest_name(active_owner.profile)),
     };
     let diagnostic = CompilerDiagnostic::invalid_config_reason(None, reason, setting_span);
-    CompilerMessages::from_diagnostic(diagnostic, diagnostic_table)
+    PreparedDiagnosticBatch::capture_from_root_string_table(
+        DiagnosticBag::from(diagnostic),
+        root_string_table,
+        None,
+        || None,
+    )
+    .map(PreparedFailure::Diagnosed)
+    .unwrap_or_else(PreparedFailure::from)
 }
 
 fn emit_recoverable_manifest_warning(reason: &ManifestRecoveryReason) {
