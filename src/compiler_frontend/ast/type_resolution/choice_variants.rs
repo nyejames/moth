@@ -5,8 +5,9 @@ use crate::compiler_frontend::ast::type_resolution::{
     TypeResolutionContext, TypeResolutionResult, resolve_parsed_type_annotation,
     reusable_type_id_for_parsed_ref,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTypeAnnotationReason, TypeAnnotationContext,
+    InvalidTypeAnnotationReason, TypeAnnotationContext,
 };
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -57,7 +58,7 @@ pub(crate) fn resolve_choice_variant_payload_types(
                                 *type_id != type_resolution_context.type_environment.builtins().none
                             })
                             .ok_or_else(|| {
-                                CompilerDiagnostic::invalid_type_annotation(
+                                names_declarations::invalid_type_annotation(
                                     TypeAnnotationContext::DeclarationTarget,
                                     InvalidTypeAnnotationReason::NoneNotAllowed,
                                     field.binding_span,
@@ -72,7 +73,7 @@ pub(crate) fn resolve_choice_variant_payload_types(
                     {
                         field.type_id
                     } else {
-                        return Err(CompilerDiagnostic::invalid_type_annotation(
+                        return Err(names_declarations::invalid_type_annotation(
                             TypeAnnotationContext::DeclarationTarget,
                             InvalidTypeAnnotationReason::NoneNotAllowed,
                             field.binding_span,

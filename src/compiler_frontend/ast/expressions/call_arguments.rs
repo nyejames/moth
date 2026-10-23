@@ -53,10 +53,11 @@ use crate::compiler_frontend::ast::numeric_known_shape::{
 use crate::compiler_frontend::ast::statements::functions::ParameterContract;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticToken,
-    InvalidBuiltinCallReason, InvalidCallShapeReason, InvalidExpressionReason,
-    InvalidGenericInstantiationReason, ValueReceiverContext,
+    CompileTimeEvaluationErrorReason, DiagnosticToken, InvalidBuiltinCallReason,
+    InvalidCallShapeReason, InvalidExpressionReason, InvalidGenericInstantiationReason,
+    ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -655,11 +656,9 @@ fn parse_call_arguments_inner(
     } = argument_syntax
     {
         if token_stream.current_tag() != TokenTag::OPEN_PARENTHESIS {
-            return Err(CompilerDiagnostic::invalid_builtin_call(
-                InvalidBuiltinCallReason::MissingParentheses,
-                Some(member_name),
-                current_span(token_stream),
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_builtin_call(InvalidBuiltinCallReason::MissingParentheses,
+            Some(member_name),
+            current_span(token_stream),)
             .into());
         }
 
@@ -667,11 +666,9 @@ fn parse_call_arguments_inner(
         token_stream.skip_newlines();
 
         if token_stream.current_tag() != TokenTag::CLOSE_PARENTHESIS {
-            return Err(CompilerDiagnostic::invalid_builtin_call(
-                InvalidBuiltinCallReason::TakesNoArguments,
-                Some(member_name),
-                current_span(token_stream),
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_builtin_call(InvalidBuiltinCallReason::TakesNoArguments,
+            Some(member_name),
+            current_span(token_stream),)
             .into());
         }
 
@@ -686,16 +683,13 @@ fn parse_call_arguments_inner(
         let found = token_stream
             .current_diagnostic_token(string_table)
             .map_err(|error| {
-                CompilerDiagnostic::token_view_invariant_error(
-                    error,
-                    "call opening-delimiter diagnostic",
-                )
+                CompilerError::compiler_error(format!(
+                    "call opening-delimiter diagnostic token payload was malformed: {error:?}"
+                ))
             })?;
-        return Err(CompilerDiagnostic::expected_token_from_tags(
-            TokenTag::OPEN_PARENTHESIS,
-            found,
-            current_span(token_stream),
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::expected_token_from_projections(DiagnosticToken::from_static_tag(TokenTag::OPEN_PARENTHESIS),
+        found,
+        current_span(token_stream),)
         .into());
     }
 
@@ -741,10 +735,8 @@ fn parse_call_arguments_inner(
                 if next_token_tag(token_stream) == Some(TokenTag::SYMBOL)
                     && lookahead_third_is_assign =>
             {
-                return Err(CompilerDiagnostic::unexpected_token_from_tag(
-                    DiagnosticToken::from_static_tag(TokenTag::MUTABLE),
-                    current_span(token_stream),
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_token_from_tag(DiagnosticToken::from_static_tag(TokenTag::MUTABLE),
+                current_span(token_stream),)
                 .into());
             }
 
@@ -770,10 +762,8 @@ fn parse_call_arguments_inner(
                     && lookahead_third_is_close_paren
                     && lookahead_fourth_is_assign =>
             {
-                return Err(CompilerDiagnostic::unexpected_token_from_tag(
-                    DiagnosticToken::from_static_tag(TokenTag::OPEN_PARENTHESIS),
-                    current_span(token_stream),
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_token_from_tag(DiagnosticToken::from_static_tag(TokenTag::OPEN_PARENTHESIS),
+                current_span(token_stream),)
                 .into());
             }
 
@@ -791,20 +781,17 @@ fn parse_call_arguments_inner(
             let found = token_stream
                 .current_diagnostic_token(string_table)
                 .map_err(|error| {
-                    CompilerDiagnostic::token_view_invariant_error(
-                        error,
-                        "named-only argument diagnostic",
-                    )
+                    CompilerError::compiler_error(format!(
+                        "named-only argument diagnostic token payload was malformed: {error:?}"
+                    ))
                 })?
                 .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
             let diagnostic = if matches!(argument_syntax, CallArgumentSyntax::AnonymousConstRecord)
             {
-                CompilerDiagnostic::invalid_expression(
-                    InvalidExpressionReason::AnonymousRecordFieldNotNamed,
-                    current_span(token_stream),
-                )
+                crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::invalid_expression(InvalidExpressionReason::AnonymousRecordFieldNotNamed,
+                current_span(token_stream),)
             } else {
-                CompilerDiagnostic::unexpected_token_from_tag(found, argument_span)
+                crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_token_from_tag(found, argument_span)
             };
             return Err(diagnostic.into());
         }
@@ -827,20 +814,17 @@ fn parse_call_arguments_inner(
             let found = token_stream
                 .current_diagnostic_token(string_table)
                 .map_err(|error| {
-                    CompilerDiagnostic::token_view_invariant_error(
-                        error,
-                        "call argument value diagnostic",
-                    )
+                    CompilerError::compiler_error(format!(
+                        "call argument value diagnostic token payload was malformed: {error:?}"
+                    ))
                 })?
                 .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
             let diagnostic = if matches!(argument_syntax, CallArgumentSyntax::AnonymousConstRecord)
             {
-                CompilerDiagnostic::invalid_expression(
-                    InvalidExpressionReason::AnonymousRecordFieldNotNamed,
-                    current_span(token_stream),
-                )
+                crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::invalid_expression(InvalidExpressionReason::AnonymousRecordFieldNotNamed,
+                current_span(token_stream),)
             } else {
-                CompilerDiagnostic::unexpected_token_from_tag(found, current_span(token_stream))
+                crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_token_from_tag(found, current_span(token_stream))
             };
             return Err(diagnostic.into());
         }
@@ -856,22 +840,18 @@ fn parse_call_arguments_inner(
                         | ExpectedParameterType::GenericParameter(type_id) => type_id,
                         ExpectedParameterType::ConstructionShape(_)
                         | ExpectedParameterType::UnknownExternal => {
-                            return Err(CompilerDiagnostic::invalid_call_shape(
-                                InvalidCallShapeReason::RouteArgumentNotDirect,
-                                None,
-                                current_span(token_stream),
-                            )
+                            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::RouteArgumentNotDirect,
+                            None,
+                            current_span(token_stream),)
                             .into());
                         }
                     };
                     if access_mode == CallAccessMode::Mutable
                         || token_stream.current_tag() != TokenTag::SYMBOL
                     {
-                        return Err(CompilerDiagnostic::invalid_call_shape(
-                            InvalidCallShapeReason::RouteArgumentNotDirect,
-                            None,
-                            current_span(token_stream),
-                        )
+                        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::RouteArgumentNotDirect,
+                        None,
+                        current_span(token_stream),)
                         .into());
                     }
                     Some(crate::compiler_frontend::ast::expressions::parse_expression_input::RouteArgumentContext {
@@ -887,11 +867,9 @@ fn parse_call_arguments_inner(
             .is_some_and(|expectation| expectation.contract == ParameterContract::Wire)
             && access_mode == CallAccessMode::Mutable
         {
-            return Err(CompilerDiagnostic::invalid_call_shape(
-                InvalidCallShapeReason::WireArgumentMutableMarker,
-                None,
-                marker_span,
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::WireArgumentMutableMarker,
+            None,
+            marker_span,)
             .into());
         }
         // A construction-shape slot keeps its literal unresolved until completion, and its ready
@@ -982,11 +960,9 @@ fn parse_call_arguments_inner(
                         route_input_type,
                         type_interner.environment(),
                     ) {
-                        return Err(CompilerDiagnostic::invalid_call_shape(
-                            InvalidCallShapeReason::RouteForwardingContractMismatch,
-                            None,
-                            Some(argument_source_span),
-                        )
+                        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::RouteForwardingContractMismatch,
+                        None,
+                        Some(argument_source_span),)
                         .into());
                     }
                     route_future_input_type = route_input_type;
@@ -997,11 +973,9 @@ fn parse_call_arguments_inner(
                         token_stream.current_tag(),
                         TokenTag::COMMA | TokenTag::CLOSE_PARENTHESIS
                     ) {
-                        return Err(CompilerDiagnostic::invalid_call_shape(
-                            InvalidCallShapeReason::RouteArgumentNotDirect,
-                            None,
-                            Some(argument_source_span),
-                        )
+                        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::RouteArgumentNotDirect,
+                        None,
+                        Some(argument_source_span),)
                         .into());
                     }
 
@@ -1018,11 +992,9 @@ fn parse_call_arguments_inner(
                 None => {
                     match context.get_reference(&name) {
                         Some(ScopeDeclarationRef::PendingNumeric { .. }) => {
-                            return Err(CompilerDiagnostic::invalid_call_shape(
-                                InvalidCallShapeReason::RouteArgumentNotDirect,
-                                None,
-                                Some(argument_source_span),
-                            )
+                            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::RouteArgumentNotDirect,
+                            None,
+                            Some(argument_source_span),)
                             .into());
                         }
                         Some(ScopeDeclarationRef::Local { .. })
@@ -1092,11 +1064,9 @@ fn parse_call_arguments_inner(
                         _ => false,
                     };
                     if !direct_route_root {
-                        return Err(CompilerDiagnostic::invalid_call_shape(
-                            InvalidCallShapeReason::RouteArgumentNotDirect,
-                            None,
-                            argument_view.span(),
-                        )
+                        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::RouteArgumentNotDirect,
+                        None,
+                        argument_view.span(),)
                         .into());
                     }
                 }
@@ -1111,11 +1081,9 @@ fn parse_call_arguments_inner(
                         context,
                         path_fork,
                     ) {
-                        return Err(CompilerDiagnostic::invalid_call_shape(
-                            InvalidCallShapeReason::WireArgumentOrigin,
-                            None,
-                            argument_view.span(),
-                        )
+                        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::WireArgumentOrigin,
+                        None,
+                        argument_view.span(),)
                         .into());
                     }
                 }
@@ -1177,11 +1145,9 @@ fn parse_call_arguments_inner(
                 if route_argument_context.is_some()
                     && !retained_route_argument_is_constructor_root(&deferral.items)
                 {
-                    return Err(CompilerDiagnostic::invalid_call_shape(
-                        InvalidCallShapeReason::RouteArgumentNotDirect,
-                        None,
-                        deferral.span,
-                    )
+                    return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::RouteArgumentNotDirect,
+                    None,
+                    deferral.span,)
                     .into());
                 }
                 // Deferred expressions have no completed operation view; only one pending
@@ -1194,11 +1160,9 @@ fn parse_call_arguments_inner(
                             [ExpressionRpnItem::PendingNumericBinding { is_copy: false, .. }]
                         ))
                 {
-                    return Err(CompilerDiagnostic::invalid_call_shape(
-                        InvalidCallShapeReason::WireArgumentOrigin,
-                        None,
-                        deferral.span,
-                    )
+                    return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::WireArgumentOrigin,
+                    None,
+                    deferral.span,)
                     .into());
                 }
                 // A known non-numeric parameter is the exact receiver of its argument's direct origin,
@@ -1346,10 +1310,9 @@ fn parse_call_arguments_inner(
                 let found = token_stream
                     .current_diagnostic_token(string_table)
                     .map_err(|error| {
-                        CompilerDiagnostic::token_view_invariant_error(
-                            error,
-                            "call argument separator diagnostic",
-                        )
+                        CompilerError::compiler_error(format!(
+                            "call argument separator diagnostic token payload was malformed: {error:?}"
+                        ))
                     })?
                     .unwrap_or_else(|| {
                         DiagnosticToken::from_static_tag(token_stream.current_tag())
@@ -1359,13 +1322,11 @@ fn parse_call_arguments_inner(
                     CallArgumentNamingPolicy::NamedOnly
                 ) && current_token_starts_named_entry(token_stream)
                 {
-                    CompilerDiagnostic::expected_token_from_tags(
-                        TokenTag::COMMA,
-                        Some(found),
-                        current_span(token_stream),
-                    )
+                    crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::expected_token_from_projections(DiagnosticToken::from_static_tag(TokenTag::COMMA),
+                    Some(found),
+                    current_span(token_stream),)
                 } else {
-                    CompilerDiagnostic::unexpected_token_from_tag(found, current_span(token_stream))
+                    crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_token_from_tag(found, current_span(token_stream))
                 };
                 return Err(diagnostic.into());
             }
@@ -1596,14 +1557,12 @@ fn validate_argument_value_policy(
         return Ok(());
     }
 
-    Err(CompilerDiagnostic::compile_time_evaluation_error(
-        CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
-        receiving_context
-            .diagnostics
-            .const_operation
-            .and_then(|operation| operation.diagnostic_callee_name(string_table)),
-        value.span(),
-    )
+    Err(crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::compile_time_evaluation_error(CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
+    receiving_context
+        .diagnostics
+        .const_operation
+        .and_then(|operation| operation.diagnostic_callee_name(string_table)),
+    value.span(),)
     .into())
 }
 
@@ -1658,12 +1617,16 @@ impl<'a> ParameterSlotRouter<'a> {
             && let Some((target_name, target_span)) = named_target
         {
             if let Some(first_span) = named_target_spans.get(target_name) {
-                return Err(CompilerDiagnostic::duplicate_declaration(
-                    *target_name,
-                    *first_span,
-                    *target_span,
-                )
-                .into());
+                let diagnostic = crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::duplicate_declaration(*target_name, *target_span);
+                let diagnostic = if let Some(first_span) = first_span {
+                    diagnostic.with_label(
+                        Some(*first_span),
+                        Some(LabelDraftMessage::PreviousDeclaration),
+                    )
+                } else {
+                    diagnostic
+                };
+                return Err(diagnostic.into());
             }
             named_target_spans.insert(*target_name, *target_span);
         }
@@ -1676,29 +1639,23 @@ impl<'a> ParameterSlotRouter<'a> {
         {
             match self.receiving_context.diagnostics.syntax {
                 CallArgumentSyntax::UnsupportedCall { callee_name } => {
-                    return Err(CompilerDiagnostic::invalid_call_shape(
-                        InvalidCallShapeReason::NamedArgumentsNotSupported,
-                        callee_name,
-                        *target_span,
-                    )
+                    return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::NamedArgumentsNotSupported,
+                    callee_name,
+                    *target_span,)
                     .into());
                 }
                 CallArgumentSyntax::UnsupportedBuiltinMember { member_name, .. } => {
-                    return Err(CompilerDiagnostic::invalid_builtin_call(
-                        InvalidBuiltinCallReason::NamedArgumentsNotSupported,
-                        member_name,
-                        *target_span,
-                    )
+                    return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_builtin_call(InvalidBuiltinCallReason::NamedArgumentsNotSupported,
+                    member_name,
+                    *target_span,)
                     .into());
                 }
                 CallArgumentSyntax::Supported { .. }
                 | CallArgumentSyntax::Constructor { .. }
                 | CallArgumentSyntax::Assertion { .. } => {
-                    return Err(CompilerDiagnostic::invalid_call_shape(
-                        InvalidCallShapeReason::NamedArgumentsNotSupported,
-                        self.callee_name(string_table),
-                        *target_span,
-                    )
+                    return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::NamedArgumentsNotSupported,
+                    self.callee_name(string_table),
+                    *target_span,)
                     .into());
                 }
                 CallArgumentSyntax::AnonymousConstRecord => {}
@@ -1719,33 +1676,27 @@ impl<'a> ParameterSlotRouter<'a> {
             self.saw_named_argument = true;
             match self.receiving_context.diagnostics.syntax {
                 CallArgumentSyntax::UnsupportedCall { callee_name } => {
-                    return Err(CompilerDiagnostic::invalid_call_shape(
-                        InvalidCallShapeReason::NamedArgumentsNotSupported,
-                        callee_name,
-                        *target_span,
-                    )
+                    return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::NamedArgumentsNotSupported,
+                    callee_name,
+                    *target_span,)
                     .into());
                 }
                 CallArgumentSyntax::UnsupportedBuiltinMember { member_name, .. } => {
-                    return Err(CompilerDiagnostic::invalid_builtin_call(
-                        InvalidBuiltinCallReason::NamedArgumentsNotSupported,
-                        member_name,
-                        *target_span,
-                    )
+                    return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_builtin_call(InvalidBuiltinCallReason::NamedArgumentsNotSupported,
+                    member_name,
+                    *target_span,)
                     .into());
                 }
                 CallArgumentSyntax::Supported { .. }
                 | CallArgumentSyntax::Constructor { .. }
                 | CallArgumentSyntax::Assertion { .. } => {
                     let Some(slot) = self.parameter_name_to_slot.get(target_name).copied() else {
-                        return Err(CompilerDiagnostic::invalid_call_shape(
-                            InvalidCallShapeReason::NamedArgumentNotFound {
-                                name: *target_name,
-                                known_parameters: known_parameter_names(expectations),
-                            },
-                            self.callee_name(string_table),
-                            *target_span,
-                        )
+                        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::NamedArgumentNotFound {
+                            name: *target_name,
+                            known_parameters: known_parameter_names(expectations),
+                        },
+                        self.callee_name(string_table),
+                        *target_span,)
                         .into());
                     };
 
@@ -1757,11 +1708,9 @@ impl<'a> ParameterSlotRouter<'a> {
         }
 
         if self.saw_named_argument {
-            return Err(CompilerDiagnostic::invalid_call_shape(
-                InvalidCallShapeReason::PositionalAfterNamed,
-                self.callee_name(string_table),
-                argument_span,
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::PositionalAfterNamed,
+            self.callee_name(string_table),
+            argument_span,)
             .into());
         }
 
@@ -1776,13 +1725,11 @@ impl<'a> ParameterSlotRouter<'a> {
         }
 
         if self.positional_cursor >= slot_count {
-            return Err(CompilerDiagnostic::invalid_call_shape(
-                InvalidCallShapeReason::ExtraPositionalArgument {
-                    expected_count: expectations.len(),
-                },
-                self.callee_name(string_table),
-                argument_span,
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::ExtraPositionalArgument {
+                expected_count: expectations.len(),
+            },
+            self.callee_name(string_table),
+            argument_span,)
             .into());
         }
 
@@ -1804,14 +1751,12 @@ impl<'a> ParameterSlotRouter<'a> {
             .and_then(|expectation| expectation.name);
 
         if self.slot_is_occupied(slot) {
-            let diagnostic = CompilerDiagnostic::invalid_call_shape(
-                InvalidCallShapeReason::DuplicateArgument {
-                    parameter_name,
-                    parameter_index: slot,
-                },
-                self.callee_name(string_table),
-                span,
-            );
+            let diagnostic = crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::DuplicateArgument {
+                parameter_name,
+                parameter_index: slot,
+            },
+            self.callee_name(string_table),
+            span,);
             return Err(diagnostic.into());
         }
 
@@ -1896,11 +1841,9 @@ fn reject_simple_generic_argument_type_ascription(
         return Ok(());
     };
 
-    Err(CompilerDiagnostic::invalid_generic_instantiation(
-        function_name,
-        InvalidGenericInstantiationReason::ExplicitCallTypeArgumentsUnsupported,
-        Some(type_span),
-    )
+    Err(crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::invalid_generic_instantiation(function_name,
+    InvalidGenericInstantiationReason::ExplicitCallTypeArgumentsUnsupported,
+    Some(type_span),)
     .into())
 }
 /// tries to parse the type keyword as another expression.

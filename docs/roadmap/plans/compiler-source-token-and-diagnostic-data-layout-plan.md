@@ -108,10 +108,15 @@ ACTIVE_PLAN:
 - Execution order: Phase 4 runs as the steps in `PHASE_4_EXECUTION_ORDER` below. The slice
   checklists remain the acceptance contract. Only their order and grouping changed, under the
   architecture document's repository-discovered corrections rule.
-- NEXT_SUBSTEP: P4.6b wave W2 (AST: `compiler_frontend/ast/**`), then W3 (headers,
-  declaration syntax, `builtins`, `traits`, `type_coercion`, `utilities`, `datatypes`, tokenizer,
-  paths, source, symbols and the remaining leaves), then P4.6z deletes the legacy model, adapter
-  and docs remnants (4I). W1 is accepted in "Phase 4 P4.6b W1: build, backend, project and
+- NEXT_SUBSTEP: P4.6b wave W3 (headers, declaration syntax, `builtins`, `traits`,
+  `type_coercion`, `utilities`, `datatypes`, tokenizer, paths, source, symbols and the remaining
+  leaves), then P4.6z deletes the legacy model, adapter and docs remnants (4I). W2 is accepted in
+  "Phase 4 P4.6b W2: AST producers construct drafts": every `compiler_frontend/ast/**` producer
+  builds family drafts, AST error enums carry `DiagnosticDraft`, and the post-construction
+  classifications (nonconstant struct defaults, `$children` empty arguments, signature fallback,
+  generic-parameter spans, config-origin labels, generic call sites) are decided before
+  construction; only W3-callee boundaries still convert legacy values. W1 is accepted in "Phase 4
+  P4.6b W1: build, backend, project and
   module-compilation producers construct drafts": those producers and the integration-test roots
   build family drafts; Stage 0 file-reference rows store small semantic failure facts and the AST
   emits the diagnostic per read; the never-read `ResolvedExternalImport.diagnostics` and the

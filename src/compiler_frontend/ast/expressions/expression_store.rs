@@ -22,6 +22,7 @@ use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastFallibility;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType, InfrastructureErrors};
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::{
     AstCapacityResource, CompilerDiagnostic, ValueReceiverContext,
 };
@@ -542,8 +543,18 @@ pub(crate) struct CompletedExpressionInput {
 }
 #[derive(Debug)]
 pub(crate) enum ExpressionConstructionFailure {
-    Diagnostic(CompilerDiagnostic),
+    Diagnostic(DiagnosticDraft),
     Invariant(Box<InfrastructureErrors>),
+}
+impl From<DiagnosticDraft> for ExpressionConstructionFailure {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
+        Self::Diagnostic(diagnostic)
+    }
+}
+impl From<CompilerDiagnostic> for ExpressionConstructionFailure {
+    fn from(diagnostic: CompilerDiagnostic) -> Self {
+        Self::Diagnostic(diagnostic.into())
+    }
 }
 impl From<CompilerError> for ExpressionConstructionFailure {
     fn from(e: CompilerError) -> Self {
@@ -561,14 +572,12 @@ pub(super) fn checked_extent(
     rows: bool,
 ) -> Result<(u32, u32), ExpressionConstructionFailure> {
     let capacity = || {
-        ExpressionConstructionFailure::Diagnostic(CompilerDiagnostic::compiler_capacity_exceeded(
-            if rows {
-                AstCapacityResource::ExpressionRows
-            } else {
-                AstCapacityResource::ExpressionSideEntries
-            },
-            span,
-        ))
+        ExpressionConstructionFailure::Diagnostic(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::compiler_capacity_exceeded(if rows {
+            AstCapacityResource::ExpressionRows
+        } else {
+            AstCapacityResource::ExpressionSideEntries
+        },
+        span,))
     };
     let start = u32::try_from(start).map_err(|_| capacity())?;
     let len = u32::try_from(len).map_err(|_| capacity())?;
@@ -651,8 +660,8 @@ storage!(
 /// WHY: the borrow checker keeps views from outliving appends, and `freeze` consumes the builder
 /// at the last-reader boundary.
 ///
-/// Failure contract: an exhausted limit fails the append with a `Diagnostic` from
-/// `CompilerDiagnostic::compiler_capacity_exceeded`. That is an ordinary construction failure.
+/// Failure contract: an exhausted limit fails the append with a `DiagnosticDraft` from
+/// `families::token_lexical::compiler_capacity_exceeded`. That is an ordinary construction failure.
 /// No probe or fallback may turn it into a rejected candidate or a runtime classification.
 /// Generated-constant materialisation and constant import report it as an internal compiler
 /// error instead, because they rebuild values that already fitted once. Compound constructors
@@ -1460,15 +1469,13 @@ impl<'a> ExpressionView<'a> {
     pub(crate) fn require_single(
         self,
         receiver: ValueReceiverContext,
-    ) -> Result<TypeId, CompilerDiagnostic> {
+    ) -> Result<TypeId, DiagnosticDraft> {
         match self.row().success {
             SuccessShape::One(id) => Ok(id),
-            _ => Err(CompilerDiagnostic::invalid_value_receiver(
-                receiver,
-                1,
-                self.success_types().len(),
-                self.span(),
-            )),
+            _ => Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_value_receiver(receiver,
+            1,
+            self.success_types().len(),
+            self.span(),)),
         }
     }
     pub(crate) fn error_type(self) -> Option<TypeId> {
@@ -1535,11 +1542,6 @@ pub(crate) struct ExpressionStorageStatistics {
 mod freeze;
 pub(crate) use freeze::ExpressionFreezeRoots;
 
-impl From<CompilerDiagnostic> for ExpressionConstructionFailure {
-    fn from(e: CompilerDiagnostic) -> Self {
-        Self::Diagnostic(e)
-    }
-}
 #[path = "expression_store_snapshot.rs"]
 mod snapshot;
 

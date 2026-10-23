@@ -22,8 +22,8 @@ use crate::compiler_frontend::ast::templates::tir::public_const_rebuild::rebuild
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidFieldAccessReason,
-    InvalidReceiverCallReason, ValueReceiverContext,
+    InvalidAssignmentTargetReason, InvalidFieldAccessReason, InvalidReceiverCallReason,
+    ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -349,13 +349,11 @@ fn parse_postfix_chain_typed(
             || token_stream.current_tag() == TokenTag::EOF
         {
             let dot_span = previous_token_span(token_stream);
-            return Err(CompilerDiagnostic::invalid_field_access(
-                InvalidFieldAccessReason::ExpectedNameAfterDot,
-                None,
-                None,
-                Vec::new(),
-                dot_span,
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_field_access(InvalidFieldAccessReason::ExpectedNameAfterDot,
+            None,
+            None,
+            Vec::new(),
+            dot_span,)
             .into());
         }
 
@@ -509,13 +507,11 @@ fn parse_postfix_chain_typed(
         };
 
         let known_fields = collect_known_member_names(receiver_type_id, type_interner, path_fork);
-        return Err(CompilerDiagnostic::invalid_field_access(
-            reason,
-            Some(member_name),
-            Some(receiver_type_id),
-            known_fields,
-            member_span,
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_field_access(reason,
+        Some(member_name),
+        Some(receiver_type_id),
+        known_fields,
+        member_span,)
         .into());
     }
 
@@ -531,19 +527,16 @@ fn parse_postfix_chain_typed(
             ),
             ReceiverSourceState::Temporary
         ) {
-            let diagnostic = CompilerDiagnostic::invalid_assignment_target(
-                InvalidAssignmentTargetReason::TemporaryNotAssignable,
-                None,
-                Some(
-                    expression_builder
-                        .view(receiver_expression)?
-                        .require_single(ValueReceiverContext::ReceiverBase)?,
-                ),
-                None,
-                None,
-                None,
-                receiver_node.span,
-            );
+            let diagnostic = crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::invalid_assignment_target(InvalidAssignmentTargetReason::TemporaryNotAssignable,
+            None,
+            Some(
+                expression_builder
+                    .view(receiver_expression)?
+                    .require_single(ValueReceiverContext::ReceiverBase)?,
+            ),
+            None,
+            None,
+            receiver_node.span,);
             return Err(diagnostic.into());
         }
     }
@@ -556,25 +549,20 @@ fn parse_postfix_chain_typed(
         // When the chain is followed by an assignment operator, the author wrote `~place = ...`
         // and intended an assignment target, not a receiver call.
         if token_stream.current_tag().is_assignment_operator() {
-            return Err(CompilerDiagnostic::invalid_assignment_target(
-                InvalidAssignmentTargetReason::MutableMarkerOnAssignmentTarget,
-                None,
-                None,
-                None,
-                None,
-                None,
-                marker_span,
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::invalid_assignment_target(InvalidAssignmentTargetReason::MutableMarkerOnAssignmentTarget,
+            None,
+            None,
+            None,
+            None,
+            marker_span,)
             .into());
         }
-        return Err(CompilerDiagnostic::invalid_receiver_call(
-            InvalidReceiverCallReason::MutableMarkerOnNonReceiverCall,
-            None,
-            None,
-            None,
-            None,
-            marker_span,
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_receiver_call(InvalidReceiverCallReason::MutableMarkerOnNonReceiverCall,
+        None,
+        None,
+        None,
+        None,
+        marker_span,)
         .into());
     }
 
@@ -803,25 +791,21 @@ pub(crate) fn pending_numeric_member_access_error(
             || token_stream.current_tag() == TokenTag::EOF
         {
             let dot_span = previous_token_span(token_stream);
-            return CompilerDiagnostic::invalid_field_access(
-                InvalidFieldAccessReason::ExpectedNameAfterDot,
-                None,
-                None,
-                Vec::new(),
-                dot_span,
-            )
+            return crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_field_access(InvalidFieldAccessReason::ExpectedNameAfterDot,
+            None,
+            None,
+            Vec::new(),
+            dot_span,)
             .into();
         }
 
         let member_span = current_token_span(token_stream);
         return match parse_member_name_typed(token_stream, string_table) {
-            Ok(member_name) => CompilerDiagnostic::invalid_field_access(
-                InvalidFieldAccessReason::UnknownMember,
-                Some(member_name),
-                None,
-                Vec::new(),
-                member_span,
-            )
+            Ok(member_name) => crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_field_access(InvalidFieldAccessReason::UnknownMember,
+            Some(member_name),
+            None,
+            Vec::new(),
+            member_span,)
             .into(),
             Err(error) => error,
         };

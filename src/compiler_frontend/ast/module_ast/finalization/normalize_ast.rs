@@ -43,8 +43,9 @@ use crate::compiler_frontend::ast::templates::tir::{
     replace_expression_overlay_entries,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateSlotReason, InvalidTemplateStructureReason,
+    DiagnosticDraft, InvalidTemplateSlotReason, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -1012,12 +1013,12 @@ fn replace_inactive_assertion_message(
 
 #[derive(Debug)]
 pub(in crate::compiler_frontend::ast) enum TemplateNormalizationError {
-    Diagnostic(CompilerDiagnostic),
+    Diagnostic(DiagnosticDraft),
     Infrastructure(Box<InfrastructureErrors>),
 }
 
-impl From<CompilerDiagnostic> for TemplateNormalizationError {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
+impl From<DiagnosticDraft> for TemplateNormalizationError {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
         TemplateNormalizationError::Diagnostic(diagnostic)
     }
 }
@@ -1037,7 +1038,9 @@ impl From<Box<InfrastructureErrors>> for TemplateNormalizationError {
 impl From<TemplateError> for TemplateNormalizationError {
     fn from(error: TemplateError) -> Self {
         match error {
-            TemplateError::Diagnostic(diagnostic) => {
+            TemplateError::Diagnostic(diagnostic)
+            | TemplateError::EmptyArguments(diagnostic)
+            | TemplateError::NonConstantReferenceInConstant(diagnostic) => {
                 TemplateNormalizationError::Diagnostic(diagnostic)
             }
             TemplateError::Infrastructure(error) => {
@@ -1241,7 +1244,7 @@ fn normalize_expression_template_node(
             }
             FinalizedTemplateValue::SlotInsertHelper => {
                 if helper_artifact_policy == HelperArtifactPolicy::RejectFinalHelperValue {
-                    return Err(CompilerDiagnostic::invalid_template_structure(
+                    return Err(templates::invalid_template_structure(
                         InvalidTemplateStructureReason::HelperOutsideWrapperSlot,
                         template.span,
                     )
@@ -1463,7 +1466,7 @@ fn materialize_runtime_template_handoff_for_hir(
         prepared.outcome,
         TemplatePreparationOutcome::Runtime(RuntimeTemplateReason::SlotContribution,)
     ) {
-        return Err(CompilerDiagnostic::invalid_template_slot(
+        return Err(templates::invalid_template_slot(
             InvalidTemplateSlotReason::InsertOutsideParentSlot,
             None,
             template.span,

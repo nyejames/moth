@@ -17,10 +17,13 @@ use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
-    calls_data::InvalidValueReceiverView, types_borrows_targets::TypeMismatchView,
+    calls_data::{InvalidBuiltinCallView, InvalidValueReceiverView},
+    types_borrows_targets::TypeMismatchView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidBuiltinCallReason, TypeMismatchContext, ValueReceiverContext,
+    DiagnosticBag, InvalidBuiltinCallReason, TypeMismatchContext, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::display::display_type_with_resolver;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -691,15 +694,25 @@ fn preserves_nested_builtin_diagnostic_origin_under_whole_expression_catch() {
     let diagnostic = pending
         .unhandled_typed_error_diagnostic()
         .expect("unhandled nested get needs a builtin diagnostic");
-    let DiagnosticPayload::InvalidBuiltinCall {
-        reason: InvalidBuiltinCallReason::UnhandledFallibleCall,
-        builtin_name: Some(diagnostic_builtin),
-    } = diagnostic.payload
-    else {
-        panic!("expected unhandled builtin diagnostic");
-    };
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact
+        .first()
+        .expect("the draft compacts to a diagnostic view");
+    let facts = diagnostic
+        .family_view::<InvalidBuiltinCallView>()
+        .expect("unhandled nested get retains the invalid-builtin-call facts");
+    assert_eq!(
+        facts.reason,
+        InvalidBuiltinCallReason::UnhandledFallibleCall
+    );
+    let diagnostic_builtin = facts
+        .builtin_name
+        .expect("unhandled nested get names its builtin");
     assert_eq!(string_table.resolve(diagnostic_builtin), "get");
-    assert_eq!(diagnostic.primary_span, left.span());
+    assert!(matches!(
+        diagnostic.primary_site(),
+        SiteRef::Local(span) if Some(span) == left.span()
+    ));
 }
 
 #[test]

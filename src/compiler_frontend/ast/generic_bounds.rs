@@ -5,9 +5,9 @@
 //! WHY: nominal generic instances are keyed only by constructor plus type arguments, so
 //! only reusable canonical/compiler-owned evidence may satisfy those bounds.
 use crate::compiler_frontend::builtins::casts::evidence::builtin_cast_proves_core_trait;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidGenericInstantiationReason,
-};
+use crate::compiler_frontend::compiler_messages::InvalidGenericInstantiationReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::invalid_generic_instantiation;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -19,7 +19,7 @@ use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId};
 use rustc_hash::FxHashSet;
 
-type GenericBoundValidationResult<T> = Result<T, CompilerDiagnostic>;
+type GenericBoundValidationResult<T> = Result<T, DiagnosticDraft>;
 
 /// Evidence selected for a concrete trait bound in the requester context.
 ///
@@ -226,7 +226,7 @@ fn validate_single_bound(
         .map(|definition| definition.name)
         .unwrap_or(parameter_name);
 
-    Err(CompilerDiagnostic::invalid_generic_instantiation(
+    Err(invalid_generic_instantiation(
         instance_name,
         InvalidGenericInstantiationReason::MissingNominalTraitEvidence {
             parameter_name,

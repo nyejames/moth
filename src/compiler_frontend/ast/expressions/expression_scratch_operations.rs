@@ -583,7 +583,7 @@ impl SideCounts {
             ($field:ident,$amount:expr) => {
                 self.$field = self.$field.checked_add($amount).ok_or_else(|| {
                     ExpressionConstructionFailure::Diagnostic(
-                        CompilerDiagnostic::compiler_capacity_exceeded(
+                        crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::compiler_capacity_exceeded(
                             AstCapacityResource::ExpressionSideEntries,
                             span,
                         ),

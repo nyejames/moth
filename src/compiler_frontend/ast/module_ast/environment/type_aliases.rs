@@ -20,8 +20,9 @@ use crate::compiler_frontend::ast::type_resolution::{
     ResolvedTypeAlias, ResolvedTypeAnnotation, resolve_parsed_type_annotation,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticToken, InvalidDeclarationReason, InvalidTypeAnnotationReason,
+    DiagnosticDraft, DiagnosticToken, InvalidDeclarationReason, InvalidTypeAnnotationReason,
     TypeAnnotationContext,
 };
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
@@ -243,7 +244,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .map(|def| def.name.to_string())
                 .unwrap_or_else(|| "external".to_string());
 
-            let diagnostic = CompilerDiagnostic::invalid_declaration(
+            let diagnostic = names_declarations::invalid_declaration(
                 InvalidDeclarationReason::ExternalTypeAlias {
                     type_name: string_table.intern(&type_name),
                 },
@@ -286,12 +287,12 @@ fn parsed_type_span(parsed_type: &ParsedTypeRef) -> Option<SourceSpan> {
 fn unresolved_alias_target_diagnostic(
     target: &ParsedTypeRef,
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     if let Some(name) = first_authored_type_name(target) {
-        return CompilerDiagnostic::unknown_type_name(name, span);
+        return names_declarations::unknown_type_name(name, span);
     }
 
-    CompilerDiagnostic::invalid_type_annotation(
+    names_declarations::invalid_type_annotation(
         TypeAnnotationContext::DeclarationTarget,
         InvalidTypeAnnotationReason::ExpectedTypeAnnotation {
             found: DiagnosticToken::from_static_tag(TokenTag::EOF),

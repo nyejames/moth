@@ -38,9 +38,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{
     FileValueResolutionServices, ScopeContext, Stage0ResolutionFacts, TopLevelDeclarationTable,
 };
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidExpressionReason, InvalidTemplateStructureReason, NameNamespace,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::CompactDiagnosticBagForTest;
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
@@ -263,9 +261,7 @@ fn const_required_option_capture_template_with_direct_tir(
     }
 }
 
-fn parse_template_error(
-    source: &str,
-) -> crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
+fn parse_template_error(source: &str) -> CompactDiagnosticBagForTest {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -350,7 +346,7 @@ fn parse_control_flow_template_after_composition(
 
 fn parse_control_flow_template_after_composition_error(
     source: &str,
-) -> crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
+) -> CompactDiagnosticBagForTest {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -596,9 +592,7 @@ fn parse_const_required_template(
     (template, context, string_table)
 }
 
-fn parse_const_required_template_error(
-    source: &str,
-) -> crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
+fn parse_const_required_template_error(source: &str) -> CompactDiagnosticBagForTest {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -1032,18 +1026,6 @@ fn assert_body_node_static_excludes(
         !rendered.contains(unexpected),
         "expected {rendered:?} to exclude {unexpected:?}"
     );
-}
-
-fn assert_invalid_template_structure(
-    diagnostic: &crate::compiler_frontend::compiler_messages::CompilerDiagnostic,
-    expected_reason: InvalidTemplateStructureReason,
-) {
-    match &diagnostic.payload {
-        DiagnosticPayload::InvalidTemplateStructure { reason } => {
-            assert_eq!(*reason, expected_reason);
-        }
-        payload => panic!("expected invalid template structure payload, found {payload:?}"),
-    }
 }
 
 fn expect_conditional_node(template: &Template, context: &ScopeContext) -> TemplateIrNodeId {

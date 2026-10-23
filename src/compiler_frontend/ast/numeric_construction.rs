@@ -52,9 +52,9 @@ use crate::compiler_frontend::ast::statements::match_patterns::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticLabel, TypeMismatchContext,
-};
+use crate::compiler_frontend::compiler_messages::TypeMismatchContext;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::type_mismatch;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId, builtin_type_ids};
 use crate::compiler_frontend::instrumentation::ast_counters::{AstCounter, increment_ast_counter};
@@ -2731,17 +2731,10 @@ pub(crate) fn numeric_receiver_conflict(
     found: TypeId,
     receiver_span: Option<SourceSpan>,
     recipe_span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    let diagnostic = CompilerDiagnostic::type_mismatch(
-        expected,
-        found,
-        TypeMismatchContext::General,
-        receiver_span,
-    );
+) -> DiagnosticDraft {
+    let diagnostic = type_mismatch(expected, found, TypeMismatchContext::General, receiver_span);
     match recipe_span {
-        Some(recipe_span) => {
-            diagnostic.with_labels(vec![DiagnosticLabel::secondary(Some(recipe_span), None)])
-        }
+        Some(recipe_span) => diagnostic.with_label(Some(recipe_span), None),
         None => diagnostic,
     }
 }
@@ -2750,17 +2743,15 @@ pub(crate) fn numeric_receiver_conflict(
 pub(crate) fn conflicting_receiver_diagnostic(
     first: ReceiverWitness,
     second: ReceiverWitness,
-) -> CompilerDiagnostic {
-    let diagnostic = CompilerDiagnostic::type_mismatch(
+) -> DiagnosticDraft {
+    let diagnostic = type_mismatch(
         first.type_id,
         second.type_id,
         TypeMismatchContext::General,
         second.span,
     );
     match first.span {
-        Some(first_span) => {
-            diagnostic.with_labels(vec![DiagnosticLabel::secondary(Some(first_span), None)])
-        }
+        Some(first_span) => diagnostic.with_label(Some(first_span), None),
         None => diagnostic,
     }
 }
@@ -2806,8 +2797,7 @@ pub(crate) fn family_receives_recipe(
 /// Result of one construction-table operation.
 ///
 /// WHAT: reuses the expression parser's existing failure lane: an authored numeric conflict is a
-///       `CompilerDiagnostic` and a broken construction invariant is a typed `CompilerError`.
-/// WHY: completion runs at the body root but reports through the same lane as the statements it
+///       `DiagnosticDraft` and a broken construction invariant is a typed `CompilerError`.
 ///      resumes, so no second error envelope exists.
 pub(crate) type ConstructionResult<T> = Result<T, ExpressionParseError>;
 

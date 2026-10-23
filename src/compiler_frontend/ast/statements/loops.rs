@@ -24,9 +24,8 @@ use crate::compiler_frontend::ast::statements::loop_headers::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, InvalidLoopHeaderReason,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, InvalidLoopHeaderReason};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
@@ -135,7 +134,7 @@ pub fn create_loop(
 
     let mut window = token_stream.subcursor_window(start_index, colon_index)?;
     if is_empty_header_window(&mut window)? {
-        return Err(CompilerDiagnostic::invalid_loop_header(
+        return Err(choices_control_flow::invalid_loop_header(
             InvalidLoopHeaderReason::EmptyHeader,
             span,
         )
@@ -296,7 +295,7 @@ fn find_loop_header_colon_index(token_stream: &mut AstCursor) -> LoopResult<usiz
         }
 
         if is_top_level && matches!(tag, TokenTag::END | TokenTag::EOF) {
-            outcome = Some(Err(CompilerDiagnostic::invalid_loop_header(
+            outcome = Some(Err(choices_control_flow::invalid_loop_header(
                 InvalidLoopHeaderReason::MissingColon,
                 Some(token_span),
             )
@@ -317,7 +316,7 @@ fn find_loop_header_colon_index(token_stream: &mut AstCursor) -> LoopResult<usiz
         .set_position(resume)
         .map_err(ExpressionParseError::from)?;
     outcome.unwrap_or_else(|| {
-        Err(CompilerDiagnostic::invalid_loop_header(
+        Err(choices_control_flow::invalid_loop_header(
             InvalidLoopHeaderReason::MissingColon,
             Some(token_stream.current_span()),
         )

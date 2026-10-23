@@ -45,9 +45,10 @@ use crate::compiler_frontend::ast::templates::top_level_templates::FoldedConstTe
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, DiagnosticDraft, GenericSubstitutionDiagnostic,
-    InvalidTemplateStructureReason, PreparedFailure,
+    DiagnosticBag, DiagnosticDraft, GenericSubstitutionDiagnostic, InvalidTemplateStructureReason,
+    PreparedFailure,
 };
 use std::sync::Arc;
 
@@ -874,7 +875,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     string_table,
                 ));
             }
-            Err(ExpressionParseError::Diagnostic(diagnostic)) => {
+            Err(ExpressionParseError::Diagnostic(diagnostic))
+            | Err(ExpressionParseError::TemplateDirectiveEmptyArguments(diagnostic))
+            | Err(ExpressionParseError::NonConstantReferenceInConstant(diagnostic)) => {
                 let diagnostic = with_generic_instantiation_context(
                     diagnostic,
                     GenericInstantiationDiagnosticContext {
@@ -1329,13 +1332,13 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             return Err(self.diagnostic_messages(
                 match preparation.outcome {
                     TemplatePreparationOutcome::SlotInsertHelper => {
-                        CompilerDiagnostic::invalid_template_structure(
+                        templates::invalid_template_structure(
                             InvalidTemplateStructureReason::HelperInConstTemplate,
                             template.span,
                         )
                     }
                     TemplatePreparationOutcome::Runtime(_) => {
-                        CompilerDiagnostic::invalid_template_structure(
+                        templates::invalid_template_structure(
                             InvalidTemplateStructureReason::NonFoldableConstTemplate,
                             template.span,
                         )
@@ -1391,7 +1394,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     /// Captures a user-facing diagnostic and accumulated warnings before the environment drops.
     fn diagnostic_messages(
         &mut self,
-        diagnostic: CompilerDiagnostic,
+        diagnostic: DiagnosticDraft,
         string_table: &StringTable,
     ) -> PreparedFailure {
         self.diagnostic_bag_messages(DiagnosticBag::from(diagnostic), string_table)
@@ -1421,7 +1424,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         string_table: &StringTable,
     ) -> PreparedFailure {
         match error {
-            TemplateError::Diagnostic(diagnostic) => {
+            TemplateError::Diagnostic(diagnostic)
+            | TemplateError::EmptyArguments(diagnostic)
+            | TemplateError::NonConstantReferenceInConstant(diagnostic) => {
                 self.diagnostic_messages(diagnostic, string_table)
             }
             TemplateError::Infrastructure(error) => self.error_messages(error, string_table),
@@ -1442,14 +1447,17 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             Err(ExpressionParseError::Infrastructure(errors)) => {
                 self.error_messages(errors, string_table)
             }
-            Err(ExpressionParseError::Diagnostic(_) | ExpressionParseError::NumericDeferral(_)) => {
-                self.error_messages(
-                    CompilerError::compiler_error(
-                        "module emitter body boundary received an unconverted parse error",
-                    ),
-                    string_table,
-                )
-            }
+            Err(
+                ExpressionParseError::Diagnostic(_)
+                | ExpressionParseError::TemplateDirectiveEmptyArguments(_)
+                | ExpressionParseError::NonConstantReferenceInConstant(_)
+                | ExpressionParseError::NumericDeferral(_),
+            ) => self.error_messages(
+                CompilerError::compiler_error(
+                    "module emitter body boundary received an unconverted parse error",
+                ),
+                string_table,
+            ),
         }
     }
 }

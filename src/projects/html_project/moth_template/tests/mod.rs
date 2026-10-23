@@ -8,14 +8,11 @@ use super::bundle::prepare_file_value_bundle;
 use crate::build_system::create_project_modules::resource_inputs::{
     ResourceContentState, ResourceInputRegistry,
 };
-use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::file_value_resolution::retained_reference_error;
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, ErrorType};
-use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_resolved_failure_for_test;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, dev_server::render_boundary_messages_html,
     terse::format_terse_boundary_messages,
@@ -850,10 +847,7 @@ fn retained_resolution_diagnostics_name_the_final_logical_source() {
             _ => None,
         })
         .expect("a reference to an absent target should retain a diagnostic");
-    let ExpressionParseError::Diagnostic(diagnostic) = retained_reference_error(*diagnostic) else {
-        panic!("a retained missing-target failure should emit a user diagnostic");
-    };
-    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let compact = compact_resolved_failure_for_test(*diagnostic);
     let view = compact
         .first()
         .expect("the emitted resolution diagnostic should compact");

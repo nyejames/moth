@@ -40,10 +40,11 @@ use crate::compiler_frontend::ast::statements::match_patterns::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::deferred_feature_diagnostics::deferred_feature_reason_diagnostic;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, names_declarations,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DeferredFeatureReason, InvalidMatchArmReason, InvalidMatchPatternReason,
-    ValueReceiverContext,
+    DeferredFeatureReason, InvalidMatchArmReason, InvalidMatchPatternReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -171,7 +172,7 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
     let mut arm_scope = match_context.clone();
 
     if arm_scope.get_reference(&capture_name).is_some() {
-        return Err(CompilerDiagnostic::invalid_match_pattern(
+        return Err(choices_control_flow::invalid_match_pattern(
             InvalidMatchPatternReason::CaptureBindingShadowsVariable,
             None,
             None,
@@ -489,7 +490,7 @@ fn parse_match_pattern_header(
             if token_stream.current_tag() == TokenTag::SYMBOL
                 && !option_pattern_constructor_like(token_stream)
             {
-                return Err(CompilerDiagnostic::invalid_match_pattern(
+                return Err(choices_control_flow::invalid_match_pattern(
                     InvalidMatchPatternReason::BareCaptureOnOptionalScrutinee,
                     None,
                     None,
@@ -573,7 +574,7 @@ pub(crate) fn deferred_pattern_span(pattern: &DeferredArmPattern) -> Option<Sour
 
 fn reject_invalid_pattern_suffix(token_stream: &AstCursor) -> MatchHeaderResult<()> {
     if token_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET {
-        return Err(deferred_feature_reason_diagnostic(
+        return Err(names_declarations::deferred_feature_reason(
             DeferredFeatureReason::CaptureTaggedPattern,
             Some(token_stream.current_span()),
         )
@@ -581,7 +582,7 @@ fn reject_invalid_pattern_suffix(token_stream: &AstCursor) -> MatchHeaderResult<
     }
 
     if token_stream.current_tag() == TokenTag::AS {
-        return Err(CompilerDiagnostic::invalid_match_pattern(
+        return Err(choices_control_flow::invalid_match_pattern(
             InvalidMatchPatternReason::AsNotValid,
             None,
             None,
@@ -591,21 +592,19 @@ fn reject_invalid_pattern_suffix(token_stream: &AstCursor) -> MatchHeaderResult<
     }
 
     if token_stream.current_tag() == TokenTag::COLON {
-        return Err(CompilerDiagnostic::invalid_match_arm(
+        return Err(choices_control_flow::invalid_match_arm(
             InvalidMatchArmReason::LegacyColonSyntax,
             Some(token_stream.current_span()),
         )
         .into());
     }
-
     if token_stream.current_tag() == TokenTag::ARROW {
-        return Err(CompilerDiagnostic::invalid_match_arm(
+        return Err(choices_control_flow::invalid_match_arm(
             InvalidMatchArmReason::InvalidArrow,
             Some(token_stream.current_span()),
         )
         .into());
     }
-
     Ok(())
 }
 
@@ -640,7 +639,7 @@ fn build_arm_scope_with_choice_captures(
 
         // Enforce no-shadowing: the local binding name must not collide with any visible local.
         if let Some(_existing) = arm_scope.get_reference(&binding_name) {
-            return Err(CompilerDiagnostic::invalid_match_pattern(
+            return Err(choices_control_flow::invalid_match_pattern(
                 InvalidMatchPatternReason::CaptureBindingShadowsVariable,
                 None,
                 None,
@@ -806,7 +805,7 @@ fn build_pending_choice_arm_scope(
         let binding_name = capture.binding_name;
 
         if arm_scope.get_reference(&binding_name).is_some() {
-            return Err(CompilerDiagnostic::invalid_match_pattern(
+            return Err(choices_control_flow::invalid_match_pattern(
                 InvalidMatchPatternReason::CaptureBindingShadowsVariable,
                 None,
                 None,
@@ -922,7 +921,7 @@ fn parse_pending_option_pattern_header(
     if token_stream.current_tag() == TokenTag::SYMBOL
         && !option_pattern_constructor_like(token_stream)
     {
-        return Err(CompilerDiagnostic::invalid_match_pattern(
+        return Err(choices_control_flow::invalid_match_pattern(
             InvalidMatchPatternReason::BareCaptureOnOptionalScrutinee,
             None,
             None,
@@ -976,7 +975,7 @@ fn build_pending_option_capture_scope(
     let arm_scope = match_context.clone();
 
     if arm_scope.get_reference(&binding.name).is_some() {
-        return Err(CompilerDiagnostic::invalid_match_pattern(
+        return Err(choices_control_flow::invalid_match_pattern(
             InvalidMatchPatternReason::CaptureBindingShadowsVariable,
             None,
             None,

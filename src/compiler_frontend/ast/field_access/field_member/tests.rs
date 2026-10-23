@@ -24,7 +24,10 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrBuilder, TemplateIrStore, TemplateIrSummary, TemplateTirPhase, TemplateTirReference,
     TemplateViewContext,
 };
-use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidFieldAccessReason};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidFieldAccessView;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, InvalidFieldAccessReason};
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
@@ -175,18 +178,17 @@ fn missing_member_name_after_dot_points_at_offending_token_boundary() {
     else {
         panic!("expected user diagnostic, found infrastructure error: {error:?}")
     };
-    assert_eq!(
-        diagnostic.primary_span,
-        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, offending_span))
-    );
-
-    match diagnostic.payload {
-        DiagnosticPayload::InvalidFieldAccess {
-            reason: InvalidFieldAccessReason::ExpectedNameAfterDot,
-            ..
-        } => {}
-        other => panic!("expected InvalidFieldAccess::ExpectedNameAfterDot, got {other:?}"),
-    }
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    assert!(matches!(
+        diagnostic.primary_site(),
+        SiteRef::Local(span)
+            if span == SourceSpan::new(SourceId::COMPILATION_ROOT, offending_span)
+    ));
+    let facts = diagnostic
+        .family_view::<InvalidFieldAccessView>()
+        .expect("the diagnostic is an invalid field access");
+    assert_eq!(facts.reason, InvalidFieldAccessReason::ExpectedNameAfterDot);
 }
 #[test]
 fn resolved_default_field_uses_foreign_effective_tir() {

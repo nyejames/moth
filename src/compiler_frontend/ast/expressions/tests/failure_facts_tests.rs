@@ -20,9 +20,12 @@ use crate::compiler_frontend::ast::expressions::failure_facts::{
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
-use crate::compiler_frontend::compiler_messages::{
-    BuiltinFailureOriginKind, DiagnosticPayload, InvalidFallibleHandlingReason,
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
+    InvalidFallibleHandlingCode, InvalidFallibleHandlingView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::compiler_messages::{BuiltinFailureOriginKind, DiagnosticBag};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::tests::ast_fixture_support::{
@@ -599,24 +602,36 @@ fn first_numeric_and_typed_diagnostics_keep_descendant_producer_spans() {
     let typed_diagnostic = pending
         .unhandled_typed_error_diagnostic()
         .expect("the pending expression has an unhandled typed producer");
-    assert_eq!(typed_diagnostic.primary_span, first_typed.span);
+    let typed_compact = compact_bag_for_test(DiagnosticBag::from(typed_diagnostic), None);
+    let typed_diagnostic = typed_compact.first().expect("the diagnostic is retained");
     assert!(matches!(
-        typed_diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason: InvalidFallibleHandlingReason::UnhandledErrorReturn,
-        }
+        typed_diagnostic.primary_site(),
+        SiteRef::Local(span) if Some(span) == first_typed.span
     ));
+    let typed_facts = typed_diagnostic
+        .family_view::<InvalidFallibleHandlingView>()
+        .expect("the diagnostic is invalid fallible handling");
+    assert_eq!(
+        typed_facts.reason,
+        InvalidFallibleHandlingCode::UnhandledErrorReturn
+    );
     let numeric_diagnostic =
         assert_message_escape_diagnostic(pending, &TemplateIrStore::new(), &builder)
             .expect("valid AST")
             .expect("checked numeric work can escape message evaluation");
-    assert_eq!(numeric_diagnostic.primary_span, first_numeric.span);
+    let numeric_compact = compact_bag_for_test(DiagnosticBag::from(numeric_diagnostic), None);
+    let numeric_diagnostic = numeric_compact.first().expect("the diagnostic is retained");
     assert!(matches!(
-        numeric_diagnostic.payload,
-        DiagnosticPayload::InvalidFallibleHandling {
-            reason: InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
-        }
+        numeric_diagnostic.primary_site(),
+        SiteRef::Local(span) if Some(span) == first_numeric.span
     ));
+    let numeric_facts = numeric_diagnostic
+        .family_view::<InvalidFallibleHandlingView>()
+        .expect("the diagnostic is invalid fallible handling");
+    assert_eq!(
+        numeric_facts.reason,
+        InvalidFallibleHandlingCode::AssertionMessageCannotEscape
+    );
 }
 
 #[test]

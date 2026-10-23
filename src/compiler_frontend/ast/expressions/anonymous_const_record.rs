@@ -23,7 +23,7 @@ use crate::compiler_frontend::ast::expressions::expression_types::{
     ConstRecordState, ConstValueKind,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticToken};
+use crate::compiler_frontend::compiler_messages::DiagnosticToken;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -80,10 +80,8 @@ pub(super) fn parse_parenthesized_anonymous_const_record_expression(
             .map_err(ExpressionParseError::from)?;
 
         if argument.access_mode != CallAccessMode::Shared {
-            return Err(CompilerDiagnostic::unexpected_token_from_tag(
-                DiagnosticToken::from_static_tag(TokenTag::MUTABLE),
-                argument.marker_span.or(argument.span),
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_token_from_tag(DiagnosticToken::from_static_tag(TokenTag::MUTABLE),
+            argument.marker_span.or(argument.span),)
             .into());
         }
 

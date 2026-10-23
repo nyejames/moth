@@ -38,9 +38,11 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_errors::ErrorType;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_token_from_tag;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
-use crate::compiler_frontend::compiler_messages::render::terminal::format_diagnostic_guidance;
+use crate::compiler_frontend::compiler_messages::render::terminal::format_guidance_view;
 use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
 use crate::compiler_frontend::datatypes::{builtin_type_ids, environment::TypeEnvironment};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -1079,9 +1081,14 @@ fn canonical_string_only_donors_borrow_identity_without_retaining_file_tokens() 
         .current_diagnostic_token(&mut materialised_strings)
         .expect("materialised body diagnostic projection should succeed")
         .expect("materialised body should expose its current token");
-    let diagnostic = CompilerDiagnostic::unexpected_token_from_tag(projected, None);
-    let rendered = format_diagnostic_guidance(
-        &diagnostic,
+    let compact = compact_bag_for_test(
+        DiagnosticBag::from(unexpected_token_from_tag(projected, None)),
+        None,
+    );
+    let rendered = format_guidance_view(
+        compact
+            .first()
+            .expect("projected token diagnostic compacts"),
         DiagnosticRenderContext::new(&materialised_strings),
     )
     .join("\n");
@@ -1139,10 +1146,9 @@ fn malformed_materialised_donor_text_handle_is_infrastructure_failure() {
         .current_diagnostic_token(&mut StringTable::new())
         .expect_err("malformed donor text must fail diagnostic projection");
     assert_eq!(error, TokenViewError::MalformedStringHandle);
-    let infrastructure = CompilerDiagnostic::token_view_invariant_error(
-        error,
-        "materialised body diagnostic projection",
-    );
+    let infrastructure = CompilerError::compiler_error(format!(
+        "materialised body diagnostic projection token payload was malformed: {error:?}"
+    ));
     assert_eq!(infrastructure.error_type, ErrorType::Compiler);
 }
 
@@ -1264,9 +1270,14 @@ fn donor_numeric_literal_text_renders_through_borrowed_origin() {
         .current_diagnostic_token(&mut materialised_strings)
         .expect("donor numeric diagnostic projection should succeed")
         .expect("the current numeric token should project into a diagnostic token");
-    let diagnostic = CompilerDiagnostic::unexpected_token_from_tag(projected, None);
-    let rendered = format_diagnostic_guidance(
-        &diagnostic,
+    let compact = compact_bag_for_test(
+        DiagnosticBag::from(unexpected_token_from_tag(projected, None)),
+        None,
+    );
+    let rendered = format_guidance_view(
+        compact
+            .first()
+            .expect("projected numeric token diagnostic compacts"),
         DiagnosticRenderContext::new(&materialised_strings),
     )
     .join("\n");

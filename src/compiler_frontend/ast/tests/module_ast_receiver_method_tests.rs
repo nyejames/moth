@@ -12,7 +12,11 @@ use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_resolution::validate_no_recursive_runtime_structs;
-use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidDeclarationReason};
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
+    InvalidDeclarationCode, InvalidDeclarationView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
@@ -313,14 +317,16 @@ fn recursive_runtime_struct_cycles_are_rejected() {
 
     let diagnostic =
         validate_no_recursive_runtime_structs(&struct_fields, &type_environment, &path_fork)
-            .expect_err("recursive runtime struct cycle should be rejected");
-    assert!(matches!(
-        &diagnostic.payload,
-        DiagnosticPayload::InvalidDeclaration {
-            reason: InvalidDeclarationReason::RecursiveRuntimeStruct { .. },
-            ..
-        }
-    ));
+            .expect_err("recursive runtime struct cycles should be rejected");
+
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), Some(&type_environment));
+    let diagnostic = compact
+        .first()
+        .expect("recursive cycle emits one diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidDeclarationView>()
+        .expect("recursive cycle should retain typed declaration facts");
+    assert_eq!(facts.code, InvalidDeclarationCode::RecursiveRuntimeStruct);
 }
 
 #[test]

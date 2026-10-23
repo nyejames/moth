@@ -3,9 +3,8 @@
 use crate::compiler_frontend::ast::TopLevelDeclarationTable;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::type_resolution::TypeResolutionResult;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticPayload, InvalidDeclarationReason,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidDeclarationReason};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::{
@@ -176,29 +175,27 @@ pub(crate) fn build_generic_parameter_scope(
         &forbidden_names,
         string_table,
     )
-    .map_err(|mut diagnostic| {
-        let parameter_name = match &diagnostic.payload {
-            DiagnosticPayload::InvalidDeclaration {
-                reason:
-                    InvalidDeclarationReason::InvalidGenericParameterName { parameter_name }
-                    | InvalidDeclarationReason::DuplicateGenericParameter { parameter_name }
-                    | InvalidDeclarationReason::GenericParameterNameCollision { parameter_name }
-                    | InvalidDeclarationReason::ReservedGenericParameterName { parameter_name },
-                ..
-            } => Some(*parameter_name),
-            _ => None,
+    .map_err(|diagnostic| {
+        let DiagnosticPayload::InvalidDeclaration { reason, name } = &diagnostic.payload else {
+            return diagnostic.into();
         };
-
-        if diagnostic.primary_span.is_none()
-            && let Some(parameter_name) = parameter_name
-            && let Some(parameter) = generic_parameters
+        let parameter_name = match reason {
+            InvalidDeclarationReason::InvalidGenericParameterName { parameter_name }
+            | InvalidDeclarationReason::GenericParameterNameCollision { parameter_name }
+            | InvalidDeclarationReason::ReservedGenericParameterName { parameter_name }
+            | InvalidDeclarationReason::DuplicateGenericParameter { parameter_name } => {
+                *parameter_name
+            }
+            _ => return diagnostic.into(),
+        };
+        let span = diagnostic.primary_span.or_else(|| {
+            generic_parameters
                 .parameters
                 .iter()
                 .find(|parameter| parameter.name == parameter_name)
-        {
-            diagnostic.primary_span = parameter.span;
-        }
-        diagnostic
+                .and_then(|parameter| parameter.span)
+        });
+        names_declarations::invalid_declaration(reason.clone(), *name, span)
     })
     .map(Some)
 }
@@ -236,7 +233,7 @@ pub(crate) fn validate_generic_parameters_used(
 ) -> TypeResolutionResult<()> {
     for parameter in &generic_parameters.parameters {
         if !used_parameters.contains(&parameter.id) {
-            return Err(CompilerDiagnostic::invalid_declaration(
+            return Err(names_declarations::invalid_declaration(
                 InvalidDeclarationReason::UnusedGenericParameter {
                     parameter_name: parameter.name,
                 },

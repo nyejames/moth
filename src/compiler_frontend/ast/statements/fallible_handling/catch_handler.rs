@@ -48,9 +48,9 @@ use crate::compiler_frontend::ast::statements::value_production::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, InvalidFallibleHandlingReason,
-};
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::InvalidFallibleHandlingReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::type_coercion::parse_context::{
@@ -1041,7 +1041,7 @@ fn parse_catch_error_binding(
     string_table: &mut StringTable,
 ) -> Result<ParsedCatchErrorBinding, ExpressionParseError> {
     if token_stream.current_tag() != TokenTag::TYPE_PARAMETER_BRACKET {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerOpeningPipe,
             Some(token_stream.current_span()),
         )
@@ -1051,7 +1051,7 @@ fn parse_catch_error_binding(
     token_stream.advance();
 
     if token_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::EmptyCatchHandlerBinding,
             Some(token_stream.current_span()),
         )
@@ -1059,7 +1059,7 @@ fn parse_catch_error_binding(
     }
 
     if token_stream.current_tag() != TokenTag::SYMBOL {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerIdentifier,
             Some(token_stream.current_span()),
         )
@@ -1067,7 +1067,7 @@ fn parse_catch_error_binding(
     }
 
     let Some(handler_name) = token_stream.current_string_id_in(string_table)? else {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerIdentifier,
             Some(token_stream.current_span()),
         )
@@ -1093,7 +1093,7 @@ fn parse_catch_error_binding(
     token_stream.advance();
 
     if token_stream.current_tag() == TokenTag::COMMA {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::MultipleCatchHandlerBindings,
             Some(token_stream.current_span()),
         )
@@ -1101,7 +1101,7 @@ fn parse_catch_error_binding(
     }
 
     if token_stream.current_tag() != TokenTag::TYPE_PARAMETER_BRACKET {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerClosingPipe,
             Some(token_stream.current_span()),
         )
@@ -1190,7 +1190,7 @@ fn parse_catch_fallible_handler_body(
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedCatchHandler, ExpressionParseError> {
     if token_stream.current_tag() != TokenTag::COLON {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerColon,
             Some(token_stream.current_span()),
         )
@@ -1359,7 +1359,7 @@ fn parse_inline_catch_handler_body(
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedCatchHandler, ExpressionParseError> {
     if token_stream.current_tag() == TokenTag::NEWLINE {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::InlineCatchMultiline,
             Some(token_stream.current_span()),
         )
@@ -1367,7 +1367,7 @@ fn parse_inline_catch_handler_body(
     }
 
     if token_stream.current_tag() != TokenTag::THEN {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler,
             Some(token_stream.current_span()),
         )
@@ -1382,7 +1382,7 @@ fn parse_inline_catch_handler_body(
             Some(success_result_type_ids) if success_result_type_ids.is_empty()
         )
     {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::FallbackValuesForErrorOnlyResult,
             Some(token_stream.current_span()),
         )
@@ -1393,7 +1393,7 @@ fn parse_inline_catch_handler_body(
     token_stream.advance();
 
     if token_stream.current_tag() == TokenTag::NEWLINE {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::InlineCatchMultiline,
             Some(token_stream.current_span()),
         )
@@ -1401,7 +1401,7 @@ fn parse_inline_catch_handler_body(
     }
 
     if is_missing_produced_value_boundary(token_stream.current_tag()) {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ThenRequiresValues,
             Some(token_stream.current_span()),
         )
@@ -1434,7 +1434,7 @@ fn parse_inline_catch_handler_body(
     })?;
 
     if token_stream.current_tag() == TokenTag::CATCH {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler,
             Some(token_stream.current_span()),
         )

@@ -23,9 +23,9 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateDirectiveReason,
-};
+use crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveArgumentType, StyleDirectiveArgumentValue, StyleDirectiveEffects,
@@ -75,7 +75,7 @@ pub(super) fn apply_handler_style_directive(
     if let Some(factory) = handler_spec.formatter_factory {
         let formatter = factory(parsed_argument.value.as_ref()).map_err(|message| {
             let message_id = string_table.get_or_intern(message);
-            let diagnostic = CompilerDiagnostic::invalid_template_directive(
+            let diagnostic = templates::invalid_template_directive(
                 Some(string_table.intern(directive_name)),
                 InvalidTemplateDirectiveReason::invalid_argument_with_detail(message_id),
                 parsed_argument.error_span,
@@ -150,7 +150,7 @@ fn parse_optional_handler_style_argument(
 
     let Some(argument_type) = argument_type else {
         return Err(with_argument_span(
-            CompilerDiagnostic::invalid_template_directive(
+            templates::invalid_template_directive(
                 Some(string_table.intern(directive_name)),
                 InvalidTemplateDirectiveReason::DirectiveNotAllowedHere,
                 default_span,
@@ -177,7 +177,7 @@ fn parse_optional_handler_style_argument(
 
     if !argument_is_compile_time_constant {
         return Err(with_argument_span(
-            CompilerDiagnostic::invalid_template_directive(
+            templates::invalid_template_directive(
                 Some(string_table.intern(directive_name)),
                 InvalidTemplateDirectiveReason::invalid_argument(),
                 argument_span,
@@ -226,7 +226,7 @@ fn normalize_provided_style_argument_value(
                 StyleDirectiveArgumentValue::String(string_table.resolve(*text).to_owned()),
             ),
             _ => Err(with_argument_span(
-                CompilerDiagnostic::invalid_template_directive(
+                templates::invalid_template_directive(
                     Some(string_table.intern(directive_name)),
                     InvalidTemplateDirectiveReason::invalid_argument(),
                     argument_span,
@@ -241,7 +241,7 @@ fn normalize_provided_style_argument_value(
                 StyleDirectiveArgumentValue::Template(Box::new(template.clone())),
             ),
             _ => Err(with_argument_span(
-                CompilerDiagnostic::invalid_template_directive(
+                templates::invalid_template_directive(
                     Some(string_table.intern(directive_name)),
                     InvalidTemplateDirectiveReason::invalid_argument(),
                     argument_span,
@@ -259,7 +259,7 @@ fn normalize_provided_style_argument_value(
             match number {
                 Some(number) => Ok(StyleDirectiveArgumentValue::Number(number)),
                 None => Err(with_argument_span(
-                    CompilerDiagnostic::invalid_template_directive(
+                    templates::invalid_template_directive(
                         Some(string_table.intern(directive_name)),
                         InvalidTemplateDirectiveReason::invalid_argument(),
                         argument_span,
@@ -273,7 +273,7 @@ fn normalize_provided_style_argument_value(
         StyleDirectiveArgumentType::Bool => match payload {
             Some(ConstValuePayload::Bool(value)) => Ok(StyleDirectiveArgumentValue::Bool(*value)),
             _ => Err(with_argument_span(
-                CompilerDiagnostic::invalid_template_directive(
+                templates::invalid_template_directive(
                     Some(string_table.intern(directive_name)),
                     InvalidTemplateDirectiveReason::invalid_argument(),
                     argument_span,
@@ -309,11 +309,11 @@ fn current_token_source_span(token_stream: &AstCursor) -> Option<SourceSpan> {
 }
 
 fn with_argument_span(
-    mut diagnostic: CompilerDiagnostic,
+    mut diagnostic: DiagnosticDraft,
     argument_span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    if diagnostic.primary_span.is_none() {
-        diagnostic.primary_span = argument_span;
+) -> DiagnosticDraft {
+    if diagnostic.primary_span().is_none() {
+        diagnostic.set_primary_span(argument_span);
     }
     diagnostic
 }

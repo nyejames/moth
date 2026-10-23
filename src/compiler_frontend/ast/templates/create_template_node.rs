@@ -50,9 +50,7 @@ use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateStructureReason,
-};
+use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, FrontendCounter, add_ast_counter, increment_frontend_counter,
 };
@@ -613,7 +611,7 @@ impl Template {
             TemplateType::Comment(CommentDirectiveKind::Doc)
         ) && !template_preparation.facts.is_const_evaluable_shape
         {
-            return Err(CompilerDiagnostic::invalid_template_structure(
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::templates::invalid_template_structure(
                 InvalidTemplateStructureReason::NonFoldableDocComment,
                 construction_span,
             )

@@ -1,13 +1,13 @@
 //! Shared operator-policy diagnostics.
 //!
-//! WHAT: constructs `CompilerDiagnostic` values for unsupported operator-type combinations so
-//!      comparison, arithmetic, and unary policy files do not duplicate diagnostic creation.
+//! WHAT: constructs diagnostic drafts for unsupported operator-type combinations so comparison,
+//! arithmetic, and unary policy files do not duplicate diagnostic creation.
 //! WHY: exact operator and operand-type reporting is a single responsibility; keeping it here
-//!      ensures consistent error messages and stable diagnostic codes across all operator policies.
+//! ensures consistent error messages and stable diagnostic codes across all operator policies.
 
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
 use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticOperator};
+use crate::compiler_frontend::compiler_messages::DiagnosticOperator;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 
@@ -48,12 +48,10 @@ pub(super) fn invalid_comparison_types(
     op: &Operator,
     span: Option<SourceSpan>,
 ) -> Result<TypeId, ExpressionTypingError> {
-    Err(CompilerDiagnostic::unsupported_operator_types(
-        diagnostic_operator_from_ast(op),
-        lhs,
-        Some(rhs),
-        span,
-    )
+    Err(crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::unsupported_operator_types(diagnostic_operator_from_ast(op),
+    lhs,
+    Some(rhs),
+    span,)
     .into())
 }
 
@@ -63,11 +61,9 @@ pub(super) fn invalid_operator_types(
     op: &Operator,
     span: Option<SourceSpan>,
 ) -> Result<TypeId, ExpressionTypingError> {
-    Err(CompilerDiagnostic::unsupported_operator_types(
-        diagnostic_operator_from_ast(op),
-        lhs,
-        Some(rhs),
-        span,
-    )
+    Err(crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::unsupported_operator_types(diagnostic_operator_from_ast(op),
+    lhs,
+    Some(rhs),
+    span,)
     .into())
 }

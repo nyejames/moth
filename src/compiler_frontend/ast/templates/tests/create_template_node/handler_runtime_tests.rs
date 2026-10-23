@@ -1364,6 +1364,7 @@ fn const_required_template_loop_reports_expansion_limit() {
     let TemplateError::Diagnostic(error) = error else {
         panic!("const loop expansion limit should remain a source diagnostic");
     };
+    let error = compact_template_diagnostic(error);
 
     assert_invalid_template_structure(
         &error,
@@ -1765,12 +1766,16 @@ fn const_required_template_if_validates_selector_through_tir_view_overlay() {
     let TemplateError::Diagnostic(error) = error else {
         panic!("non-const conditional should remain a source diagnostic");
     };
+    let error = compact_template_diagnostic(error);
 
     assert_invalid_template_structure(
         &error,
         InvalidTemplateStructureReason::TemplateIfConditionNotConst,
     );
-    assert_eq!(error.primary_span, Some(override_span));
+    assert!(matches!(
+        error.first().expect("source diagnostic should have one record").primary_site(),
+        SiteRef::Local(span) if span == override_span
+    ));
 }
 
 #[test]
@@ -1815,12 +1820,16 @@ fn const_required_template_loop_validates_header_through_tir_view_overlay() {
     let TemplateError::Diagnostic(error) = error else {
         panic!("non-const loop should remain a source diagnostic");
     };
+    let error = compact_template_diagnostic(error);
 
     assert_invalid_template_structure(
         &error,
         InvalidTemplateStructureReason::TemplateConditionalLoopConstTrue,
     );
-    assert_eq!(error.primary_span, Some(override_span));
+    assert!(matches!(
+        error.first().expect("source diagnostic should have one record").primary_site(),
+        SiteRef::Local(span) if span == override_span
+    ));
 }
 
 #[test]
@@ -2025,11 +2034,15 @@ fn runtime_template_if_rejects_unresolved_insert_through_tir_view() {
     let TemplateError::Diagnostic(diagnostic) = error else {
         panic!("unresolved runtime insert should remain a source diagnostic");
     };
+    let diagnostic = compact_template_diagnostic(diagnostic);
     assert_invalid_template_structure(
         &diagnostic,
         InvalidTemplateStructureReason::RuntimeControlFlowUnresolvedInsert,
     );
-    assert_eq!(diagnostic.primary_span, Some(expected_span));
+    assert!(matches!(
+        diagnostic.first().expect("source diagnostic should have one record").primary_site(),
+        SiteRef::Local(span) if span == expected_span
+    ));
 }
 
 #[test]

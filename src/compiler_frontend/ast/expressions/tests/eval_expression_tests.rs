@@ -20,15 +20,17 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::CompileTimeEvaluationErrorView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
     InvalidNumberLiteralView, MissingOperatorOperandView, NumberLiteralCode,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
     TypeMismatchView, UnsupportedOperatorTypesView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticOperator, DiagnosticPayload, OperatorOperandPosition,
-    TypeDiagnosticKind, TypeMismatchContext,
+    CompileTimeEvaluationErrorReason, DiagnosticBag, DiagnosticOperator, OperatorOperandPosition,
+    TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
@@ -281,18 +283,13 @@ fn ordinary_expression_rejects_path_string_concatenation() {
     let crate::compiler_frontend::ast::expressions::eval_expression::ExpressionTypingError::Diagnostic(diagnostic) = error else {
         panic!("expected an expression type diagnostic");
     };
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Type(TypeDiagnosticKind::UnsupportedOperatorTypes)
-    );
-    assert_eq!(diagnostic.kind.code(), "MOTH-TYPE-0003");
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnsupportedOperatorTypes {
-            operator: DiagnosticOperator::Add,
-            ..
-        }
-    ));
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-TYPE-0003");
+    let facts = diagnostic
+        .family_view::<UnsupportedOperatorTypesView>()
+        .expect("the diagnostic is an unsupported-operator failure");
+    assert_eq!(facts.operator, DiagnosticOperator::Add);
 }
 #[test]
 fn structural_string_equality_is_refused_only_in_a_constant_context() {
@@ -362,9 +359,14 @@ fn structural_string_equality_is_refused_only_in_a_constant_context() {
     else {
         panic!("expected a typed structural-string diagnostic");
     };
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    let facts = diagnostic
+        .family_view::<CompileTimeEvaluationErrorView>()
+        .expect("the diagnostic is a compile-time evaluation failure");
     assert_eq!(
-        diagnostic.identity().reason_key,
-        Some("compile_time_evaluation_error.structural_string_requires_final_text")
+        facts.reason,
+        CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText
     );
 
     let mut runtime_type_environment = TypeEnvironment::new();

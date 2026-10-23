@@ -23,8 +23,9 @@ use crate::compiler_frontend::ast::statements::match_headers::{
 };
 use crate::compiler_frontend::ast::statements::match_patterns::MatchSubject;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidControlFlowStatementReason, ValueReceiverContext,
+    InvalidControlFlowStatementReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -168,7 +169,7 @@ fn parse_single_predicate_once(
         _ => None,
     };
     if let Some(reason) = option_rejection {
-        return Some(Err(CompilerDiagnostic::invalid_control_flow_statement(
+        return Some(Err(choices_control_flow::invalid_control_flow_statement(
             reason,
             Some(start_span),
         )

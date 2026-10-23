@@ -17,9 +17,7 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::statements::fallible_handling::fallible_catch_allowed_in_context;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic,
-};
+use crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalConstantDef, ExternalConstantId, ExternalConstantRawValue,
     ExternalConstantValue, ExternalFunctionId, ExternalSignatureType,
@@ -76,7 +74,7 @@ pub(super) fn parse_external_namespace_function_member(
 
     // Namespace function members must be followed by an argument list.
     if token_stream.peek_next_tag() != Some(TokenTag::OPEN_PARENTHESIS) {
-        return Err(CompilerDiagnostic::unknown_value_name(member_name, member_span).into());
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::unknown_value_name(member_name, member_span).into());
     }
 
     // Verify the external function metadata is still registered.
@@ -84,7 +82,7 @@ pub(super) fn parse_external_namespace_function_member(
         .external_package_registry
         .get_function_by_id(function_id)
     else {
-        return Err(CompilerDiagnostic::unknown_value_name(member_name, member_span).into());
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::unknown_value_name(member_name, member_span).into());
     };
     // Advance from the member name to the opening parenthesis so the shared
     // external call parser sees the expected token stream position.
@@ -185,7 +183,7 @@ pub(super) fn parse_external_namespace_constant_member(
         .external_package_registry
         .get_constant_by_id(constant_id)
     else {
-        return Err(CompilerDiagnostic::unknown_value_name(member_name, member_span).into());
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::unknown_value_name(member_name, member_span).into());
     };
 
     // Advance past the member name token so the caller resumes at the next token.
@@ -193,11 +191,9 @@ pub(super) fn parse_external_namespace_constant_member(
 
     // Non-scalar external constants cannot be used inside constant evaluations.
     if context.kind.is_constant_context() && !constant_definition.value.is_scalar() {
-        return Err(CompilerDiagnostic::compile_time_evaluation_error(
-            CompileTimeEvaluationErrorReason::ExternalNonScalarConstantInConstantContext,
-            Some(member_name),
-            member_span,
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::compile_time_evaluation_error(CompileTimeEvaluationErrorReason::ExternalNonScalarConstantInConstantContext,
+        Some(member_name),
+        member_span,)
         .into());
     }
 
@@ -275,11 +271,9 @@ pub(super) fn project_external_constant(
             // Keep all host u64 bits at registration, but only materialise valid U32 values.
             let Some(materialised) = FixedScalarValue::unsigned(FixedScalar::U32, value) else {
                 let literal_text = string_table.get_or_intern(value.to_string());
-                return Err(CompilerDiagnostic::invalid_number_literal(
-                    literal_text,
-                    NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::U32),
-                    span,
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::invalid_number_literal(literal_text,
+                NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::U32),
+                span,)
                 .into());
             };
             expression_builder.fixed_scalar(const_values, materialised, span, value_mode)

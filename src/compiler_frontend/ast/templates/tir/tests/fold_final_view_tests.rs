@@ -43,9 +43,11 @@ use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidTemplateStructureReason,
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
+    InvalidTemplateStructureCode, InvalidTemplateStructureView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::folded_value::OwnedFoldedString;
@@ -1621,14 +1623,17 @@ fn assert_non_progressing_bounds_diagnostic(error: TemplateError, context: &str)
     let TemplateError::Diagnostic(diagnostic) = error else {
         panic!("{context} must stay on the source diagnostic lane");
     };
-    match &diagnostic.payload {
-        DiagnosticPayload::InvalidTemplateStructure { reason } => assert_eq!(
-            *reason,
-            InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
-            "{context} must report non-progressing bounds"
-        ),
-        payload => panic!("expected invalid template structure payload, found {payload:?}"),
-    }
+    let diagnostic = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let facts = diagnostic
+        .first()
+        .expect("non-progressing bounds error should compact to one record")
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("non-progressing bounds error should retain typed structure facts");
+    assert_eq!(
+        facts.reason,
+        InvalidTemplateStructureCode::TemplateLoopRangeBoundsNotConst,
+        "{context} must report non-progressing bounds"
+    );
 }
 
 #[test]

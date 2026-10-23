@@ -62,9 +62,10 @@ use crate::compiler_frontend::builtins::casts::evidence::lookup_builtin_evidence
 use crate::compiler_frontend::builtins::casts::targets::builtin_cast_target_for_type;
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidFallibleHandlingReason,
-    TypeMismatchContext, ValueReceiverContext,
+    InvalidAssignmentTargetReason, InvalidFallibleHandlingReason, TypeMismatchContext,
+    ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -106,12 +107,10 @@ fn assignment_type_mismatch(
     actual_type_id: TypeId,
     span: Option<SourceSpan>,
 ) -> ExpressionParseError {
-    CompilerDiagnostic::type_mismatch(
-        expected_type_id,
-        actual_type_id,
-        TypeMismatchContext::Assignment,
-        span,
-    )
+    crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::type_mismatch(expected_type_id,
+    actual_type_id,
+    TypeMismatchContext::Assignment,
+    span,)
     .into()
 }
 
@@ -421,15 +420,22 @@ fn build_mutation_from_target(
         } else {
             InvalidAssignmentTargetReason::ImmutableBinding
         };
-        let diagnostic = CompilerDiagnostic::invalid_assignment_target(
+        let diagnostic = crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::invalid_assignment_target(
             reason,
             path_fork.component(variable_declaration.id),
             Some(target_type_id),
             field_name,
             root_binding_name,
-            declaration_span,
             span,
         );
+        let diagnostic = if let Some(declaration_span) = declaration_span {
+            diagnostic.with_label(
+                Some(declaration_span),
+                Some(LabelDraftMessage::ImmutableBindingDeclaration),
+            )
+        } else {
+            diagnostic
+        };
         return Err(diagnostic.into());
     }
 
@@ -525,10 +531,8 @@ fn build_mutation_from_target(
                     .option_inner_type(expression_builder.view_owned(rhs)?.value_type_id()?)
                     .is_some()
             {
-                return Err(CompilerDiagnostic::invalid_fallible_handling(
-                    InvalidFallibleHandlingReason::DirectOptionFallbackSyntax,
-                    Some(token_stream.current_span()),
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::invalid_fallible_handling(InvalidFallibleHandlingReason::DirectOptionFallbackSyntax,
+                Some(token_stream.current_span()),)
                 .into());
             }
 
@@ -544,15 +548,12 @@ fn build_mutation_from_target(
         compound_tag => {
             let Some((operator, _label)) = compound_assignment_operator_for_tag(compound_tag)
             else {
-                return Err(CompilerDiagnostic::invalid_assignment_target(
-                    InvalidAssignmentTargetReason::ExpectedAssignmentOperator,
-                    path_fork.component(variable_declaration.id),
-                    Some(target_type_id),
-                    None,
-                    None,
-                    None,
-                    span,
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::invalid_assignment_target(InvalidAssignmentTargetReason::ExpectedAssignmentOperator,
+                path_fork.component(variable_declaration.id),
+                Some(target_type_id),
+                None,
+                None,
+                span,)
                 .into());
             };
 
@@ -719,34 +720,28 @@ pub fn handle_mutation(
         // A pending receiver call has no value or place yet and can never be a mutation target; the
         // authored operator is the source boundary that reports it.
         ParsedPostfixExpression::RetainedOperand(_) => {
-            return Err(CompilerDiagnostic::invalid_assignment_target(
-                InvalidAssignmentTargetReason::TemporaryNotAssignable,
-                None,
-                None,
-                None,
-                None,
-                None,
-                Some(token_stream.current_span()),
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::invalid_assignment_target(InvalidAssignmentTargetReason::TemporaryNotAssignable,
+            None,
+            None,
+            None,
+            None,
+            Some(token_stream.current_span()),)
             .into());
         }
     };
 
     let Some(target) = place_expression_from_expression(expression_builder, target_expression)?
     else {
-        return Err(CompilerDiagnostic::invalid_assignment_target(
-            InvalidAssignmentTargetReason::TemporaryNotAssignable,
-            None,
-            expression_builder
-                .view_owned(target_expression)?
-                .success_types()
-                .first()
-                .copied(),
-            None,
-            None,
-            None,
-            Some(token_stream.current_span()),
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::invalid_assignment_target(InvalidAssignmentTargetReason::TemporaryNotAssignable,
+        None,
+        expression_builder
+            .view_owned(target_expression)?
+            .success_types()
+            .first()
+            .copied(),
+        None,
+        None,
+        Some(token_stream.current_span()),)
         .into());
     };
 

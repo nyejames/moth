@@ -36,8 +36,13 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, types_borrows_targets,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, InvalidFallibleHandlingReason, TypeMismatchContext,
+    DiagnosticBag, InvalidFallibleHandlingReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -481,7 +486,7 @@ pub(crate) fn parse_completed_expression_catch(
     path_fork: &mut PathInternerFork,
 ) -> Result<OwnedExpr, ExpressionParseError> {
     if !allow_boundary_catch || !fallible_catch_allowed_in_context(context) {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::CatchOutsideBoundary,
             Some(token_stream.current_span()),
         )
@@ -623,7 +628,7 @@ pub(crate) fn compatible_expression_error_type(
     let first = facts.summary.first_typed;
     if let Some(first) = first {
         if let Some(producer) = facts.summary.conflicting_typed {
-            return Err(CompilerDiagnostic::invalid_fallible_handling(
+            let mut diagnostic = choices_control_flow::invalid_fallible_handling(
                 InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes {
                     first_error_type_id: first.error_type_id,
                     second_error_type_id: producer.error_type_id,
@@ -631,8 +636,24 @@ pub(crate) fn compatible_expression_error_type(
                     second_producer_span: producer.span,
                 },
                 catch_span,
-            )
-            .into());
+            );
+            if let Some(span) = first.span {
+                diagnostic = diagnostic.with_label(
+                    Some(span),
+                    Some(LabelDraftMessage::TypedFailureProducer {
+                        error_type_id: first.error_type_id,
+                    }),
+                );
+            }
+            if let Some(span) = producer.span {
+                diagnostic = diagnostic.with_label(
+                    Some(span),
+                    Some(LabelDraftMessage::TypedFailureProducer {
+                        error_type_id: producer.error_type_id,
+                    }),
+                );
+            }
+            return Err(diagnostic.into());
         }
 
         if facts.summary.first_implicit.is_some() {
@@ -648,15 +669,29 @@ pub(crate) fn compatible_expression_error_type(
                 type_environment,
             ) {
                 if let Some(producer) = facts.summary.first_numeric {
-                    return Err(CompilerDiagnostic::invalid_fallible_handling(
+                    let mut diagnostic = choices_control_flow::invalid_fallible_handling(
                         InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
                             error_type_id: first.error_type_id,
                             typed_producer_span: first.span,
                             implicit_producer_span: producer.span,
                         },
                         catch_span,
-                    )
-                    .into());
+                    );
+                    if let Some(span) = first.span {
+                        diagnostic = diagnostic.with_label(
+                            Some(span),
+                            Some(LabelDraftMessage::TypedFailureProducer {
+                                error_type_id: first.error_type_id,
+                            }),
+                        );
+                    }
+                    if let Some(span) = producer.span {
+                        diagnostic = diagnostic.with_label(
+                            Some(span),
+                            Some(LabelDraftMessage::ImplicitFailureProducer),
+                        );
+                    }
+                    return Err(diagnostic.into());
                 }
 
                 let check = DeferredCustomCatchCheck {
@@ -686,7 +721,7 @@ pub(crate) fn compatible_expression_error_type(
         .type_id);
     }
 
-    Err(CompilerDiagnostic::invalid_fallible_handling(
+    Err(choices_control_flow::invalid_fallible_handling(
         super::non_fallible_handler_reason(
             TokenTag::CATCH,
             call_success_is_optional(
@@ -723,7 +758,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
                 expression_builder.view_owned(expression)?.success_types(),
                 type_environment,
             );
-            return Err(CompilerDiagnostic::invalid_fallible_handling(
+            return Err(choices_control_flow::invalid_fallible_handling(
                 super::non_fallible_handler_reason(token_stream.current_tag(), operand_is_optional),
                 Some(token_stream.current_span()),
             )
@@ -860,14 +895,14 @@ pub(crate) fn validate_postfix_propagation_contract(
     propagation_span: Option<SourceSpan>,
 ) -> Result<(), ExpressionParseError> {
     let Some(contract) = context.enclosing_callable.as_deref() else {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::FunctionHasNoErrorSlot,
             propagation_span,
         )
         .into());
     };
     let Some(expected_error_type) = contract.error_type else {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::FunctionHasNoErrorSlot,
             propagation_span,
         )
@@ -881,7 +916,7 @@ pub(crate) fn validate_postfix_propagation_contract(
         return Ok(());
     }
     if contract.owner == EnclosingCallableOwner::EntryStart {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::EntryHasIncompatibleError {
                 produced_error_type,
                 entry_error_type: expected_error_type,
@@ -890,7 +925,7 @@ pub(crate) fn validate_postfix_propagation_contract(
         )
         .into());
     }
-    Err(CompilerDiagnostic::type_mismatch(
+    Err(types_borrows_targets::type_mismatch(
         expected_error_type,
         produced_error_type,
         TypeMismatchContext::ErrorReturn,
@@ -970,7 +1005,7 @@ fn parse_catch_handling_suffix(
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedFallibleSuffix, ExpressionParseError> {
     if !site.allow_boundary_catch {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::CatchOutsideBoundary,
             Some(token_stream.current_span()),
         )
@@ -1019,7 +1054,7 @@ fn parse_catch_handling_suffix(
             path_fork,
         ),
 
-        _ => Err(CompilerDiagnostic::invalid_fallible_handling(
+        _ => Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler,
             Some(token_stream.current_span()),
         )
@@ -1254,7 +1289,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_call_expression(
     )?;
 
     let Some(handling) = handling else {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler,
             Some(token_stream.current_span()),
         )
@@ -1343,7 +1378,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_host_call_expression(
     )?;
 
     let Some(handling) = handling else {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler,
             Some(token_stream.current_span()),
         )
@@ -1425,7 +1460,7 @@ pub(crate) fn apply_completed_handling_suffix(
     let ProducerCatchOutcome::Producer(site) = producer_catch_site(value, expression_builder)?
     else {
         // Propagation requires the producer's separate error channel.
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             super::non_fallible_handler_reason(TokenTag::BANG, operand_is_optional),
             propagation_span,
         )
@@ -1454,10 +1489,10 @@ pub(crate) fn non_fallible_call_handler_diagnostic(
     success_result_type_ids: &[TypeId],
     handler_tag: TokenTag,
     type_environment: &TypeEnvironment,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     let operand_is_optional =
         super::call_success_is_optional(success_result_type_ids, type_environment);
-    CompilerDiagnostic::invalid_fallible_handling(
+    choices_control_flow::invalid_fallible_handling(
         super::non_fallible_handler_reason(handler_tag, operand_is_optional),
         Some(token_stream.current_span()),
     )

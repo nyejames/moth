@@ -23,9 +23,10 @@ use crate::compiler_frontend::ast::generic_bounds::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, GenericInferenceSubject, InvalidCallShapeReason,
-    InvalidGenericInstantiationReason, ValueReceiverContext,
+    GenericInferenceSubject, InvalidCallShapeReason, InvalidGenericInstantiationReason,
+    ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, TypeDefinition,
@@ -228,14 +229,12 @@ pub(crate) fn infer_generic_nominal_constructor(
     }
 
     if !missing_parameters.is_empty() {
-        let diagnostic = CompilerDiagnostic::invalid_generic_instantiation(
-            input
-                .context
-                .diagnostic_name
-                .diagnostic_callee_name(string_table),
-            InvalidGenericInstantiationReason::CannotInferArguments { missing_parameters },
-            input.context.span,
-        );
+        let diagnostic = crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::invalid_generic_instantiation(input
+            .context
+            .diagnostic_name
+            .diagnostic_callee_name(string_table),
+        InvalidGenericInstantiationReason::CannotInferArguments { missing_parameters },
+        input.context.span,);
         return Err(diagnostic.into());
     }
     // ------------------------
@@ -272,7 +271,7 @@ pub(crate) fn infer_generic_nominal_constructor(
         input.context.span,
         &evidence_context,
     ) {
-        diagnostic.primary_span = input.context.span;
+        diagnostic.set_primary_span(input.context.span);
         return Err(CallValidationError::Diagnostic(diagnostic));
     }
     Ok(GenericNominalInference {
@@ -599,11 +598,9 @@ fn collect_route_input_binding_evidence(
             );
             Ok(())
         }
-        Ok(false) | Err(_) => Err(CompilerDiagnostic::invalid_call_shape(
-            InvalidCallShapeReason::RouteInputFieldMismatch,
-            None,
-            span,
-        )
+        Ok(false) | Err(_) => Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::RouteInputFieldMismatch,
+        None,
+        span,)
         .into()),
     }
 }
@@ -682,7 +679,7 @@ fn nominal_binding_conflict_diagnostic(
     string_table: &mut StringTable,
     current_evidence_span: Option<SourceSpan>,
     previous_evidence_span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     // Pairwise nominal inference only records conflicts for the canonical parameters in this list.
     let parameter_name = canonical_parameters
         .iter()
@@ -690,12 +687,10 @@ fn nominal_binding_conflict_diagnostic(
         .map(|parameter| parameter.name)
         .expect("generic binding conflicts must identify a canonical parameter");
 
-    CompilerDiagnostic::conflicting_generic_inference(
-        diagnostic_name.diagnostic_callee_name(string_table),
-        GenericInferenceSubject::NominalType,
-        conflict,
-        parameter_name,
-        current_evidence_span,
-        previous_evidence_span,
-    )
+    crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::conflicting_generic_inference(diagnostic_name.diagnostic_callee_name(string_table),
+    GenericInferenceSubject::NominalType,
+    conflict,
+    parameter_name,
+    current_evidence_span,
+    previous_evidence_span,)
 }

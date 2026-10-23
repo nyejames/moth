@@ -22,7 +22,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnIte
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidFieldAccessReason, NamespaceTypeValueMisuseKind,
+    InvalidFieldAccessReason, NamespaceTypeValueMisuseKind,
 };
 use crate::compiler_frontend::headers::binding_environment::{
     NamespaceRecord, NamespaceRecordSource,
@@ -92,13 +92,11 @@ pub(super) fn parse_namespace_access(
             Some(token_stream.current_span())
         };
         if token_stream.current_tag() != TokenTag::SYMBOL {
-            return Err(CompilerDiagnostic::invalid_field_access(
-                InvalidFieldAccessReason::ExpectedNameAfterDot,
-                None,
-                None,
-                Vec::new(),
-                member_span,
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_field_access(InvalidFieldAccessReason::ExpectedNameAfterDot,
+            None,
+            None,
+            Vec::new(),
+            member_span,)
             .into());
         }
         let member_name = token_stream
@@ -122,7 +120,7 @@ pub(super) fn parse_namespace_access(
             )
         {
             return Err(
-                CompilerDiagnostic::nested_dependency_traversal(root_name, member_span).into(),
+                crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::nested_dependency_traversal(root_name, member_span).into(),
             );
         }
 
@@ -136,23 +134,19 @@ pub(super) fn parse_namespace_access(
                     continue;
                 }
 
-                return Err(CompilerDiagnostic::namespace_type_value_misuse(
-                    member_name,
-                    NamespaceTypeValueMisuseKind::Value,
-                    NamespaceTypeValueMisuseKind::Namespace,
-                    member_span,
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::namespace_type_value_misuse(member_name,
+                NamespaceTypeValueMisuseKind::Value,
+                NamespaceTypeValueMisuseKind::Namespace,
+                member_span,)
                 .into());
             }
 
             NamespaceMemberLookup::Value(value_member) => {
                 if has_following_dot {
-                    return Err(CompilerDiagnostic::namespace_type_value_misuse(
-                        member_name,
-                        NamespaceTypeValueMisuseKind::Namespace,
-                        NamespaceTypeValueMisuseKind::Value,
-                        member_span,
-                    )
+                    return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::namespace_type_value_misuse(member_name,
+                    NamespaceTypeValueMisuseKind::Namespace,
+                    NamespaceTypeValueMisuseKind::Value,
+                    member_span,)
                     .into());
                 }
 
@@ -190,18 +184,16 @@ pub(super) fn parse_namespace_access(
                     )
                 };
 
-                return Err(CompilerDiagnostic::namespace_type_value_misuse(
-                    member_name,
-                    expected,
-                    found,
-                    member_span,
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::namespace_type_value_misuse(member_name,
+                expected,
+                found,
+                member_span,)
                 .into());
             }
 
             NamespaceMemberLookup::Missing => {
                 return Err(
-                    CompilerDiagnostic::unknown_value_name(member_name, member_span).into(),
+                    crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::unknown_value_name(member_name, member_span).into(),
                 );
             }
         }

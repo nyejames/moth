@@ -40,8 +40,12 @@ use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, names_declarations,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DeferredFeatureReason, DiagnosticBag, InvalidControlFlowStatementReason,
+    DeferredFeatureReason, DiagnosticBag, InvalidControlFlowStatementReason,
     InvalidFallibleHandlingReason, InvalidMatchArmReason, InvalidStandaloneStatementReason,
     ReservedNameOwner,
 };
@@ -96,15 +100,12 @@ impl ParsedBody {
     }
 }
 
-fn statement_dispatch_error(diagnostic: CompilerDiagnostic) -> ExpressionParseError {
+fn statement_dispatch_error(diagnostic: DiagnosticDraft) -> ExpressionParseError {
     diagnostic.into()
 }
 
-fn reserved_keyword_as_name_error(
-    keyword: StringId,
-    span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::reserved_name_collision(keyword, ReservedNameOwner::Keyword, span)
+fn reserved_keyword_as_name_error(keyword: StringId, span: Option<SourceSpan>) -> DiagnosticDraft {
+    names_declarations::reserved_name_collision(keyword, ReservedNameOwner::Keyword, span)
 }
 
 /// Produce a diagnostic for a deferred block keyword (`checked`, `async`).
@@ -116,7 +117,7 @@ fn deferred_block_error(
     string_table: &mut StringTable,
     keyword: &str,
     reason: DeferredFeatureReason,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     let span = Some(token_stream.current_span());
     let next_is_assignment = token_stream
         .peek_next_tag()
@@ -126,7 +127,7 @@ fn deferred_block_error(
         return reserved_keyword_as_name_error(keyword_id, span);
     }
 
-    CompilerDiagnostic::deferred_feature_reason(reason, span)
+    names_declarations::deferred_feature_reason(reason, span)
 }
 
 #[allow(
@@ -164,7 +165,7 @@ pub(crate) fn parse_function_body_statements(
                 && current_line_contains_top_level_fat_arrow(token_stream)
             {
                 return Err(statement_dispatch_error(
-                    CompilerDiagnostic::invalid_match_arm(
+                    choices_control_flow::invalid_match_arm(
                         InvalidMatchArmReason::ArmMustStartNewLine,
                         Some(token_stream.current_span()),
                     ),
@@ -262,7 +263,7 @@ pub(crate) fn parse_function_body_statements(
                     break;
                 } else {
                     return Err(statement_dispatch_error(
-                        CompilerDiagnostic::invalid_control_flow_statement(
+                        choices_control_flow::invalid_control_flow_statement(
                             InvalidControlFlowStatementReason::ElseOutsideIfOrMatch,
                             Some(token_stream.current_span()),
                         ),
@@ -305,7 +306,7 @@ pub(crate) fn parse_function_body_statements(
             TokenTag::BREAK => {
                 if !context.is_inside_loop() {
                     return Err(statement_dispatch_error(
-                        CompilerDiagnostic::invalid_control_flow_statement(
+                        choices_control_flow::invalid_control_flow_statement(
                             InvalidControlFlowStatementReason::BreakOutsideLoop,
                             Some(token_stream.current_span()),
                         ),
@@ -323,7 +324,7 @@ pub(crate) fn parse_function_body_statements(
             TokenTag::CONTINUE => {
                 if !context.is_inside_loop() {
                     return Err(statement_dispatch_error(
-                        CompilerDiagnostic::invalid_control_flow_statement(
+                        choices_control_flow::invalid_control_flow_statement(
                             InvalidControlFlowStatementReason::ContinueOutsideLoop,
                             Some(token_stream.current_span()),
                         ),
@@ -353,7 +354,7 @@ pub(crate) fn parse_function_body_statements(
                     };
 
                     return Err(statement_dispatch_error(
-                        CompilerDiagnostic::invalid_fallible_handling(reason, then_span),
+                        choices_control_flow::invalid_fallible_handling(reason, then_span),
                     ));
                 };
 
@@ -361,7 +362,7 @@ pub(crate) fn parse_function_body_statements(
                     || is_missing_produced_value_boundary(token_stream.current_tag())
                 {
                     return Err(statement_dispatch_error(
-                        CompilerDiagnostic::invalid_fallible_handling(
+                        choices_control_flow::invalid_fallible_handling(
                             InvalidFallibleHandlingReason::ThenRequiresValues,
                             Some(token_stream.current_span()),
                         ),
@@ -373,7 +374,7 @@ pub(crate) fn parse_function_body_statements(
                     && active_target.expected_arity.is_none()
                 {
                     return Err(statement_dispatch_error(
-                        CompilerDiagnostic::invalid_fallible_handling(
+                        choices_control_flow::invalid_fallible_handling(
                             InvalidFallibleHandlingReason::FallbackValuesForErrorOnlyResult,
                             then_span,
                         ),
@@ -465,7 +466,7 @@ pub(crate) fn parse_function_body_statements(
             TokenTag::TEMPLATE_HEAD => {
                 if context.kind != ContextKind::Module {
                     return Err(statement_dispatch_error(
-                        CompilerDiagnostic::invalid_standalone_statement(
+                        choices_control_flow::invalid_standalone_statement(
                             InvalidStandaloneStatementReason::StandaloneTemplate,
                             Some(token_stream.current_span()),
                         ),
@@ -525,7 +526,7 @@ pub(crate) fn parse_function_body_statements(
                 if let Some(diagnostic) =
                     check_statement_common_mistake(token_stream.current_tag(), token_stream)
                 {
-                    return Err(statement_dispatch_error(diagnostic));
+                    return Err(statement_dispatch_error(diagnostic.into()));
                 }
 
                 return Err(statement_dispatch_error(unexpected_statement_token(

@@ -35,11 +35,27 @@ use crate::compiler_frontend::ast::templates::tir::refs::{
     TemplateTirChildReference, TemplateTirReference, TemplateWrapperReference,
 };
 use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
+    InvalidTemplateStructureCode, InvalidTemplateStructureView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
+
+fn assert_structure_reason(draft: DiagnosticDraft, expected: InvalidTemplateStructureCode) {
+    let diagnostic = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let facts = diagnostic
+        .first()
+        .expect("invalid structure error should compact to one record")
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("invalid structure error should retain typed facts");
+    assert_eq!(facts.reason, expected);
+}
 
 fn runtime_expression(
     expressions: &mut AstExpressionBuilder,
@@ -269,12 +285,10 @@ fn preparation_mode_controls_const_required_conditional_validation() {
     let TemplateError::Diagnostic(diagnostic) = const_required else {
         panic!("ConstRequired conditional rejection should remain a source diagnostic");
     };
-    assert!(matches!(
-        diagnostic.payload,
-        crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidTemplateStructure {
-            reason: crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::TemplateIfConditionNotConst,
-        }
-    ));
+    assert_structure_reason(
+        diagnostic,
+        InvalidTemplateStructureCode::TemplateIfConditionNotConst,
+    );
 }
 
 #[test]
@@ -313,12 +327,10 @@ fn preparation_const_required_recurses_through_coerced_loop_condition() {
     else {
         panic!("const-true loop rejection should remain a source diagnostic");
     };
-    assert!(matches!(
-        diagnostic.payload,
-        crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidTemplateStructure {
-            reason: crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::TemplateConditionalLoopConstTrue,
-        }
-    ));
+    assert_structure_reason(
+        diagnostic,
+        InvalidTemplateStructureCode::TemplateConditionalLoopConstTrue,
+    );
 }
 
 #[test]

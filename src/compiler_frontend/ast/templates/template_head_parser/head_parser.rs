@@ -51,9 +51,12 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::ast_log;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    templates, token_lexical,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticToken, InvalidTemplateDirectiveReason,
-    InvalidTemplateStructureReason,
+    DiagnosticToken, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::{
@@ -108,7 +111,7 @@ fn enforce_head_compatibility(
     } else {
         Err(with_current_token_span(
             token_stream,
-            CompilerDiagnostic::invalid_template_structure(
+            templates::invalid_template_structure(
                 InvalidTemplateStructureReason::IncompatibleHeadItem,
                 current_source_span(token_stream),
             ),
@@ -121,10 +124,10 @@ fn enforce_head_compatibility(
 /// already provide one.
 fn with_current_token_span(
     token_stream: &AstCursor,
-    mut diagnostic: CompilerDiagnostic,
-) -> CompilerDiagnostic {
-    if diagnostic.primary_span.is_none() {
-        diagnostic.primary_span = current_source_span(token_stream);
+    mut diagnostic: DiagnosticDraft,
+) -> DiagnosticDraft {
+    if diagnostic.primary_span().is_none() {
+        diagnostic.set_primary_span(current_source_span(token_stream));
     }
     diagnostic
 }
@@ -139,11 +142,11 @@ fn current_source_span(token_stream: &AstCursor) -> Option<SourceSpan> {
 }
 
 fn with_source_span(
-    mut diagnostic: CompilerDiagnostic,
+    mut diagnostic: DiagnosticDraft,
     source_span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    if diagnostic.primary_span.is_none() {
-        diagnostic.primary_span = source_span;
+) -> DiagnosticDraft {
+    if diagnostic.primary_span().is_none() {
+        diagnostic.set_primary_span(source_span);
     }
     diagnostic
 }
@@ -286,7 +289,7 @@ pub fn parse_template_head(
         if token == TokenTag::EOF {
             return Err(with_current_token_span(
                 token_stream,
-                CompilerDiagnostic::unexpected_end_of_file(
+                token_lexical::unexpected_end_of_file(
                     Some(string_table.intern("]")),
                     current_source_span(token_stream),
                 ),
@@ -309,7 +312,7 @@ pub fn parse_template_head(
             {
                 return Err(with_current_token_span(
                     token_stream,
-                    CompilerDiagnostic::invalid_template_structure(
+                    templates::invalid_template_structure(
                         InvalidTemplateStructureReason::SlotInHead,
                         current_source_span(token_stream),
                     ),
@@ -329,7 +332,7 @@ pub fn parse_template_head(
             && let Some(control_flow_span) = find_unseparated_control_flow_suffix(token_stream)
         {
             return Err(with_source_span(
-                CompilerDiagnostic::invalid_template_structure(
+                templates::invalid_template_structure(
                     InvalidTemplateStructureReason::MissingCommaBeforeControlFlowSuffix,
                     Some(control_flow_span),
                 ),
@@ -343,7 +346,7 @@ pub fn parse_template_head(
             if matches!(token, TokenTag::IF | TokenTag::LOOP) {
                 return Err(with_current_token_span(
                     token_stream,
-                    CompilerDiagnostic::invalid_template_structure(
+                    templates::invalid_template_structure(
                         InvalidTemplateStructureReason::MissingCommaBeforeControlFlowSuffix,
                         current_source_span(token_stream),
                     ),
@@ -355,16 +358,15 @@ pub fn parse_template_head(
                 let found = token_stream
                     .current_diagnostic_token(string_table)
                     .map_err(|error| {
-                        CompilerDiagnostic::token_view_invariant_error(
-                            error,
-                            "template-head separator diagnostic",
-                        )
+                        CompilerError::compiler_error(format!(
+                            "template-head separator diagnostic token payload was malformed: {error:?}"
+                        ))
                     })?
                     .or_else(|| Some(DiagnosticToken::from_static_tag(token)));
                 return Err(with_current_token_span(
                     token_stream,
-                    CompilerDiagnostic::expected_token_from_tags(
-                        TokenTag::COMMA,
+                    token_lexical::expected_token_from_projections(
+                        DiagnosticToken::from_static_tag(TokenTag::COMMA),
                         found,
                         current_source_span(token_stream),
                     ),
@@ -387,7 +389,7 @@ pub fn parse_template_head(
                 {
                     return Err(with_current_token_span(
                         token_stream,
-                        CompilerDiagnostic::invalid_template_structure(
+                        templates::invalid_template_structure(
                             InvalidTemplateStructureReason::SlotInHead,
                             current_source_span(token_stream),
                         ),
@@ -415,7 +417,7 @@ pub fn parse_template_head(
                 {
                     return Err(with_current_token_span(
                         token_stream,
-                        CompilerDiagnostic::invalid_template_structure(
+                        templates::invalid_template_structure(
                             InvalidTemplateStructureReason::SlotInHead,
                             current_source_span(token_stream),
                         ),
@@ -627,17 +629,14 @@ pub fn parse_template_head(
                     let diagnostic = token_stream
                         .current_diagnostic_token(string_table)
                         .map_err(|error| {
-                            CompilerDiagnostic::token_view_invariant_error(
-                                error,
-                                "template-head `this` diagnostic",
-                            )
+                            CompilerError::compiler_error(format!(
+                                "template-head `this` diagnostic token payload was malformed: {error:?}"
+                            ))
                         })?
-                        .map(|found| CompilerDiagnostic::unexpected_token_from_tag(found, span))
+                        .map(|found| token_lexical::unexpected_token_from_tag(found, span))
                         .unwrap_or_else(|| {
-                            CompilerDiagnostic::unexpected_token_from_tag(
-                                DiagnosticToken::from_static_tag(TokenTag::THIS),
-                                span,
-                            )
+                            token_lexical::unexpected_token_from_tag(DiagnosticToken::from_static_tag(TokenTag::THIS),
+                            span,)
                         });
                     return Err(with_current_token_span(token_stream, diagnostic).into());
                 }
@@ -774,7 +773,7 @@ pub fn parse_template_head(
                 let Some(spec) = context.style_directives.find(&directive_name) else {
                     return Err(with_current_token_span(
                         token_stream,
-                        CompilerDiagnostic::invalid_template_directive(
+                        templates::invalid_template_directive(
                             Some(directive),
                             InvalidTemplateDirectiveReason::UnknownDirective,
                             current_source_span(token_stream),
@@ -824,14 +823,13 @@ pub fn parse_template_head(
                 let diagnostic = token_stream
                     .current_diagnostic_token(string_table)
                     .map_err(|error| {
-                        CompilerDiagnostic::token_view_invariant_error(
-                            error,
-                            "template-head comma diagnostic",
-                        )
+                        CompilerError::compiler_error(format!(
+                            "template-head comma diagnostic token payload was malformed: {error:?}"
+                        ))
                     })?
-                    .map(|found| CompilerDiagnostic::unexpected_token_from_tag(found, span))
+                    .map(|found| token_lexical::unexpected_token_from_tag(found, span))
                     .unwrap_or_else(|| {
-                        CompilerDiagnostic::unexpected_token_from_tag(
+                        token_lexical::unexpected_token_from_tag(
                             DiagnosticToken::from_static_tag(TokenTag::COMMA),
                             span,
                         )
@@ -851,17 +849,14 @@ pub fn parse_template_head(
                 let diagnostic = token_stream
                     .current_diagnostic_token(string_table)
                     .map_err(|error| {
-                        CompilerDiagnostic::token_view_invariant_error(
-                            error,
-                            "template-head unexpected-token diagnostic",
-                        )
+                        CompilerError::compiler_error(format!(
+                            "template-head unexpected-token diagnostic token payload was malformed: {error:?}"
+                        ))
                     })?
-                    .map(|found| CompilerDiagnostic::unexpected_token_from_tag(found, span))
+                    .map(|found| token_lexical::unexpected_token_from_tag(found, span))
                     .unwrap_or_else(|| {
-                        CompilerDiagnostic::unexpected_token_from_tag(
-                            DiagnosticToken::from_static_tag(token),
-                            span,
-                        )
+                        token_lexical::unexpected_token_from_tag(DiagnosticToken::from_static_tag(token),
+                        span,)
                     });
                 return Err(with_current_token_span(token_stream, diagnostic).into());
             }
@@ -870,7 +865,7 @@ pub fn parse_template_head(
         // Guard against malformed or truncated synthetic token streams.
         if token_stream.position() >= token_stream.length() {
             return Err(with_source_span(
-                CompilerDiagnostic::unexpected_end_of_file(
+                token_lexical::unexpected_end_of_file(
                     Some(string_table.intern("]")),
                     last_known_span,
                 ),
@@ -890,7 +885,7 @@ pub fn parse_template_head(
         if token_stream.current_tag() == TokenTag::EOF {
             return Err(with_current_token_span(
                 token_stream,
-                CompilerDiagnostic::unexpected_end_of_file(
+                token_lexical::unexpected_end_of_file(
                     Some(string_table.intern("]")),
                     current_source_span(token_stream),
                 ),
@@ -912,7 +907,7 @@ pub fn parse_template_head(
     }
 
     Err(with_source_span(
-        CompilerDiagnostic::unexpected_end_of_file(Some(string_table.intern("]")), last_known_span),
+        token_lexical::unexpected_end_of_file(Some(string_table.intern("]")), last_known_span),
         last_known_span,
     )
     .into())

@@ -58,7 +58,7 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch_for_tag,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticToken, InvalidCallShapeReason,
+    CompileTimeEvaluationErrorReason, DiagnosticToken, InvalidCallShapeReason,
     InvalidChoiceVariantReason,
 };
 use crate::compiler_frontend::datatypes::definitions::{
@@ -136,10 +136,8 @@ pub(super) fn parse_choice_construct(
     }
 
     if let Some(gap) = token_stream.current_choice_variant_separator_gap() {
-        return Err(CompilerDiagnostic::invalid_choice_variant_spacing(
-            gap,
-            Some(token_stream.current_span()),
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::invalid_choice_variant_spacing(gap,
+        Some(token_stream.current_span()),)
         .into());
     }
 
@@ -170,16 +168,13 @@ pub(super) fn parse_choice_construct(
             let found_token = token_stream
                 .current_diagnostic_token(string_table)
                 .map_err(|error| {
-                    CompilerDiagnostic::token_view_invariant_error(
-                        error,
-                        "choice variant diagnostic",
-                    )
+                    CompilerError::compiler_error(format!(
+                        "choice variant diagnostic token payload was malformed: {error:?}"
+                    ))
                 })?
                 .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
-            return Err(CompilerDiagnostic::unexpected_token_from_tag(
-                found_token,
-                Some(token_stream.current_span()),
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_token_from_tag(found_token,
+            Some(token_stream.current_span()),)
             .into());
         }
     };
@@ -197,13 +192,11 @@ pub(super) fn parse_choice_construct(
             .map(|variant| variant.name)
             .collect();
 
-        return Err(CompilerDiagnostic::invalid_choice_variant(
-            InvalidChoiceVariantReason::UnknownVariant,
-            path_fork.component(choice_declaration.id),
-            Some(variant_name),
-            available_variant_ids,
-            variant_span,
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::invalid_choice_variant(InvalidChoiceVariantReason::UnknownVariant,
+        path_fork.component(choice_declaration.id),
+        Some(variant_name),
+        available_variant_ids,
+        variant_span,)
         .into());
     };
 
@@ -488,23 +481,19 @@ pub(super) fn parse_choice_construct(
                 token_stream.advance(); // past '('
 
                 if token_stream.current_tag() == TokenTag::CLOSE_PARENTHESIS {
-                    return Err(CompilerDiagnostic::invalid_choice_variant(
-                        InvalidChoiceVariantReason::UnitVariantWithParentheses,
-                        path_fork.component(choice_declaration.id),
-                        Some(variant_name),
-                        vec![],
-                        Some(token_stream.current_span()),
-                    )
-                    .into());
-                }
-
-                return Err(CompilerDiagnostic::invalid_choice_variant(
-                    InvalidChoiceVariantReason::UnitVariantAsConstructor,
+                    return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::invalid_choice_variant(InvalidChoiceVariantReason::UnitVariantWithParentheses,
                     path_fork.component(choice_declaration.id),
                     Some(variant_name),
                     vec![],
-                    variant_span,
-                )
+                    Some(token_stream.current_span()),)
+                    .into());
+                }
+
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::invalid_choice_variant(InvalidChoiceVariantReason::UnitVariantAsConstructor,
+                path_fork.component(choice_declaration.id),
+                Some(variant_name),
+                vec![],
+                variant_span,)
                 .into());
             }
 
@@ -521,13 +510,11 @@ pub(super) fn parse_choice_construct(
         ChoiceVariantPayloadDefinition::Record { fields } => {
             if !has_parens {
                 token_stream.advance();
-                return Err(CompilerDiagnostic::invalid_choice_variant(
-                    InvalidChoiceVariantReason::PayloadVariantMissingArguments,
-                    path_fork.component(choice_declaration.id),
-                    Some(variant_name),
-                    vec![],
-                    Some(token_stream.current_span()),
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::invalid_choice_variant(InvalidChoiceVariantReason::PayloadVariantMissingArguments,
+                path_fork.component(choice_declaration.id),
+                Some(variant_name),
+                vec![],
+                Some(token_stream.current_span()),)
                 .into());
             }
 
@@ -599,11 +586,9 @@ fn parse_route_choice_construct(
     // Generic templates are provisional while this constructor seeds their instance; the
     // substituted call signature owns the final exact contract check.
     if !route_context.matches_output_type(choice_declaration.type_id, type_interner.environment()) {
-        return Err(CompilerDiagnostic::invalid_call_shape(
-            InvalidCallShapeReason::RouteArgumentNotDirect,
-            None,
-            variant_span,
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::RouteArgumentNotDirect,
+        None,
+        variant_span,)
         .into());
     }
 
@@ -622,21 +607,17 @@ fn parse_route_choice_construct(
                 } else {
                     InvalidChoiceVariantReason::UnitVariantAsConstructor
                 };
-                return Err(CompilerDiagnostic::invalid_choice_variant(
-                    reason,
-                    path_fork.component(choice_declaration.id),
-                    Some(variant_name),
-                    vec![],
-                    variant_span,
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::invalid_choice_variant(reason,
+                path_fork.component(choice_declaration.id),
+                Some(variant_name),
+                vec![],
+                variant_span,)
                 .into());
             }
             if route_context.input_type.is_some() {
-                return Err(CompilerDiagnostic::invalid_call_shape(
-                    InvalidCallShapeReason::RouteInputFieldMismatch,
-                    None,
-                    variant_span,
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::RouteInputFieldMismatch,
+                None,
+                variant_span,)
                 .into());
             }
             let choice_type_id = if let Some(seed) = generic_constructor_seed {
@@ -686,11 +667,9 @@ fn parse_route_choice_construct(
             let future_input = route_context.input_type.is_some();
             let capture_count = if route_context.input_type.is_some() {
                 let Some(trailing_field) = fields.last() else {
-                    return Err(CompilerDiagnostic::invalid_call_shape(
-                        InvalidCallShapeReason::RouteInputFieldMismatch,
-                        None,
-                        variant_span,
-                    )
+                    return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::RouteInputFieldMismatch,
+                    None,
+                    variant_span,)
                     .into());
                 };
                 let trailing_field_type = if let Some(seed) = &generic_constructor_seed {
@@ -706,11 +685,9 @@ fn parse_route_choice_construct(
                 if !route_context
                     .matches_input_type(Some(trailing_field_type), type_interner.environment())
                 {
-                    return Err(CompilerDiagnostic::invalid_call_shape(
-                        InvalidCallShapeReason::RouteInputFieldMismatch,
-                        None,
-                        variant_span,
-                    )
+                    return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::RouteInputFieldMismatch,
+                    None,
+                    variant_span,)
                     .into());
                 }
                 fields.len() - 1
@@ -719,11 +696,9 @@ fn parse_route_choice_construct(
             };
 
             if future_input && capture_count == 0 && has_parens {
-                return Err(CompilerDiagnostic::invalid_call_shape(
-                    InvalidCallShapeReason::RouteArgumentNotDirect,
-                    None,
-                    variant_span,
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::RouteArgumentNotDirect,
+                None,
+                variant_span,)
                 .into());
             }
             if !has_parens {
@@ -766,13 +741,11 @@ fn parse_route_choice_construct(
                     };
                     return Ok(ParsedConstructorExpression::Value(expression));
                 }
-                return Err(CompilerDiagnostic::invalid_choice_variant(
-                    InvalidChoiceVariantReason::PayloadVariantMissingArguments,
-                    path_fork.component(choice_declaration.id),
-                    Some(variant_name),
-                    vec![],
-                    variant_span,
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::invalid_choice_variant(InvalidChoiceVariantReason::PayloadVariantMissingArguments,
+                path_fork.component(choice_declaration.id),
+                Some(variant_name),
+                vec![],
+                variant_span,)
                 .into());
             }
 
@@ -1054,11 +1027,9 @@ fn finish_choice_payload_construct(
                 let field_name = path_fork
                     .component(field.name)
                     .unwrap_or_else(|| string_table.intern("<field>"));
-                return Err(CompilerDiagnostic::compile_time_evaluation_error(
-                    CompileTimeEvaluationErrorReason::NonCompileTimeFieldInConstantContext,
-                    Some(field_name),
-                    field_span,
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::compile_time_evaluation_error(CompileTimeEvaluationErrorReason::NonCompileTimeFieldInConstantContext,
+                Some(field_name),
+                field_span,)
                 .into());
             }
 

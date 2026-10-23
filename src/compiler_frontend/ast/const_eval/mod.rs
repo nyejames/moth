@@ -27,9 +27,10 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::casts::{BuiltinCastLiteral, apply_builtin_cast_policy};
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage,
-    DiagnosticPayload, InvalidCastReason,
+    CompileTimeEvaluationErrorReason, InvalidCastReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -55,7 +56,8 @@ use std::borrow::Cow;
 
 #[derive(Debug)]
 pub(crate) enum ConstantFoldError {
-    Diagnostic(CompilerDiagnostic),
+    Diagnostic(DiagnosticDraft),
+    NumericFailure(DiagnosticDraft),
     Infrastructure(Box<InfrastructureErrors>),
 }
 #[derive(Debug)]
@@ -68,14 +70,14 @@ pub(crate) enum ConstantFoldOutcome {
     },
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug)]
 pub(crate) enum ConstantFoldRefusalReason {
-    StructuralTextUnavailable(CompilerDiagnostic),
-    EvaluationOutputBoundExceeded(CompilerDiagnostic),
+    StructuralTextUnavailable(DiagnosticDraft),
+    EvaluationOutputBoundExceeded(DiagnosticDraft),
 }
 
 impl ConstantFoldRefusalReason {
-    pub(crate) fn into_diagnostic(self) -> CompilerDiagnostic {
+    pub(crate) fn into_draft(self) -> DiagnosticDraft {
         match self {
             Self::StructuralTextUnavailable(diagnostic)
             | Self::EvaluationOutputBoundExceeded(diagnostic) => diagnostic,
@@ -148,9 +150,9 @@ pub(crate) fn registered_external_const_eval_op(
     registry?.get_function_by_id(function_id)?.const_eval
 }
 
-impl From<CompilerDiagnostic> for ConstantFoldError {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
-        ConstantFoldError::Diagnostic(diagnostic)
+impl From<DiagnosticDraft> for ConstantFoldError {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
+        Self::Diagnostic(diagnostic)
     }
 }
 
@@ -169,8 +171,12 @@ impl From<Box<InfrastructureErrors>> for ConstantFoldError {
 impl From<TemplateError> for ConstantFoldError {
     fn from(error: TemplateError) -> Self {
         match error {
-            TemplateError::Diagnostic(diagnostic) => ConstantFoldError::Diagnostic(diagnostic),
-            TemplateError::Infrastructure(error) => ConstantFoldError::Infrastructure(error),
+            TemplateError::Diagnostic(diagnostic)
+            | TemplateError::EmptyArguments(diagnostic)
+            | TemplateError::NonConstantReferenceInConstant(diagnostic) => {
+                Self::Diagnostic(diagnostic)
+            }
+            TemplateError::Infrastructure(error) => Self::Infrastructure(error),
         }
     }
 }
@@ -197,7 +203,7 @@ pub(crate) fn require_concrete_text(
     constants: &ConstValueStore,
     requirement: ConstStringRequirement,
     strings: &mut StringTable,
-) -> Result<Option<StringId>, CompilerDiagnostic> {
+) -> Result<Option<StringId>, DiagnosticDraft> {
     let ExpressionOperationView::Constant(id) = value.operation() else {
         return Ok(None);
     };
@@ -211,7 +217,7 @@ pub(super) fn concrete_payload_text(
     span: Option<SourceSpan>,
     requirement: ConstStringRequirement,
     strings: &mut StringTable,
-) -> Result<Option<StringId>, CompilerDiagnostic> {
+) -> Result<Option<StringId>, DiagnosticDraft> {
     let ConstValuePayload::String(value) = payload else {
         return Ok(None);
     };
@@ -224,11 +230,9 @@ pub(super) fn concrete_payload_text(
                     ConstStringPiece::Text(part) => text.push_str(strings.resolve(*part)),
                     ConstStringPiece::Resource(_) | ConstStringPiece::SiteRoot => {
                         let operation = strings.intern(requirement.operation_name());
-                        return Err(CompilerDiagnostic::compile_time_evaluation_error(
-                            CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText,
-                            Some(operation),
-                            span,
-                        ));
+                        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::compile_time_evaluation_error(CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText,
+                        Some(operation),
+                        span,));
                     }
                 }
             }
@@ -357,7 +361,7 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
         error: ConstantFoldError,
         operands: &[ConstValueId],
     ) -> ConstantFoldError {
-        let ConstantFoldError::Diagnostic(mut diagnostic) = error else {
+        let ConstantFoldError::NumericFailure(diagnostic) = error else {
             return error;
         };
         let provenances = operands
@@ -365,13 +369,9 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
             .filter_map(|operand| self.values.metadata(*operand))
             .map(|metadata| &metadata.synthetic_interface_provenance)
             .collect::<Vec<_>>();
-        match attach_source_config_origin_labels(
-            &mut diagnostic,
-            &provenances,
-            self.strings,
-            self.scope,
-        ) {
-            Ok(()) => ConstantFoldError::Diagnostic(diagnostic),
+        match attach_source_config_origin_labels(diagnostic, &provenances, self.strings, self.scope)
+        {
+            Ok(diagnostic) => ConstantFoldError::NumericFailure(diagnostic),
             Err(error) => error,
         }
     }
@@ -699,12 +699,10 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                         InvalidCastReason::GenericBoundEvidenceNotConstFoldable
                     }
                 };
-                Err(CompilerDiagnostic::invalid_cast(
-                    reason,
-                    Some(facts.source_type_id),
-                    Some(facts.target_type_id),
-                    original.span(),
-                )
+                Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_cast(reason,
+                Some(facts.source_type_id),
+                Some(facts.target_type_id),
+                original.span(),)
                 .into())
             }
         }
@@ -945,12 +943,10 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
             _ => return Ok(None),
         };
         let literal = apply_builtin_cast_policy(policy, &literal).map_err(|_| {
-            CompilerDiagnostic::invalid_cast(
-                InvalidCastReason::BuiltinCastFailedInConst,
-                Some(facts.source_type_id),
-                Some(facts.target_type_id),
-                original.span(),
-            )
+            crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_cast(InvalidCastReason::BuiltinCastFailedInConst,
+            Some(facts.source_type_id),
+            Some(facts.target_type_id),
+            original.span(),)
         })?;
         let payload = match literal {
             BuiltinCastLiteral::Bool(value) => ConstValuePayload::Bool(value),
@@ -1037,7 +1033,7 @@ fn cast_operands(
 enum PayloadFoldOutcome {
     Folded(ConstValuePayload),
     NotConstant,
-    TextUnavailable(CompilerDiagnostic),
+    TextUnavailable(DiagnosticDraft),
 }
 /// A numeric coercion is transparent to arithmetic and comparison, so a `Coerced` operand
 /// reads as the scalar it wraps.
@@ -1470,7 +1466,7 @@ pub(crate) fn fold_expression_with_bindings(
                         folding.requirement,
                     ) {
                         Ok(ConstantFoldOutcome::Refused { reason, .. }) if !folding.speculative => {
-                            return Err(reason.into_diagnostic().into());
+                            return Err(reason.into_draft().into());
                         }
                         Ok(ConstantFoldOutcome::Refused { reason, root }) => {
                             walk.refusal.get_or_insert(reason);
@@ -1479,8 +1475,12 @@ pub(crate) fn fold_expression_with_bindings(
                         Ok(outcome) => outcome_root(outcome),
                         // Capacity exhaustion is never a speculative refusal: it must reach the module build.
                         Err(ConstantFoldError::Diagnostic(diagnostic))
-                            if folding.speculative
-                                && !diagnostic.is_compiler_capacity_exceeded() =>
+                            if folding.speculative && diagnostic.code() != "MOTH-SYNTAX-0037" =>
+                        {
+                            result
+                        }
+                        Err(ConstantFoldError::NumericFailure(diagnostic))
+                            if folding.speculative && diagnostic.code() != "MOTH-SYNTAX-0037" =>
                         {
                             result
                         }
@@ -1708,18 +1708,11 @@ fn fold_root(
     ))
 }
 fn attach_source_config_origin_labels(
-    diagnostic: &mut CompilerDiagnostic,
+    mut diagnostic: DiagnosticDraft,
     provenances: &[&SyntheticInterfaceProvenance],
     string_table: &mut StringTable,
     scope_context: Option<&ScopeContext>,
-) -> Result<(), ConstantFoldError> {
-    if !matches!(
-        &diagnostic.payload,
-        DiagnosticPayload::CompileTimeEvaluationError { .. }
-    ) {
-        return Ok(());
-    }
-
+) -> Result<DiagnosticDraft, ConstantFoldError> {
     let mut input_names = provenances
         .iter()
         .flat_map(|provenance| provenance.source_config_member_names())
@@ -1727,7 +1720,7 @@ fn attach_source_config_origin_labels(
     input_names.sort_unstable();
     input_names.dedup();
     if input_names.is_empty() {
-        return Ok(());
+        return Ok(diagnostic);
     }
 
     let Some(scope_context) = scope_context else {
@@ -1746,16 +1739,16 @@ fn attach_source_config_origin_labels(
             ))
             .into());
         };
-        diagnostic.labels.push(DiagnosticLabel::secondary(
+        diagnostic = diagnostic.with_label(
             Some(label_span),
-            Some(DiagnosticLabelMessage::ConfigInputOrigin {
+            Some(LabelDraftMessage::ConfigInputOrigin {
                 input_name: string_table.intern(input_name),
                 origin,
             }),
-        ));
+        );
     }
 
-    Ok(())
+    Ok(diagnostic)
 }
 
 fn compile_time_evaluation_diagnostic(
@@ -1765,8 +1758,9 @@ fn compile_time_evaluation_diagnostic(
     span: Option<SourceSpan>,
 ) -> ConstantFoldError {
     let operation = operation.map(|operation| string_table.get_or_intern(operation));
-
-    CompilerDiagnostic::compile_time_evaluation_error(reason, operation, span).into()
+    ConstantFoldError::NumericFailure(
+        crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::compile_time_evaluation_error(reason, operation, span),
+    )
 }
 
 fn integer_overflow_error<T>(ctx: &mut NumericFoldFailure<'_, '_>) -> Result<T, ConstantFoldError> {

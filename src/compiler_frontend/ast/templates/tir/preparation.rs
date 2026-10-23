@@ -34,9 +34,9 @@ use crate::compiler_frontend::ast::templates::tir::view::{
     TemplateTirPhase, TirView, TirViewIdentity,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateStructureReason,
-};
+use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -114,7 +114,7 @@ struct PreparationWalk<'scope> {
     visiting_slot_plans: FxHashSet<PreparationSlotPlanKey>,
     runtime_reason: Option<RuntimeTemplateReason>,
     mode: TemplatePreparationMode,
-    const_diagnostic: Option<CompilerDiagnostic>,
+    const_diagnostic: Option<DiagnosticDraft>,
     source_scope: Option<&'scope ScopeContext>,
     external_package_registry: Option<&'scope ExternalPackageRegistry>,
     expressions: &'scope AstExpressionBuilder,
@@ -221,7 +221,7 @@ impl<'scope> PreparationWalk<'scope> {
         }
     }
 
-    fn record_const_diagnostic(&mut self, diagnostic: CompilerDiagnostic) {
+    fn record_const_diagnostic(&mut self, diagnostic: DiagnosticDraft) {
         if self.const_diagnostic.is_none() {
             self.const_diagnostic = Some(diagnostic);
         }
@@ -649,12 +649,10 @@ impl PreparationWalk<'_> {
                             RuntimeTemplateReason::RuntimeExpression,
                         );
                         if matches!(self.mode, TemplatePreparationMode::ConstRequired) {
-                            self.record_const_diagnostic(
-                                CompilerDiagnostic::invalid_template_structure(
-                                    InvalidTemplateStructureReason::TemplateIfBranchNotConst,
-                                    node.span,
-                                ),
-                            );
+                            self.record_const_diagnostic(templates::invalid_template_structure(
+                                InvalidTemplateStructureReason::TemplateIfBranchNotConst,
+                                node.span,
+                            ));
                         }
                     }
                     facts.merge(body_facts);
@@ -687,12 +685,10 @@ impl PreparationWalk<'_> {
                     if !body_facts.const_evaluable
                         && matches!(self.mode, TemplatePreparationMode::ConstRequired)
                     {
-                        self.record_const_diagnostic(
-                            CompilerDiagnostic::invalid_template_structure(
-                                InvalidTemplateStructureReason::TemplateLoopBodyNotConst,
-                                node.span,
-                            ),
-                        );
+                        self.record_const_diagnostic(templates::invalid_template_structure(
+                            InvalidTemplateStructureReason::TemplateLoopBodyNotConst,
+                            node.span,
+                        ));
                     }
                     facts.merge(body_facts);
                     if let Some(aggregate_wrapper) = aggregate_wrapper {
@@ -791,9 +787,9 @@ impl PreparationWalk<'_> {
                                 ..
                             } => InvalidTemplateStructureReason::TemplateOptionCaptureConstDeferred,
                         };
-                        self.record_const_diagnostic(
-                            CompilerDiagnostic::invalid_template_structure(reason, node.span),
-                        );
+                        self.record_const_diagnostic(templates::invalid_template_structure(
+                            reason, node.span,
+                        ));
                     }
                     Ok(facts)
                 }
@@ -1046,7 +1042,7 @@ impl PreparationWalk<'_> {
                 if is_const {
                     Ok(())
                 } else {
-                    Err(CompilerDiagnostic::invalid_template_structure(
+                    Err(templates::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateIfConditionNotConst,
                         self.expressions.view(*condition)?.span().or(node_span),
                     ))
@@ -1082,7 +1078,7 @@ impl PreparationWalk<'_> {
                     collect_option_capture_binding_path(pattern, &mut branch_binding_paths);
                     Ok(())
                 } else {
-                    Err(CompilerDiagnostic::invalid_template_structure(
+                    Err(templates::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateOptionCaptureConstDeferred,
                         scrutinee_view.span().or(node_span),
                     ))
@@ -1133,11 +1129,11 @@ impl PreparationWalk<'_> {
                 );
                 let diagnostic = match condition_value {
                     Some(false) => None,
-                    Some(true) => Some(CompilerDiagnostic::invalid_template_structure(
+                    Some(true) => Some(templates::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateConditionalLoopConstTrue,
                         condition_span_or_loop_span(diagnostic_condition, loop_span),
                     )),
-                    None => Some(CompilerDiagnostic::invalid_template_structure(
+                    None => Some(templates::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateLoopConditionNotConst,
                         condition_span_or_loop_span(diagnostic_condition, loop_span),
                     )),
@@ -1214,7 +1210,7 @@ impl PreparationWalk<'_> {
                     facts.merge(step_facts);
                 }
                 (!header_const).then(|| {
-                    CompilerDiagnostic::invalid_template_structure(
+                    templates::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
                         loop_span,
                     )
@@ -1227,7 +1223,7 @@ impl PreparationWalk<'_> {
                 facts.merge(iterable_facts);
                 let iterable_span = self.expressions.view(*iterable)?.span().or(loop_span);
                 (!header_const).then(|| {
-                    CompilerDiagnostic::invalid_template_structure(
+                    templates::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateLoopSourceNotConst,
                         iterable_span,
                     )

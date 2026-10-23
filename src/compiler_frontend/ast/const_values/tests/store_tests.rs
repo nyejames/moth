@@ -6,8 +6,11 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrId, TemplateTirPhase, TemplateTirReference, TemplateViewContext,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::CompilerCapacityExceededView;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::{
-    AstCapacityResource, CapacityResource, DiagnosticPayload,
+    AstCapacityResource, CapacityResource, DiagnosticBag,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::paths::module_resources::{ModuleResourceTable, ResourceId};
@@ -37,13 +40,19 @@ fn compact_const_value_extent_checks_preserve_capacity_resource_and_span() {
     );
     for (prefix, offset) in [(max, 1), (usize::MAX, 1)] {
         let diagnostic = checked_const_value_index(prefix, offset, span).unwrap_err();
+        let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+        let diagnostic = compact.first().expect("the diagnostic is retained");
+        let facts = diagnostic
+            .family_view::<CompilerCapacityExceededView>()
+            .expect("the diagnostic is a capacity failure");
+        assert_eq!(
+            facts.resource,
+            CapacityResource::Ast(AstCapacityResource::ConstValues)
+        );
         assert!(matches!(
-            diagnostic.payload,
-            DiagnosticPayload::CompilerCapacityExceeded {
-                resource: CapacityResource::Ast(AstCapacityResource::ConstValues),
-            }
+            diagnostic.primary_site(),
+            SiteRef::Local(actual) if Some(actual) == span
         ));
-        assert_eq!(diagnostic.primary_span, span);
     }
 }
 

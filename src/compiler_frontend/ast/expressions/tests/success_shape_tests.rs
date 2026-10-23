@@ -8,7 +8,10 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 };
 use crate::compiler_frontend::ast::expressions::expression_types::FallibleExpressionHandling;
 use crate::compiler_frontend::ast::expressions::failure_facts::ExpressionFailureFacts;
-use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, ValueReceiverContext};
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::ValueReceiverContext;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidValueReceiverView;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -100,9 +103,14 @@ fn single_value_boundary_reports_actual_success_arity() {
         let diagnostic = view
             .require_single(ValueReceiverContext::Declaration)
             .expect_err("scalar receiver rejects arity");
-        assert!(
-            matches!(diagnostic.payload, DiagnosticPayload::InvalidValueReceiver { receiver: ValueReceiverContext::Declaration, target_count: 1, produced_count: found } if found == produced_count)
-        );
+        let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+        let diagnostic = compact.first().expect("the diagnostic is retained");
+        let facts = diagnostic
+            .family_view::<InvalidValueReceiverView>()
+            .expect("the diagnostic is an invalid value receiver");
+        assert_eq!(facts.receiver, ValueReceiverContext::Declaration);
+        assert_eq!(facts.target_count, 1);
+        assert_eq!(facts.produced_count, produced_count);
         assert!(
             view.value_type_id().is_err(),
             "internal single-value access also rejects arity"

@@ -7,7 +7,6 @@
 use super::diagnostics::diagnostic_operator_from_ast;
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
 use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -30,11 +29,9 @@ pub(super) fn resolve_logical_operator_type(
         return Ok(bool_type_id);
     }
 
-    Err(CompilerDiagnostic::unsupported_operator_types(
-        diagnostic_operator_from_ast(op),
-        lhs,
-        Some(rhs),
-        span,
-    )
+    Err(crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::unsupported_operator_types(diagnostic_operator_from_ast(op),
+    lhs,
+    Some(rhs),
+    span,)
     .into())
 }

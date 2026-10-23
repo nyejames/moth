@@ -6,19 +6,21 @@ use crate::compiler_frontend::ast::type_resolution::{
     TypeResolutionContext, resolve_parsed_type_annotation, reusable_type_id_for_parsed_ref,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTypeAnnotationReason, TypeAnnotationContext,
+    InvalidTypeAnnotationReason, TypeAnnotationContext,
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 pub(crate) enum StructFieldResolutionError {
-    Diagnostic(CompilerDiagnostic),
+    Diagnostic(DiagnosticDraft),
     Infrastructure(Box<CompilerError>),
 }
 
-impl From<CompilerDiagnostic> for StructFieldResolutionError {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
+impl From<DiagnosticDraft> for StructFieldResolutionError {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
         StructFieldResolutionError::Diagnostic(diagnostic)
     }
 }
@@ -148,7 +150,7 @@ fn resolve_struct_field_type_shells(
                     *type_id != type_resolution_context.type_environment.builtins().none
                 })
                 .ok_or_else(|| {
-                    CompilerDiagnostic::invalid_type_annotation(
+                    names_declarations::invalid_type_annotation(
                         TypeAnnotationContext::DeclarationTarget,
                         InvalidTypeAnnotationReason::NoneNotAllowed,
                         field.binding_span,

@@ -54,13 +54,14 @@ use crate::compiler_frontend::builtins::casts::resolution::{
 };
 use crate::compiler_frontend::builtins::expression_parsing::parse_curly_literal_expression;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch_for_tag,
 };
 use crate::compiler_frontend::compiler_messages::{
-    AstCapacityResource, CompilerDiagnostic, DeferredFeatureReason, DiagnosticToken,
-    InvalidBuiltinCallReason, InvalidCastReason, InvalidControlFlowStatementReason,
-    InvalidExpressionReason, InvalidFallibleHandlingReason,
+    AstCapacityResource, DeferredFeatureReason, DiagnosticToken, InvalidBuiltinCallReason,
+    InvalidCastReason, InvalidControlFlowStatementReason, InvalidExpressionReason,
+    InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::declaration_syntax::type_syntax::builtin_scalar_type_name_for_tag;
 use crate::compiler_frontend::source::SourceSpan;
@@ -168,10 +169,8 @@ fn reject_adjacent_operand(
         .is_some_and(ExpressionRpnItem::is_operand_shape);
 
     if previous_is_operand {
-        return Err(CompilerDiagnostic::invalid_expression(
-            InvalidExpressionReason::ExpectedOperatorBeforeExpression,
-            second_expression_span,
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::invalid_expression(InvalidExpressionReason::ExpectedOperatorBeforeExpression,
+        second_expression_span,)
         .into());
     }
 
@@ -182,22 +181,19 @@ fn unexpected_token_at_current(
     token_stream: &AstCursor,
     fallback: TokenTag,
     string_table: &mut StringTable,
-) -> Result<CompilerDiagnostic, ExpressionParseError> {
+) -> Result<DiagnosticDraft, ExpressionParseError> {
     let span = Some(token_stream.current_span());
     let found = token_stream
         .current_diagnostic_token(string_table)
         .map_err(|error| {
-            CompilerDiagnostic::token_view_invariant_error(
-                error,
-                "expression unexpected-token diagnostic",
-            )
+            CompilerError::compiler_error(format!(
+                "expression unexpected-token diagnostic token payload was malformed: {error:?}"
+            ))
         })?;
     Ok(match found {
-        Some(found) => CompilerDiagnostic::unexpected_token_from_tag(found, span),
-        None => CompilerDiagnostic::unexpected_token_from_tag(
-            DiagnosticToken::from_static_tag(fallback),
-            span,
-        ),
+        Some(found) => crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_token_from_tag(found, span),
+        None => crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_token_from_tag(DiagnosticToken::from_static_tag(fallback),
+        span,),
     })
 }
 
@@ -230,19 +226,15 @@ fn reject_second_operand_after_value_template(
         )?;
 
         if next_template.is_some() {
-            return Err(CompilerDiagnostic::invalid_expression(
-                InvalidExpressionReason::ExpectedOperatorBeforeExpression,
-                next_template_start,
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::invalid_expression(InvalidExpressionReason::ExpectedOperatorBeforeExpression,
+            next_template_start,)
             .into());
         }
     }
 
     if is_value_operand_start_token(token_stream.current_tag()) {
-        return Err(CompilerDiagnostic::invalid_expression(
-            InvalidExpressionReason::ExpectedOperatorBeforeExpression,
-            Some(token_stream.current_span()),
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::invalid_expression(InvalidExpressionReason::ExpectedOperatorBeforeExpression,
+        Some(token_stream.current_span()),)
         .into());
     }
 
@@ -348,12 +340,10 @@ fn push_expression_after_suffixes(
             string_table,
             path_fork,
         );
-        return Err(CompilerDiagnostic::const_record_used_as_value(
-            record_name,
-            expression_builder
-                .view_owned(expression_after_option_propagation)?
-                .span(),
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::const_record_used_as_value(record_name,
+        expression_builder
+            .view_owned(expression_after_option_propagation)?
+            .span(),)
         .into());
     }
 
@@ -596,10 +586,8 @@ fn dispatch_non_group_expression_token(
         // Recovery selects the completed ordinary expression, never the last primary.
         TokenTag::CATCH => {
             if !state.allow_boundary_catch || !fallible_catch_allowed_in_context(context) {
-                return Err(CompilerDiagnostic::invalid_fallible_handling(
-                    InvalidFallibleHandlingReason::CatchOutsideBoundary,
-                    Some(token_stream.current_span()),
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::invalid_fallible_handling(InvalidFallibleHandlingReason::CatchOutsideBoundary,
+                Some(token_stream.current_span()),)
                 .into());
             }
             Ok(ExpressionTokenStep::Break)
@@ -623,11 +611,9 @@ fn dispatch_non_group_expression_token(
             if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS) {
                 let cast_name = builtin_scalar_type_name_for_tag(token)
                     .map(|spelling| string_table.intern(spelling));
-                return Err(CompilerDiagnostic::invalid_builtin_call(
-                    InvalidBuiltinCallReason::ScalarConstructorRemoved,
-                    cast_name,
-                    Some(token_stream.current_span()),
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_builtin_call(InvalidBuiltinCallReason::ScalarConstructorRemoved,
+                cast_name,
+                Some(token_stream.current_span()),)
                 .into());
             }
 
@@ -822,17 +808,13 @@ fn dispatch_non_group_expression_token(
             Ok(ExpressionTokenStep::Continue)
         }
 
-        TokenTag::IF => Err(CompilerDiagnostic::invalid_control_flow_statement(
-            InvalidControlFlowStatementReason::ValueBlockOutsideReceiver,
-            Some(token_stream.current_span()),
-        )
+        TokenTag::IF => Err(crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::invalid_control_flow_statement(InvalidControlFlowStatementReason::ValueBlockOutsideReceiver,
+        Some(token_stream.current_span()),)
         .into()),
 
-        TokenTag::ASSERT => Err(CompilerDiagnostic::invalid_builtin_call(
-            InvalidBuiltinCallReason::ExpressionPositionNotAllowed,
-            Some(string_table.intern("assert")),
-            Some(token_stream.current_span()),
-        )
+        TokenTag::ASSERT => Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_builtin_call(InvalidBuiltinCallReason::ExpressionPositionNotAllowed,
+        Some(string_table.intern("assert")),
+        Some(token_stream.current_span()),)
         .into()),
 
         TokenTag::MUST | TokenTag::TRAIT_THIS => {
@@ -1032,10 +1014,8 @@ fn dispatch_non_group_expression_token(
                         if token_stream.peek_next_tag() == Some(TokenTag::CATCH) {
                             let conflict_span =
                                 token_stream.span_at(token_stream.position().saturating_add(1));
-                            return Err(CompilerDiagnostic::invalid_fallible_handling(
-                                InvalidFallibleHandlingReason::OptionPropagationCatchConflict,
-                                conflict_span,
-                            )
+                            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::invalid_fallible_handling(InvalidFallibleHandlingReason::OptionPropagationCatchConflict,
+                            conflict_span,)
                             .into());
                         }
                         let span = Some(token_stream.current_postfix_operator_span());
@@ -1150,14 +1130,12 @@ fn dispatch_parenthesized_record(
     let group_span = Some(token_stream.current_postfix_operator_span());
     if !context.kind.is_constant_context() {
         if matches!(parenthesized_kind, ParenthesizedExpressionKind::Empty) {
-            return Err(CompilerDiagnostic::invalid_expression(
-                InvalidExpressionReason::EmptyRuntimeAnonymousRecord,
-                Some(token_stream.current_span()),
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::invalid_expression(InvalidExpressionReason::EmptyRuntimeAnonymousRecord,
+            Some(token_stream.current_span()),)
             .into());
         }
 
-        return Err(CompilerDiagnostic::deferred_feature_reason(
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::deferred_feature_reason(
             DeferredFeatureReason::RuntimeAnonymousRecord,
             Some(token_stream.current_span()),
         )
@@ -1334,7 +1312,7 @@ fn group_open_distance(
             )
         })?;
     u32::try_from(distance).map_err(|_| {
-        CompilerDiagnostic::compiler_capacity_exceeded(AstCapacityResource::GroupDistances, span)
+        crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::compiler_capacity_exceeded(AstCapacityResource::GroupDistances, span)
             .into()
     })
 }
@@ -1415,10 +1393,8 @@ fn dispatch_delimiter_token(
     }
 
     if state.consume_closing_parenthesis {
-        return Err(CompilerDiagnostic::missing_closing_delimiter(
-            string_table.intern(")"),
-            Some(token_stream.current_span()),
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::missing_closing_delimiter(string_table.intern(")"),
+        Some(token_stream.current_span()),)
         .into());
     }
 
@@ -1616,32 +1592,26 @@ fn parse_cast_expression(
         } => (target_type_id, target, requires_optional_wrap_after_cast),
 
         CastTargetContext::TargetIsGenericParameter { target_type_id } => {
-            return Err(CompilerDiagnostic::invalid_cast(
-                InvalidCastReason::TargetIsGenericParameter,
-                None,
-                Some(target_type_id),
-                Some(token_stream.current_span()),
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_cast(InvalidCastReason::TargetIsGenericParameter,
+            None,
+            Some(target_type_id),
+            Some(token_stream.current_span()),)
             .into());
         }
 
         CastTargetContext::TargetNotBuiltin { target_type_id } => {
-            return Err(CompilerDiagnostic::invalid_cast(
-                InvalidCastReason::TargetNotBuiltin,
-                None,
-                Some(target_type_id),
-                Some(token_stream.current_span()),
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_cast(InvalidCastReason::TargetNotBuiltin,
+            None,
+            Some(target_type_id),
+            Some(token_stream.current_span()),)
             .into());
         }
 
         CastTargetContext::None => {
-            return Err(CompilerDiagnostic::invalid_cast(
-                InvalidCastReason::MissingExplicitTarget,
-                None,
-                None,
-                Some(token_stream.current_span()),
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_cast(InvalidCastReason::MissingExplicitTarget,
+            None,
+            None,
+            Some(token_stream.current_span()),)
             .into());
         }
     };
@@ -1652,12 +1622,10 @@ fn parse_cast_expression(
     // `cast!` was removed. Its separate bang remains an ordinary token so the
     // diagnostic can point to the exact byte instead of silently changing meaning.
     if token_stream.current_tag() == TokenTag::BANG {
-        return Err(CompilerDiagnostic::invalid_cast(
-            InvalidCastReason::CastPropagationRemoved,
-            None,
-            None,
-            Some(token_stream.current_span()),
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_cast(InvalidCastReason::CastPropagationRemoved,
+        None,
+        None,
+        Some(token_stream.current_span()),)
         .into());
     }
 

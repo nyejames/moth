@@ -29,9 +29,9 @@ use crate::compiler_frontend::ast::type_resolution::{
     validate_no_recursive_runtime_structs,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticBag, DiagnosticLabel,
-    DiagnosticPayload, PublicGenericOwnerKind, TypeMismatchContext,
+    DiagnosticBag, PublicGenericOwnerKind, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition,
@@ -74,35 +74,6 @@ enum ConstantWalkScope {
 struct NominalBoundSurfaceValidationContext<'a> {
     trait_environment: &'a TraitEnvironment,
     trait_evidence_environment: &'a TraitEvidenceEnvironment,
-}
-
-fn member_shell_diagnostic_for_context(
-    diagnostic: CompilerDiagnostic,
-    member_context: MemberShellSemanticContext,
-) -> CompilerDiagnostic {
-    let primary_span = diagnostic.primary_span;
-    let mut diagnostic = match member_context {
-        MemberShellSemanticContext::StructField
-            if is_non_constant_struct_default_diagnostic(&diagnostic) =>
-        {
-            CompilerDiagnostic::invalid_struct_default_value(primary_span)
-        }
-
-        MemberShellSemanticContext::StructField
-        | MemberShellSemanticContext::ChoicePayloadField => diagnostic,
-    };
-    diagnostic.primary_span = primary_span;
-    diagnostic
-}
-
-fn is_non_constant_struct_default_diagnostic(diagnostic: &CompilerDiagnostic) -> bool {
-    matches!(
-        diagnostic.payload,
-        DiagnosticPayload::CompileTimeEvaluationError {
-            reason: CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
-            ..
-        }
-    )
 }
 
 impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
@@ -1242,18 +1213,24 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         }
                     },
                 )
-                .map_err(|error| {
-                    // The member shell is the boundary that maps signature-member failures onto
-                    // their struct-default or choice-payload context; a leaked numeric deferral
-                    // has no diagnostic context to remap, so it reports its broken handoff here.
-                    match error.at_boundary_without_numeric_retention(
+                .map_err(|error| match error {
+                    ExpressionParseError::NonConstantReferenceInConstant(diagnostic) => {
+                        let diagnostic = match member_context {
+                            MemberShellSemanticContext::StructField => {
+                                names_declarations::invalid_struct_default_value(
+                                    diagnostic.primary_span(),
+                                )
+                            }
+                            MemberShellSemanticContext::ChoicePayloadField => diagnostic,
+                        };
+                        ExpressionParseError::Diagnostic(diagnostic)
+                    }
+                    error => match error.at_boundary_without_numeric_retention(
                         "the module environment type resolution",
                     ) {
-                        Ok(diagnostic) => ExpressionParseError::Diagnostic(
-                            member_shell_diagnostic_for_context(diagnostic, member_context),
-                        ),
+                        Ok(diagnostic) => ExpressionParseError::Diagnostic(diagnostic),
                         Err(error) => error,
-                    }
+                    },
                 })?;
                 declarations.push(declaration);
             }
@@ -1353,14 +1330,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 }
             })
             .collect::<Vec<_>>();
-        if !failure
-            .labels
-            .iter()
-            .any(|label| label.span == variant_span)
-        {
-            failure
-                .labels
-                .push(DiagnosticLabel::secondary(variant_span, None));
+        if !failure.has_label_at(variant_span) {
+            failure = failure.with_label(variant_span, None);
         }
         self.warnings = DiagnosticBag::from_diagnostics(warnings);
 

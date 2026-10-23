@@ -49,9 +49,7 @@ use crate::compiler_frontend::ast::numeric_construction::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic,
-};
+use crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::source::SourceSpan;
@@ -399,11 +397,9 @@ fn finish_struct_instance(
                 let field_name = path_fork
                     .component(field.name)
                     .unwrap_or_else(|| string_table.intern("<field>"));
-                return Err(CompilerDiagnostic::compile_time_evaluation_error(
-                    CompileTimeEvaluationErrorReason::NonCompileTimeFieldInConstantContext,
-                    Some(field_name),
-                    field_span,
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::compile_time_evaluation_error(CompileTimeEvaluationErrorReason::NonCompileTimeFieldInConstantContext,
+                Some(field_name),
+                field_span,)
                 .into());
             }
 

@@ -20,7 +20,7 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidTemplateSlotReason};
+use crate::compiler_frontend::compiler_messages::InvalidTemplateSlotReason;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -174,11 +174,9 @@ pub(super) fn parse_template_expression(
         }
 
         TemplateType::SlotDefinition(_) => {
-            let diagnostic = CompilerDiagnostic::invalid_template_slot(
-                InvalidTemplateSlotReason::SlotDefinitionOutsideTemplateBody,
-                None,
-                Some(token_stream.current_span()),
-            );
+            let diagnostic = crate::compiler_frontend::compiler_messages::diagnostics::families::templates::invalid_template_slot(InvalidTemplateSlotReason::SlotDefinitionOutsideTemplateBody,
+            None,
+            Some(token_stream.current_span()),);
 
             Err(diagnostic.into())
         }

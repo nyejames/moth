@@ -13,9 +13,7 @@ use crate::compiler_frontend::ast::const_values::store::{
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionView;
 use crate::compiler_frontend::ast::expressions::expression_types::ConstValueKind;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic,
-};
+use crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::external_packages::{
     ConstEvalLeafType, ConstEvalSlotType, TextConstEvalOp,
@@ -297,11 +295,9 @@ fn checked_text_length_evaluation(
 ) -> Result<ExternalCallEvaluation, ConstantFoldError> {
     let Ok(length) = i32::try_from(length) else {
         let operation = strings.intern("text.length");
-        let diagnostic = CompilerDiagnostic::compile_time_evaluation_error(
-            CompileTimeEvaluationErrorReason::EvaluationOutputBoundExceeded,
-            Some(operation),
-            span,
-        );
+        let diagnostic = crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::compile_time_evaluation_error(CompileTimeEvaluationErrorReason::EvaluationOutputBoundExceeded,
+        Some(operation),
+        span,);
         return Ok(ExternalCallEvaluation::Refused(
             ConstantFoldRefusalReason::EvaluationOutputBoundExceeded(diagnostic),
         ));
@@ -316,7 +312,9 @@ fn checked_text_length_evaluation(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
+    use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::CompileTimeEvaluationErrorView;
+    use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 
     #[test]
     fn checked_text_length_evaluation_refuses_values_above_i32_max() {
@@ -336,13 +334,15 @@ mod tests {
         else {
             panic!("checked Text length should report the output-bound refusal");
         };
-        assert!(matches!(
-            diagnostic.payload,
-            DiagnosticPayload::CompileTimeEvaluationError {
-                reason: CompileTimeEvaluationErrorReason::EvaluationOutputBoundExceeded,
-                ..
-            }
-        ));
+        let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+        let diagnostic = compact.first().expect("the diagnostic is retained");
+        let facts = diagnostic
+            .family_view::<CompileTimeEvaluationErrorView>()
+            .expect("the diagnostic is a compile-time evaluation failure");
+        assert_eq!(
+            facts.reason,
+            CompileTimeEvaluationErrorReason::EvaluationOutputBoundExceeded
+        );
         assert!(
             payloads.is_empty(),
             "a refused call must leave no partial payloads behind"

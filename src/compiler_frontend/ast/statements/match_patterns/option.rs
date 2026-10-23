@@ -18,7 +18,8 @@ use crate::compiler_frontend::ast::statements::match_patterns::{
     parse_non_choice_pattern,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidMatchPatternReason};
+use crate::compiler_frontend::compiler_messages::InvalidMatchPatternReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -29,8 +30,8 @@ use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 
 /// Result for the option pattern family.
 ///
-/// Option parsing returns plain `CompilerDiagnostic` values on the diagnosed
-/// lane; the surrounding parser boundary owns any infrastructure failure.
+/// Option parsing keeps diagnosed failures on the compact draft lane; infrastructure failures
+/// remain typed.
 type OptionPatternResult<T> =
     Result<T, crate::compiler_frontend::ast::expressions::error::ExpressionParseError>;
 
@@ -131,7 +132,7 @@ pub(crate) fn parse_option_capture_binding(
 
     let name = match token_stream.current_tag() {
         TokenTag::TYPE_PARAMETER_BRACKET => {
-            return Err(CompilerDiagnostic::invalid_match_pattern(
+            return Err(choices_control_flow::invalid_match_pattern(
                 InvalidMatchPatternReason::EmptyOptionPresentCapture,
                 None,
                 None,
@@ -145,7 +146,7 @@ pub(crate) fn parse_option_capture_binding(
                 CompilerError::compiler_error("option capture symbol is missing its payload")
             })?,
         _ => {
-            return Err(CompilerDiagnostic::invalid_match_pattern(
+            return Err(choices_control_flow::invalid_match_pattern(
                 InvalidMatchPatternReason::ExpectedBindingInOptionPresentCapture,
                 None,
                 None,
@@ -159,7 +160,7 @@ pub(crate) fn parse_option_capture_binding(
 
     // Reject type annotations such as `|name String|`.
     if token_stream.current_tag() == TokenTag::SYMBOL {
-        return Err(CompilerDiagnostic::invalid_match_pattern(
+        return Err(choices_control_flow::invalid_match_pattern(
             InvalidMatchPatternReason::OptionPresentCaptureTypeAnnotation,
             None,
             None,
@@ -171,7 +172,7 @@ pub(crate) fn parse_option_capture_binding(
     token_stream.skip_newlines();
 
     if token_stream.current_tag() != TokenTag::TYPE_PARAMETER_BRACKET {
-        return Err(CompilerDiagnostic::invalid_match_pattern(
+        return Err(choices_control_flow::invalid_match_pattern(
             InvalidMatchPatternReason::MissingClosingPipe,
             None,
             None,
@@ -203,7 +204,7 @@ fn wrap_option_present_value(
     match pattern {
         MatchPattern::Literal(value) => {
             if !type_environment.supports_runtime_equality(inner_type_id) {
-                return Err(CompilerDiagnostic::invalid_match_pattern(
+                return Err(choices_control_flow::invalid_match_pattern(
                     InvalidMatchPatternReason::OptionValuePatternRequiresEquality,
                     None,
                     None,

@@ -2,7 +2,8 @@
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::type_resolution::TypeResolutionResult;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidDeclarationReason};
+use crate::compiler_frontend::compiler_messages::InvalidDeclarationReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -20,7 +21,7 @@ pub(crate) fn validate_no_recursive_generic_type(
         return Ok(());
     }
 
-    Err(CompilerDiagnostic::invalid_declaration(
+    Err(names_declarations::invalid_declaration(
         InvalidDeclarationReason::RecursiveGenericType,
         None,
         span,
@@ -144,7 +145,7 @@ pub(crate) fn validate_no_recursive_runtime_structs(
                 .and_then(|fields| fields.first())
                 .and_then(|field| field.binding_span);
 
-            return Err(CompilerDiagnostic::invalid_declaration(
+            return Err(names_declarations::invalid_declaration(
                 InvalidDeclarationReason::RecursiveRuntimeStruct { cycle },
                 None,
                 cycle_span,

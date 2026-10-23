@@ -22,9 +22,13 @@ use crate::compiler_frontend::ast::module_ast::scope_context::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidExpressionReason, PathKind,
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::unsupported_source_file_kind;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::invalid_compile_time_path;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    invalid_expression, invalid_path,
 };
+use crate::compiler_frontend::compiler_messages::{InvalidExpressionReason, PathKind};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::headers::synthetic_content_header::content_constant_path;
 use crate::compiler_frontend::paths::file_references::{
@@ -37,30 +41,20 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-/// Builds the retained legacy error for a settled file-reference failure.
-///
-/// Transitional: `ExpressionParseError` still carries `CompilerDiagnostic`. W2 switches these
-/// emission sites to family draft constructors when `ExpressionParseError` migrates, then deletes
-/// this helper.
-/// It is crate-visible so tests compact the same production emission instead of rebuilding drafts
-/// from retained facts.
-pub(crate) fn retained_reference_error(
-    failure: ResolvedFileReferenceFailure,
-) -> ExpressionParseError {
-    let diagnostic = match failure {
+fn file_reference_failure_draft(failure: ResolvedFileReferenceFailure) -> DiagnosticDraft {
+    match failure {
         ResolvedFileReferenceFailure::InvalidCompileTimePath { path, reason, span } => {
-            CompilerDiagnostic::invalid_compile_time_path(path, reason, Some(span))
+            invalid_compile_time_path(path, reason, Some(span))
         }
         ResolvedFileReferenceFailure::InvalidComponent { span } => {
-            CompilerDiagnostic::invalid_path(PathKind::InvalidComponent, Some(span))
+            invalid_path(PathKind::InvalidComponent, Some(span))
         }
         ResolvedFileReferenceFailure::UnsupportedSourceFileKind {
             path,
             extension,
             span,
-        } => CompilerDiagnostic::unsupported_source_file_kind(path, extension, Some(span)),
-    };
-    diagnostic.into()
+        } => unsupported_source_file_kind(path, extension, Some(span)),
+    }
 }
 
 /// Resolve one path token through the value-position Stage 0 view.
@@ -111,17 +105,11 @@ pub(crate) fn resolve_file_value(
         })?;
 
     match resolved.class {
-        PreparedFileReferenceClass::Extensionless => Err(CompilerDiagnostic::invalid_expression(
-            InvalidExpressionReason::ExtensionlessFileValue,
-            span,
-        )
-        .into()),
+        PreparedFileReferenceClass::Extensionless => {
+            Err(invalid_expression(InvalidExpressionReason::ExtensionlessFileValue, span).into())
+        }
         PreparedFileReferenceClass::SourceKindNoFileValue => {
-            Err(CompilerDiagnostic::invalid_expression(
-                InvalidExpressionReason::MothFileHasNoValue,
-                span,
-            )
-            .into())
+            Err(invalid_expression(InvalidExpressionReason::MothFileHasNoValue, span).into())
         }
         PreparedFileReferenceClass::SiteRoot => match resolved.outcome {
             Stage0ResolvedFileReferenceOutcome::NoPhysicalTarget => structural_string(
@@ -132,7 +120,7 @@ pub(crate) fn resolve_file_value(
                 value_mode,
             ),
             Stage0ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => {
-                Err(retained_reference_error(diagnostic))
+                Err(file_reference_failure_draft(diagnostic).into())
             }
             _ => Err(CompilerError::compiler_error(
                 "site-root file reference unexpectedly resolved to a physical target",
@@ -141,7 +129,7 @@ pub(crate) fn resolve_file_value(
         },
         PreparedFileReferenceClass::ContentSource => match resolved.outcome {
             Stage0ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => {
-                Err(retained_reference_error(diagnostic))
+                Err(file_reference_failure_draft(diagnostic).into())
             }
             Stage0ResolvedFileReferenceOutcome::Content {
                 logical_path,
@@ -202,7 +190,7 @@ pub(crate) fn resolve_file_value(
         },
         PreparedFileReferenceClass::ResourceFile => match resolved.outcome {
             Stage0ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => {
-                Err(retained_reference_error(diagnostic))
+                Err(file_reference_failure_draft(diagnostic).into())
             }
             Stage0ResolvedFileReferenceOutcome::Resource {
                 source,

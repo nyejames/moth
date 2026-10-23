@@ -13,10 +13,17 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedTypeAlias, TypeResolutionContext, resolve_parsed_type_annotation,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
+    GenericInstantiationShape, InvalidGenericInstantiationView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
+    InvalidTypeAnnotationCode, InvalidTypeAnnotationView, UnknownTypeNameView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticPayload, DiagnosticToken, GenericApplicationErrorReason,
-    InvalidCollectionTypeReason, InvalidGenericInstantiationReason, InvalidMapTypeReason,
-    InvalidTypeAnnotationReason, NameNamespace,
+    CompilerDiagnostic, DiagnosticBag, DiagnosticDraft, DiagnosticPayload, DiagnosticToken,
+    GenericApplicationErrorReason, InvalidCollectionTypeReason, InvalidMapTypeReason,
+    InvalidTypeAnnotationReason,
 };
 use crate::compiler_frontend::datatypes::definitions::{StructTypeDefinition, TypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -155,7 +162,7 @@ fn resolve_type_annotation_error(
     parsed: ParsedTypeRef,
     string_table: &mut StringTable,
     expected_failure: &str,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(
         Vec::new(),
         &PathInternerFork::empty(),
@@ -568,19 +575,17 @@ fn public_option_type_syntax_is_deferred() {
         "public Option of T syntax should be rejected",
     );
 
-    assert_diagnostic_payload(
-        error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidGenericInstantiation {
-                    reason: InvalidGenericInstantiationReason::OptionTypeSyntaxNotSupported,
-                    ..
-                }
-            )
-        },
-        "InvalidGenericInstantiation(OptionTypeSyntaxNotSupported)",
-    );
+    let compact = compact_bag_for_test(DiagnosticBag::from(error), None);
+    let diagnostic = compact
+        .first()
+        .expect("unsupported option syntax should compact");
+    let facts = diagnostic
+        .family_view::<InvalidGenericInstantiationView>()
+        .expect("unsupported option syntax should retain generic-instantiation facts");
+    assert!(matches!(
+        facts.shape,
+        GenericInstantiationShape::OptionTypeSyntaxNotSupported { .. }
+    ));
 }
 
 #[test]
@@ -614,19 +619,17 @@ fn public_result_type_syntax_is_deferred() {
         "public Result of T, E syntax should be rejected",
     );
 
-    assert_diagnostic_payload(
-        error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidGenericInstantiation {
-                    reason: InvalidGenericInstantiationReason::ResultTypeSyntaxNotSupported,
-                    ..
-                }
-            )
-        },
-        "InvalidGenericInstantiation(ResultTypeSyntaxNotSupported)",
-    );
+    let compact = compact_bag_for_test(DiagnosticBag::from(error), None);
+    let diagnostic = compact
+        .first()
+        .expect("unsupported result syntax should compact");
+    let facts = diagnostic
+        .family_view::<InvalidGenericInstantiationView>()
+        .expect("unsupported result syntax should retain generic-instantiation facts");
+    assert!(matches!(
+        facts.shape,
+        GenericInstantiationShape::ResultTypeSyntaxNotSupported { .. }
+    ));
 }
 
 #[test]
@@ -829,19 +832,14 @@ fn alias_expanded_nested_optional_type_is_rejected() {
     )
     .expect_err("alias-expanded nested option should fail");
 
-    assert_diagnostic_payload(
-        error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidTypeAnnotation {
-                    reason: InvalidTypeAnnotationReason::NestedOptional,
-                    ..
-                }
-            )
-        },
-        "InvalidTypeAnnotation(NestedOptional)",
-    );
+    let compact = compact_bag_for_test(DiagnosticBag::from(error), None);
+    let diagnostic = compact
+        .first()
+        .expect("nested optional annotation should compact");
+    let facts = diagnostic
+        .family_view::<InvalidTypeAnnotationView>()
+        .expect("nested optional annotation should retain typed facts");
+    assert_eq!(facts.code, InvalidTypeAnnotationCode::NestedOptional);
 }
 
 #[test]
@@ -1062,22 +1060,19 @@ fn generic_instance_resolution_rejects_wrong_arity() {
     )
     .expect_err("wrong generic arity should fail");
 
-    assert_diagnostic_payload(
-        error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidGenericInstantiation {
-                    type_name,
-                    reason: InvalidGenericInstantiationReason::WrongArgumentCount {
-                        expected: 1,
-                        found: 2,
-                    },
-                } if *type_name == Some(box_name)
-            )
-        },
-        "InvalidGenericInstantiation(WrongArgumentCount)",
-    );
+    let compact = compact_bag_for_test(DiagnosticBag::from(error), None);
+    let diagnostic = compact.first().expect("wrong generic arity should compact");
+    let facts = diagnostic
+        .family_view::<InvalidGenericInstantiationView>()
+        .expect("wrong generic arity should retain typed facts");
+    assert!(matches!(
+        facts.shape,
+        GenericInstantiationShape::WrongArgumentCount {
+            type_name: Some(name),
+            expected: 1,
+            found: 2,
+        } if name == box_name
+    ));
 }
 
 #[test]
@@ -1138,19 +1133,19 @@ fn bare_generic_type_name_requires_type_arguments() {
     )
     .expect_err("bare generic type name should fail");
 
-    assert_diagnostic_payload(
-        error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::InvalidGenericInstantiation {
-                    type_name,
-                    reason: InvalidGenericInstantiationReason::MissingTypeArguments,
-                } if *type_name == Some(box_name)
-            )
-        },
-        "InvalidGenericInstantiation(MissingTypeArguments)",
-    );
+    let compact = compact_bag_for_test(DiagnosticBag::from(error), None);
+    let diagnostic = compact
+        .first()
+        .expect("missing generic arguments should compact");
+    let facts = diagnostic
+        .family_view::<InvalidGenericInstantiationView>()
+        .expect("missing generic arguments should retain typed facts");
+    assert!(matches!(
+        facts.shape,
+        GenericInstantiationShape::MissingTypeArguments {
+            type_name: Some(name),
+        } if name == box_name
+    ));
 }
 
 #[test]
@@ -1184,19 +1179,13 @@ fn unknown_named_type_reports_consistent_error() {
     )
     .expect_err("unknown type should fail");
 
-    assert_diagnostic_payload(
-        error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::UnknownName {
-                    name,
-                    namespace: NameNamespace::Type,
-                } if *name == missing
-            )
-        },
-        "UnknownName(type)",
-    );
+    let compact = compact_bag_for_test(DiagnosticBag::from(error), None);
+    let diagnostic = compact.first().expect("unknown type should compact");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0035");
+    let facts = diagnostic
+        .family_view::<UnknownTypeNameView>()
+        .expect("unknown type should retain typed name facts");
+    assert_eq!(facts.name, missing);
 }
 
 #[test]
@@ -1280,19 +1269,15 @@ fn unresolved_generic_argument_does_not_intern_instance() {
         None,
     )
     .expect_err("an unresolved generic argument must fail");
-    assert_diagnostic_payload(
-        error,
-        |payload| {
-            matches!(
-                payload,
-                DiagnosticPayload::UnknownName {
-                    name,
-                    namespace: NameNamespace::Type,
-                } if *name == missing_type
-            )
-        },
-        "UnknownName(type)",
-    );
+    let compact = compact_bag_for_test(DiagnosticBag::from(error), None);
+    let diagnostic = compact
+        .first()
+        .expect("unresolved generic argument should compact");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0035");
+    let facts = diagnostic
+        .family_view::<UnknownTypeNameView>()
+        .expect("unresolved generic argument should retain typed name facts");
+    assert_eq!(facts.name, missing_type);
     let interned_generic_instances = (0..128)
         .filter(|id| {
             matches!(

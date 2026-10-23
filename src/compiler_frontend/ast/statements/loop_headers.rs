@@ -38,9 +38,12 @@ use crate::compiler_frontend::ast::numeric_known_shape::{KnownShape, KnownShapeI
 use crate::compiler_frontend::ast::statements::condition_validation::ensure_loop_condition;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    calls_data, choices_control_flow,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidLoopHeaderReason, InvalidRangeOperandReason, RangeOperandKind,
-    ValueReceiverContext,
+    InvalidLoopHeaderReason, InvalidRangeOperandReason, RangeOperandKind, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
@@ -263,7 +266,7 @@ struct LoopHeaderParser<'a, 'types> {
     type_interner: &'a mut AstTypeInterner<'types>,
     expression_builder: &'a mut AstExpressionBuilder,
     const_values: &'a mut ConstValueStore,
-    warnings: &'a mut Vec<CompilerDiagnostic>,
+    warnings: &'a mut Vec<DiagnosticDraft>,
     string_table: &'a mut StringTable,
     path_fork: &'a mut PathInternerFork,
 }
@@ -314,7 +317,7 @@ fn loop_header_error<T>(
     reason: InvalidLoopHeaderReason,
     span: Option<SourceSpan>,
 ) -> LoopHeaderResult<T> {
-    Err(CompilerDiagnostic::invalid_loop_header(reason, span).into())
+    Err(choices_control_flow::invalid_loop_header(reason, span).into())
 }
 
 /// Parse the sole loop-header grammar directly from its bounded cursor window.
@@ -332,7 +335,7 @@ pub(crate) fn parse_loop_header_cursor(
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    warnings: &mut Vec<DiagnosticDraft>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> LoopHeaderResult<(ParsedLoopHeader, ScopeContext)> {
@@ -1173,7 +1176,7 @@ fn range_operand_domain(
     let domain = NumericScalar::from_type_id(operand_type, type_environment);
     match domain {
         Some(domain) if domain.is_integer() || domain.is_binary_float() => Ok(domain),
-        _ => Err(CompilerDiagnostic::invalid_range_operand(
+        _ => Err(calls_data::invalid_range_operand(
             kind,
             operand_type,
             InvalidRangeOperandReason::NotNumeric,
@@ -1208,7 +1211,7 @@ fn range_numeric_domain(
             }
             _ => (RangeOperandKind::End, end),
         };
-        return Err(CompilerDiagnostic::invalid_range_operand(
+        return Err(calls_data::invalid_range_operand(
             operand,
             offender.value_type_id()?,
             InvalidRangeOperandReason::IncompatibleDomain,
@@ -1509,10 +1512,10 @@ fn collection_source_diagnostic(
     context: &ScopeContext,
     environment: &TypeEnvironment,
     expression_builder: &AstExpressionBuilder,
-) -> LoopHeaderResult<CompilerDiagnostic> {
+) -> LoopHeaderResult<DiagnosticDraft> {
     let found_type =
         retained_known_result_type(&deferral.items, context, environment, expression_builder)?;
-    Ok(CompilerDiagnostic::invalid_loop_header(
+    Ok(choices_control_flow::invalid_loop_header(
         InvalidLoopHeaderReason::CollectionSourceNotCollection { found_type },
         deferral.span,
     ))
@@ -1669,7 +1672,7 @@ fn parses_as_collection_cursor(
         Ok(expression) => expression,
         // Capacity exhaustion is not a rejected cursor shape: it must reach the module build.
         Err(ExpressionParseError::Diagnostic(diagnostic))
-            if !diagnostic.is_compiler_capacity_exceeded() =>
+            if diagnostic.code() != "MOTH-SYNTAX-0037" =>
         {
             return Ok(false);
         }
@@ -1719,7 +1722,7 @@ fn parses_as_range_cursor(input: RangeLoopSpecInput<'_, '_, '_, '_>) -> LoopHead
         Ok(_) => Ok(true),
         // Capacity exhaustion is not a rejected cursor shape: it must reach the module build.
         Err(ExpressionParseError::Diagnostic(diagnostic))
-            if !diagnostic.is_compiler_capacity_exceeded() =>
+            if diagnostic.code() != "MOTH-SYNTAX-0037" =>
         {
             Ok(false)
         }
@@ -1958,7 +1961,7 @@ fn validate_loop_binding_name(
         IdentifierNamingKind::ValueLike,
         parser.string_table,
     ) {
-        parser.warnings.push(warning);
+        parser.warnings.push(warning.into());
     }
 
     Ok(())

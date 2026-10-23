@@ -10,11 +10,13 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueStoreError;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionConstructionFailure;
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 
 #[derive(Debug)]
 pub(crate) enum TemplateError {
-    Diagnostic(CompilerDiagnostic),
+    Diagnostic(DiagnosticDraft),
+    EmptyArguments(DiagnosticDraft),
+    NonConstantReferenceInConstant(DiagnosticDraft),
     Infrastructure(Box<InfrastructureErrors>),
 }
 
@@ -23,17 +25,21 @@ impl TemplateError {
     /// infrastructure failure into the user-facing lane.
     pub(crate) fn map_diagnostic(
         self,
-        map: impl FnOnce(CompilerDiagnostic) -> CompilerDiagnostic,
+        map: impl FnOnce(DiagnosticDraft) -> DiagnosticDraft,
     ) -> Self {
         match self {
             Self::Diagnostic(diagnostic) => Self::Diagnostic(map(diagnostic)),
+            Self::EmptyArguments(diagnostic) => Self::EmptyArguments(map(diagnostic)),
+            Self::NonConstantReferenceInConstant(diagnostic) => {
+                Self::NonConstantReferenceInConstant(map(diagnostic))
+            }
             Self::Infrastructure(error) => Self::Infrastructure(error),
         }
     }
 }
 
-impl From<CompilerDiagnostic> for TemplateError {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
+impl From<DiagnosticDraft> for TemplateError {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
         TemplateError::Diagnostic(diagnostic)
     }
 }
@@ -56,6 +62,12 @@ impl From<ExpressionParseError> for TemplateError {
     fn from(error: ExpressionParseError) -> Self {
         match error {
             ExpressionParseError::Diagnostic(diagnostic) => TemplateError::Diagnostic(diagnostic),
+            ExpressionParseError::TemplateDirectiveEmptyArguments(diagnostic) => {
+                TemplateError::EmptyArguments(diagnostic)
+            }
+            ExpressionParseError::NonConstantReferenceInConstant(diagnostic) => {
+                TemplateError::NonConstantReferenceInConstant(diagnostic)
+            }
             ExpressionParseError::Infrastructure(error) => TemplateError::Infrastructure(error),
             // A numeric-dependent fragment is retained only by the boundary that owns the whole
             // authored position: template head positions retain through the head expression
@@ -96,7 +108,8 @@ impl From<ConstValueStoreError> for TemplateError {
 impl From<ConstantFoldError> for TemplateError {
     fn from(error: ConstantFoldError) -> Self {
         match error {
-            ConstantFoldError::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
+            ConstantFoldError::Diagnostic(diagnostic)
+            | ConstantFoldError::NumericFailure(diagnostic) => Self::Diagnostic(diagnostic),
             ConstantFoldError::Infrastructure(error) => Self::Infrastructure(error),
         }
     }

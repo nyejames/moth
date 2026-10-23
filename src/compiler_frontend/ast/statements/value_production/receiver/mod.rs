@@ -31,8 +31,9 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
     ActiveValueProductionTarget, ParsedReceiverValue, ValueReceiverKind,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, InvalidControlFlowStatementReason,
+    DiagnosticBag, InvalidControlFlowStatementReason,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -164,7 +165,7 @@ pub fn try_parse_value_block_at_receiver_with_target(
         classification,
     ) {
         Ok(Some(reason)) => {
-            return Some(Err(CompilerDiagnostic::invalid_control_flow_statement(
+            return Some(Err(choices_control_flow::invalid_control_flow_statement(
                 reason,
                 Some(token_stream.current_span()),
             )
@@ -298,7 +299,7 @@ fn parse_bool_value_if_after_condition(
     path_fork: &mut PathInternerFork,
 ) -> ReceiverResult<ParsedReceiverValue> {
     if seed.is_none() && if_condition_is_missing(token_stream) {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+        return Err(choices_control_flow::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedConditionAfterIf,
             Some(token_stream.current_span()),
         )
@@ -363,7 +364,7 @@ fn parse_bool_value_if_after_condition(
 
     if token_stream.current_tag() == TokenTag::THEN {
         if !same_logical_line(token_stream, header_index, token_stream.position()) {
-            return Err(CompilerDiagnostic::invalid_control_flow_statement(
+            return Err(choices_control_flow::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::InlineValueIfMultiline,
                 Some(token_stream.current_span()),
             )
@@ -399,7 +400,7 @@ fn parse_bool_value_if_after_condition(
         });
     }
 
-    Err(CompilerDiagnostic::invalid_control_flow_statement(
+    Err(choices_control_flow::invalid_control_flow_statement(
         InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
         Some(token_stream.current_span()),
     )

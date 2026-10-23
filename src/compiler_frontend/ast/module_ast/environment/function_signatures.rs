@@ -29,8 +29,9 @@ use crate::compiler_frontend::ast::type_resolution::{
     validate_generic_parameters_used,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidReceiverDeclarationReason, PublicGenericOwnerKind,
+    InvalidReceiverDeclarationReason, PublicGenericOwnerKind,
 };
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
@@ -444,7 +445,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 .get(other.target.local_path())
                                 .is_some_and(|entry| entry.receiver == method_entry.receiver)
                     }) {
-                        let diagnostic = CompilerDiagnostic::invalid_receiver_declaration(
+                        let diagnostic = generics_traits_api::invalid_receiver_declaration(
                             InvalidReceiverDeclarationReason::DuplicateVisibleMethod,
                             visible_method.span,
                         );

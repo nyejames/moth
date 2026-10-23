@@ -41,7 +41,7 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticToken};
+use crate::compiler_frontend::compiler_messages::DiagnosticToken;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
@@ -314,10 +314,8 @@ fn create_expression_until_with_seeded_items_inner(
             .collect::<Vec<_>>()
             .join(", ");
         let expected_delimiter = input.string_table.intern(&expected_tokens);
-        return Err(CompilerDiagnostic::unexpected_end_of_file(
-            Some(expected_delimiter),
-            Some(input.token_stream.current_span()),
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_end_of_file(Some(expected_delimiter),
+        Some(input.token_stream.current_span()),)
         .into());
     }
     let Some(end_tag) = end_tag else {
@@ -327,17 +325,13 @@ fn create_expression_until_with_seeded_items_inner(
             .collect::<Vec<_>>()
             .join(", ");
         let expected_delimiter = input.string_table.intern(&expected_tokens);
-        return Err(CompilerDiagnostic::unexpected_end_of_file(
-            Some(expected_delimiter),
-            Some(input.token_stream.current_span()),
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_end_of_file(Some(expected_delimiter),
+        Some(input.token_stream.current_span()),)
         .into());
     };
     if !stop_tokens.contains(&end_tag) {
-        return Err(CompilerDiagnostic::unexpected_token_from_tag(
-            DiagnosticToken::from_static_tag(end_tag),
-            end_span,
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_token_from_tag(DiagnosticToken::from_static_tag(end_tag),
+        end_span,)
         .into());
     }
     // An empty remainder means the scrutinee already spans the whole condition (e.g. a bare
@@ -1206,10 +1200,8 @@ fn collect_expression_fragment_into(
 
     if !group_frames.is_empty() {
         // The stream ended before a group's `)`, so that group has no closing delimiter.
-        return Err(CompilerDiagnostic::missing_closing_delimiter(
-            input.string_table.intern(")"),
-            Some(input.token_stream.current_span()),
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::missing_closing_delimiter(input.string_table.intern(")"),
+        Some(input.token_stream.current_span()),)
         .into());
     }
 
@@ -1288,10 +1280,8 @@ fn create_expression_until_with_policy(
         let expected_tokens = formatted_stop_tokens.join(", ");
 
         let expected_delimiter = input.string_table.intern(&expected_tokens);
-        return Err(CompilerDiagnostic::unexpected_end_of_file(
-            Some(expected_delimiter),
-            Some(input.token_stream.current_span()),
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_end_of_file(Some(expected_delimiter),
+        Some(input.token_stream.current_span()),)
         .into());
     }
 
@@ -1303,26 +1293,20 @@ fn create_expression_until_with_policy(
         let expected_tokens = formatted_stop_tokens.join(", ");
 
         let expected_delimiter = input.string_table.intern(&expected_tokens);
-        return Err(CompilerDiagnostic::unexpected_end_of_file(
-            Some(expected_delimiter),
-            Some(input.token_stream.current_span()),
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_end_of_file(Some(expected_delimiter),
+        Some(input.token_stream.current_span()),)
         .into());
     };
 
     if end_index == start_index {
-        return Err(CompilerDiagnostic::unexpected_token_from_tag(
-            DiagnosticToken::from_static_tag(end_tag),
-            end_span,
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_token_from_tag(DiagnosticToken::from_static_tag(end_tag),
+        end_span,)
         .into());
     }
 
     if !stop_tokens.contains(&end_tag) {
-        return Err(CompilerDiagnostic::unexpected_token_from_tag(
-            DiagnosticToken::from_static_tag(end_tag),
-            end_span,
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_token_from_tag(DiagnosticToken::from_static_tag(end_tag),
+        end_span,)
         .into());
     }
 

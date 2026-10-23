@@ -8,9 +8,7 @@ use super::diagnostics::invalid_comparison_types;
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
 use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, IncompatibleChoiceComparisonReason,
-};
+use crate::compiler_frontend::compiler_messages::IncompatibleChoiceComparisonReason;
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -130,24 +128,20 @@ pub(super) fn resolve_comparison_operator_type(
     let rhs_is_choice = type_environment.variants_for(rhs).is_some();
 
     if lhs_is_choice && rhs_is_choice {
-        return Err(CompilerDiagnostic::incompatible_choice_comparison(
-            IncompatibleChoiceComparisonReason::DifferentChoiceTypes,
-            lhs,
-            rhs,
-            span,
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::incompatible_choice_comparison(IncompatibleChoiceComparisonReason::DifferentChoiceTypes,
+        lhs,
+        rhs,
+        span,)
         .into());
     }
 
     // A choice value can only be compared with another value of the same choice type.
     let exactly_one_is_choice = lhs_is_choice != rhs_is_choice;
     if exactly_one_is_choice {
-        return Err(CompilerDiagnostic::incompatible_choice_comparison(
-            IncompatibleChoiceComparisonReason::ChoiceWithNonChoice,
-            lhs,
-            rhs,
-            span,
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::incompatible_choice_comparison(IncompatibleChoiceComparisonReason::ChoiceWithNonChoice,
+        lhs,
+        rhs,
+        span,)
         .into());
     }
 
@@ -180,15 +174,13 @@ fn validate_choice_equality_support(
                         .into());
                     };
 
-                    return Err(CompilerDiagnostic::incompatible_choice_comparison(
-                        IncompatibleChoiceComparisonReason::PayloadEqualityNotSupported {
-                            field_name: field_name_id,
-                            field_type: field.type_id,
-                        },
-                        lhs_type_id,
-                        rhs_type_id,
-                        span,
-                    )
+                    return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::incompatible_choice_comparison(IncompatibleChoiceComparisonReason::PayloadEqualityNotSupported {
+                        field_name: field_name_id,
+                        field_type: field.type_id,
+                    },
+                    lhs_type_id,
+                    rhs_type_id,
+                    span,)
                     .into());
                 }
             }

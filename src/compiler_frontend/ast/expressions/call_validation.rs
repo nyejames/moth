@@ -21,8 +21,9 @@ use rustc_hash::FxHashMap;
 
 use crate::compiler_frontend::ast::statements::functions::{FunctionParameter, ParameterContract};
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidCallShapeReason, TypeMismatchContext, ValueReceiverContext,
+    InvalidCallShapeReason, TypeMismatchContext, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
@@ -41,13 +42,13 @@ use crate::compiler_frontend::type_coercion::compatibility::{
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_declared_type;
 
 pub(crate) enum CallValidationError {
-    Diagnostic(CompilerDiagnostic),
+    Diagnostic(DiagnosticDraft),
     Infrastructure(Box<InfrastructureErrors>),
 }
 
-impl From<CompilerDiagnostic> for CallValidationError {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
-        CallValidationError::Diagnostic(diagnostic)
+impl From<DiagnosticDraft> for CallValidationError {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
+        Self::Diagnostic(diagnostic)
     }
 }
 
@@ -612,14 +613,12 @@ fn resolve_call_arguments_with_type_policy(
                     CallSurfaceKind::Assertion => FrontendCounter::CensusCallAssertionDefaultFills,
                 });
             } else {
-                return Err(CompilerDiagnostic::invalid_call_shape(
-                    InvalidCallShapeReason::MissingArgument {
-                        parameter_name: expectation.name,
-                        parameter_index: slot,
-                    },
-                    diagnostics.diagnostic_callee_name(string_table),
-                    span,
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::MissingArgument {
+                    parameter_name: expectation.name,
+                    parameter_index: slot,
+                },
+                diagnostics.diagnostic_callee_name(string_table),
+                span,)
                 .into());
             }
         }
@@ -706,12 +705,10 @@ fn resolve_call_arguments_with_type_policy(
                 CallSurfaceKind::Assertion => TypeMismatchContext::AssertionArgument,
                 _ => TypeMismatchContext::FunctionArgument,
             };
-            return Err(CompilerDiagnostic::type_mismatch(
-                expected_type_id,
-                actual_type_id,
-                mismatch_context,
-                normalized_argument.span,
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::type_mismatch(expected_type_id,
+            actual_type_id,
+            mismatch_context,
+            normalized_argument.span,)
             .into());
         }
 
@@ -751,39 +748,33 @@ fn classify_call_passing_mode(
             // must be declared mutable. Point at the value expression, since no `~` was authored,
             // so the compiler does not suggest a marker-only repair.
             CallArgumentSourceState::ImmutablePlace { binding_name } => {
-                Err(CompilerDiagnostic::invalid_call_shape(
-                    InvalidCallShapeReason::ImmutablePlaceMutableAccessRequired {
-                        parameter_name: expectation.name,
-                        parameter_index: slot_index,
-                        binding_name,
-                    },
-                    diagnostics.diagnostic_callee_name(string_table),
-                    argument.span,
-                )
+                Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::ImmutablePlaceMutableAccessRequired {
+                    parameter_name: expectation.name,
+                    parameter_index: slot_index,
+                    binding_name,
+                },
+                diagnostics.diagnostic_callee_name(string_table),
+                argument.span,)
                 .into())
             }
             // A mutable place passed without `~` needs the explicit marker.
-            CallArgumentSourceState::MutablePlace => Err(CompilerDiagnostic::invalid_call_shape(
-                InvalidCallShapeReason::MutableAccessRequired {
-                    parameter_name: expectation.name,
-                    parameter_index: slot_index,
-                },
-                diagnostics.diagnostic_callee_name(string_table),
-                argument.span,
-            )
+            CallArgumentSourceState::MutablePlace => Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::MutableAccessRequired {
+                parameter_name: expectation.name,
+                parameter_index: slot_index,
+            },
+            diagnostics.diagnostic_callee_name(string_table),
+            argument.span,)
             .into()),
         },
 
         // Mutable argument passed to a shared parameter: never allowed.
         (CallAccessMode::Mutable, ExpectedAccessMode::Shared) => {
-            Err(CompilerDiagnostic::invalid_call_shape(
-                InvalidCallShapeReason::MutableAccessNotAllowed {
-                    parameter_name: expectation.name,
-                    parameter_index: slot_index,
-                },
-                diagnostics.diagnostic_callee_name(string_table),
-                authored_marker_span(argument),
-            )
+            Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::MutableAccessNotAllowed {
+                parameter_name: expectation.name,
+                parameter_index: slot_index,
+            },
+            diagnostics.diagnostic_callee_name(string_table),
+            authored_marker_span(argument),)
             .into())
         }
 
@@ -792,27 +783,23 @@ fn classify_call_passing_mode(
         (CallAccessMode::Mutable, ExpectedAccessMode::Mutable) => match source_state {
             // Fresh rvalues, including explicit `copy source`, are not places here, so the
             // authored marker is the mistake.
-            CallArgumentSourceState::Fresh => Err(CompilerDiagnostic::invalid_call_shape(
-                InvalidCallShapeReason::MutableAccessOnNonPlace {
-                    parameter_name: expectation.name,
-                    parameter_index: slot_index,
-                },
-                diagnostics.diagnostic_callee_name(string_table),
-                authored_marker_span(argument),
-            )
+            CallArgumentSourceState::Fresh => Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::MutableAccessOnNonPlace {
+                parameter_name: expectation.name,
+                parameter_index: slot_index,
+            },
+            diagnostics.diagnostic_callee_name(string_table),
+            authored_marker_span(argument),)
             .into()),
             // The authored `~` is the call-site source the author wrote, so the primary label
             // stays on the marker rather than the immutable binding declaration.
             CallArgumentSourceState::ImmutablePlace { binding_name } => {
-                Err(CompilerDiagnostic::invalid_call_shape(
-                    InvalidCallShapeReason::MutableAccessOnImmutablePlace {
-                        parameter_name: expectation.name,
-                        parameter_index: slot_index,
-                        binding_name,
-                    },
-                    diagnostics.diagnostic_callee_name(string_table),
-                    authored_marker_span(argument),
-                )
+                Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::MutableAccessOnImmutablePlace {
+                    parameter_name: expectation.name,
+                    parameter_index: slot_index,
+                    binding_name,
+                },
+                diagnostics.diagnostic_callee_name(string_table),
+                authored_marker_span(argument),)
                 .into())
             }
             CallArgumentSourceState::MutablePlace => Ok(CallPassingMode::MutablePlace),

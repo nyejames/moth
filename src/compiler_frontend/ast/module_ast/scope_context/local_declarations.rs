@@ -1,6 +1,8 @@
 //! Per-scope local declaration mutation for AST scope contexts.
 
 use super::*;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 
 impl ScopeContext {
     // --------------------------
@@ -16,18 +18,23 @@ impl ScopeContext {
         declarations: Vec<Declaration>,
         path_fork: &PathInternerFork,
         string_table: &StringTable,
-    ) -> Result<(), CompilerDiagnostic> {
+    ) -> Result<(), DiagnosticDraft> {
         // Check every parameter before publishing the frame so a rejected signature installs none.
         for declaration in &declarations {
             let Some(name) = path_fork.component(declaration.id) else {
                 continue;
             };
             if let Some(reference) = self.get_reference(&name) {
-                return Err(CompilerDiagnostic::shadowed_name(
-                    name,
-                    reference.binding_span(),
-                    declaration.binding_span,
-                ));
+                let diagnostic = names_declarations::shadowed_name(name, declaration.binding_span);
+                let diagnostic = if let Some(previous_span) = reference.binding_span() {
+                    diagnostic.with_label(
+                        Some(previous_span),
+                        Some(LabelDraftMessage::PreviousDeclaration),
+                    )
+                } else {
+                    diagnostic
+                };
+                return Err(diagnostic);
             }
             if let Some(diagnostic) =
                 self.check_body_binding_visibility(name, declaration.binding_span, string_table)

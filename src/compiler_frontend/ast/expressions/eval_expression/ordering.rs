@@ -8,7 +8,7 @@
 //! ## Diagnostic boundary
 //!
 //! `CompilerError` in this module means an internal compiler invariant or setup failure only.
-//! Source-authored syntax failures are rejected earlier with `CompilerDiagnostic`.
+//! Source-authored syntax failures are rejected earlier as diagnostic drafts.
 
 use super::evaluator::pending_expression_item_bug;
 use crate::compiler_frontend::ast::expressions::expression_kind::Operator;

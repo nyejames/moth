@@ -23,9 +23,9 @@ use crate::compiler_frontend::ast::templates::tir::{
     prepare_tir_view,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateStructureReason,
-};
+use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::invalid_template_structure;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -49,7 +49,7 @@ pub(crate) enum TemplateEmission {
 }
 
 /// Provenance follows only the exact selected emission path, never an ambient accumulator.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug)]
 pub(crate) struct TemplateFoldResult {
     pub(crate) emission: TemplateEmission,
     pub(crate) provenance: SyntheticInterfaceProvenance,
@@ -85,10 +85,10 @@ impl TemplateFoldResult {
     /// WHAT: consumes the refusal and leaves the emission, provenance and projection pieces alone.
     /// WHY: every required-text boundary reports the same refusal diagnostic, while opportunistic
     ///      boundaries keep the result to materialize the template at runtime.
-    pub(crate) fn take_required_diagnostic(&mut self) -> Option<CompilerDiagnostic> {
+    pub(crate) fn take_required_diagnostic(&mut self) -> Option<DiagnosticDraft> {
         self.refusal
             .take()
-            .map(ConstantFoldRefusalReason::into_diagnostic)
+            .map(ConstantFoldRefusalReason::into_draft)
     }
 }
 impl<'a> TirFoldContext<'a> {
@@ -271,8 +271,8 @@ fn expression_provenance(expression: ExpressionView<'_>) -> SyntheticInterfacePr
         })
 }
 
-fn option_capture_const_deferred_error(expression: ExpressionView<'_>) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_template_structure(
+fn option_capture_const_deferred_error(expression: ExpressionView<'_>) -> DiagnosticDraft {
+    invalid_template_structure(
         InvalidTemplateStructureReason::TemplateOptionCaptureConstDeferred,
         expression.span(),
     )
@@ -329,17 +329,15 @@ pub(crate) fn fold_condition_with_provenance(
         Ok(ConstantFoldOutcome::Refused { reason, .. }) => {
             return Ok(FoldedCondition::Refused { reason, provenance });
         }
-        Err(ConstantFoldError::Diagnostic(diagnostic))
-            if !diagnostic.is_compiler_capacity_exceeded() =>
-        {
-            resolved.expression
-        }
+        Err(
+            ConstantFoldError::Diagnostic(diagnostic)
+            | ConstantFoldError::NumericFailure(diagnostic),
+        ) if diagnostic.code() != "MOTH-SYNTAX-0037" => resolved.expression,
         Err(error) => return Err(error.into()),
     };
     let view = fold_context.expression_builder.view(folded)?;
-    let value = const_bool_value(view, fold_context.const_values).ok_or_else(|| {
-        CompilerDiagnostic::invalid_template_structure(not_constant, view.span().or(fallback_span))
-    })?;
+    let value = const_bool_value(view, fold_context.const_values)
+        .ok_or_else(|| invalid_template_structure(not_constant, view.span().or(fallback_span)))?;
     Ok(FoldedCondition::Selected { value, provenance })
 }
 

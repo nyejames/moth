@@ -32,8 +32,9 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity, GenericDeclarationOrigin, intern_canonical_builtin,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, PreparedFailure, PublicGenericOwnerKind,
+    DiagnosticBag, PreparedFailure, PublicGenericOwnerKind,
 };
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
@@ -1161,7 +1162,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 // The owner name is only rendered on this failure path, so resolve it here
                 // instead of on every call.
                 let owner_name = self.public_generic_declaration_name(header)?;
-                return Err(CompilerDiagnostic::generic_bound_private_surface_leak(
+                return Err(generics_traits_api::generic_bound_private_surface_leak(
                     owner_kind,
                     owner_name,
                     trait_definition.name,
@@ -1194,7 +1195,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             Err(ExpressionParseError::Infrastructure(errors)) => {
                 PreparedFailure::Infrastructure(errors)
             }
-            Err(ExpressionParseError::Diagnostic(_) | ExpressionParseError::NumericDeferral(_)) => {
+            Err(ExpressionParseError::Diagnostic(_))
+            | Err(ExpressionParseError::TemplateDirectiveEmptyArguments(_))
+            | Err(ExpressionParseError::NonConstantReferenceInConstant(_))
+            | Err(ExpressionParseError::NumericDeferral(_)) => {
                 unreachable!("boundary conversion only fails with infrastructure errors")
             }
         }

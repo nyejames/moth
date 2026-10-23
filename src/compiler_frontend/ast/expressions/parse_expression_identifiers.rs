@@ -34,9 +34,10 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::builtins::casts::traits::is_core_cast_trait_name;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidAssignmentTargetReason,
-    InvalidCallShapeReason, InvalidTemplateSlotReason, NameNamespace,
+    CompileTimeEvaluationErrorReason, InvalidAssignmentTargetReason, InvalidCallShapeReason,
+    InvalidTemplateSlotReason, NameNamespace,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -85,15 +86,12 @@ pub(super) fn parse_identifier_or_call(
         .ok_or_else(|| CompilerError::compiler_error("symbol token had no string payload"))?;
 
     if context.is_assignment_target_unavailable(identifier) {
-        return Err(CompilerDiagnostic::invalid_assignment_target(
-            InvalidAssignmentTargetReason::UnavailableInCatchRecovery,
-            Some(identifier),
-            None,
-            None,
-            None,
-            None,
-            Some(token_stream.current_span()),
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::invalid_assignment_target(InvalidAssignmentTargetReason::UnavailableInCatchRecovery,
+        Some(identifier),
+        None,
+        None,
+        None,
+        Some(token_stream.current_span()),)
         .into());
     }
 
@@ -109,32 +107,29 @@ pub(super) fn parse_identifier_or_call(
         // for the whole fragment instead of fabricating a value or reporting an absent name.
         if let Some(pending_binding) = binding.pending_binding() {
             if route_argument_context.is_some() {
-                return Err(CompilerDiagnostic::invalid_call_shape(
-                    InvalidCallShapeReason::RouteArgumentNotDirect,
-                    None,
-                    Some(token_stream.current_span()),
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::RouteArgumentNotDirect,
+                None,
+                Some(token_stream.current_span()),)
                 .into());
             }
             // A pending numeric binding is a runtime body-local value, and constants fold at
             // their declaration boundary, so a constant context can never consume it.
             if context.kind.is_constant_context() {
-                return Err(CompilerDiagnostic::compile_time_evaluation_error(
-                    CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
-                    Some(identifier),
-                    Some(token_stream.current_span()),
-                )
-                .into());
+                return Err(ExpressionParseError::NonConstantReferenceInConstant(
+                    choices_control_flow::compile_time_evaluation_error(
+                        CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
+                        Some(identifier),
+                        Some(token_stream.current_span()),
+                    ),
+                ));
             }
 
             // Variant syntax names a choice type, and a pending numeric binding is a value.
             if token_stream.peek_next_tag() == Some(TokenTag::DOUBLE_COLON) {
-                return Err(CompilerDiagnostic::namespace_misuse(
-                    identifier,
-                    NameNamespace::Type,
-                    NameNamespace::Value,
-                    Some(token_stream.current_span()),
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::namespace_misuse(identifier,
+                NameNamespace::Type,
+                NameNamespace::Value,
+                Some(token_stream.current_span()),)
                 .into());
             }
 
@@ -169,11 +164,9 @@ pub(super) fn parse_identifier_or_call(
                     const_values,
                 )?)
         {
-            return Err(CompilerDiagnostic::invalid_call_shape(
-                InvalidCallShapeReason::RouteArgumentNotDirect,
-                None,
-                Some(token_stream.current_span()),
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape(InvalidCallShapeReason::RouteArgumentNotDirect,
+            None,
+            Some(token_stream.current_span()),)
             .into());
         }
 
@@ -199,11 +192,9 @@ pub(super) fn parse_identifier_or_call(
                     ContextKind::Template | ContextKind::Constant | ContextKind::ConstantHeader
                 )
             {
-                return Err(CompilerDiagnostic::invalid_template_slot(
-                    InvalidTemplateSlotReason::InsertOutsideParentSlot,
-                    None,
-                    Some(token_stream.current_span()),
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::templates::invalid_template_slot(InvalidTemplateSlotReason::InsertOutsideParentSlot,
+                None,
+                Some(token_stream.current_span()),)
                 .into());
             }
         }
@@ -215,10 +206,8 @@ pub(super) fn parse_identifier_or_call(
             && token_stream.peek_next_tag() != Some(TokenTag::DOT)
             && !context.kind.is_constant_context()
         {
-            return Err(CompilerDiagnostic::const_record_used_as_value(
-                identifier,
-                Some(token_stream.current_span()),
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::const_record_used_as_value(identifier,
+            Some(token_stream.current_span()),)
             .into());
         }
 
@@ -315,12 +304,10 @@ pub(super) fn parse_identifier_or_call(
                 return Ok(());
             }
 
-            return Err(CompilerDiagnostic::namespace_misuse(
-                identifier,
-                NameNamespace::Type,
-                NameNamespace::Value,
-                Some(token_stream.current_span()),
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::namespace_misuse(identifier,
+            NameNamespace::Type,
+            NameNamespace::Value,
+            Some(token_stream.current_span()),)
             .into());
         }
 
@@ -332,12 +319,10 @@ pub(super) fn parse_identifier_or_call(
                 DeclarationShell::Struct | DeclarationShell::Choice | DeclarationShell::TypeAlias
             )
         ) {
-            return Err(CompilerDiagnostic::namespace_misuse(
-                identifier,
-                NameNamespace::Value,
-                NameNamespace::Type,
-                Some(token_stream.current_span()),
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::namespace_misuse(identifier,
+            NameNamespace::Value,
+            NameNamespace::Type,
+            Some(token_stream.current_span()),)
             .into());
         }
 
@@ -367,12 +352,13 @@ pub(super) fn parse_identifier_or_call(
             };
 
             if !is_compile_time_constant {
-                return Err(CompilerDiagnostic::compile_time_evaluation_error(
-                    CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
-                    Some(identifier),
-                    Some(token_stream.current_span()),
-                )
-                .into());
+                return Err(ExpressionParseError::NonConstantReferenceInConstant(
+                    choices_control_flow::compile_time_evaluation_error(
+                        CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
+                        Some(identifier),
+                        Some(token_stream.current_span()),
+                    ),
+                ));
             }
         }
 
@@ -462,10 +448,8 @@ pub(super) fn parse_identifier_or_call(
             });
         }
 
-        return Err(CompilerDiagnostic::dependency_namespace_used_as_value(
-            identifier,
-            Some(token_stream.current_span()),
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::dependency_namespace_used_as_value(identifier,
+        Some(token_stream.current_span()),)
         .into());
     }
 
@@ -477,11 +461,9 @@ pub(super) fn parse_identifier_or_call(
         token_stream.advance();
 
         if context.kind.is_constant_context() && !const_def.value.is_scalar() {
-            return Err(CompilerDiagnostic::compile_time_evaluation_error(
-                CompileTimeEvaluationErrorReason::ExternalNonScalarConstantInConstantContext,
-                Some(identifier),
-                span,
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::compile_time_evaluation_error(CompileTimeEvaluationErrorReason::ExternalNonScalarConstantInConstantContext,
+            Some(identifier),
+            span,)
             .into());
         }
 
@@ -586,37 +568,31 @@ pub(super) fn parse_identifier_or_call(
     if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS)
         && context.lookup_visible_external_type(identifier).is_some()
     {
-        return Err(CompilerDiagnostic::compile_time_evaluation_error(
-            CompileTimeEvaluationErrorReason::ExternalTypeConstructionNotSupported,
-            Some(identifier),
-            Some(token_stream.current_span()),
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::compile_time_evaluation_error(CompileTimeEvaluationErrorReason::ExternalTypeConstructionNotSupported,
+        Some(identifier),
+        Some(token_stream.current_span()),)
         .into());
     }
 
     // Type aliases are type-namespace only.
     if context.is_visible_type_alias_name(identifier) {
-        return Err(CompilerDiagnostic::namespace_misuse(
-            identifier,
-            NameNamespace::Value,
-            NameNamespace::Type,
-            Some(token_stream.current_span()),
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::namespace_misuse(identifier,
+        NameNamespace::Value,
+        NameNamespace::Type,
+        Some(token_stream.current_span()),)
         .into());
     }
 
     // Core cast trait names are reserved static contracts. They are valid in trait
     // declarations, conformances, and generic bounds, but never as ordinary values.
     if is_core_cast_trait_name(string_table.resolve(identifier)) {
-        return Err(CompilerDiagnostic::trait_name_used_as_type(
-            identifier,
-            Some(token_stream.current_span()),
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::trait_name_used_as_type(identifier,
+        Some(token_stream.current_span()),)
         .into());
     }
 
     Err(
-        CompilerDiagnostic::unknown_value_name(identifier, Some(token_stream.current_span()))
+        crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::unknown_value_name(identifier, Some(token_stream.current_span()))
             .into(),
     )
 }

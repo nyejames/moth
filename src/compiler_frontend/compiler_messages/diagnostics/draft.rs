@@ -196,6 +196,36 @@ impl DiagnosticDraft {
             .as_ref()
             .is_some_and(|extra| extra.labels.iter().any(|label| label.span == span))
     }
+    pub(crate) fn has_label_at_with_owner(
+        &self,
+        span: Option<SourceSpan>,
+        owner: Option<&FrozenIdentityHandle>,
+    ) -> bool {
+        self.extra.as_ref().is_some_and(|extra| {
+            extra.labels.iter().enumerate().any(|(index, label)| {
+                if label.span != span {
+                    return false;
+                }
+                let label_owner = extra
+                    .foreign_sites
+                    .iter()
+                    .find(|site| matches!(site.slot, ForeignSlot::Label(label_index) if label_index == index))
+                    .map(|site| &site.context);
+                match (label_owner, owner) {
+                    (None, None) => true,
+                    (None, Some(_)) | (Some(_), None) => false,
+                    (Some(label_owner), Some(owner)) => {
+                        match (label_owner.domain(), owner.domain()) {
+                            (Some(label_domain), Some(owner_domain)) => {
+                                label_domain == owner_domain
+                            }
+                            _ => label_owner == owner,
+                        }
+                    }
+                }
+            })
+        })
+    }
 
     pub(crate) fn label_count(&self) -> usize {
         self.extra.as_ref().map_or(0, |extra| extra.labels.len())
@@ -261,23 +291,53 @@ impl DiagnosticDraft {
         Ok(())
     }
 
-    /// Adds a secondary label in this draft's own identity. A label without a message still points at its span.
+    /// Adds a secondary label in this draft's own identity.
     pub(crate) fn with_label(
+        self,
+        span: Option<SourceSpan>,
+        message: Option<LabelDraftMessage>,
+    ) -> Self {
+        let index = self.label_count();
+        self.with_label_at(index, span, message)
+    }
+
+    /// Inserts a secondary label before the label at `index`.
+    pub(crate) fn with_label_at(
         mut self,
+        index: usize,
         span: Option<SourceSpan>,
         message: Option<LabelDraftMessage>,
     ) -> Self {
         if self.core.faulted {
             return self;
         }
-        let extra = self.extra.get_or_insert_with(Box::default);
-        match encode_label(span, message, &mut extra.substitutions) {
-            Ok(label) => {
-                extra.labels.push(label);
-                self
+        assert!(
+            index <= self.label_count(),
+            "a draft label is inserted at or before an existing label"
+        );
+        let label = {
+            let extra = self.extra.get_or_insert_with(Box::default);
+            encode_label(span, message, &mut extra.substitutions)
+        };
+        let label = match label {
+            Ok(label) => label,
+            Err(FactCapacityError) => {
+                return self.faulted_by(DiagnosticCapacityResource::FactValue);
             }
-            Err(FactCapacityError) => self.faulted_by(DiagnosticCapacityResource::FactValue),
+        };
+        let extra = self
+            .extra
+            .as_deref_mut()
+            .expect("label insertion initialized extra");
+        extra.labels.insert(index, label);
+        for site in &mut extra.foreign_sites {
+            if let ForeignSlot::Label(label_index) = &mut site.slot
+                && *label_index >= index
+            {
+                *label_index += 1;
+            }
         }
+        self
     }
 
     /// Marks a span as belonging to another identity.
@@ -319,6 +379,37 @@ impl DiagnosticDraft {
         handle: FrozenIdentityHandle,
     ) {
         self.set_foreign_slot(ForeignSlot::Primary, handle, true);
+    }
+    pub(crate) fn primary_frozen_identity_handle(&self) -> Option<&FrozenIdentityHandle> {
+        self.extra
+            .as_ref()?
+            .foreign_sites
+            .iter()
+            .find(|site| matches!(site.slot, ForeignSlot::Primary))
+            .map(|site| &site.context)
+    }
+
+    pub(crate) fn replace_primary_frozen_identity_handle(
+        &mut self,
+        handle: Option<FrozenIdentityHandle>,
+    ) {
+        if self.core.faulted {
+            if let Some(handle) = handle {
+                self.extra
+                    .get_or_insert_with(Box::default)
+                    .owner_handles
+                    .push(handle);
+            }
+            return;
+        }
+        if let Some(extra) = self.extra.as_deref_mut() {
+            extra
+                .foreign_sites
+                .retain(|site| !matches!(site.slot, ForeignSlot::Primary));
+        }
+        if let Some(handle) = handle {
+            self.set_foreign_slot(ForeignSlot::Primary, handle, false);
+        }
     }
 
     pub(crate) fn attach_frozen_identity_handle_if_missing(

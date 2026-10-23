@@ -1,14 +1,9 @@
 use super::*;
-use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::file_value_resolution::retained_reference_error;
-use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
     InvalidCompileTimePathCode, InvalidCompileTimePathView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
-use crate::compiler_frontend::compiler_messages::diagnostics::test_support::{
-    compact_bag_for_test, compact_resolved_failure_for_test,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_resolved_failure_for_test;
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceFailure;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
@@ -511,11 +506,7 @@ fn directory_stage0_retains_missing_resource_diagnostic_without_aborting_discove
         )
         .expect("entry source should remain in the source database")
         .id;
-    let emitted = retained_reference_error(*diagnostic);
-    let ExpressionParseError::Diagnostic(emitted) = emitted else {
-        panic!("a missing resource should emit a user diagnostic");
-    };
-    let compact = compact_bag_for_test(DiagnosticBag::from(emitted), None);
+    let compact = compact_resolved_failure_for_test(*diagnostic);
     let diagnostic_view = compact
         .first()
         .expect("the emitted missing-resource diagnostic should compact");

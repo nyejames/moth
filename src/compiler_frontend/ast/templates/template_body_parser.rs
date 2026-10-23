@@ -28,7 +28,7 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticToken};
+use crate::compiler_frontend::compiler_messages::DiagnosticToken;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::keywords::token_tag_for_source_word;
 use crate::compiler_frontend::source::SourceSpan;
@@ -239,7 +239,7 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
                     return Ok(());
                 }
                 TokenTag::EOF => {
-                    return Err(CompilerDiagnostic::unexpected_end_of_file(
+                    return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_end_of_file(
                         Some(self.close_bracket_id),
                         last_known_span,
                     )
@@ -300,17 +300,15 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
                         .token_stream
                         .current_diagnostic_token(self.string_table)
                         .map_err(|error| {
-                            CompilerDiagnostic::token_view_invariant_error(
-                                error,
-                                "template-body unexpected-token diagnostic",
-                            )
+                            CompilerError::compiler_error(format!(
+                                "template-body unexpected-token diagnostic token payload was malformed: {error:?}"
+                            ))
                         })?
                         .unwrap_or_else(|| {
                             DiagnosticToken::from_static_tag(self.token_stream.current_tag())
                         });
-                    let mut diagnostic =
-                        CompilerDiagnostic::unexpected_token_from_tag(found_token, last_known_span);
-                    diagnostic.primary_span = last_known_span;
+                    let diagnostic =
+                        crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_token_from_tag(found_token, last_known_span);
                     return Err(diagnostic.into());
                 }
             }
@@ -321,7 +319,7 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
         if matches!(end_policy, TemplateBodyEndPolicy::DonorExhaustionIsClose) {
             Ok(())
         } else {
-            Err(CompilerDiagnostic::unexpected_end_of_file(
+            Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_end_of_file(
                 Some(self.close_bracket_id),
                 last_known_span,
             )

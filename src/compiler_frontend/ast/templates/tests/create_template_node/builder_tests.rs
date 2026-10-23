@@ -1,9 +1,13 @@
 use super::*;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::templates::template::TemplateType;
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, DiagnosticToken, InvalidTemplateDirectiveReason,
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
+    InvalidTemplateDirectiveCode, InvalidTemplateDirectiveView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    UnexpectedTokenShape, UnexpectedTokenView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveArgumentType, StyleDirectiveEffects, StyleDirectiveHandlerSpec,
     StyleDirectiveRegistry, StyleDirectiveSpec, TemplateHeadCompatibility,
@@ -90,18 +94,18 @@ fn template_head_fallback_unknown_directive_uses_standard_metadata() {
     .expect_err("template-head fallback should reject missing registry directives");
     let fallback_error = expect_template_diagnostic(fallback_error);
 
-    match &fallback_error.payload {
-        DiagnosticPayload::InvalidTemplateDirective {
-            directive_name,
-            reason: InvalidTemplateDirectiveReason::UnknownDirective,
-        } => {
-            let directive_name =
-                directive_name.expect("unknown directive should preserve its name");
-            assert_eq!(string_table.resolve(directive_name), "brand");
-        }
-        payload => panic!("expected unknown directive payload, found {payload:?}"),
-    }
-    assert!(fallback_error.primary_span.is_some());
+    let diagnostic = fallback_error
+        .first()
+        .expect("unknown directive should compact to one diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidTemplateDirectiveView>()
+        .expect("unknown directive should retain typed facts");
+    assert_eq!(facts.reason, InvalidTemplateDirectiveCode::UnknownDirective);
+    let directive_name = facts
+        .directive_name
+        .expect("unknown directive should preserve its name");
+    assert_eq!(string_table.resolve(directive_name), "brand");
+    assert!(matches!(diagnostic.primary_site(), SiteRef::Local(_)));
 }
 
 #[test]
@@ -264,13 +268,15 @@ fn builder_registered_noop_directive_rejects_parenthesized_arguments_by_default(
     .expect_err("default no-op directives should reject parenthesized arguments");
     let error = expect_template_diagnostic(error);
 
-    match &error.payload {
-        DiagnosticPayload::InvalidTemplateDirective {
-            reason: InvalidTemplateDirectiveReason::DirectiveNotAllowedHere,
-            ..
-        } => {}
-        payload => panic!("expected invalid template directive payload, found {payload:?}"),
-    }
+    assert_eq!(
+        error
+            .first()
+            .expect("invalid directive should compact to one record")
+            .family_view::<InvalidTemplateDirectiveView>()
+            .expect("invalid directive should retain typed facts")
+            .reason,
+        InvalidTemplateDirectiveCode::DirectiveNotAllowedHere
+    );
 }
 
 #[test]
@@ -383,10 +389,15 @@ fn builder_registered_handler_directive_rejects_multiple_arguments() {
     )
     .expect_err("handler directives should reject multiple arguments");
     let error = expect_template_diagnostic(error);
+    let facts = error
+        .first()
+        .expect("multiple arguments should compact to one record")
+        .family_view::<UnexpectedTokenView>()
+        .expect("multiple arguments should retain unexpected-token facts");
     assert!(matches!(
-        &error.payload,
-        DiagnosticPayload::UnexpectedToken { found }
-            if *found == DiagnosticToken::from_static_tag(TokenTag::COMMA)
+        facts.shape,
+        UnexpectedTokenShape::Token(found)
+            if found == crate::compiler_frontend::compiler_messages::DiagnosticToken::from_static_tag(TokenTag::COMMA)
     ));
 }
 
@@ -449,13 +460,13 @@ fn builder_registered_handler_directive_rejects_runtime_argument_values() {
     )
     .expect_err("handler directives should reject runtime-only argument values");
     let error = expect_template_diagnostic(error);
-    assert!(matches!(
-        &error.payload,
-        DiagnosticPayload::InvalidTemplateDirective {
-            reason: InvalidTemplateDirectiveReason::InvalidArgument { detail: None },
-            ..
-        }
-    ));
+    let facts = error
+        .first()
+        .expect("runtime argument should compact to one record")
+        .family_view::<InvalidTemplateDirectiveView>()
+        .expect("runtime argument should retain typed facts");
+    assert_eq!(facts.reason, InvalidTemplateDirectiveCode::InvalidArgument);
+    assert_eq!(facts.detail, None);
 }
 
 #[test]

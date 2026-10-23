@@ -18,7 +18,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 };
 use crate::compiler_frontend::ast::generic_bounds::{BoundEvidenceSelection, evidence_for_type};
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidReceiverCallReason};
+use crate::compiler_frontend::compiler_messages::InvalidReceiverCallReason;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
@@ -198,14 +198,12 @@ pub(super) fn lookup_generic_bound_receiver_method(
     );
     match candidates.as_slice() {
         [] => Ok(None),
-        [_first, _second, ..] => Err(CompilerDiagnostic::invalid_receiver_call(
-            InvalidReceiverCallReason::AmbiguousGenericBoundMethod,
-            None,
-            Some(member_name),
-            None,
-            None,
-            member_span,
-        )
+        [_first, _second, ..] => Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_receiver_call(InvalidReceiverCallReason::AmbiguousGenericBoundMethod,
+        None,
+        Some(member_name),
+        None,
+        None,
+        member_span,)
         .into()),
         [candidate] => {
             let method_path = if receiver_is_unresolved_generic {

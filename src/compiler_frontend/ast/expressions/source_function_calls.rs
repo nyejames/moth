@@ -18,13 +18,11 @@ use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionB
 use crate::compiler_frontend::ast::generic_functions::{
     GenericCallExpectedContext, GenericFunctionCallParseInput, GenericFunctionTemplate,
     parse_generic_function_call_expression, validate_generic_function_template_call_expression,
-    with_generic_primary_span,
 };
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidGenericInstantiationReason,
-};
+use crate::compiler_frontend::compiler_messages::InvalidGenericInstantiationReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -99,8 +97,8 @@ pub(super) fn parse_source_callable_member(
                 let follower_span = token_stream.span_at(token_stream.position().saturating_add(1));
                 let explicit_syntax_span = follower_span.or(call_span);
 
-                return Err(with_generic_primary_span(
-                    explicit_generic_call_type_arguments_error(visible_name, explicit_syntax_span),
+                return Err(explicit_generic_call_type_arguments_error(
+                    visible_name,
                     explicit_syntax_span,
                 )
                 .into());
@@ -111,14 +109,9 @@ pub(super) fn parse_source_callable_member(
             Some(TokenTag::OPEN_PARENTHESIS) => {}
 
             _ => {
-                return Err(with_generic_primary_span(
-                    CompilerDiagnostic::invalid_generic_instantiation(
-                        Some(visible_name),
-                        InvalidGenericInstantiationReason::GenericFunctionValueDeferred,
-                        call_span,
-                    ),
-                    call_span,
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::invalid_generic_instantiation(Some(visible_name),
+                InvalidGenericInstantiationReason::GenericFunctionValueDeferred,
+                call_span,)
                 .into());
             }
         }
@@ -233,10 +226,8 @@ pub(super) fn parse_source_callable_member(
 fn explicit_generic_call_type_arguments_error(
     function_name: StringId,
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_generic_instantiation(
-        Some(function_name),
-        InvalidGenericInstantiationReason::ExplicitCallTypeArgumentsUnsupported,
-        span,
-    )
+) -> DiagnosticDraft {
+    crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::invalid_generic_instantiation(Some(function_name),
+    InvalidGenericInstantiationReason::ExplicitCallTypeArgumentsUnsupported,
+    span,)
 }

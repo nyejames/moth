@@ -27,7 +27,10 @@ use crate::compiler_frontend::build_config::{
     PrimitiveBuildValue, ResolvedBuildConfigValue, build_config_fingerprint,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
+use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    project_config, token_lexical,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -456,7 +459,7 @@ fn config_expression_error(
     reason: InvalidConfigReason,
     span: Option<SourceSpan>,
 ) -> ExpressionParseError {
-    CompilerDiagnostic::invalid_config_reason(key, reason, span).into()
+    project_config::invalid_config_reason(key, reason, span).into()
 }
 
 fn config_input_type_mismatch(
@@ -513,7 +516,7 @@ fn configured_value_error(
                     },
                     span,
                 ),
-                None => CompilerDiagnostic::invalid_number_literal(literal, reason, span).into(),
+                None => token_lexical::invalid_number_literal(literal, reason, span).into(),
             }
         }
     }

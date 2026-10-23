@@ -34,8 +34,9 @@ use crate::compiler_frontend::ast::numeric_known_shape::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::invalid_generic_instantiation;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidGenericInstantiationReason, ValueReceiverContext,
+    InvalidGenericInstantiationReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantPayloadDefinition, TypeDefinition,
@@ -493,7 +494,7 @@ pub(crate) fn link_generic_nominal_result_shape(
     // Missing parameters are the ordinary inference error, matching the immediate constructor lane.
     let missing = linker.unbound_parameter_names();
     if !missing.is_empty() {
-        return Err(CompilerDiagnostic::invalid_generic_instantiation(
+        return Err(invalid_generic_instantiation(
             diagnostic_name.diagnostic_callee_name(string_table),
             InvalidGenericInstantiationReason::CannotInferArguments {
                 missing_parameters: missing,

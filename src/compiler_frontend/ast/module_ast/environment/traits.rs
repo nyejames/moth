@@ -25,9 +25,11 @@ use crate::compiler_frontend::builtins::casts::traits::{
     BUILTIN_CAST_TRAIT_ROWS, builtin_cast_trait_name, core_cast_trait_for_target_and_fallibility,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTraitIncompatibilityReason,
+use crate::compiler_frontend::compiler_messages::InvalidTraitIncompatibilityReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    generics_traits_api, names_declarations,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::datatypes::generic_parameters::{
     GenericParameter, GenericParameterList, GenericParameterScope, TypeParameterId,
 };
@@ -124,11 +126,18 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     continue;
                 };
 
-                let diagnostic = CompilerDiagnostic::duplicate_declaration(
+                let diagnostic = names_declarations::duplicate_declaration(
                     declaration.name,
-                    existing_definition.declaration_span,
                     source_span(header, declaration.name_span),
                 );
+                let diagnostic = if let Some(previous_span) = existing_definition.declaration_span {
+                    diagnostic.with_label(
+                        Some(previous_span),
+                        Some(LabelDraftMessage::PreviousDeclaration),
+                    )
+                } else {
+                    diagnostic
+                };
                 return Err(diagnostic.into());
             }
 
@@ -361,7 +370,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             if let Some(first_span) = requirement_spans_by_name
                 .insert(requirement.name, source_span(header, requirement.span))
             {
-                let diagnostic = CompilerDiagnostic::duplicate_trait_requirement(
+                let diagnostic = generics_traits_api::duplicate_trait_requirement(
                     declaration.name,
                     requirement.name,
                     first_span,
@@ -451,7 +460,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         )?;
 
         let Some(first_parameter) = resolved_signature.signature.parameters.first() else {
-            let diagnostic = CompilerDiagnostic::unsupported_trait_feature(
+            let diagnostic = generics_traits_api::unsupported_trait_feature(
                 declaration.name,
                 string_table.intern("missing This receiver"),
                 requirement_span,
@@ -485,7 +494,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let mut returns = Vec::with_capacity(resolved_signature.signature.returns.len());
         for return_slot in &resolved_signature.signature.returns {
             let Some(type_id) = return_slot.type_id else {
-                let diagnostic = CompilerDiagnostic::unsupported_trait_feature(
+                let diagnostic = generics_traits_api::unsupported_trait_feature(
                     declaration.name,
                     string_table.intern("unresolved requirement return"),
                     requirement_span,
@@ -563,7 +572,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         }
 
         if signature.parameters.is_empty() {
-            let diagnostic = CompilerDiagnostic::unsupported_trait_feature(
+            let diagnostic = generics_traits_api::unsupported_trait_feature(
                 declaration.name,
                 string_table.intern("marker requirement"),
                 source_span(header, declaration.name_span),
@@ -632,7 +641,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 source_order_by_trait_id,
                 trait_environment,
             ) {
-                let diagnostic = CompilerDiagnostic::invalid_trait_incompatibility(
+                let diagnostic = generics_traits_api::invalid_trait_incompatibility(
                     incompatibility.subject.name,
                     Some(incompatibility.subject.name),
                     InvalidTraitIncompatibilityReason::UnknownTrait,
@@ -657,7 +666,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     source_order_by_trait_id,
                     trait_environment,
                 ) {
-                    let diagnostic = CompilerDiagnostic::invalid_trait_incompatibility(
+                    let diagnostic = generics_traits_api::invalid_trait_incompatibility(
                         incompatibility.subject.name,
                         Some(incompatible_trait.name),
                         InvalidTraitIncompatibilityReason::UnknownTrait,
@@ -667,7 +676,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 }
 
                 if subject_id == incompatible_id {
-                    let diagnostic = CompilerDiagnostic::invalid_trait_incompatibility(
+                    let diagnostic = generics_traits_api::invalid_trait_incompatibility(
                         incompatibility.subject.name,
                         Some(incompatible_trait.name),
                         InvalidTraitIncompatibilityReason::SelfIncompatible,
@@ -683,7 +692,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 };
 
                 if !recorded_source_pairs.insert(normalized_pair) {
-                    let diagnostic = CompilerDiagnostic::invalid_trait_incompatibility(
+                    let diagnostic = generics_traits_api::invalid_trait_incompatibility(
                         incompatibility.subject.name,
                         Some(incompatible_trait.name),
                         InvalidTraitIncompatibilityReason::DuplicateRelation,
@@ -726,7 +735,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         };
 
         let Some(trait_id) = trait_id else {
-            let diagnostic = CompilerDiagnostic::invalid_trait_incompatibility(
+            let diagnostic = generics_traits_api::invalid_trait_incompatibility(
                 subject.name,
                 Some(trait_ref.name),
                 InvalidTraitIncompatibilityReason::UnknownTrait,
@@ -756,7 +765,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             return Ok(id);
         }
 
-        Err(CompilerDiagnostic::unknown_trait_name(name, span).into())
+        Err(generics_traits_api::unknown_trait(name, span).into())
     }
 
     fn validate_exported_trait_surface(
@@ -811,7 +820,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             return Ok(());
         }
 
-        Err(CompilerDiagnostic::trait_private_surface_leak(trait_name, type_id, span).into())
+        Err(generics_traits_api::trait_private_surface_leak(trait_name, type_id, span).into())
     }
 }
 fn trait_reference_is_forward(

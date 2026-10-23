@@ -33,8 +33,9 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidControlFlowStatementReason, ValueReceiverContext,
+    InvalidControlFlowStatementReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -247,7 +248,7 @@ fn parse_inline_then_else_with_target(
     token_stream.advance(); // consume `then`
 
     if token_stream.current_tag() == TokenTag::NEWLINE {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+        return Err(choices_control_flow::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfMultiline,
             Some(token_stream.current_span()),
         )
@@ -257,7 +258,7 @@ fn parse_inline_then_else_with_target(
     // A retained newline is a multiline form. Every other definite boundary means
     // the branch has no value and must not reach expression evaluation.
     if is_missing_produced_value_boundary(token_stream.current_tag()) {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+        return Err(choices_control_flow::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedValueAfterThen,
             Some(token_stream.current_span()),
         )
@@ -405,7 +406,7 @@ pub(super) fn parse_inline_then_else(
     token_stream.advance(); // consume `then`
 
     if token_stream.current_tag() == TokenTag::NEWLINE {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+        return Err(choices_control_flow::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfMultiline,
             Some(token_stream.current_span()),
         )
@@ -415,7 +416,7 @@ pub(super) fn parse_inline_then_else(
     // A retained newline is a multiline form. Every other definite boundary means
     // the branch has no value and must not reach expression evaluation.
     if is_missing_produced_value_boundary(token_stream.current_tag()) {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+        return Err(choices_control_flow::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedValueAfterThen,
             Some(token_stream.current_span()),
         )
@@ -554,7 +555,7 @@ pub(super) fn parse_inline_then_else(
     let else_request_end = else_context.generic_request_checkpoint();
 
     if !same_logical_line(token_stream, then_index, else_expression_start_index) {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+        return Err(choices_control_flow::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfMultiline,
             else_span,
         )
@@ -757,7 +758,7 @@ fn inline_else_follows_from_position(
 /// Requires that the current token is `else` and that it is on the same logical line.
 fn require_else_inline(token_stream: &AstCursor, then_index: usize) -> InlineThenElseResult<()> {
     if token_stream.current_tag() != TokenTag::ELSE {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+        return Err(choices_control_flow::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ValueIfMissingElse,
             Some(token_stream.current_span()),
         )
@@ -765,7 +766,7 @@ fn require_else_inline(token_stream: &AstCursor, then_index: usize) -> InlineThe
     }
 
     if !same_logical_line(token_stream, then_index, token_stream.position()) {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+        return Err(choices_control_flow::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfMultiline,
             Some(token_stream.current_span()),
         )
@@ -778,7 +779,7 @@ fn require_else_inline(token_stream: &AstCursor, then_index: usize) -> InlineThe
 /// Rejects `else then`, which is never valid in inline value-producing `if`.
 fn reject_else_then(token_stream: &AstCursor) -> InlineThenElseResult<()> {
     if token_stream.current_tag() == TokenTag::THEN {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+        return Err(choices_control_flow::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfElseThen,
             Some(token_stream.current_span()),
         )
@@ -791,7 +792,7 @@ fn reject_else_then(token_stream: &AstCursor) -> InlineThenElseResult<()> {
 /// Rejects a newline immediately after `else` in inline form.
 fn reject_newline_after_else(token_stream: &AstCursor) -> InlineThenElseResult<()> {
     if token_stream.current_tag() == TokenTag::NEWLINE {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+        return Err(choices_control_flow::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfMultiline,
             Some(token_stream.current_span()),
         )
@@ -804,7 +805,7 @@ fn reject_newline_after_else(token_stream: &AstCursor) -> InlineThenElseResult<(
 /// Rejects an empty `else` branch at its first definite boundary.
 fn reject_empty_value_after_else(token_stream: &AstCursor) -> InlineThenElseResult<()> {
     if is_missing_produced_value_boundary(token_stream.current_tag()) {
-        return Err(CompilerDiagnostic::invalid_control_flow_statement(
+        return Err(choices_control_flow::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedValueAfterElse,
             Some(token_stream.current_span()),
         )

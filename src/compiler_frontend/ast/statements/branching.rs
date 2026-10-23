@@ -47,9 +47,10 @@ use crate::compiler_frontend::ast::statements::value_production::types::ActiveVa
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, InvalidControlFlowStatementReason, InvalidMatchArmReason,
-    ValueReceiverContext,
+    DiagnosticBag, InvalidControlFlowStatementReason, InvalidMatchArmReason, ValueReceiverContext,
 };
 #[cfg(feature = "benchmark_counters")]
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
@@ -66,7 +67,7 @@ use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 /// emission boundary instead of being recast as authored control-flow diagnostics.
 type BranchingResult<T> = Result<T, ExpressionParseError>;
 
-fn branching_error(diagnostic: CompilerDiagnostic) -> ExpressionParseError {
+fn branching_error(diagnostic: DiagnosticDraft) -> ExpressionParseError {
     diagnostic.into()
 }
 
@@ -259,7 +260,7 @@ fn reject_same_line_else_if(token_stream: &AstCursor) -> BranchingResult<()> {
     // `if` remains available as the first statement inside a separate `else` body.
     if next_tag == TokenTag::IF {
         return Err(branching_error(
-            CompilerDiagnostic::invalid_control_flow_statement(
+            choices_control_flow::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ElseIfUnsupported,
                 else_span,
             ),
@@ -350,7 +351,7 @@ pub fn create_branch(
     ast_log!("Creating If Statement");
     if token_stream.current_tag() != TokenTag::COLON {
         return Err(branching_error(
-            CompilerDiagnostic::invalid_control_flow_statement(
+            choices_control_flow::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
                 Some(token_stream.current_span()),
             ),
@@ -487,7 +488,7 @@ fn create_option_present_capture_branch(
 
     if token_stream.current_tag() != TokenTag::COLON {
         return Err(branching_error(
-            CompilerDiagnostic::invalid_control_flow_statement(
+            choices_control_flow::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
                 Some(token_stream.current_span()),
             ),
@@ -698,7 +699,7 @@ pub(crate) fn parse_match_block(
 
     if token_stream.current_tag() != TokenTag::COLON {
         return Err(branching_error(
-            CompilerDiagnostic::invalid_control_flow_statement(
+            choices_control_flow::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
                 Some(token_stream.current_span()),
             ),
@@ -754,7 +755,7 @@ pub(crate) fn parse_match_block(
                     });
 
                 if semicolon_separates_same_level_arms {
-                    return Err(branching_error(CompilerDiagnostic::invalid_match_arm(
+                    return Err(branching_error(choices_control_flow::invalid_match_arm(
                         InvalidMatchArmReason::SemicolonDelimiter,
                         Some(token_stream.current_span()),
                     )));
@@ -765,7 +766,7 @@ pub(crate) fn parse_match_block(
 
             TokenTag::EOF => {
                 return Err(branching_error(
-                    CompilerDiagnostic::invalid_control_flow_statement(
+                    choices_control_flow::invalid_control_flow_statement(
                         InvalidControlFlowStatementReason::UnexpectedEndOfFileInMatch,
                         Some(token_stream.current_span()),
                     ),
@@ -775,7 +776,7 @@ pub(crate) fn parse_match_block(
             TokenTag::ELSE => {
                 if arms.is_empty() {
                     return Err(branching_error(
-                        CompilerDiagnostic::invalid_control_flow_statement(
+                        choices_control_flow::invalid_control_flow_statement(
                             InvalidControlFlowStatementReason::CaseRequiredBeforeElse,
                             Some(token_stream.current_span()),
                         ),
@@ -784,7 +785,7 @@ pub(crate) fn parse_match_block(
 
                 if seen_else {
                     return Err(branching_error(
-                        CompilerDiagnostic::invalid_control_flow_statement(
+                        choices_control_flow::invalid_control_flow_statement(
                             InvalidControlFlowStatementReason::DuplicateElseArm,
                             Some(token_stream.current_span()),
                         ),
@@ -823,7 +824,7 @@ pub(crate) fn parse_match_block(
                     )?;
 
                     if seen_else {
-                        warnings.push(CompilerDiagnostic::unreachable_match_arm(
+                        warnings.push(choices_control_flow::unreachable_match_arm(
                             parsed.pattern_span,
                         ));
                     } else {
@@ -835,7 +836,7 @@ pub(crate) fn parse_match_block(
                         );
 
                         if coverage.unreachable {
-                            warnings.push(CompilerDiagnostic::unreachable_match_arm(
+                            warnings.push(choices_control_flow::unreachable_match_arm(
                                 parsed.pattern_span,
                             ));
                         }
@@ -847,12 +848,12 @@ pub(crate) fn parse_match_block(
                 if token_is_line_initial(token_stream, token_stream.position())
                     && current_line_contains_top_level_colon(token_stream)
                 {
-                    return Err(branching_error(CompilerDiagnostic::invalid_match_arm(
+                    return Err(branching_error(choices_control_flow::invalid_match_arm(
                         InvalidMatchArmReason::LegacyColonSyntax,
                         Some(token_stream.current_span()),
                     )));
                 }
-                return Err(branching_error(CompilerDiagnostic::invalid_match_arm(
+                return Err(branching_error(choices_control_flow::invalid_match_arm(
                     InvalidMatchArmReason::ExpectedArmHeader,
                     Some(token_stream.current_span()),
                 )));
@@ -1085,7 +1086,7 @@ pub(crate) fn resume_deferred_match<'env>(
                 let services = completion.session_services();
                 services
                     .context
-                    .emit_warning(CompilerDiagnostic::unreachable_match_arm(pattern.span()));
+                    .emit_warning(choices_control_flow::unreachable_match_arm(pattern.span()));
             }
         }
 
@@ -1139,14 +1140,14 @@ fn parse_else_arm(
     token_stream.skip_newlines();
 
     if token_stream.current_tag() == TokenTag::COLON {
-        return Err(branching_error(CompilerDiagnostic::invalid_match_arm(
+        return Err(branching_error(choices_control_flow::invalid_match_arm(
             InvalidMatchArmReason::LegacyElseSyntax,
             Some(token_stream.current_span()),
         )));
     }
 
     if token_stream.current_tag() == TokenTag::ARROW {
-        return Err(branching_error(CompilerDiagnostic::invalid_match_arm(
+        return Err(branching_error(choices_control_flow::invalid_match_arm(
             InvalidMatchArmReason::InvalidArrow,
             Some(token_stream.current_span()),
         )));
@@ -1154,7 +1155,7 @@ fn parse_else_arm(
 
     if token_stream.current_tag() != TokenTag::FAT_ARROW {
         return Err(branching_error(
-            CompilerDiagnostic::invalid_control_flow_statement(
+            choices_control_flow::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedFatArrow,
                 Some(token_stream.current_span()),
             ),
@@ -1223,7 +1224,7 @@ fn parse_match_arm(
 
     if token_stream.current_tag() != TokenTag::FAT_ARROW {
         return Err(branching_error(
-            CompilerDiagnostic::invalid_control_flow_statement(
+            choices_control_flow::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedFatArrow,
                 Some(token_stream.current_span()),
             ),

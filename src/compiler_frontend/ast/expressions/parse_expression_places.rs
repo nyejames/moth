@@ -29,7 +29,7 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch_for_tag,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticToken, InvalidAssignmentTargetReason, InvalidCopyTargetReason,
+    DiagnosticToken, InvalidAssignmentTargetReason, InvalidCopyTargetReason,
     InvalidReceiverCallReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -85,16 +85,13 @@ pub(super) fn parse_mutable_receiver_expression(
         let found = token_stream
             .current_diagnostic_token(string_table)
             .map_err(|error| {
-                CompilerDiagnostic::token_view_invariant_error(
-                    error,
-                    "mutable-receiver symbol diagnostic",
-                )
+                CompilerError::compiler_error(format!(
+                    "mutable-receiver symbol diagnostic token payload was malformed: {error:?}"
+                ))
             })?
             .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
-        return Err(CompilerDiagnostic::unexpected_token_from_tag(
-            found,
-            current_span(token_stream),
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::unexpected_token_from_tag(found,
+        current_span(token_stream),)
         .into());
     }
     let receiver_declaration = resolve_place_root(token_stream, context, string_table)?;
@@ -107,25 +104,20 @@ pub(super) fn parse_mutable_receiver_expression(
             .peek_next_tag()
             .is_some_and(TokenTag::is_assignment_operator)
         {
-            return Err(CompilerDiagnostic::invalid_assignment_target(
-                InvalidAssignmentTargetReason::MutableMarkerOnAssignmentTarget,
-                None,
-                None,
-                None,
-                None,
-                None,
-                marker_span,
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::invalid_assignment_target(InvalidAssignmentTargetReason::MutableMarkerOnAssignmentTarget,
+            None,
+            None,
+            None,
+            None,
+            marker_span,)
             .into());
         }
-        return Err(CompilerDiagnostic::invalid_receiver_call(
-            InvalidReceiverCallReason::MutableMarkerOnNonReceiverCall,
-            None,
-            None,
-            None,
-            None,
-            marker_span,
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_receiver_call(InvalidReceiverCallReason::MutableMarkerOnNonReceiverCall,
+        None,
+        None,
+        None,
+        None,
+        marker_span,)
         .into());
     }
 
@@ -240,16 +232,13 @@ pub(super) fn parse_copy_place_expression(
                 let found = token_stream
                     .current_diagnostic_token(string_table)
                     .map_err(|error| {
-                        CompilerDiagnostic::token_view_invariant_error(
-                            error,
-                            "copy-place closing-delimiter diagnostic",
-                        )
+                        CompilerError::compiler_error(format!(
+                            "copy-place closing-delimiter diagnostic token payload was malformed: {error:?}"
+                        ))
                     })?;
-                return Err(CompilerDiagnostic::expected_token_from_tags(
-                    TokenTag::CLOSE_PARENTHESIS,
-                    found,
-                    current_span(token_stream),
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::expected_token_from_projections(DiagnosticToken::from_static_tag(TokenTag::CLOSE_PARENTHESIS),
+                found,
+                current_span(token_stream),)
                 .into());
             }
 
@@ -302,7 +291,7 @@ pub(super) fn parse_copy_place_expression(
                     InvalidCopyTargetReason::FunctionName
                 };
                 Err(
-                    CompilerDiagnostic::invalid_copy_target(reason, current_span(token_stream))
+                    crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_copy_target(reason, current_span(token_stream))
                         .into(),
                 )
             } else {
@@ -339,10 +328,8 @@ pub(super) fn parse_copy_place_expression(
                         ParsedPostfixExpression::Value(value) => value,
                         // A retained receiver call has no value and can never be a place.
                         ParsedPostfixExpression::RetainedOperand(item) => {
-                            return Err(CompilerDiagnostic::invalid_copy_target(
-                                InvalidCopyTargetReason::NonPlace,
-                                item.source_span(expression_builder)?,
-                            )
+                            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_copy_target(InvalidCopyTargetReason::NonPlace,
+                            item.source_span(expression_builder)?,)
                             .into());
                         }
                     }
@@ -356,10 +343,8 @@ pub(super) fn parse_copy_place_expression(
                 let Some(place) =
                     place_expression_from_expression(expression_builder, copied_expression)?
                 else {
-                    return Err(CompilerDiagnostic::invalid_copy_target(
-                        InvalidCopyTargetReason::NonPlace,
-                        copied_span,
-                    )
+                    return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_copy_target(InvalidCopyTargetReason::NonPlace,
+                    copied_span,)
                     .into());
                 };
 
@@ -391,19 +376,15 @@ pub(super) fn parse_copy_place_expression(
                 string_table,
                 path_fork,
             ) {
-                Ok(_) => Err(CompilerDiagnostic::invalid_copy_target(
-                    InvalidCopyTargetReason::MutableMarkerNotAllowed,
-                    marker_span,
-                )
+                Ok(_) => Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_copy_target(InvalidCopyTargetReason::MutableMarkerNotAllowed,
+                marker_span,)
                 .into()),
                 Err(existing_error) => Err(existing_error),
             }
         }
 
-        _ => Err(CompilerDiagnostic::invalid_copy_target(
-            InvalidCopyTargetReason::NonPlace,
-            current_span(token_stream),
-        )
+        _ => Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_copy_target(InvalidCopyTargetReason::NonPlace,
+        current_span(token_stream),)
         .into()),
     }
 }

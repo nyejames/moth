@@ -27,13 +27,15 @@ use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedTypeAnnotation, TypeResolutionContext, TypeResolutionContextInputs,
-    resolve_parsed_type_annotation,
+    TypeResolutionFailureKind, resolve_parsed_type_annotation_with_failure_kind,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, templates,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticLabel, DiagnosticPayload,
-    InvalidCollectionTypeReason, InvalidTemplateStructureReason, NameNamespace,
-    TypeMismatchContext,
+    CompileTimeEvaluationErrorReason, InvalidTemplateStructureReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -55,6 +57,14 @@ use crate::compiler_frontend::value_mode::ValueMode;
 /// Signature parsing shares the AST error lane because default values nest an explicit
 /// cursor over the frozen file-owned source owner.
 type SignatureResult<T> = Result<T, ExpressionParseError>;
+
+type SignatureTypeResolutionResult =
+    Result<(ResolvedTypeAnnotation, TypeResolutionFailureKind), SignatureTypeResolutionFailure>;
+
+struct SignatureTypeResolutionFailure {
+    diagnostic: DiagnosticDraft,
+    failure_kind: TypeResolutionFailureKind,
+}
 
 /// Whether a return slot carries success-channel or error-channel values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -374,15 +384,18 @@ fn return_slot_from_syntax(
     );
 
     let type_id = match resolved {
-        Ok(annotation) => annotation.type_id,
-        Err(ExpressionParseError::Diagnostic(diagnostic))
-            if should_fallback_signature_type(&diagnostic, fallback_policy) =>
-        {
+        Ok((_, failure_kind)) if should_fallback_signature_type(failure_kind, fallback_policy) => {
             // Generic return types may be resolved later once the function's
             // declaration-site generic parameter scope is active.
             None
         }
-        Err(diagnostic) => return Err(diagnostic),
+        Ok((annotation, _)) => annotation.type_id,
+        Err(failure) if should_fallback_signature_type(failure.failure_kind, fallback_policy) => {
+            // Generic return types may be resolved later once the function's
+            // declaration-site generic parameter scope is active.
+            None
+        }
+        Err(failure) => return Err(failure.diagnostic.into()),
     };
 
     Ok(UnresolvedReturnSlot {
@@ -416,8 +429,7 @@ pub(crate) fn signature_member_to_declaration(
         type_interner,
         const_values,
         string_table,
-    )
-    .map_err(|error| signature_member_error_with_span(error, member));
+    );
 
     // `builtin_type_ids::NONE` is the seeded `None` type, the same id as
     // `builtins().none`. It is not an unresolved sentinel. `Option::None` means
@@ -428,15 +440,7 @@ pub(crate) fn signature_member_to_declaration(
     // `Some` as a resolved destination would normalise a default against `None`.
     // Generic names and unresolved capacities stay on the later resolution path.
     let (type_id, destination_resolved) = match resolved {
-        Ok(annotation) => {
-            let type_id = annotation.type_id.unwrap_or(builtin_type_ids::NONE);
-            let destination_resolved =
-                annotation.type_id.is_some() && type_id != builtin_type_ids::NONE;
-            (type_id, destination_resolved)
-        }
-        Err(ExpressionParseError::Diagnostic(diagnostic))
-            if should_fallback_signature_type(&diagnostic, fallback_policy) =>
-        {
+        Ok((_, failure_kind)) if should_fallback_signature_type(failure_kind, fallback_policy) => {
             // Keep a useful semantic shape for constructor parsing while retaining the authored
             // annotation for the later pass that can resolve its generic name or capacity.
             let type_id = resolve_signature_type_fallback(
@@ -451,7 +455,33 @@ pub(crate) fn signature_member_to_declaration(
             .unwrap_or(builtin_type_ids::NONE);
             (type_id, false)
         }
-        Err(diagnostic) => return Err(diagnostic),
+        Ok((annotation, _)) => {
+            let type_id = annotation.type_id.unwrap_or(builtin_type_ids::NONE);
+            let destination_resolved =
+                annotation.type_id.is_some() && type_id != builtin_type_ids::NONE;
+            (type_id, destination_resolved)
+        }
+        Err(failure) if should_fallback_signature_type(failure.failure_kind, fallback_policy) => {
+            // Keep a useful semantic shape for constructor parsing while retaining the authored
+            // annotation for the later pass that can resolve its generic name or capacity.
+            let type_id = resolve_signature_type_fallback(
+                &member.type_annotation,
+                member.span,
+                expression_context,
+                type_interner,
+                const_values,
+                string_table,
+                fallback_policy,
+            )?
+            .unwrap_or(builtin_type_ids::NONE);
+            (type_id, false)
+        }
+        Err(failure) => {
+            return Err(signature_member_error_with_span(
+                failure.diagnostic.into(),
+                member,
+            ));
+        }
     };
 
     let member_span = member.span;
@@ -558,13 +588,16 @@ fn fold_signature_default(
         type_interner.environment(),
     )
     .map_err(|error| match error {
-        ConstantFoldError::Diagnostic(diagnostic) => ExpressionParseError::Diagnostic(diagnostic),
+        ConstantFoldError::Diagnostic(diagnostic)
+        | ConstantFoldError::NumericFailure(diagnostic) => {
+            ExpressionParseError::Diagnostic(diagnostic)
+        }
         ConstantFoldError::Infrastructure(error) => ExpressionParseError::Infrastructure(error),
     })?;
     let expression = match folded {
         ConstantFoldOutcome::Folded(root) | ConstantFoldOutcome::NotConstant(root) => root,
         ConstantFoldOutcome::Refused { reason, .. } => {
-            return Err(reason.into_diagnostic().into());
+            return Err(reason.into_draft().into());
         }
     };
     fn validate_default(
@@ -575,7 +608,7 @@ fn fold_signature_default(
     ) -> SignatureResult<()> {
         if let ExpressionOperationView::Reference(path) = expression.operation() {
             if constants.value_for_path(&path).is_none() {
-                return Err(CompilerDiagnostic::compile_time_evaluation_error(
+                return Err(choices_control_flow::compile_time_evaluation_error(
                     CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
                     None,
                     expression.span(),
@@ -596,7 +629,7 @@ fn fold_signature_default(
                         Some(scope.external_package_registry.as_ref()),
                     )?;
                     if matches!(kind, TemplateConstValueKind::SlotInsertHelper) {
-                        return Err(CompilerDiagnostic::invalid_template_structure(
+                        return Err(templates::invalid_template_structure(
                             InvalidTemplateStructureReason::HelperOutsideWrapperSlot,
                             template.span,
                         )
@@ -610,7 +643,7 @@ fn fold_signature_default(
                 | ExpressionOperationView::Range { .. }
                 | ExpressionOperationView::Coerce { .. } => {}
                 ExpressionOperationView::RouteConstruct { .. } => {
-                    return Err(CompilerDiagnostic::compile_time_evaluation_error(
+                    return Err(choices_control_flow::compile_time_evaluation_error(
                         CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
                         None,
                         expression.span(),
@@ -618,7 +651,7 @@ fn fold_signature_default(
                     .into());
                 }
                 _ => {
-                    return Err(CompilerDiagnostic::compile_time_evaluation_error(
+                    return Err(choices_control_flow::compile_time_evaluation_error(
                         CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
                         None,
                         expression.span(),
@@ -665,24 +698,28 @@ fn signature_member_error_with_span(
     error: ExpressionParseError,
     member: &SignatureMemberSyntax,
 ) -> ExpressionParseError {
-    let ExpressionParseError::Diagnostic(mut diagnostic) = error else {
-        return error;
+    let member_span = member.span;
+    let attach_member_span = |mut diagnostic: DiagnosticDraft| {
+        if diagnostic.primary_span().is_none() {
+            diagnostic.set_primary_span(member_span);
+        } else if !diagnostic.has_label_at(member_span) {
+            diagnostic = diagnostic.with_label(member_span, None);
+        }
+        diagnostic
     };
 
-    let member_span = member.span;
-    if diagnostic.primary_span.is_none() {
-        diagnostic.primary_span = member_span;
-    } else if !diagnostic
-        .labels
-        .iter()
-        .any(|label| label.span == member_span)
-    {
-        diagnostic
-            .labels
-            .push(DiagnosticLabel::secondary(member_span, None));
+    match error {
+        ExpressionParseError::Diagnostic(diagnostic) => {
+            ExpressionParseError::Diagnostic(attach_member_span(diagnostic))
+        }
+        ExpressionParseError::TemplateDirectiveEmptyArguments(diagnostic) => {
+            ExpressionParseError::TemplateDirectiveEmptyArguments(attach_member_span(diagnostic))
+        }
+        ExpressionParseError::NonConstantReferenceInConstant(diagnostic) => {
+            ExpressionParseError::NonConstantReferenceInConstant(attach_member_span(diagnostic))
+        }
+        error => error,
     }
-
-    ExpressionParseError::Diagnostic(diagnostic)
 }
 
 /// Resolve a parsed type annotation inside a function-style signature.
@@ -697,7 +734,7 @@ fn resolve_signature_type_annotation(
     type_interner: &mut AstTypeInterner<'_>,
     const_values: &ConstValueStore,
     string_table: &mut StringTable,
-) -> SignatureResult<ResolvedTypeAnnotation> {
+) -> SignatureTypeResolutionResult {
     let mut type_resolution_context =
         TypeResolutionContext::from_inputs(TypeResolutionContextInputs {
             declaration_table: &expression_context.top_level_declarations,
@@ -735,33 +772,35 @@ fn resolve_signature_type_annotation(
                 .map(|fv| &fv.visible_trait_names),
         })
         .with_active_generic_type_context(expression_context.active_generic_type_context());
+    let mut failure_kind = TypeResolutionFailureKind::Other;
 
-    Ok(resolve_parsed_type_annotation(
+    match resolve_parsed_type_annotation_with_failure_kind(
         type_annotation,
         span,
         &mut type_resolution_context,
         string_table,
         Some(expression_context),
-    )?)
+        &mut failure_kind,
+    ) {
+        Ok(annotation) => Ok((annotation, failure_kind)),
+        Err(diagnostic) => Err(SignatureTypeResolutionFailure {
+            diagnostic,
+            failure_kind,
+        }),
+    }
 }
 
 fn should_fallback_signature_type(
-    diagnostic: &CompilerDiagnostic,
+    failure_kind: TypeResolutionFailureKind,
     fallback_policy: SignatureTypeFallbackPolicy,
 ) -> bool {
-    match &diagnostic.payload {
-        DiagnosticPayload::UnknownName {
-            namespace: NameNamespace::Type,
-            ..
-        } => true,
-        DiagnosticPayload::InvalidCollectionType {
-            reason: InvalidCollectionTypeReason::CapacityNotConstant,
-            ..
-        } => matches!(
+    match failure_kind {
+        TypeResolutionFailureKind::UnknownTypeName => true,
+        TypeResolutionFailureKind::CapacityNotConstant => matches!(
             fallback_policy,
             SignatureTypeFallbackPolicy::AllowUnresolvedCapacity
         ),
-        _ => false,
+        TypeResolutionFailureKind::Other => false,
     }
 }
 
@@ -792,10 +831,7 @@ fn resolve_signature_type_fallback(
         const_values,
         string_table,
     ) {
-        Ok(annotation) => annotation.type_id,
-        Err(ExpressionParseError::Diagnostic(diagnostic))
-            if should_fallback_signature_type(&diagnostic, fallback_policy) =>
-        {
+        Ok((_, failure_kind)) if should_fallback_signature_type(failure_kind, fallback_policy) => {
             resolve_signature_type_fallback(
                 element,
                 span,
@@ -806,7 +842,19 @@ fn resolve_signature_type_fallback(
                 fallback_policy,
             )?
         }
-        Err(error) => return Err(error),
+        Ok((annotation, _)) => annotation.type_id,
+        Err(failure) if should_fallback_signature_type(failure.failure_kind, fallback_policy) => {
+            resolve_signature_type_fallback(
+                element,
+                span,
+                expression_context,
+                type_interner,
+                const_values,
+                string_table,
+                fallback_policy,
+            )?
+        }
+        Err(failure) => return Err(failure.diagnostic.into()),
     };
     let Some(element_type_id) = element_type_id else {
         return Ok(None);

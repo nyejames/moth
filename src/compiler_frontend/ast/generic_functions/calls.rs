@@ -56,8 +56,11 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ParameterContract};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_call_shape;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::invalid_fallible_handling;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, InvalidCallShapeReason, ValueReceiverContext,
+    DiagnosticBag, InvalidCallShapeReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_bindings::{BindingConflict, GenericTypeBindings};
@@ -878,7 +881,7 @@ fn finish_generic_function_call(
                 call.result_type_ids.as_slice(),
                 type_interner.environment(),
             );
-            return Err(CompilerDiagnostic::invalid_fallible_handling(
+            return Err(invalid_fallible_handling(
                 non_fallible_handler_reason(token_stream.current_tag(), operand_is_optional),
                 Some(token_stream.current_span()),
             )
@@ -1218,7 +1221,7 @@ fn validate_substituted_route_contracts(
             } else {
                 InvalidCallShapeReason::RouteArgumentNotDirect
             };
-            return Err(CompilerDiagnostic::invalid_call_shape(reason, None, argument.span).into());
+            return Err(invalid_call_shape(reason, None, argument.span).into());
         }
 
         if let Some(expected_input_type) = input
@@ -1240,7 +1243,7 @@ fn validate_substituted_route_contracts(
             } else {
                 InvalidCallShapeReason::RouteInputFieldMismatch
             };
-            return Err(CompilerDiagnostic::invalid_call_shape(reason, None, argument.span).into());
+            return Err(invalid_call_shape(reason, None, argument.span).into());
         }
     }
 
@@ -1454,7 +1457,7 @@ fn binding_conflict_diagnostic(
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
     span: Option<SourceSpan>,
-) -> crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
+) -> DiagnosticDraft {
     let parameter_name = type_environment
         .generic_parameters(template.generic_parameter_list_id)
         .and_then(|list| {

@@ -65,7 +65,7 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidReceiverCallReason, ValueReceiverContext,
+    InvalidReceiverCallReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -183,26 +183,22 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
     } = input;
 
     if receiver_node.expression_is_const_record_value(&*expression_builder)? {
-        return Err(CompilerDiagnostic::invalid_receiver_call(
-            InvalidReceiverCallReason::ConstRecordNoRuntimeCalls,
-            None,
-            Some(member_name),
-            None,
-            None,
-            member_span,
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_receiver_call(InvalidReceiverCallReason::ConstRecordNoRuntimeCalls,
+        None,
+        Some(member_name),
+        None,
+        None,
+        member_span,)
         .into());
     }
 
     if token_stream.peek_next_tag() != Some(TokenTag::OPEN_PARENTHESIS) {
-        return Err(CompilerDiagnostic::invalid_receiver_call(
-            InvalidReceiverCallReason::MustUseParentheses,
-            None,
-            Some(member_name),
-            None,
-            None,
-            member_span,
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_receiver_call(InvalidReceiverCallReason::MustUseParentheses,
+        None,
+        Some(member_name),
+        None,
+        None,
+        member_span,)
         .into());
     }
 

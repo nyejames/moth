@@ -7,7 +7,6 @@
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
 use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::negation_domain;
@@ -33,12 +32,10 @@ pub(super) fn resolve_unary_operator_type(
             if operand == bool_type_id {
                 Ok(bool_type_id)
             } else {
-                Err(CompilerDiagnostic::unsupported_operator_types(
-                    diagnostic_operator_from_ast(op),
-                    operand,
-                    None,
-                    span,
-                )
+                Err(crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::unsupported_operator_types(diagnostic_operator_from_ast(op),
+                operand,
+                None,
+                span,)
                 .into())
             }
         }
@@ -50,12 +47,10 @@ pub(super) fn resolve_unary_operator_type(
             if let Some(domain) = domain {
                 Ok(domain.type_id(type_environment))
             } else {
-                Err(CompilerDiagnostic::unsupported_operator_types(
-                    diagnostic_operator_from_ast(op),
-                    operand,
-                    None,
-                    span,
-                )
+                Err(crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::unsupported_operator_types(diagnostic_operator_from_ast(op),
+                operand,
+                None,
+                span,)
                 .into())
             }
         }

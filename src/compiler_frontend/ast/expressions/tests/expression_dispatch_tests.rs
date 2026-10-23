@@ -62,7 +62,22 @@ fn group_distance_capacity_is_a_typed_diagnostic() {
     else {
         panic!("an exhausted group distance must be a typed capacity diagnostic");
     };
-    assert!(diagnostic.is_compiler_capacity_exceeded());
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::CompilerCapacityExceededView;
+    use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+    use crate::compiler_frontend::compiler_messages::{
+        AstCapacityResource, CapacityResource, DiagnosticBag,
+    };
+
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0037");
+    let facts = diagnostic
+        .family_view::<CompilerCapacityExceededView>()
+        .expect("the diagnostic is a capacity failure");
+    assert_eq!(
+        facts.resource,
+        CapacityResource::Ast(AstCapacityResource::GroupDistances)
+    );
 }
 
 #[test]

@@ -31,9 +31,8 @@ use crate::compiler_frontend::ast::numeric_known_shape::{KnownShape, KnownShapeI
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidBuiltinCallReason,
-};
+use crate::compiler_frontend::compiler_messages::InvalidAssignmentTargetReason;
+use crate::compiler_frontend::compiler_messages::InvalidBuiltinCallReason;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -235,11 +234,9 @@ pub(super) fn parse_collection_builtin_member_typed(
     let element_type_id = concrete_shape_type(scope_context, member.element_shape);
 
     if token_stream.peek_next_tag() != Some(TokenTag::OPEN_PARENTHESIS) {
-        return Err(CompilerDiagnostic::invalid_builtin_call(
-            InvalidBuiltinCallReason::MissingParentheses,
-            Some(member_name),
-            member_span,
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_builtin_call(InvalidBuiltinCallReason::MissingParentheses,
+        Some(member_name),
+        member_span,)
         .into());
     }
 
@@ -308,15 +305,12 @@ pub(super) fn parse_collection_builtin_member_typed(
     if matches!(member.op, CollectionBuiltinOp::Get)
         && token_stream.current_tag().is_assignment_operator()
     {
-        return Err(CompilerDiagnostic::invalid_assignment_target(
-            InvalidAssignmentTargetReason::CollectionGetTargetNotWritable,
-            None,
-            element_type_id,
-            None,
-            None,
-            None,
-            Some(token_stream.current_span()),
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::invalid_assignment_target(InvalidAssignmentTargetReason::CollectionGetTargetNotWritable,
+        None,
+        element_type_id,
+        None,
+        None,
+        Some(token_stream.current_span()),)
         .into());
     }
 

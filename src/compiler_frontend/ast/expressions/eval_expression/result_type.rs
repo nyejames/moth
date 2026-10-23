@@ -25,7 +25,7 @@ use crate::compiler_frontend::ast::expressions::failure_facts::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidExpressionReason, OperatorOperandPosition, ValueReceiverContext,
+    InvalidExpressionReason, OperatorOperandPosition, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -82,10 +82,8 @@ pub(crate) fn resolve_expression_result_type(
         )?;
     }
     let [root] = roots.as_slice() else {
-        return Err(CompilerDiagnostic::invalid_expression(
-            InvalidExpressionReason::UnresolvedStackShape,
-            expression_span,
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::invalid_expression(InvalidExpressionReason::UnresolvedStackShape,
+        expression_span,)
         .into());
     };
 
@@ -705,10 +703,8 @@ fn missing_operand_error(
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> ExpressionTypingError {
-    CompilerDiagnostic::missing_operator_operand(
-        string_table.intern(operator.to_str()),
-        position,
-        span,
-    )
+    crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::missing_operator_operand(string_table.intern(operator.to_str()),
+    position,
+    span,)
     .into()
 }

@@ -25,7 +25,6 @@ use crate::compiler_frontend::ast::expressions::source_function_calls::{
 };
 use crate::compiler_frontend::ast::field_access::reference_expression_from_declaration;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::NamespaceValueMember;
 use crate::compiler_frontend::source::SourceSpan;
@@ -113,7 +112,7 @@ fn resolve_source_value_member(
         .top_level_declarations
         .get_by_path(symbol_path)
     else {
-        return Err(CompilerDiagnostic::unknown_value_name(member_name, member_span).into());
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::unknown_value_name(member_name, member_span).into());
     };
 
     // Namespace fields are not first-class function values. A function member must
@@ -236,7 +235,7 @@ fn resolve_external_value_member(
         // The orchestration layer filters type symbols before calling the value leaf
         // resolver, so this branch is a proven internal invariant violation.
         ExternalSymbolId::Type(_) => {
-            Err(CompilerDiagnostic::unknown_value_name(member_name, member_span).into())
+            Err(crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::unknown_value_name(member_name, member_span).into())
         }
     }
 }

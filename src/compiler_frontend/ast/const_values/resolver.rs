@@ -256,11 +256,14 @@ impl<'a> ConstValueResolver<'a> {
         .map_err(|error| match error {
             // Builder capacity stays on the template lane: runtime classification would hide it.
             ConstantFoldError::Diagnostic(diagnostic)
-                if diagnostic.is_compiler_capacity_exceeded() =>
+            | ConstantFoldError::NumericFailure(diagnostic)
+                if diagnostic.code() == "MOTH-SYNTAX-0037" =>
             {
                 ConstResolutionError::TemplateClassification(TemplateError::Diagnostic(diagnostic))
             }
-            ConstantFoldError::Diagnostic(_) => ConstResolutionError::NonFoldableRuntimeExpression,
+            ConstantFoldError::Diagnostic(_) | ConstantFoldError::NumericFailure(_) => {
+                ConstResolutionError::NonFoldableRuntimeExpression
+            }
             ConstantFoldError::Infrastructure(error) => {
                 ConstResolutionError::TemplateClassification(TemplateError::Infrastructure(error))
             }

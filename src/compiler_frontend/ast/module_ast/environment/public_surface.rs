@@ -8,13 +8,12 @@
 //! and the header-built public export maps.
 
 use super::builder::AstModuleEnvironmentBuilder;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTraitIncompatibilityReason,
-};
+use crate::compiler_frontend::compiler_messages::InvalidTraitIncompatibilityReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeConstructor, TypeId};
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
@@ -233,7 +232,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             return Ok(());
         }
 
-        Err(CompilerDiagnostic::private_type_in_exported_api(exported_name, type_id, span).into())
+        Err(generics_traits_api::private_type_in_exported_api(exported_name, type_id, span).into())
     }
 
     pub(in crate::compiler_frontend::ast) fn public_type_id_is_nameable(
@@ -476,7 +475,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     });
 
             if subject_is_nameable != incompatible_is_nameable {
-                let diagnostic = CompilerDiagnostic::invalid_trait_incompatibility(
+                let diagnostic = generics_traits_api::invalid_trait_incompatibility(
                     incompatibility.subject.name,
                     Some(incompatible_trait.name),
                     InvalidTraitIncompatibilityReason::PrivateTraitSurfaceLeak,

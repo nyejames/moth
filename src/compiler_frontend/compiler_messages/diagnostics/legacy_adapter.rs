@@ -16,21 +16,12 @@ impl From<DiagnosticLabelMessage> for LabelDraftMessage {
             DiagnosticLabelMessage::PreviousDeclaration => Self::PreviousDeclaration,
             DiagnosticLabelMessage::ConflictingAccess => Self::ConflictingAccess,
             DiagnosticLabelMessage::ValueMovedHere => Self::ValueMovedHere,
-            DiagnosticLabelMessage::ConfigInputOrigin { input_name, origin } => {
-                Self::ConfigInputOrigin { input_name, origin }
-            }
             DiagnosticLabelMessage::RenderedText(text) => Self::RenderedText(text),
             DiagnosticLabelMessage::GenericInstantiationBodySite => {
                 Self::GenericInstantiationBodySite
             }
-            DiagnosticLabelMessage::GenericInstantiationDeclarationSite => {
-                Self::GenericInstantiationDeclarationSite
-            }
             DiagnosticLabelMessage::GenericInstantiationSubstitutions { substitutions } => {
                 Self::GenericInstantiationSubstitutions { substitutions }
-            }
-            DiagnosticLabelMessage::GenericInferencePreviousEvidence => {
-                Self::GenericInferencePreviousEvidence
             }
             DiagnosticLabelMessage::ImmutableBindingDeclaration => {
                 Self::ImmutableBindingDeclaration

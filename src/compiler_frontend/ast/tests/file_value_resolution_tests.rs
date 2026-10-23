@@ -21,9 +21,15 @@ use crate::compiler_frontend::ast::{
     Ast, ContextKind, FileValueResolutionServices, ScopeContext, Stage0ResolutionFacts,
     TopLevelDeclarationTable,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidCompileTimePathCode, InvalidCompileTimePathView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    InvalidExpressionView, InvalidPathView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticPayload, InvalidCompileTimePathReason, InvalidExpressionReason,
-    PathKind, RuleDiagnosticKind, SyntaxDiagnosticKind,
+    DiagnosticBag, InvalidCompileTimePathReason, InvalidExpressionReason, PathKind,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -191,16 +197,12 @@ fn rooted_file_value_with_suffix_reports_only_root_slash_diagnostic() {
         }
     };
 
-    assert_eq!(
-        error.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidPath)
-    );
-    assert_eq!(
-        error.payload,
-        DiagnosticPayload::InvalidPath {
-            path_kind: PathKind::OnlyRootSlashSupported,
-        }
-    );
+    let compact = compact_bag_for_test(DiagnosticBag::from(error), None);
+    let diagnostic = compact.first().expect("tokenizer emits one diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidPathView>()
+        .expect("root-path suffix should retain its typed path fact");
+    assert_eq!(facts.path_kind, PathKind::OnlyRootSlashSupported);
 }
 
 #[test]
@@ -800,16 +802,14 @@ fn assert_invalid_expression_reason(
     let ExpressionParseError::Diagnostic(diagnostic) = error else {
         panic!("expected user diagnostic, found infrastructure error: {error:?}")
     };
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidExpression)
-    );
-    assert_eq!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidExpression {
-            reason: expected_reason,
-        }
-    );
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact
+        .first()
+        .expect("invalid file value emits one diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidExpressionView>()
+        .expect("invalid file value should retain typed expression facts");
+    assert_eq!(facts.reason, expected_reason);
 }
 
 fn test_module_origin() -> StableModuleOriginIdentity {
@@ -828,16 +828,17 @@ fn assert_surfaced_stage0_boundary_diagnostic(
     let ExpressionParseError::Diagnostic(diagnostic) = error else {
         panic!("expected user diagnostic, found infrastructure error: {error:?}")
     };
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact
+        .first()
+        .expect("Stage 0 boundary failure emits one diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidCompileTimePathView>()
+        .expect("Stage 0 failure should retain typed compile-time path facts");
     assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Rule(RuleDiagnosticKind::InvalidCompileTimePath)
+        facts.reason,
+        InvalidCompileTimePathCode::of(&expected_reason)
     );
-    match diagnostic.payload {
-        DiagnosticPayload::InvalidCompileTimePath { reason, .. } => {
-            assert_eq!(reason, expected_reason);
-        }
-        other => panic!("the value site must surface Stage 0's retained diagnostic, got {other:?}"),
-    }
 }
 
 fn portable_resource_path(path: &str) -> PortableResourcePath {

@@ -38,9 +38,8 @@ use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirReference;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::view::{TemplateTirPhase, TirView};
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateStructureReason,
-};
+use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, add_ast_counter, increment_ast_counter,
 };
@@ -979,11 +978,10 @@ fn fold_tir_dynamic_expression(
                 output_state.refusal = Some(reason);
                 return Ok(());
             }
-            Err(ConstantFoldError::Diagnostic(diagnostic))
-                if !diagnostic.is_compiler_capacity_exceeded() =>
-            {
-                resolved
-            }
+            Err(
+                ConstantFoldError::Diagnostic(diagnostic)
+                | ConstantFoldError::NumericFailure(diagnostic),
+            ) if diagnostic.code() != "MOTH-SYNTAX-0037" => resolved,
             Err(error) => return Err(error.into()),
         }
     };
@@ -998,7 +996,7 @@ fn fold_tir_dynamic_expression(
             output_state.emitted_output = true;
             Ok(())
         }
-        None => Err(CompilerDiagnostic::invalid_template_structure(
+        None => Err(templates::invalid_template_structure(
             InvalidTemplateStructureReason::NonFoldableConstTemplate,
             expression_span,
         )

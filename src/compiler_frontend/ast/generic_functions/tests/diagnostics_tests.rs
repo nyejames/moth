@@ -9,20 +9,34 @@ use crate::compiler_frontend::ast::generic_functions::diagnostics::{
     GenericInstantiationDiagnosticContext, conflicting_generic_function_argument,
     with_generic_instantiation_context,
 };
-use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticLabel, DiagnosticLabelMessage,
-    DiagnosticLabelStyle, DiagnosticPayload, GenericSubstitutionDiagnostic, RuleDiagnosticKind,
-    TypeMismatchContext,
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
+    GenericInstantiationShape, InvalidGenericInstantiationView, duplicate_trait_requirement,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::type_mismatch;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::{
+    CompactDiagnosticBagForTest, compact_bag_for_test,
+};
+use crate::compiler_frontend::compiler_messages::render::terminal::format_label_messages_view;
+use crate::compiler_frontend::compiler_messages::render::{
+    DiagnosticRenderContext, compact_label_message_text,
+};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticBag, GenericInferenceSubject, GenericSubstitutionDiagnostic, TypeMismatchContext,
+};
+use crate::compiler_frontend::datatypes::GenericParameterId;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
-use crate::compiler_frontend::datatypes::ids::GenericParameterId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityContext, FrozenIdentityHandle, LocalSpan, SourceDatabase,
     SourceId, SourceSpan,
 };
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::fs;
@@ -49,7 +63,7 @@ fn frozen_identity_for_test(
     let mut string_table = StringTable::new();
     let mut source_database = SourceDatabase::build(
         std::iter::once(source_path.as_path()),
-        &source_root,
+        &source_path,
         None,
         &mut string_table,
     )
@@ -83,26 +97,65 @@ fn instantiation_context(
         substitutions: Vec::new(),
     }
 }
+fn mismatch_diagnostic(span: Option<SourceSpan>) -> DiagnosticDraft {
+    type_mismatch(
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        builtin_type_ids::STRING,
+        TypeMismatchContext::FunctionArgument,
+        span,
+    )
+}
+
+fn previous_declaration_diagnostic(
+    primary_span: SourceSpan,
+    previous_span: SourceSpan,
+) -> DiagnosticDraft {
+    let mut string_table = StringTable::new();
+    duplicate_trait_requirement(
+        string_table.intern("TestTrait"),
+        string_table.intern("requirement"),
+        Some(previous_span),
+        Some(primary_span),
+    )
+}
+
+fn compact_diagnostic(
+    diagnostic: DiagnosticDraft,
+    environment: Option<&TypeEnvironment>,
+) -> CompactDiagnosticBagForTest {
+    compact_bag_for_test(DiagnosticBag::from(diagnostic), environment)
+}
+
+fn site_span(site: SiteRef<'_>) -> Option<SourceSpan> {
+    match site {
+        SiteRef::Absent => None,
+        SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
+    }
+}
+
+fn site_has_owner(site: SiteRef<'_>, owner: &FrozenIdentityHandle) -> bool {
+    matches!(site, SiteRef::Foreign { context, .. } if context == owner)
+}
 
 #[test]
 fn with_generic_instantiation_context_changes_primary_span_to_call_site() {
     let body_span = make_span(1, 10, 1);
     let call_span = make_span(2, 20, 1);
-    let diagnostic = CompilerDiagnostic::type_mismatch(
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        builtin_type_ids::STRING,
-        TypeMismatchContext::FunctionArgument,
-        Some(body_span),
-    );
+    let diagnostic = mismatch_diagnostic(Some(body_span));
 
     let transformed =
         with_generic_instantiation_context(diagnostic, instantiation_context(call_span, body_span));
+    let compact = compact_diagnostic(transformed, None);
+    let diagnostic = compact.first().expect("generic rewrite emits a diagnostic");
 
-    assert_eq!(transformed.primary_span, Some(call_span));
-    assert!(transformed.labels.iter().any(|label| {
-        label.style == DiagnosticLabelStyle::Secondary
-            && label.span == Some(body_span)
-            && label.message == Some(DiagnosticLabelMessage::GenericInstantiationBodySite)
+    assert_eq!(site_span(diagnostic.primary_site()), Some(call_span));
+    assert!(diagnostic.durable_labels().any(|label| {
+        label.spanned
+            && site_span(label.site) == Some(body_span)
+            && matches!(
+                label.message,
+                DurableLabelMessage::GenericInstantiationBodySite
+            )
     }));
 }
 
@@ -111,13 +164,8 @@ fn with_generic_instantiation_context_without_call_span_retains_body_primary() {
     let body_span = make_span(1, 10, 1);
     let declaration_span = make_span(2, 20, 1);
     let body_owner = FrozenIdentityHandle::new();
-    let mut diagnostic = CompilerDiagnostic::type_mismatch(
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        builtin_type_ids::STRING,
-        TypeMismatchContext::FunctionArgument,
-        Some(body_span),
-    );
-    diagnostic.primary_frozen_identity_handle = Some(body_owner.clone());
+    let diagnostic = mismatch_diagnostic(Some(body_span))
+        .with_primary_frozen_identity_handle(body_owner.clone());
 
     let transformed = with_generic_instantiation_context(
         diagnostic,
@@ -129,26 +177,28 @@ fn with_generic_instantiation_context_without_call_span_retains_body_primary() {
             substitutions: Vec::new(),
         },
     );
-
-    assert_eq!(transformed.primary_span, Some(body_span));
+    let compact = compact_diagnostic(transformed, None);
+    let diagnostic = compact.first().expect("generic rewrite emits a diagnostic");
+    assert_eq!(site_span(diagnostic.primary_site()), Some(body_span));
+    assert!(site_has_owner(diagnostic.primary_site(), &body_owner));
+    let labels = diagnostic.durable_labels().collect::<Vec<_>>();
     assert_eq!(
-        transformed.primary_frozen_identity_handle.as_ref(),
-        Some(&body_owner)
-    );
-    assert_eq!(
-        transformed
-            .labels
+        labels
             .iter()
-            .filter(|label| {
-                label.message == Some(DiagnosticLabelMessage::GenericInstantiationBodySite)
-            })
+            .filter(|label| matches!(
+                label.message,
+                DurableLabelMessage::GenericInstantiationBodySite
+            ))
             .count(),
         0,
         "without a call site, the body must remain primary rather than become a label"
     );
-    assert!(transformed.labels.iter().any(|label| {
-        label.span == Some(declaration_span)
-            && label.message == Some(DiagnosticLabelMessage::GenericInstantiationDeclarationSite)
+    assert!(labels.iter().any(|label| {
+        site_span(label.site) == Some(declaration_span)
+            && matches!(
+                label.message,
+                DurableLabelMessage::GenericInstantiationDeclarationSite
+            )
     }));
 }
 
@@ -160,81 +210,55 @@ fn with_generic_instantiation_context_retains_exact_extended_call_span() {
         SourceId::from_index(4),
         LocalSpan::exact(17, 4096, &mut span_builder).unwrap(),
     );
-    let diagnostic = CompilerDiagnostic::type_mismatch(
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        builtin_type_ids::STRING,
-        TypeMismatchContext::FunctionArgument,
-        Some(body_span),
-    );
+    let diagnostic = mismatch_diagnostic(Some(body_span));
 
     let transformed =
         with_generic_instantiation_context(diagnostic, instantiation_context(call_span, body_span));
+    let compact = compact_diagnostic(transformed, None);
+    let diagnostic = compact.first().expect("generic rewrite emits a diagnostic");
 
     assert_eq!(span_builder.len(), 1);
-    assert_eq!(transformed.primary_span, Some(call_span));
+    assert_eq!(site_span(diagnostic.primary_site()), Some(call_span));
     assert!(
-        transformed
-            .labels
-            .iter()
-            .all(|label| label.span != Some(call_span))
+        diagnostic
+            .durable_labels()
+            .all(|label| site_span(label.site) != Some(call_span))
     );
 }
 
 #[test]
 fn with_generic_instantiation_context_preserves_existing_secondary_labels() {
-    let mut string_table = StringTable::new();
     let body_span = make_span(1, 10, 1);
     let call_span = make_span(2, 20, 1);
     let extra_span = make_span(3, 30, 1);
-    let diagnostic = CompilerDiagnostic::new(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
-        Some(body_span),
-        DiagnosticPayload::UnknownName {
-            name: string_table.intern("x"),
-            namespace: crate::compiler_frontend::compiler_messages::NameNamespace::Value,
-        },
-    )
-    .with_labels(vec![DiagnosticLabel::secondary(
-        Some(extra_span),
-        Some(DiagnosticLabelMessage::PreviousDeclaration),
-    )]);
-
+    let diagnostic = previous_declaration_diagnostic(body_span, extra_span);
     let transformed =
         with_generic_instantiation_context(diagnostic, instantiation_context(call_span, body_span));
+    let compact = compact_diagnostic(transformed, None);
+    let diagnostic = compact.first().expect("generic rewrite emits a diagnostic");
 
-    assert!(transformed.labels.iter().any(|label| {
-        label.style == DiagnosticLabelStyle::Secondary
-            && label.span == Some(extra_span)
-            && label.message == Some(DiagnosticLabelMessage::PreviousDeclaration)
+    assert!(diagnostic.durable_labels().any(|label| {
+        label.spanned
+            && site_span(label.site) == Some(extra_span)
+            && matches!(label.message, DurableLabelMessage::PreviousDeclaration)
     }));
 }
 
 #[test]
 fn with_generic_instantiation_context_avoids_duplicate_body_secondary_label() {
-    let mut string_table = StringTable::new();
     let body_span = make_span(1, 10, 1);
     let call_span = make_span(2, 20, 1);
-    let diagnostic = CompilerDiagnostic::new(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
-        Some(body_span),
-        DiagnosticPayload::UnknownName {
-            name: string_table.intern("x"),
-            namespace: crate::compiler_frontend::compiler_messages::NameNamespace::Value,
-        },
-    )
-    .with_labels(vec![DiagnosticLabel::secondary(
-        Some(body_span),
-        Some(DiagnosticLabelMessage::PreviousDeclaration),
-    )]);
+    let diagnostic = previous_declaration_diagnostic(body_span, body_span);
 
     let transformed =
         with_generic_instantiation_context(diagnostic, instantiation_context(call_span, body_span));
+    let compact = compact_diagnostic(transformed, None);
+    let diagnostic = compact.first().expect("generic rewrite emits a diagnostic");
 
     assert_eq!(
-        transformed
-            .labels
-            .iter()
-            .filter(|label| label.span == Some(body_span))
+        diagnostic
+            .durable_labels()
+            .filter(|label| site_span(label.site) == Some(body_span))
             .count(),
         1
     );
@@ -242,25 +266,13 @@ fn with_generic_instantiation_context_avoids_duplicate_body_secondary_label() {
 
 #[test]
 fn generic_reanchoring_does_not_deduplicate_distinct_domainless_label_owners() {
-    let mut string_table = StringTable::new();
     let body_span = make_span(1, 10, 1);
     let call_span = make_span(2, 20, 1);
     let body_owner = FrozenIdentityHandle::new();
     let existing_owner = FrozenIdentityHandle::new();
-    let mut diagnostic = CompilerDiagnostic::new(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
-        Some(body_span),
-        DiagnosticPayload::UnknownName {
-            name: string_table.intern("x"),
-            namespace: crate::compiler_frontend::compiler_messages::NameNamespace::Value,
-        },
-    )
-    .with_labels(vec![DiagnosticLabel::secondary_with_frozen_identity(
-        Some(body_span),
-        Some(DiagnosticLabelMessage::PreviousDeclaration),
-        existing_owner.clone(),
-    )]);
-    diagnostic.primary_frozen_identity_handle = Some(body_owner.clone());
+    let diagnostic = previous_declaration_diagnostic(body_span, body_span)
+        .with_label_frozen_identity_handle(0, existing_owner.clone())
+        .with_primary_frozen_identity_handle(body_owner.clone());
 
     let transformed = with_generic_instantiation_context(
         diagnostic,
@@ -272,48 +284,41 @@ fn generic_reanchoring_does_not_deduplicate_distinct_domainless_label_owners() {
             substitutions: Vec::new(),
         },
     );
+    let compact = compact_diagnostic(transformed, None);
+    let diagnostic = compact.first().expect("generic rewrite emits a diagnostic");
+    let labels = diagnostic.durable_labels().collect::<Vec<_>>();
 
     assert_eq!(
-        transformed
-            .labels
+        labels
             .iter()
-            .filter(|label| label.span == Some(body_span))
+            .filter(|label| site_span(label.site) == Some(body_span))
             .count(),
         2,
         "distinct domain-less owners must not deduplicate colliding spans"
     );
-    assert!(transformed.labels.iter().any(|label| {
-        label.span == Some(body_span)
-            && label.message == Some(DiagnosticLabelMessage::GenericInstantiationBodySite)
-            && label.frozen_identity_handle.as_ref() == Some(&body_owner)
+    assert!(labels.iter().any(|label| {
+        site_span(label.site) == Some(body_span)
+            && matches!(
+                label.message,
+                DurableLabelMessage::GenericInstantiationBodySite
+            )
+            && site_has_owner(label.site, &body_owner)
     }));
-    assert!(transformed.labels.iter().any(|label| {
-        label.span == Some(body_span)
-            && label.message == Some(DiagnosticLabelMessage::PreviousDeclaration)
-            && label.frozen_identity_handle.as_ref() == Some(&existing_owner)
+    assert!(labels.iter().any(|label| {
+        site_span(label.site) == Some(body_span)
+            && matches!(label.message, DurableLabelMessage::PreviousDeclaration)
+            && site_has_owner(label.site, &existing_owner)
     }));
 }
 
 #[test]
 fn generic_reanchoring_deduplicates_same_domainless_label_owner() {
-    let mut string_table = StringTable::new();
     let body_span = make_span(1, 10, 1);
     let call_span = make_span(2, 20, 1);
     let body_owner = FrozenIdentityHandle::new();
-    let mut diagnostic = CompilerDiagnostic::new(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
-        Some(body_span),
-        DiagnosticPayload::UnknownName {
-            name: string_table.intern("x"),
-            namespace: crate::compiler_frontend::compiler_messages::NameNamespace::Value,
-        },
-    )
-    .with_labels(vec![DiagnosticLabel::secondary_with_frozen_identity(
-        Some(body_span),
-        Some(DiagnosticLabelMessage::PreviousDeclaration),
-        body_owner.clone(),
-    )]);
-    diagnostic.primary_frozen_identity_handle = Some(body_owner.clone());
+    let diagnostic = previous_declaration_diagnostic(body_span, body_span)
+        .with_label_frozen_identity_handle(0, body_owner.clone())
+        .with_primary_frozen_identity_handle(body_owner.clone());
 
     let transformed = with_generic_instantiation_context(
         diagnostic,
@@ -325,12 +330,13 @@ fn generic_reanchoring_deduplicates_same_domainless_label_owner() {
             substitutions: Vec::new(),
         },
     );
+    let compact = compact_diagnostic(transformed, None);
+    let diagnostic = compact.first().expect("generic rewrite emits a diagnostic");
 
     assert_eq!(
-        transformed
-            .labels
-            .iter()
-            .filter(|label| label.span == Some(body_span))
+        diagnostic
+            .durable_labels()
+            .filter(|label| site_span(label.site) == Some(body_span))
             .count(),
         1,
         "clones of the same domain-less owner should deduplicate"
@@ -342,22 +348,22 @@ fn with_generic_instantiation_context_adds_declaration_span_label() {
     let body_span = make_span(1, 10, 1);
     let call_span = make_span(2, 20, 1);
     let declaration_span = make_span(3, 30, 1);
-    let diagnostic = CompilerDiagnostic::type_mismatch(
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        builtin_type_ids::STRING,
-        TypeMismatchContext::FunctionArgument,
-        Some(body_span),
-    );
+    let diagnostic = mismatch_diagnostic(Some(body_span));
 
     let transformed = with_generic_instantiation_context(
         diagnostic,
         instantiation_context(call_span, declaration_span),
     );
+    let compact = compact_diagnostic(transformed, None);
+    let diagnostic = compact.first().expect("generic rewrite emits a diagnostic");
 
-    assert!(transformed.labels.iter().any(|label| {
-        label.style == DiagnosticLabelStyle::Secondary
-            && label.span == Some(declaration_span)
-            && label.message == Some(DiagnosticLabelMessage::GenericInstantiationDeclarationSite)
+    assert!(diagnostic.durable_labels().any(|label| {
+        label.spanned
+            && site_span(label.site) == Some(declaration_span)
+            && matches!(
+                label.message,
+                DurableLabelMessage::GenericInstantiationDeclarationSite
+            )
     }));
 }
 
@@ -368,12 +374,7 @@ fn with_generic_instantiation_context_adds_structured_substitution_label() {
     let call_span = make_span(2, 20, 1);
     let declaration_span = make_span(3, 30, 1);
     let parameter_name = string_table.intern("T");
-    let diagnostic = CompilerDiagnostic::type_mismatch(
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        builtin_type_ids::STRING,
-        TypeMismatchContext::FunctionArgument,
-        Some(body_span),
-    );
+    let diagnostic = mismatch_diagnostic(Some(body_span));
 
     let transformed = with_generic_instantiation_context(
         diagnostic,
@@ -388,20 +389,33 @@ fn with_generic_instantiation_context_adds_structured_substitution_label() {
             }],
         },
     );
-
-    assert!(transformed.labels.iter().any(|label| {
-        label.span == Some(declaration_span)
-            && matches!(
-                &label.message,
-                Some(DiagnosticLabelMessage::GenericInstantiationSubstitutions {
-                    substitutions
-                }) if substitutions
-                    == &vec![GenericSubstitutionDiagnostic {
-                        parameter_name,
-                        concrete_type_id: builtin_type_ids::STRING,
-                    }]
-            )
-    }));
+    let type_environment = TypeEnvironment::new();
+    let compact = compact_diagnostic(transformed, Some(&type_environment));
+    let diagnostic = compact.first().expect("generic rewrite emits a diagnostic");
+    let label = diagnostic
+        .durable_labels()
+        .find(|label| {
+            site_span(label.site) == Some(declaration_span)
+                && matches!(
+                    label.message,
+                    DurableLabelMessage::GenericInstantiationSubstitutions(_)
+                )
+        })
+        .expect("generic substitutions should retain their typed label");
+    let DurableLabelMessage::GenericInstantiationSubstitutions(substitutions) = label.message
+    else {
+        unreachable!("the label filter selected generic substitutions")
+    };
+    let substitutions = substitutions.iter().collect::<Vec<_>>();
+    assert_eq!(substitutions.len(), 1);
+    assert_eq!(substitutions[0].parameter, parameter_name);
+    let path_fork = PathInternerFork::empty();
+    let path_table = path_fork.snapshot_table();
+    let render_context = DiagnosticRenderContext::new(&string_table).with_path_table(&path_table);
+    assert_eq!(
+        compact_label_message_text(label.message, diagnostic.types(), render_context,).as_deref(),
+        Some("generic substitution: T = String")
+    );
 }
 
 #[test]
@@ -424,11 +438,26 @@ fn conflicting_generic_function_argument_keeps_current_evidence_primary_span() {
         Some(previous_span),
     );
 
-    assert_eq!(diagnostic.primary_span, Some(current_span));
-    assert!(diagnostic.labels.iter().any(|label| {
-        label.style == DiagnosticLabelStyle::Secondary
-            && label.span == Some(previous_span)
-            && label.message == Some(DiagnosticLabelMessage::GenericInferencePreviousEvidence)
+    let type_environment = TypeEnvironment::new();
+    let compact = compact_diagnostic(diagnostic, Some(&type_environment));
+    let diagnostic = compact
+        .first()
+        .expect("generic inference conflict emits a diagnostic");
+    assert_eq!(site_span(diagnostic.primary_site()), Some(current_span));
+    let facts = diagnostic
+        .family_view::<InvalidGenericInstantiationView>()
+        .expect("generic inference conflict should retain typed facts");
+    let GenericInstantiationShape::ConflictingInference { subject, .. } = facts.shape else {
+        panic!("expected conflicting generic inference facts");
+    };
+    assert_eq!(subject, GenericInferenceSubject::Function);
+    assert!(diagnostic.durable_labels().any(|label| {
+        label.spanned
+            && site_span(label.site) == Some(previous_span)
+            && matches!(
+                label.message,
+                DurableLabelMessage::GenericInferencePreviousEvidence
+            )
     }));
 }
 
@@ -452,9 +481,15 @@ fn conflicting_generic_function_argument_retains_evidence_spans() {
         Some(previous_span),
     );
 
-    assert_eq!(diagnostic.primary_span, Some(current_span));
-    assert_eq!(diagnostic.labels.len(), 1);
-    assert_eq!(diagnostic.labels[0].span, Some(previous_span));
+    let type_environment = TypeEnvironment::new();
+    let compact = compact_diagnostic(diagnostic, Some(&type_environment));
+    let diagnostic = compact
+        .first()
+        .expect("generic inference conflict emits a diagnostic");
+    assert_eq!(site_span(diagnostic.primary_site()), Some(current_span));
+    let labels = diagnostic.durable_labels().collect::<Vec<_>>();
+    assert_eq!(labels.len(), 1);
+    assert_eq!(site_span(labels[0].site), Some(previous_span));
 }
 
 #[test]
@@ -466,18 +501,7 @@ fn with_generic_instantiation_context_attaches_donor_owner_to_all_donor_labels()
     let extra_span = make_span(1, 40, 1);
     let parameter_name = string_table.intern("T");
     let frozen_identity_handle = FrozenIdentityHandle::new();
-    let diagnostic = CompilerDiagnostic::new(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
-        Some(body_span),
-        DiagnosticPayload::UnknownName {
-            name: string_table.intern("x"),
-            namespace: crate::compiler_frontend::compiler_messages::NameNamespace::Value,
-        },
-    )
-    .with_labels(vec![DiagnosticLabel::secondary(
-        Some(extra_span),
-        Some(DiagnosticLabelMessage::PreviousDeclaration),
-    )]);
+    let diagnostic = previous_declaration_diagnostic(body_span, extra_span);
 
     let transformed = with_generic_instantiation_context(
         diagnostic,
@@ -492,12 +516,13 @@ fn with_generic_instantiation_context_attaches_donor_owner_to_all_donor_labels()
             }],
         },
     );
-
+    let type_environment = TypeEnvironment::new();
+    let compact = compact_diagnostic(transformed, Some(&type_environment));
+    let diagnostic = compact.first().expect("generic rewrite emits a diagnostic");
     assert!(
-        transformed
-            .labels
-            .iter()
-            .all(|label| label.frozen_identity_handle.as_ref() == Some(&frozen_identity_handle)),
+        diagnostic
+            .durable_labels()
+            .all(|label| site_has_owner(label.site, &frozen_identity_handle)),
         "every donor label must retain the materialised body's owner"
     );
 }
@@ -506,21 +531,17 @@ fn with_generic_instantiation_context_attaches_donor_owner_to_all_donor_labels()
 fn same_domain_generic_labels_remain_ownerless() {
     let body_span = make_span(1, 10, 1);
     let call_span = make_span(2, 20, 1);
-    let diagnostic = CompilerDiagnostic::type_mismatch(
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        builtin_type_ids::STRING,
-        TypeMismatchContext::FunctionArgument,
-        Some(body_span),
-    );
+    let diagnostic = mismatch_diagnostic(Some(body_span));
 
     let transformed =
         with_generic_instantiation_context(diagnostic, instantiation_context(call_span, body_span));
+    let compact = compact_diagnostic(transformed, None);
+    let diagnostic = compact.first().expect("generic rewrite emits a diagnostic");
 
     assert!(
-        transformed
-            .labels
-            .iter()
-            .all(|label| label.frozen_identity_handle.is_none()),
+        diagnostic
+            .durable_labels()
+            .all(|label| matches!(label.site, SiteRef::Local(_) | SiteRef::Absent)),
         "ordinary same-domain labels must continue using the requester context"
     );
 }
@@ -542,38 +563,62 @@ fn donor_owned_label_uses_installed_donor_context() {
     donor_handle
         .install(Arc::clone(&donor_identity))
         .expect("donor identity should install once");
-    let donor_label = DiagnosticLabel::secondary_with_frozen_identity(
-        Some(SourceSpan::new(
-            donor_source,
-            LocalSpan::exact(0, 5, &mut ExtendedSpanBuilder::new())
-                .expect("donor span should fit inline"),
-        )),
-        Some(DiagnosticLabelMessage::GenericInstantiationBodySite),
-        donor_handle,
+    let donor_span = SourceSpan::new(
+        donor_source,
+        LocalSpan::exact(0, 5, &mut ExtendedSpanBuilder::new())
+            .expect("donor span should fit inline"),
     );
+    let donor_draft = mismatch_diagnostic(None)
+        .with_label(
+            Some(donor_span),
+            Some(LabelDraftMessage::GenericInstantiationBodySite),
+        )
+        .with_label_frozen_identity_handle(0, donor_handle.clone());
+    let donor_compact = compact_diagnostic(donor_draft, None);
     let requester_context = DiagnosticRenderContext::new(requester_identity.strings())
         .with_frozen_identity(&requester_identity);
-    let position = requester_context
-        .label_position(&donor_label)
-        .expect("donor-owned label should resolve through its installed owner");
-    assert_eq!(position.line, "donor body");
-
-    let uninstalled_label = DiagnosticLabel::secondary_with_frozen_identity(
-        donor_label.span,
-        Some(DiagnosticLabelMessage::GenericInstantiationBodySite),
-        FrozenIdentityHandle::new(),
+    let donor_messages = format_label_messages_view(
+        donor_compact.first().expect("donor label compacts"),
+        requester_context,
     );
     assert!(
-        requester_context
-            .label_position(&uninstalled_label)
-            .is_none(),
+        donor_messages
+            .iter()
+            .any(|message| message.contains("generic body operation failed here")),
+        "the donor-owned label should retain its rendered message"
+    );
+    let donor_view = donor_compact.first().expect("donor label compacts");
+    let donor_label = donor_view
+        .durable_labels()
+        .next()
+        .expect("donor diagnostic retains its label");
+    assert!(site_has_owner(donor_label.site, &donor_handle));
+    let donor_position = requester_context
+        .site_position(donor_label.site)
+        .expect("the installed donor owner should resolve its source span");
+    assert_eq!(donor_position.line, "donor body");
+
+    let uninstalled_draft = mismatch_diagnostic(None)
+        .with_label(
+            Some(donor_span),
+            Some(LabelDraftMessage::GenericInstantiationBodySite),
+        )
+        .with_label_frozen_identity_handle(0, FrozenIdentityHandle::new());
+    let uninstalled_compact = compact_diagnostic(uninstalled_draft, None);
+    assert!(
+        format_label_messages_view(
+            uninstalled_compact
+                .first()
+                .expect("uninstalled donor label compacts"),
+            requester_context,
+        )
+        .is_empty(),
         "an uninstalled donor owner must not fall back to requester context"
     );
 }
 
 #[test]
 fn generic_reanchoring_preserves_mixed_domain_label_owners() {
-    let mut string_table = StringTable::new();
     let body_span = make_span(1, 10, 1);
     let call_span = make_span(2, 20, 1);
     let declaration_span = make_span(1, 30, 1);
@@ -587,20 +632,9 @@ fn generic_reanchoring_preserves_mixed_domain_label_owners() {
     ));
     let call_site_owner =
         FrozenIdentityHandle::for_domain(StablePackageIdentity::project_local("requester"));
-    let mut diagnostic = CompilerDiagnostic::new(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
-        Some(body_span),
-        DiagnosticPayload::UnknownName {
-            name: string_table.intern("x"),
-            namespace: crate::compiler_frontend::compiler_messages::NameNamespace::Value,
-        },
-    )
-    .with_labels(vec![DiagnosticLabel::secondary_with_frozen_identity(
-        Some(body_span),
-        Some(DiagnosticLabelMessage::PreviousDeclaration),
-        existing_owner.clone(),
-    )]);
-    diagnostic.primary_frozen_identity_handle = Some(existing_owner.clone());
+    let diagnostic = previous_declaration_diagnostic(body_span, body_span)
+        .with_label_frozen_identity_handle(0, existing_owner.clone())
+        .with_primary_frozen_identity_handle(existing_owner.clone());
 
     let transformed = with_generic_instantiation_context(
         diagnostic,
@@ -608,24 +642,20 @@ fn generic_reanchoring_preserves_mixed_domain_label_owners() {
             call_span: Some(call_span),
             declaration_span: Some(declaration_span),
             frozen_identity_handle: Some(donor_owner.clone()),
-            call_site_frozen_identity_handle: Some(call_site_owner),
+            call_site_frozen_identity_handle: Some(call_site_owner.clone()),
             substitutions: Vec::new(),
         },
     );
+    let compact = compact_diagnostic(transformed, None);
+    let diagnostic = compact.first().expect("generic rewrite emits a diagnostic");
 
-    assert_eq!(
-        transformed
-            .primary_frozen_identity_handle
-            .as_ref()
-            .map(FrozenIdentityHandle::domain),
-        Some(Some(&StablePackageIdentity::project_local("requester"))),
-    );
-    assert!(transformed.labels.iter().any(|label| {
-        label.span == Some(body_span)
-            && label.frozen_identity_handle.as_ref() == Some(&existing_owner)
+    assert_eq!(site_span(diagnostic.primary_site()), Some(call_span));
+    assert!(site_has_owner(diagnostic.primary_site(), &call_site_owner));
+    let labels = diagnostic.durable_labels().collect::<Vec<_>>();
+    assert!(labels.iter().any(|label| {
+        site_span(label.site) == Some(body_span) && site_has_owner(label.site, &existing_owner)
     }));
-    assert!(transformed.labels.iter().any(|label| {
-        label.span == Some(declaration_span)
-            && label.frozen_identity_handle.as_ref() == Some(&donor_owner)
+    assert!(labels.iter().any(|label| {
+        site_span(label.site) == Some(declaration_span) && site_has_owner(label.site, &donor_owner)
     }));
 }

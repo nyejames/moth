@@ -1,5 +1,11 @@
 use super::*;
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::UnknownValueNameView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidExpressionView;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::{
+    InvalidExpressionReason, InvalidTemplateStructureReason,
+};
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -7,7 +13,7 @@ use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 #[test]
 fn template_head_unknown_symbol_reports_unknown_value_name_not_unexpected_token() {
-    // Unknown names in a template head should produce a structured UnknownName
+    // Unknown names in a template head should produce a structured unknown-value-name
     // diagnostic, not a generic UnexpectedToken. This is the improvement from
     // routing symbol-led head items through the ordinary expression parser.
     let source = "[unknown_name]";
@@ -50,23 +56,20 @@ fn template_head_unknown_symbol_reports_unknown_value_name_not_unexpected_token(
     )
     .expect_err("unknown name in template head should fail");
     let diagnostic = expect_template_diagnostic(diagnostic);
-
     let unknown_name = string_table.intern("unknown_name");
-    assert!(
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::UnknownName {
-                name,
-                namespace: NameNamespace::Value,
-            } if name == unknown_name
-        ),
-        "expected UnknownName for unknown symbol in template head, got: {:?}",
-        diagnostic.payload
-    );
 
-    let primary_span = diagnostic
-        .primary_span
-        .expect("expression parser diagnostics should retain the authored symbol span");
+    let view = diagnostic
+        .first()
+        .expect("unknown-name diagnostic should compact to one record");
+    assert_eq!(view.descriptor().code, "MOTH-RULE-0034");
+    let facts = view
+        .family_view::<UnknownValueNameView>()
+        .expect("unknown-value-name diagnostic should retain typed facts");
+    assert_eq!(facts.name, unknown_name);
+
+    let SiteRef::Local(primary_span) = view.primary_site() else {
+        panic!("expression parser diagnostic should retain its authored local symbol span");
+    };
     assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
     let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     assert_eq!((range.start(), range.end()), (1, 13));
@@ -128,16 +131,17 @@ fn incompatible_head_item_retains_exact_extended_multibyte_span() {
         )
         .expect_err("incompatible formatter directives should fail"),
     );
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidTemplateStructure {
-            reason: InvalidTemplateStructureReason::IncompatibleHeadItem
-        }
-    ));
-
-    let primary_span = diagnostic
-        .primary_span
-        .expect("incompatible head item should retain its exact source span");
+    assert_invalid_template_structure(
+        &diagnostic,
+        InvalidTemplateStructureReason::IncompatibleHeadItem,
+    );
+    let SiteRef::Local(primary_span) = diagnostic
+        .first()
+        .expect("incompatible head item should compact to one record")
+        .primary_site()
+    else {
+        panic!("incompatible head item should retain its local source span");
+    };
     assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
     let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     let target = format!("${long_directive_name}");
@@ -550,16 +554,20 @@ fn template_head_extensionless_path_retains_exact_span() {
         )
         .expect_err("an extensionless template-head path should fail"),
     );
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidExpression {
-            reason: InvalidExpressionReason::ExtensionlessFileValue
-        }
-    ));
+    let view = diagnostic
+        .first()
+        .expect("extensionless path diagnostic should compact to one record");
+    let facts = view
+        .family_view::<InvalidExpressionView>()
+        .expect("extensionless path diagnostic should retain typed expression facts");
+    assert_eq!(
+        facts.reason,
+        InvalidExpressionReason::ExtensionlessFileValue
+    );
 
-    let primary_span = diagnostic
-        .primary_span
-        .expect("path-value diagnostics should retain the authored path span");
+    let SiteRef::Local(primary_span) = view.primary_site() else {
+        panic!("path-value diagnostic should retain its authored local path span");
+    };
     assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
     let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     let target = "@docs/intro";
@@ -738,48 +746,40 @@ fn template_control_flow_suffix_requires_comma_after_head_items() {
     .expect_err("missing comma before template control-flow suffix should fail");
     let diagnostic = expect_template_diagnostic(diagnostic);
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidTemplateStructure {
-            reason: InvalidTemplateStructureReason::MissingCommaBeforeControlFlowSuffix
-        }
-    ));
+    assert_invalid_template_structure(
+        &diagnostic,
+        InvalidTemplateStructureReason::MissingCommaBeforeControlFlowSuffix,
+    );
 }
 
 #[test]
 fn template_if_suffix_must_be_final() {
     let diagnostic = parse_template_error("[if true, $raw: Visible]");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidTemplateStructure {
-            reason: InvalidTemplateStructureReason::ControlFlowSuffixNotFinal
-        }
-    ));
+    assert_invalid_template_structure(
+        &diagnostic,
+        InvalidTemplateStructureReason::ControlFlowSuffixNotFinal,
+    );
 }
 
 #[test]
 fn template_loop_suffix_must_be_final() {
     let diagnostic = parse_template_error("[loop 0 to 3 |i|, value: [i]]");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidTemplateStructure {
-            reason: InvalidTemplateStructureReason::ControlFlowSuffixNotFinal
-        }
-    ));
+    assert_invalid_template_structure(
+        &diagnostic,
+        InvalidTemplateStructureReason::ControlFlowSuffixNotFinal,
+    );
 }
 
 #[test]
 fn template_if_suffix_requires_condition() {
     let diagnostic = parse_template_error("[if: Visible]");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidTemplateStructure {
-            reason: InvalidTemplateStructureReason::MissingTemplateIfCondition
-        }
-    ));
+    assert_invalid_template_structure(
+        &diagnostic,
+        InvalidTemplateStructureReason::MissingTemplateIfCondition,
+    );
 }
 
 #[test]
@@ -819,16 +819,17 @@ fn template_if_suffix_separator_retains_exact_multibyte_span() {
         )
         .expect_err("a separator after an if suffix should fail"),
     );
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidTemplateStructure {
-            reason: InvalidTemplateStructureReason::ControlFlowSuffixNotFinal
-        }
-    ));
-
-    let primary_span = diagnostic
-        .primary_span
-        .expect("the suffix separator should retain its exact source span");
+    assert_invalid_template_structure(
+        &diagnostic,
+        InvalidTemplateStructureReason::ControlFlowSuffixNotFinal,
+    );
+    let SiteRef::Local(primary_span) = diagnostic
+        .first()
+        .expect("suffix separator diagnostic should compact to one record")
+        .primary_site()
+    else {
+        panic!("suffix separator diagnostic should retain its local source span");
+    };
     assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
     let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     let expected_start = source
@@ -845,10 +846,8 @@ fn template_if_suffix_separator_retains_exact_multibyte_span() {
 fn template_loop_suffix_requires_header() {
     let diagnostic = parse_template_error("[loop: Visible]");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidTemplateStructure {
-            reason: InvalidTemplateStructureReason::MissingTemplateLoopHeader
-        }
-    ));
+    assert_invalid_template_structure(
+        &diagnostic,
+        InvalidTemplateStructureReason::MissingTemplateLoopHeader,
+    );
 }

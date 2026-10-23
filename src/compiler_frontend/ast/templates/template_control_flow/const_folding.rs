@@ -18,9 +18,8 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView, OccurrenceFacts,
 };
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateStructureReason,
-};
+use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -277,7 +276,7 @@ impl ConstRangeCursor {
                 }
 
                 if self.emitted_iterations >= self.limit {
-                    return Err(CompilerDiagnostic::invalid_template_structure(
+                    return Err(templates::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateConstLoopExpansionLimitExceeded {
                             limit: self.limit,
                         },
@@ -320,7 +319,7 @@ impl ConstRangeCursor {
                 }
 
                 if self.emitted_iterations >= self.limit {
-                    return Err(CompilerDiagnostic::invalid_template_structure(
+                    return Err(templates::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateConstLoopExpansionLimitExceeded {
                             limit: self.limit,
                         },
@@ -397,7 +396,7 @@ fn fixed_integer_max_magnitude(scalar: FixedScalar) -> Option<i128> {
 fn invalid_range_bounds(
     span: Option<crate::compiler_frontend::source::SourceSpan>,
 ) -> TemplateError {
-    CompilerDiagnostic::invalid_template_structure(
+    templates::invalid_template_structure(
         InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
         span,
     )
@@ -481,7 +480,7 @@ pub(crate) fn const_collection_items(
         _ => None,
     };
     let Some(values) = values else {
-        return Err(CompilerDiagnostic::invalid_template_structure(
+        return Err(templates::invalid_template_structure(
             InvalidTemplateStructureReason::TemplateLoopSourceNotConst,
             span,
         )

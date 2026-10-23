@@ -21,10 +21,12 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
 };
 use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
-    calls_data::InvalidValueReceiverView, types_borrows_targets::TypeMismatchView,
+    calls_data::InvalidValueReceiverView, choices_control_flow::InvalidControlFlowStatementView,
+    types_borrows_targets::TypeMismatchView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidControlFlowStatementReason, ValueReceiverContext,
+    DiagnosticBag, InvalidControlFlowStatementReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::tests::ast_fixture_support::{
@@ -502,12 +504,17 @@ fn shared_validator_rejects_all_terminating_value_if() {
         panic!("expected user diagnostic, found infrastructure error: {error:?}")
     };
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidControlFlowStatement {
-            reason: InvalidControlFlowStatementReason::ValueIfNoProducingPath,
-        }
-    ));
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact
+        .first()
+        .expect("the draft compacts to a diagnostic view");
+    let facts = diagnostic
+        .family_view::<InvalidControlFlowStatementView>()
+        .expect("the diagnostic is an invalid control-flow statement");
+    assert_eq!(
+        facts.reason,
+        InvalidControlFlowStatementReason::ValueIfNoProducingPath
+    );
 }
 
 #[test]

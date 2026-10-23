@@ -40,9 +40,9 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::{
-    BuiltinFailureOriginKind, BuiltinFailureWitness, CompilerDiagnostic,
-    InvalidFallibleHandlingReason,
+    BuiltinFailureOriginKind, BuiltinFailureWitness, InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -514,7 +514,7 @@ pub(crate) fn explicit_propagation_catch_diagnostic<'a>(
     expression: ExpressionView<'_>,
     template_ir_store: &TemplateIrStore,
     expression_builder: impl Into<FailureClassificationExpressions<'a>>,
-) -> Result<Option<CompilerDiagnostic>, CompilerError> {
+) -> Result<Option<DiagnosticDraft>, CompilerError> {
     let expression_builder = expression_builder.into();
     expression_builder.validate_view(expression)?;
     if expression
@@ -536,7 +536,7 @@ pub(crate) fn explicit_propagation_catch_diagnostic<'a>(
             }
             _ => InvalidFallibleHandlingReason::ExplicitPropagationCatchConflict,
         };
-        CompilerDiagnostic::invalid_fallible_handling(reason, effect.span())
+        crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::invalid_fallible_handling(reason, effect.span())
     }))
 }
 

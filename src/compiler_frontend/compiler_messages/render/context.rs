@@ -21,9 +21,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::report::Diagnostic
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 #[cfg(test)]
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, DiagnosticLabel,
-};
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticBag};
 #[cfg(test)]
 use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::source::line_index::{LineIndex, LinePosition};
@@ -206,23 +204,6 @@ impl<'a> DiagnosticRenderContext<'a> {
     ) -> Option<DiagnosticPrimaryPosition<'a>> {
         let span = diagnostic.primary_span?;
         self.position_of(span, diagnostic.primary_frozen_identity_handle.as_ref())
-    }
-
-    /// Resolve one secondary label span through its explicit owner when present.
-    ///
-    /// Ordinary labels remain compact and use the diagnostic context. A donor-owned label is
-    /// different: its source IDs belong to the handle's frozen context, so an uninstalled handle
-    /// returns no position rather than silently falling back to the requester context.
-    #[cfg(test)]
-    pub(crate) fn label_position<'label>(
-        self,
-        label: &'label DiagnosticLabel,
-    ) -> Option<DiagnosticPrimaryPosition<'label>>
-    where
-        'a: 'label,
-    {
-        let span = label.span?;
-        self.position_of(span, label.frozen_identity_handle.as_ref())
     }
 
     /// Resolve a compact site: a foreign site through its own identity, a local site through this context, and an

@@ -23,11 +23,18 @@ use crate::compiler_frontend::ast::statements::functions::ParameterContract;
 use crate::compiler_frontend::ast::{
     AstTypeInterner, ContextKind, ScopeContext, TopLevelDeclarationTable,
 };
+use crate::compiler_frontend::compiler_messages::TypeMismatchContext;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::{
+    InvalidCallShapeCode, InvalidCallShapeView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::CompileTimeEvaluationErrorView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
+    UnexpectedTokenShape, UnexpectedTokenView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::TypeMismatchView;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticKind, DiagnosticPayload,
-    DiagnosticToken, InvalidCallShapeReason, RuleDiagnosticKind, SyntaxDiagnosticKind,
-    TypeMismatchContext,
+    CompileTimeEvaluationErrorReason, DiagnosticBag, DiagnosticDraft, DiagnosticToken,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -252,7 +259,7 @@ fn parse_raw_call_args_for_test(
     )
 }
 
-fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
+fn parse_args_diagnostic(source: &str) -> DiagnosticDraft {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = path_fork
@@ -311,7 +318,9 @@ fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
     )
     .expect_err("call arguments should fail");
     match error {
-        ExpressionParseError::Diagnostic(diagnostic) => diagnostic,
+        ExpressionParseError::Diagnostic(diagnostic)
+        | ExpressionParseError::TemplateDirectiveEmptyArguments(diagnostic)
+        | ExpressionParseError::NonConstantReferenceInConstant(diagnostic) => diagnostic,
         ExpressionParseError::Infrastructure(error) => {
             panic!("expected user diagnostic, found infrastructure error: {error:?}")
         }
@@ -437,13 +446,14 @@ fn named_only_receiving_context_rejects_positional_arguments() {
     let ExpressionParseError::Diagnostic(diagnostic) = error else {
         panic!("expected a user diagnostic for positional named-only input");
     };
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedToken)
-    );
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0002");
     assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnexpectedToken { .. }
+        diagnostic
+            .family_view::<UnexpectedTokenView>()
+            .expect("the diagnostic is unexpected-token"),
+        facts if matches!(facts.shape, UnexpectedTokenShape::Token(_))
     ));
 }
 
@@ -464,13 +474,15 @@ fn positional_only_without_signature_rejects_named_arguments() {
     let ExpressionParseError::Diagnostic(diagnostic) = error else {
         panic!("expected a user diagnostic for a named positional-only argument");
     };
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidCallShape {
-            reason: InvalidCallShapeReason::NamedArgumentsNotSupported,
-            ..
-        }
-    ));
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    let facts = diagnostic
+        .family_view::<InvalidCallShapeView>()
+        .expect("the diagnostic is an invalid call shape");
+    assert_eq!(
+        facts.reason,
+        InvalidCallShapeCode::NamedArgumentsNotSupported
+    );
 }
 
 #[test]
@@ -510,17 +522,15 @@ fn const_required_receiving_context_rejects_non_constant_values() {
     let ExpressionParseError::Diagnostic(diagnostic) = error else {
         panic!("expected a user diagnostic for a non-constant argument");
     };
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    let facts = diagnostic
+        .family_view::<CompileTimeEvaluationErrorView>()
+        .expect("the diagnostic is a compile-time evaluation failure");
     assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Rule(RuleDiagnosticKind::CompileTimeEvaluationError)
+        facts.reason,
+        CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable
     );
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::CompileTimeEvaluationError {
-            reason: CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
-            ..
-        }
-    ));
 }
 
 #[test]
@@ -758,14 +768,15 @@ fn rejects_tilde_on_left_side_of_named_arg() {
     // ~name = value is explicitly rejected at the parse level before signature binding.
     let diagnostic = parse_args_diagnostic("take(~value = 1)");
 
-    assert_eq!(
-        diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedToken)
-    );
-    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0002");
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0002");
+    let facts = diagnostic
+        .family_view::<UnexpectedTokenView>()
+        .expect("the diagnostic is unexpected-token");
     assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnexpectedToken { found }
+        facts.shape,
+        UnexpectedTokenShape::Token(found)
             if found == DiagnosticToken::from_static_tag(TokenTag::MUTABLE)
     ));
 }

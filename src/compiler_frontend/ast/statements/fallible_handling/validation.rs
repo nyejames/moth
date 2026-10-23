@@ -9,9 +9,9 @@ use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, InvalidFallibleHandlingReason,
-};
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::InvalidFallibleHandlingReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::{
@@ -59,7 +59,7 @@ pub(super) fn validate_catch_fallible_handler_conflict(
     string_table: &StringTable,
 ) -> Result<(), ExpressionParseError> {
     if context.get_reference(&handler_name).is_some() {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::CatchHandlerConflicts,
             span,
         )
@@ -98,7 +98,7 @@ pub(super) fn validate_catch_fallible_handler_value_requirement(
     let body_exits = analyze_branch_exits(handler_body, expression_builder, const_values);
 
     if value_required && !success_result_type_ids.is_empty() && body_exits.can_fall_through {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
+        return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::CatchHandlerCanFallThrough,
             span,
         )

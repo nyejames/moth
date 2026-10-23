@@ -31,7 +31,9 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopHeader,
 };
 use crate::compiler_frontend::compiler_errors::ErrorType;
-use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidTemplateSlotReason};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::InvalidTemplateSlotView;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, InvalidTemplateSlotReason};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -188,16 +190,17 @@ fn build_wrapper_with_slots(store: &mut TemplateIrStore, keys: Vec<SlotKey>) -> 
     )
 }
 
-fn assert_invalid_template_slot_reason(error: &TemplateError, expected: InvalidTemplateSlotReason) {
+fn assert_invalid_template_slot_reason(error: TemplateError, expected: InvalidTemplateSlotReason) {
     let TemplateError::Diagnostic(error) = error else {
         panic!("authored slot failure should remain a source diagnostic");
     };
-    match &error.payload {
-        DiagnosticPayload::InvalidTemplateSlot { reason, .. } => {
-            assert_eq!(*reason, expected);
-        }
-        other => panic!("expected InvalidTemplateSlot diagnostic, got {other:?}"),
-    }
+    let diagnostic = compact_bag_for_test(DiagnosticBag::from(error), None);
+    let facts = diagnostic
+        .first()
+        .expect("slot error should compact to one record")
+        .family_view::<InvalidTemplateSlotView>()
+        .expect("slot error should retain typed facts");
+    assert_eq!(facts.reason, expected);
 }
 
 fn assert_internal_authority_error(error: &TemplateError, expected_message: &str) {
@@ -1263,7 +1266,7 @@ fn unknown_insert_target_produces_diagnostic() {
         .expect_err("unknown insert target should produce an error");
 
     assert_invalid_template_slot_reason(
-        &error,
+        error,
         InvalidTemplateSlotReason::InsertTargetsUnknownNamedSlot,
     );
 }
@@ -1290,7 +1293,7 @@ fn loose_content_without_default_or_positional_slots_produces_diagnostic() {
         .expect_err("loose content with no default slot should produce an error");
 
     assert_invalid_template_slot_reason(
-        &error,
+        error,
         InvalidTemplateSlotReason::LooseContentWithoutDefaultSlot,
     );
 }
@@ -1378,7 +1381,7 @@ fn extra_loose_content_beyond_positional_capacity_produces_diagnostic() {
         .expect_err("extra loose content should produce an error");
 
     assert_invalid_template_slot_reason(
-        &error,
+        error,
         InvalidTemplateSlotReason::ExtraLooseContentWithoutDefaultSlot,
     );
 }

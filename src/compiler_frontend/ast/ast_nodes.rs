@@ -7,7 +7,7 @@
 //! ## Diagnostic boundary
 //!
 //! `CompilerError` in this module means an internal compiler invariant or setup failure only.
-//! Source-authored syntax, type, and rule failures are rejected earlier with `CompilerDiagnostic`.
+//! Source-authored syntax, type, and rule failures flow through diagnostic drafts.
 
 use crate::compiler_frontend::ast::const_values::ConstValueId;
 use crate::compiler_frontend::ast::expressions::expression_store::{

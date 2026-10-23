@@ -38,8 +38,13 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, generics_traits_api,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticDraft, InvalidFallibleHandlingReason, PreparedFailure,
+    BuiltinFailureOriginKind, BuiltinFailureWitness, DiagnosticDraft,
+    InvalidFallibleHandlingReason, InvalidTraitConformanceReason, PreparedFailure,
 };
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
@@ -533,7 +538,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
 
     fn diagnostic_failure(
         &self,
-        diagnostic: CompilerDiagnostic,
+        diagnostic: DiagnosticDraft,
         warnings: &mut Vec<DiagnosticDraft>,
         string_table: &StringTable,
         capture_types: bool,
@@ -545,6 +550,42 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             capture_types.then_some(&self.environment.type_environment),
             || Some(Arc::new(self.path_fork.snapshot_table())),
         )
+    }
+    fn infallible_cast_evidence_failure_draft(
+        contract: &crate::compiler_frontend::traits::evidence::environment::InfallibleCastEvidenceContract,
+        witness: &BuiltinFailureWitness,
+    ) -> DiagnosticDraft {
+        let diagnostic = generics_traits_api::invalid_trait_conformance(
+            contract.target_name,
+            Some(contract.trait_name),
+            InvalidTraitConformanceReason::InferredFailureInInfallibleCast {
+                requirement_name: contract.requirement_name,
+            },
+            contract.span,
+        );
+        Self::append_builtin_failure_witness_labels(diagnostic, witness)
+    }
+
+    fn append_builtin_failure_witness_labels(
+        mut diagnostic: DiagnosticDraft,
+        witness: &BuiltinFailureWitness,
+    ) -> DiagnosticDraft {
+        for span in witness.call_spans.iter().copied().flatten() {
+            diagnostic =
+                diagnostic.with_label(Some(span), Some(LabelDraftMessage::BuiltinFailureCall));
+        }
+        if let Some(span) = witness.origin_span {
+            let message = match witness.origin {
+                BuiltinFailureOriginKind::Operation => LabelDraftMessage::BuiltinFailureOrigin,
+                BuiltinFailureOriginKind::CompoundWriteBack { target } => {
+                    LabelDraftMessage::BuiltinWriteBackOrigin {
+                        target_type_id: target,
+                    }
+                }
+            };
+            diagnostic = diagnostic.with_label(Some(span), Some(message));
+        }
+        diagnostic
     }
 
     /// Routes infrastructure failures through their typed lane.
@@ -706,7 +747,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             {
                 let witness = summaries.witness(contributor);
                 return Err(self.diagnostic_failure(
-                    CompilerDiagnostic::infallible_cast_evidence_failure(contract, &witness),
+                    Self::infallible_cast_evidence_failure_draft(contract, &witness),
                     warnings,
                     string_table,
                     true,
@@ -722,7 +763,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                         continue;
                     }
                     return Err(self.diagnostic_failure(
-                        CompilerDiagnostic::invalid_fallible_handling(
+                        choices_control_flow::invalid_fallible_handling(
                             InvalidFallibleHandlingReason::CatchOnNonFallible,
                             check.catch_span,
                         ),
@@ -732,19 +773,29 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                     ));
                 }
                 if let Some(candidate) = candidate {
-                    return Err(self.diagnostic_failure(
-                        CompilerDiagnostic::invalid_fallible_handling(
-                            InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
+                    let mut diagnostic = choices_control_flow::invalid_fallible_handling(
+                        InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
+                            error_type_id: check.error_type_id,
+                            typed_producer_span: check.typed_producer_span,
+                            implicit_producer_span: candidate.span,
+                        },
+                        check.catch_span,
+                    );
+                    if let Some(span) = check.typed_producer_span {
+                        diagnostic = diagnostic.with_label(
+                            Some(span),
+                            Some(LabelDraftMessage::TypedFailureProducer {
                                 error_type_id: check.error_type_id,
-                                typed_producer_span: check.typed_producer_span,
-                                implicit_producer_span: candidate.span,
-                            },
-                            check.catch_span,
-                        ),
-                        warnings,
-                        string_table,
-                        true,
-                    ));
+                            }),
+                        );
+                    }
+                    if let Some(span) = candidate.span {
+                        diagnostic = diagnostic.with_label(
+                            Some(span),
+                            Some(LabelDraftMessage::ImplicitFailureProducer),
+                        );
+                    }
+                    return Err(self.diagnostic_failure(diagnostic, warnings, string_table, true));
                 }
             }
             if let Some(contributor) = pending
@@ -753,7 +804,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 .find(|contributor| summaries.is_active(contributor))
             {
                 return Err(self.diagnostic_failure(
-                    CompilerDiagnostic::invalid_fallible_handling(
+                    choices_control_flow::invalid_fallible_handling(
                         InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
                         contributor.span.or(node.span),
                     ),
@@ -780,26 +831,29 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 continue;
             };
             let witness = summaries.witness(contributor);
+            let reason_witness = BuiltinFailureWitness {
+                call_spans: Vec::new(),
+                origin_span: None,
+                origin: witness.origin,
+                elided_call_hops: witness.elided_call_hops,
+            };
             let reason = match custom_error {
                 Some(error_type_id) => {
                     InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
                         error_type_id,
-                        witness: Box::new(witness),
+                        witness: Box::new(reason_witness),
                     }
                 }
                 None => InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
-                    witness: Box::new(witness),
+                    witness: Box::new(reason_witness),
                 },
             };
-            return Err(self.diagnostic_failure(
-                CompilerDiagnostic::invalid_fallible_handling(
-                    reason,
-                    node.span.or(contributor.span),
-                ),
-                warnings,
-                string_table,
-                true,
-            ));
+            let diagnostic = choices_control_flow::invalid_fallible_handling(
+                reason,
+                node.span.or(contributor.span),
+            );
+            let diagnostic = Self::append_builtin_failure_witness_labels(diagnostic, &witness);
+            return Err(self.diagnostic_failure(diagnostic, warnings, string_table, true));
         }
         // Only witnesses on completed concrete roots can demand inactive generic validation.
         // Dormant template checks above and eliminated static branches own no such demand.

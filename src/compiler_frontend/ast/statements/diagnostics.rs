@@ -1,18 +1,20 @@
 //! Statement-position diagnostic helpers.
 //!
-//! WHAT: builds typed `CompilerDiagnostic` values for unexpected tokens and scope
-//!       closes encountered during function-body statement dispatch.
-//! WHY: keeps `body_dispatch.rs` focused on parsing logic rather than diagnostic
-//!      construction, and ensures all statement-position errors emit structured
-//!      `CompilerDiagnostic` records instead of legacy `CompilerError`.
+//! WHAT: builds diagnostic drafts for unexpected tokens and scope closes encountered during
+//!       function-body statement dispatch.
+//! WHY: keeps `body_dispatch.rs` focused on parsing logic rather than diagnostic construction.
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, token_lexical,
+};
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_for_tag,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticToken, InvalidStatementPositionReason,
+    DiagnosticToken, InvalidStatementPositionReason,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
@@ -20,10 +22,10 @@ use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 /// Attach the exact authored range of the current token when this stream has a source identity.
 fn with_current_token_span(
     token_stream: &AstCursor,
-    mut diagnostic: CompilerDiagnostic,
-) -> CompilerDiagnostic {
-    if diagnostic.primary_span.is_none() {
-        diagnostic.primary_span = Some(token_stream.current_span());
+    mut diagnostic: DiagnosticDraft,
+) -> DiagnosticDraft {
+    if diagnostic.primary_span().is_none() {
+        diagnostic.set_primary_span(Some(token_stream.current_span()));
     }
 
     diagnostic
@@ -36,67 +38,66 @@ fn with_current_token_span(
 pub(crate) fn unexpected_statement_token(
     token_stream: &AstCursor,
     string_table: &mut StringTable,
-) -> Result<CompilerDiagnostic, CompilerError> {
+) -> Result<DiagnosticDraft, CompilerError> {
     let current_tag = token_stream.current_tag();
     let span = Some(token_stream.current_span());
     let diagnostic = match current_tag {
-        TokenTag::COMMA => CompilerDiagnostic::invalid_statement_position(
+        TokenTag::COMMA => choices_control_flow::invalid_statement_position(
             InvalidStatementPositionReason::UnexpectedComma,
             span,
         ),
 
-        TokenTag::CLOSE_PARENTHESIS => CompilerDiagnostic::invalid_statement_position(
+        TokenTag::CLOSE_PARENTHESIS => choices_control_flow::invalid_statement_position(
             InvalidStatementPositionReason::UnexpectedCloseParenthesis,
             span,
         ),
 
-        TokenTag::CLOSE_CURLY => CompilerDiagnostic::invalid_statement_position(
+        TokenTag::CLOSE_CURLY => choices_control_flow::invalid_statement_position(
             InvalidStatementPositionReason::UnexpectedCloseCurly,
             span,
         ),
 
         // The `|` token is only valid in type-parameter position, not as a statement.
-        TokenTag::TYPE_PARAMETER_BRACKET => CompilerDiagnostic::invalid_statement_position(
+        TokenTag::TYPE_PARAMETER_BRACKET => choices_control_flow::invalid_statement_position(
             InvalidStatementPositionReason::UnexpectedPipe,
             span,
         ),
 
-        TokenTag::ARROW => CompilerDiagnostic::invalid_statement_position(
+        TokenTag::ARROW => choices_control_flow::invalid_statement_position(
             InvalidStatementPositionReason::UnexpectedArrow,
             span,
         ),
 
-        TokenTag::WILDCARD => CompilerDiagnostic::invalid_statement_position(
+        TokenTag::WILDCARD => choices_control_flow::invalid_statement_position(
             InvalidStatementPositionReason::UnexpectedWildcard,
             span,
         ),
 
         // `type` in statement position looks like an attempt to declare a generic parameter.
-        TokenTag::TYPE => CompilerDiagnostic::invalid_statement_position(
+        TokenTag::TYPE => choices_control_flow::invalid_statement_position(
             InvalidStatementPositionReason::GenericParameterOutsideDeclarationHeader,
             span,
         ),
 
-        TokenTag::OF => CompilerDiagnostic::invalid_statement_position(
+        TokenTag::OF => choices_control_flow::invalid_statement_position(
             InvalidStatementPositionReason::UnexpectedOf,
             span,
         ),
 
         TokenTag::MUST | TokenTag::TRAIT_THIS => {
             if let Some(keyword) = reserved_trait_keyword_for_tag(current_tag) {
-                reserved_trait_keyword_error(keyword, span)
+                reserved_trait_keyword_error(keyword, span).into()
             } else {
                 // Invariant: Must and TraitThis are always reserved trait keywords.
                 let found = token_stream
                     .current_diagnostic_token(string_table)
                     .map_err(|error| {
-                        crate::compiler_frontend::compiler_messages::CompilerDiagnostic::token_view_invariant_error(
-                            error,
-                            "statement-position unexpected-token diagnostic",
-                        )
+                        CompilerError::compiler_error(format!(
+                            "statement-position unexpected-token diagnostic token payload was malformed: {error:?}"
+                        ))
                     })?
                     .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
-                CompilerDiagnostic::unexpected_token_from_tag(found, span)
+                token_lexical::unexpected_token_from_tag(found, span)
             }
         }
 
@@ -104,13 +105,12 @@ pub(crate) fn unexpected_statement_token(
             let found = token_stream
                 .current_diagnostic_token(string_table)
                 .map_err(|error| {
-                    crate::compiler_frontend::compiler_messages::CompilerDiagnostic::token_view_invariant_error(
-                        error,
-                        "statement-position unexpected-token diagnostic",
-                    )
+                    CompilerError::compiler_error(format!(
+                        "statement-position unexpected-token diagnostic token payload was malformed: {error:?}"
+                    ))
                 })?
                 .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
-            CompilerDiagnostic::unexpected_token_from_tag(found, span)
+            token_lexical::unexpected_token_from_tag(found, span)
         }
     };
 
@@ -134,7 +134,7 @@ pub(crate) enum UnexpectedScopeCloseContext {
 pub(crate) fn unexpected_scope_close(
     context: UnexpectedScopeCloseContext,
     token_stream: &AstCursor,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     let reason = match context {
         UnexpectedScopeCloseContext::Expression => {
             InvalidStatementPositionReason::UnexpectedScopeCloseInExpression
@@ -146,7 +146,7 @@ pub(crate) fn unexpected_scope_close(
 
     with_current_token_span(
         token_stream,
-        CompilerDiagnostic::invalid_statement_position(reason, Some(token_stream.current_span())),
+        choices_control_flow::invalid_statement_position(reason, Some(token_stream.current_span())),
     )
 }
 

@@ -23,9 +23,13 @@ use crate::compiler_frontend::ast::numeric_construction::{
 };
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, token_lexical,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticToken, InvalidFallibleHandlingReason,
-    InvalidStandaloneStatementReason,
+    DiagnosticToken, InvalidFallibleHandlingReason, InvalidStandaloneStatementReason,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -74,7 +78,7 @@ pub(crate) fn validate_resumed_statement_expression(
         return Err(diagnostic.into());
     }
     if !is_expression_statement(expression) {
-        return Err(CompilerDiagnostic::invalid_standalone_statement(
+        return Err(choices_control_flow::invalid_standalone_statement(
             InvalidStandaloneStatementReason::Expression,
             expression.span(),
         )
@@ -88,9 +92,7 @@ pub(crate) fn validate_resumed_statement_expression(
 /// Returns a diagnostic when a handled-fallible expression with a non-`none`
 /// return type is used in statement position, since the caller is silently
 /// dropping a potentially meaningful success value.
-fn rejects_discarded_fallible_success(
-    expression: ExpressionView<'_>,
-) -> Option<CompilerDiagnostic> {
+fn rejects_discarded_fallible_success(expression: ExpressionView<'_>) -> Option<DiagnosticDraft> {
     let is_handled_fallible = match expression.operation() {
         ExpressionOperationView::HandleFallible { .. } => true,
         ExpressionOperationView::Call(call) | ExpressionOperationView::MethodCall { call, .. } => {
@@ -100,7 +102,7 @@ fn rejects_discarded_fallible_success(
     };
 
     if is_handled_fallible && !expression.success_types().is_empty() {
-        return Some(CompilerDiagnostic::invalid_fallible_handling(
+        return Some(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::SuccessValueDiscarded,
             expression.span(),
         ));
@@ -169,13 +171,12 @@ fn validate_statement_expression(
         let found = token_stream
             .current_diagnostic_token(string_table)
             .map_err(|error| {
-                CompilerDiagnostic::token_view_invariant_error(
-                    error,
-                    "statement expression diagnostic",
-                )
+                CompilerError::compiler_error(format!(
+                    "statement expression diagnostic token payload was malformed: {error:?}"
+                ))
             })?
             .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
-        return Err(CompilerDiagnostic::unexpected_token_from_tag(
+        return Err(token_lexical::unexpected_token_from_tag(
             found,
             Some(token_stream.current_span()),
         )

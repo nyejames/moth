@@ -18,7 +18,9 @@ use crate::compiler_frontend::ast::templates::tir::{
     DerivedTemplateMetadata, TemplateIrId, TemplateIrNode, TemplateIrNodeId, TemplateIrStore,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidTemplateSlotReason};
+use crate::compiler_frontend::compiler_messages::InvalidTemplateSlotReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::source::SourceSpan;
 
 use super::head_chain::HeadChainResolutionInputs;
@@ -41,19 +43,19 @@ pub(super) fn internal_compiler_error(message: &str) -> TemplateError {
 pub(super) fn unknown_slot_target_error(
     target: &SlotKey,
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
+) -> DiagnosticDraft {
     match target {
-        SlotKey::Default => CompilerDiagnostic::invalid_template_slot(
+        SlotKey::Default => templates::invalid_template_slot(
             InvalidTemplateSlotReason::InsertCannotTargetDefaultSlot,
             None,
             span,
         ),
-        SlotKey::Named(name) => CompilerDiagnostic::invalid_template_slot(
+        SlotKey::Named(name) => templates::invalid_template_slot(
             InvalidTemplateSlotReason::InsertTargetsUnknownNamedSlot,
             Some(*name),
             span,
         ),
-        SlotKey::Positional(_) => CompilerDiagnostic::invalid_template_slot(
+        SlotKey::Positional(_) => templates::invalid_template_slot(
             InvalidTemplateSlotReason::InsertTargetsUnknownPositionalSlot,
             None,
             span,
@@ -65,8 +67,8 @@ pub(super) fn unknown_slot_target_error(
 /// positional slots.
 pub(super) fn loose_content_without_default_slot_error(
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_template_slot(
+) -> DiagnosticDraft {
+    templates::invalid_template_slot(
         InvalidTemplateSlotReason::LooseContentWithoutDefaultSlot,
         None,
         span,
@@ -75,8 +77,8 @@ pub(super) fn loose_content_without_default_slot_error(
 
 pub(super) fn extra_loose_content_without_default_slot_error(
     span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_template_slot(
+) -> DiagnosticDraft {
+    templates::invalid_template_slot(
         InvalidTemplateSlotReason::ExtraLooseContentWithoutDefaultSlot,
         None,
         span,

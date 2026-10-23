@@ -18,7 +18,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, TypeMismatchContext};
+use crate::compiler_frontend::compiler_messages::TypeMismatchContext;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -111,7 +111,7 @@ pub fn evaluate_expression(
                 root
             }
             ConstantFoldOutcome::Refused { reason, .. } => {
-                return Err(reason.into_diagnostic().into());
+                return Err(reason.into_draft().into());
             }
         };
         // A standalone producer retains its slots for multi-bind, return and handling owners.
@@ -228,7 +228,7 @@ pub fn evaluate_expression(
             root
         }
         ConstantFoldOutcome::Refused { reason, .. } => {
-            return Err(reason.into_diagnostic().into());
+            return Err(reason.into_draft().into());
         }
     };
 
@@ -371,14 +371,14 @@ pub(super) fn materialize_pending_literal(
             Some(PendingLiteralDestination::FixedScalar(scalar)) => {
                 let value = materialize_fixed_scalar(token, token.sign, scalar, string_table)
                     .map_err(|reason| {
-                        CompilerDiagnostic::invalid_number_literal(token.source_text, reason, *span)
+                        crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::invalid_number_literal(token.source_text, reason, *span)
                     })?;
                 expressions.fixed_scalar(const_values, value, *span, *value_mode)?
             }
             Some(PendingLiteralDestination::Number { scale, type_id }) => {
                 let value = materialize_number(token, token.sign, scale, string_table).map_err(
                     |reason| {
-                        CompilerDiagnostic::invalid_number_literal(token.source_text, reason, *span)
+                        crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::invalid_number_literal(token.source_text, reason, *span)
                     },
                 )?;
                 expressions.number(const_values, value, type_id, *span, *value_mode)?
@@ -460,7 +460,7 @@ fn default_materialised_literal(
     if token.kind == NumericLiteralKind::WholeNumber {
         let value = materialize_fixed_scalar(token, token.sign, FixedScalar::I32, string_table)
             .map_err(|reason| {
-                CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
+                crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::invalid_number_literal(token.source_text, reason, span)
             })?;
 
         return Ok(expressions.fixed_scalar(const_values, value, span, value_mode)?);
@@ -471,7 +471,7 @@ fn default_materialised_literal(
     // signed zero is preserved exactly.
     let value = materialize_fixed_scalar(token, token.sign, FixedScalar::F64, string_table)
         .map_err(|reason| {
-            CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
+            crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::invalid_number_literal(token.source_text, reason, span)
         })?;
 
     Ok(expressions.fixed_scalar(const_values, value, span, value_mode)?)
@@ -595,7 +595,7 @@ fn fold_completed_node(
         {
             Ok(root)
         }
-        ConstantFoldOutcome::Refused { reason, .. } => Err(reason.into_diagnostic().into()),
+        ConstantFoldOutcome::Refused { reason, .. } => Err(reason.into_draft().into()),
     }
 }
 
@@ -630,11 +630,9 @@ fn validate_expression_result_type(
         return Ok(());
     }
 
-    Err(CompilerDiagnostic::type_mismatch(
-        expected_type_id,
-        actual_type_id,
-        TypeMismatchContext::General,
-        span,
-    )
+    Err(crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::type_mismatch(expected_type_id,
+    actual_type_id,
+    TypeMismatchContext::General,
+    span,)
     .into())
 }

@@ -29,9 +29,7 @@ use crate::compiler_frontend::ast::templates::tir::{
     fold_prepared_const_template_pattern, prepare_tir_view,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateStructureReason,
-};
+use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, PublicConstTemplate, PublicConstTemplateKind, PublicConstTemplatePiece,
@@ -186,10 +184,8 @@ pub(crate) fn const_template_value_from_projection(
     // never a compile-time constant one. `final_value_kind` alone cannot answer this, because a
     // renderable or wrapper template can carry a runtime outcome.
     let Some(public) = projected.public else {
-        return Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::NonFoldableConstTemplate,
-            template.span,
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::templates::invalid_template_structure(InvalidTemplateStructureReason::NonFoldableConstTemplate,
+        template.span,)
         .into());
     };
 

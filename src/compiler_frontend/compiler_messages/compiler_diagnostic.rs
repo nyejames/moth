@@ -5,32 +5,26 @@
 
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
-use crate::compiler_frontend::compiler_messages::BuiltinFailureWitness;
 #[cfg(test)]
 use crate::compiler_frontend::compiler_messages::DiagnosticIdentity;
 use crate::compiler_frontend::compiler_messages::{
     BorrowAccessKind, BorrowDiagnosticKind, BuiltinFailureOriginKind, CapacityResource,
-    ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason, ConfigDiagnosticKind,
-    DeferredFeatureDiagnosticKind, DeferredFeatureReason, DependencyClauseKind, DiagnosticKind,
-    DiagnosticLabel, DiagnosticLabelMessage, DiagnosticOperator, DiagnosticPayload,
-    DiagnosticPlace, DiagnosticSeverity, DiagnosticToken, GenericApplicationErrorReason,
-    GenericInferenceSubject, ImportDiagnosticKind, ImportPublicSurfaceType,
-    IncompatibleChoiceComparisonReason, InvalidCastReason, InvalidChoiceVariantReason,
-    InvalidCollectionTypeReason, InvalidCompileTimePathReason, InvalidConfigReason,
+    CommonSyntaxMistakeReason, ConfigDiagnosticKind, DeferredFeatureDiagnosticKind,
+    DeferredFeatureReason, DependencyClauseKind, DiagnosticKind, DiagnosticLabel,
+    DiagnosticLabelMessage, DiagnosticOperator, DiagnosticPayload, DiagnosticPlace,
+    DiagnosticSeverity, DiagnosticToken, GenericApplicationErrorReason, ImportDiagnosticKind,
+    ImportPublicSurfaceType, IncompatibleChoiceComparisonReason, InvalidCastReason,
+    InvalidChoiceVariantReason, InvalidCollectionTypeReason, InvalidConfigReason,
     InvalidDependencyClauseReason, InvalidExpressionReason, InvalidFallibleHandlingReason,
     InvalidFunctionSignatureReason, InvalidGenericParameterReason, InvalidImportPathReason,
-    InvalidLoopHeaderReason, InvalidMapLiteralReason, InvalidMapTypeReason, InvalidMatchArmReason,
-    InvalidParameterContractReason, InvalidRangeOperandReason, InvalidRouteOutputReason,
-    InvalidSignatureMemberReason, InvalidStandaloneStatementReason, InvalidStatementPositionReason,
-    InvalidStringEscapeReason, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
-    InvalidTraitConformanceReason, InvalidTraitIncompatibilityReason,
+    InvalidMapTypeReason, InvalidParameterContractReason, InvalidSignatureMemberReason,
+    InvalidStandaloneStatementReason, InvalidStatementPositionReason, InvalidStringEscapeReason,
+    InvalidTemplateDirectiveReason, InvalidTemplateStructureReason, InvalidTraitConformanceReason,
     InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason, LegacyDependencyClauseReason,
-    NameNamespace, NamespaceTypeValueMisuseKind, NamingConvention, OperatorOperandPosition,
-    PathKind, PublicGenericOwnerKind, RangeOperandKind, RuleDiagnosticKind,
+    NameNamespace, NamespaceTypeValueMisuseKind, NamingConvention, PathKind, RuleDiagnosticKind,
     SourceSpanCapacityResource, SyntaxDiagnosticKind, TypeAnnotationContext, TypeDiagnosticKind,
     TypeMismatchContext, UnsupportedBackendFeatureReason, ValueReceiverContext,
 };
-use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::{
     FrozenIdentityHandle, SourceId, SourceSpan, SpanCapacityError, SpanCapacityReason,
@@ -38,7 +32,6 @@ use crate::compiler_frontend::source::{
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::tokenizer::tokens::{TokenRef, TokenTag, TokenViewError};
-use crate::compiler_frontend::traits::evidence::environment::InfallibleCastEvidenceContract;
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompilerDiagnostic {
@@ -87,6 +80,10 @@ impl CompilerDiagnostic {
         self
     }
 
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn set_primary_frozen_identity_handle_if_missing(
         &mut self,
         frozen_identity_handle: FrozenIdentityHandle,
@@ -97,6 +94,10 @@ impl CompilerDiagnostic {
     }
 
     /// Fill missing owners for every source-bearing part of this diagnostic.
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn attach_frozen_identity_handle_if_missing(
         &mut self,
         frozen_identity_handle: FrozenIdentityHandle,
@@ -107,13 +108,6 @@ impl CompilerDiagnostic {
                 label.set_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
             }
         }
-    }
-    pub(crate) fn with_primary_frozen_identity_handle(
-        mut self,
-        frozen_identity_handle: FrozenIdentityHandle,
-    ) -> Self {
-        self.primary_frozen_identity_handle = Some(frozen_identity_handle);
-        self
     }
 
     // ------------------------------------------------------------------
@@ -524,18 +518,10 @@ impl CompilerDiagnostic {
         .with_labels(labels)
     }
 
-    pub(crate) fn invalid_compile_time_path(
-        path: PathId,
-        reason: InvalidCompileTimePathReason,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::InvalidCompileTimePath),
-            span,
-            DiagnosticPayload::InvalidCompileTimePath { path, reason },
-        )
-    }
-
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn dependency_namespace_used_as_value(
         record_name: StringId,
         span: Option<SourceSpan>,
@@ -547,17 +533,10 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn const_record_used_as_value(
-        record_name: StringId,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::ConstRecordUsedAsValue),
-            span,
-            DiagnosticPayload::ConstRecordUsedAsValue { record_name },
-        )
-    }
-
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn nested_dependency_traversal(
         record_name: StringId,
         span: Option<SourceSpan>,
@@ -569,6 +548,10 @@ impl CompilerDiagnostic {
         )
     }
 
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn namespace_type_value_misuse(
         name: StringId,
         expected: NamespaceTypeValueMisuseKind,
@@ -585,24 +568,6 @@ impl CompilerDiagnostic {
             },
         )
     }
-
-    pub(crate) fn invalid_range_operand(
-        operand: RangeOperandKind,
-        found_type: TypeId,
-        reason: InvalidRangeOperandReason,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::InvalidRangeOperand),
-            span,
-            DiagnosticPayload::InvalidRangeOperand {
-                operand,
-                found_type,
-                reason,
-            },
-        )
-    }
-
     #[cfg_attr(
         not(test),
         allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
@@ -673,6 +638,10 @@ impl CompilerDiagnostic {
         )
     }
 
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn unreachable_match_arm(span: Option<SourceSpan>) -> Self {
         Self::with_severity(
             DiagnosticKind::Rule(RuleDiagnosticKind::UnreachableMatchArm),
@@ -746,6 +715,10 @@ impl CompilerDiagnostic {
     }
 
     /// Report authored input that exhausted a bounded HIR or AST store or grouping distance.
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn compiler_capacity_exceeded(
         resource: impl Into<CapacityResource>,
         span: Option<SourceSpan>,
@@ -756,17 +729,6 @@ impl CompilerDiagnostic {
             DiagnosticPayload::CompilerCapacityExceeded {
                 resource: resource.into(),
             },
-        )
-    }
-
-    /// Whether this diagnostic reports exhausted compiler capacity rather than authored source.
-    ///
-    /// WHY: a speculative probe that read capacity as a rejected candidate would report a parse
-    /// mismatch and hide the exhausted builder.
-    pub(crate) fn is_compiler_capacity_exceeded(&self) -> bool {
-        matches!(
-            self.payload,
-            DiagnosticPayload::CompilerCapacityExceeded { .. }
         )
     }
 
@@ -797,17 +759,6 @@ impl CompilerDiagnostic {
                 directive_name,
                 supported_directives,
             },
-        )
-    }
-
-    pub(crate) fn missing_closing_delimiter(
-        expected_delimiter: StringId,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::MissingClosingDelimiter),
-            span,
-            DiagnosticPayload::MissingClosingDelimiter { expected_delimiter },
         )
     }
 
@@ -954,17 +905,6 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn invalid_map_literal(
-        reason: InvalidMapLiteralReason,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidMapLiteral),
-            span,
-            DiagnosticPayload::InvalidMapLiteral { reason },
-        )
-    }
-
     pub(crate) fn invalid_generic_parameter(
         reason: InvalidGenericParameterReason,
         span: Option<SourceSpan>,
@@ -976,6 +916,10 @@ impl CompilerDiagnostic {
         )
     }
 
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn invalid_template_directive(
         directive_name: Option<StringId>,
         reason: InvalidTemplateDirectiveReason,
@@ -991,6 +935,10 @@ impl CompilerDiagnostic {
         )
     }
 
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn invalid_template_structure(
         reason: InvalidTemplateStructureReason,
         span: Option<SourceSpan>,
@@ -1001,7 +949,10 @@ impl CompilerDiagnostic {
             DiagnosticPayload::InvalidTemplateStructure { reason },
         )
     }
-
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn invalid_expression(
         reason: InvalidExpressionReason,
         span: Option<SourceSpan>,
@@ -1013,18 +964,10 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn missing_operator_operand(
-        operator: StringId,
-        position: OperatorOperandPosition,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::MissingOperatorOperand),
-            span,
-            DiagnosticPayload::MissingOperatorOperand { operator, position },
-        )
-    }
-
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn invalid_standalone_statement(
         reason: InvalidStandaloneStatementReason,
         span: Option<SourceSpan>,
@@ -1036,44 +979,10 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn expected_symbol_statement(span: Option<SourceSpan>) -> Self {
-        Self::new(
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::ExpectedSymbolStatement),
-            span,
-            DiagnosticPayload::ExpectedSymbolStatement,
-        )
-    }
-
-    pub(crate) fn missing_collection_item(span: Option<SourceSpan>) -> Self {
-        Self::new(
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::MissingCollectionItem),
-            span,
-            DiagnosticPayload::MissingCollectionItem,
-        )
-    }
-
-    pub(crate) fn invalid_match_arm(
-        reason: InvalidMatchArmReason,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidMatchArm),
-            span,
-            DiagnosticPayload::InvalidMatchArm { reason },
-        )
-    }
-
-    pub(crate) fn invalid_loop_header(
-        reason: InvalidLoopHeaderReason,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidLoopHeader),
-            span,
-            DiagnosticPayload::InvalidLoopHeader { reason },
-        )
-    }
-
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn invalid_statement_position(
         reason: InvalidStatementPositionReason,
         span: Option<SourceSpan>,
@@ -1084,7 +993,6 @@ impl CompilerDiagnostic {
             DiagnosticPayload::InvalidStatementPosition { reason },
         )
     }
-
     pub(crate) fn common_syntax_mistake(
         reason: CommonSyntaxMistakeReason,
         span: Option<SourceSpan>,
@@ -1093,16 +1001,6 @@ impl CompilerDiagnostic {
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::CommonSyntaxMistake),
             span,
             DiagnosticPayload::CommonSyntaxMistake { reason },
-        )
-    }
-
-    pub(crate) fn invalid_choice_variant_spacing(
-        gap: ChoiceVariantSeparatorGap,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::common_syntax_mistake(
-            CommonSyntaxMistakeReason::InvalidChoiceVariantSpacing { gap },
-            span,
         )
     }
 
@@ -1151,14 +1049,6 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn invalid_struct_default_value(span: Option<SourceSpan>) -> Self {
-        Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::InvalidStructDefaultValue),
-            span,
-            DiagnosticPayload::InvalidStructDefaultValue,
-        )
-    }
-
     pub(crate) fn missing_declaration_initializer(
         name: StringId,
         span: Option<SourceSpan>,
@@ -1178,6 +1068,10 @@ impl CompilerDiagnostic {
         )
     }
 
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn unknown_value_name(name: StringId, span: Option<SourceSpan>) -> Self {
         Self::new(
             DiagnosticKind::Rule(RuleDiagnosticKind::UnknownValueName),
@@ -1205,73 +1099,6 @@ impl CompilerDiagnostic {
             DiagnosticKind::Rule(RuleDiagnosticKind::UnknownTrait),
             span,
             DiagnosticPayload::UnknownTrait { name },
-        )
-    }
-
-    pub(crate) fn duplicate_trait_requirement(
-        trait_name: StringId,
-        requirement_name: StringId,
-        first_span: Option<SourceSpan>,
-        duplicate_span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::DuplicateTraitRequirement),
-            duplicate_span,
-            DiagnosticPayload::DuplicateTraitRequirement {
-                trait_name,
-                requirement_name,
-            },
-        )
-        .with_labels(vec![DiagnosticLabel::secondary(
-            first_span,
-            Some(DiagnosticLabelMessage::PreviousDeclaration),
-        )])
-    }
-
-    pub(crate) fn trait_private_surface_leak(
-        trait_name: StringId,
-        surface_type: TypeId,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::TraitPrivateSurfaceLeak),
-            span,
-            DiagnosticPayload::TraitPrivateSurfaceLeak {
-                trait_name,
-                surface_type,
-            },
-        )
-    }
-
-    pub(crate) fn generic_bound_private_surface_leak(
-        owner_kind: PublicGenericOwnerKind,
-        owner_name: StringId,
-        trait_name: StringId,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::GenericBoundPrivateSurfaceLeak),
-            span,
-            DiagnosticPayload::GenericBoundPrivateSurfaceLeak {
-                owner_kind,
-                owner_name,
-                trait_name,
-            },
-        )
-    }
-
-    pub(crate) fn unsupported_trait_feature(
-        trait_name: StringId,
-        feature: StringId,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::UnsupportedTraitFeature),
-            span,
-            DiagnosticPayload::UnsupportedTraitFeature {
-                trait_name,
-                feature,
-            },
         )
     }
 
@@ -1323,21 +1150,6 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn private_type_in_exported_api(
-        exported_name: StringId,
-        private_type: TypeId,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::PrivateTypeInExportedApi),
-            span,
-            DiagnosticPayload::PrivateTypeInExportedApi {
-                exported_name,
-                private_type,
-            },
-        )
-    }
-
     pub(crate) fn invalid_trait_conformance(
         target_name: StringId,
         trait_name: Option<StringId>,
@@ -1355,69 +1167,10 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn infallible_cast_evidence_failure(
-        contract: &InfallibleCastEvidenceContract,
-        witness: &BuiltinFailureWitness,
-    ) -> Self {
-        let mut labels = Vec::with_capacity(witness.call_spans.len() + 1);
-        for span in &witness.call_spans {
-            if span.is_some() {
-                labels.push(DiagnosticLabel::secondary(
-                    *span,
-                    Some(DiagnosticLabelMessage::BuiltinFailureCall),
-                ));
-            }
-        }
-        if witness.origin_span.is_some() {
-            let message = match witness.origin {
-                BuiltinFailureOriginKind::Operation => DiagnosticLabelMessage::BuiltinFailureOrigin,
-                BuiltinFailureOriginKind::CompoundWriteBack { target } => {
-                    DiagnosticLabelMessage::BuiltinWriteBackOrigin {
-                        target_type_id: target,
-                    }
-                }
-            };
-            labels.push(DiagnosticLabel::secondary(
-                witness.origin_span,
-                Some(message),
-            ));
-        }
-        Self::invalid_trait_conformance(
-            contract.target_name,
-            Some(contract.trait_name),
-            InvalidTraitConformanceReason::InferredFailureInInfallibleCast {
-                requirement_name: contract.requirement_name,
-            },
-            contract.span,
-        )
-        .with_labels(labels)
-    }
-
-    pub(crate) fn invalid_trait_incompatibility(
-        subject_name: StringId,
-        incompatible_trait_name: Option<StringId>,
-        reason: InvalidTraitIncompatibilityReason,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::InvalidTraitIncompatibility),
-            span,
-            DiagnosticPayload::InvalidTraitIncompatibility {
-                subject_name,
-                incompatible_trait_name,
-                reason,
-            },
-        )
-    }
-
-    pub(crate) fn trait_name_used_as_type(trait_name: StringId, span: Option<SourceSpan>) -> Self {
-        Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::TraitNameUsedAsType),
-            span,
-            DiagnosticPayload::TraitNameUsedAsType { trait_name },
-        )
-    }
-
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn namespace_misuse(
         name: StringId,
         expected: NameNamespace,
@@ -1442,25 +1195,6 @@ impl CompilerDiagnostic {
                 found,
             },
         )
-    }
-
-    pub(crate) fn shadowed_name(
-        name: StringId,
-        first_span: Option<SourceSpan>,
-        duplicate_span: Option<SourceSpan>,
-    ) -> Self {
-        let diagnostic = Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::ShadowedName),
-            duplicate_span,
-            DiagnosticPayload::ShadowedName { name },
-        );
-        match first_span {
-            Some(span) => diagnostic.with_labels(vec![DiagnosticLabel::secondary(
-                Some(span),
-                Some(DiagnosticLabelMessage::PreviousDeclaration),
-            )]),
-            None => diagnostic,
-        }
     }
 
     pub(crate) fn reserved_name_collision(
@@ -1513,17 +1247,6 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn invalid_control_flow_statement(
-        reason: crate::compiler_frontend::compiler_messages::InvalidControlFlowStatementReason,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::InvalidControlFlowStatement),
-            span,
-            DiagnosticPayload::InvalidControlFlowStatement { reason },
-        )
-    }
-
     pub(crate) fn invalid_declaration(
         reason: crate::compiler_frontend::compiler_messages::InvalidDeclarationReason,
         name: Option<StringId>,
@@ -1536,6 +1259,10 @@ impl CompilerDiagnostic {
         )
     }
 
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn invalid_generic_instantiation(
         type_name: Option<StringId>,
         reason: crate::compiler_frontend::compiler_messages::InvalidGenericInstantiationReason,
@@ -1547,36 +1274,10 @@ impl CompilerDiagnostic {
             DiagnosticPayload::InvalidGenericInstantiation { type_name, reason },
         )
     }
-
-    pub(crate) fn conflicting_generic_inference(
-        type_name: Option<StringId>,
-        subject: GenericInferenceSubject,
-        conflict: BindingConflict,
-        parameter_name: StringId,
-        current_evidence_span: Option<SourceSpan>,
-        previous_evidence_span: Option<SourceSpan>,
-    ) -> Self {
-        let mut diagnostic = Self::invalid_generic_instantiation(
-            type_name,
-            crate::compiler_frontend::compiler_messages::InvalidGenericInstantiationReason::ConflictingInference {
-                subject,
-                parameter_id: conflict.parameter_id,
-                parameter_name,
-                existing_type_id: conflict.existing_type_id,
-                replacement_type_id: conflict.replacement_type_id,
-            },
-            current_evidence_span,
-        );
-        if previous_evidence_span.is_some() {
-            diagnostic = diagnostic.with_labels(vec![DiagnosticLabel::secondary(
-                previous_evidence_span,
-                Some(DiagnosticLabelMessage::GenericInferencePreviousEvidence),
-            )]);
-        }
-
-        diagnostic
-    }
-
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn invalid_assignment_target(
         reason: crate::compiler_frontend::compiler_messages::InvalidAssignmentTargetReason,
         target_name: Option<StringId>,
@@ -1608,6 +1309,10 @@ impl CompilerDiagnostic {
     }
 
     /// Reports arity at the authored producer rather than a synthetic receiving node.
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn invalid_value_receiver(
         receiver: ValueReceiverContext,
         target_count: usize,
@@ -1625,35 +1330,10 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn invalid_multi_bind(
-        reason: crate::compiler_frontend::compiler_messages::InvalidMultiBindReason,
-        target_name: Option<StringId>,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::InvalidMultiBind),
-            span,
-            DiagnosticPayload::InvalidMultiBind {
-                reason,
-                target_name,
-            },
-        )
-    }
-
-    pub(crate) fn invalid_multi_bind_syntax(
-        reason: crate::compiler_frontend::compiler_messages::InvalidMultiBindReason,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedToken),
-            span,
-            DiagnosticPayload::InvalidMultiBind {
-                reason,
-                target_name: None,
-            },
-        )
-    }
-
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn invalid_builtin_call(
         reason: crate::compiler_frontend::compiler_messages::InvalidBuiltinCallReason,
         builtin_name: Option<StringId>,
@@ -1668,7 +1348,6 @@ impl CompilerDiagnostic {
             },
         )
     }
-
     pub(crate) fn invalid_cast(
         reason: InvalidCastReason,
         source_type: Option<crate::compiler_frontend::datatypes::ids::TypeId>,
@@ -1686,6 +1365,10 @@ impl CompilerDiagnostic {
         )
     }
 
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn invalid_receiver_call(
         reason: crate::compiler_frontend::compiler_messages::InvalidReceiverCallReason,
         receiver_type: Option<StringId>,
@@ -1706,18 +1389,10 @@ impl CompilerDiagnostic {
             },
         )
     }
-
-    pub(crate) fn invalid_copy_target(
-        reason: crate::compiler_frontend::compiler_messages::InvalidCopyTargetReason,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::InvalidCopyTarget),
-            span,
-            DiagnosticPayload::InvalidCopyTarget { reason },
-        )
-    }
-
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn invalid_field_access(
         reason: crate::compiler_frontend::compiler_messages::InvalidFieldAccessReason,
         field_name: Option<StringId>,
@@ -1737,38 +1412,10 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn invalid_match_pattern(
-        reason: crate::compiler_frontend::compiler_messages::InvalidMatchPatternReason,
-        variant_name: Option<StringId>,
-        scrutinee_name: Option<StringId>,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::InvalidMatchPattern),
-            span,
-            DiagnosticPayload::InvalidMatchPattern {
-                reason,
-                variant_name,
-                scrutinee_name,
-            },
-        )
-    }
-
-    pub(crate) fn non_exhaustive_match(
-        reason: crate::compiler_frontend::compiler_messages::NonExhaustiveMatchReason,
-        missing_variants: Vec<StringId>,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::NonExhaustiveMatch),
-            span,
-            DiagnosticPayload::NonExhaustiveMatch {
-                reason,
-                missing_variants,
-            },
-        )
-    }
-
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn invalid_fallible_handling(
         reason: InvalidFallibleHandlingReason,
         span: Option<SourceSpan>,
@@ -1857,18 +1504,6 @@ impl CompilerDiagnostic {
         .with_labels(labels)
     }
 
-    pub(crate) fn invalid_template_slot(
-        reason: crate::compiler_frontend::compiler_messages::InvalidTemplateSlotReason,
-        slot_name: Option<StringId>,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::InvalidTemplateSlot),
-            span,
-            DiagnosticPayload::InvalidTemplateSlot { reason, slot_name },
-        )
-    }
-
     pub(crate) fn compile_time_evaluation_error(
         reason: crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason,
         operation: Option<StringId>,
@@ -1881,14 +1516,10 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn empty_collection_type_ambiguity(span: Option<SourceSpan>) -> Self {
-        Self::new(
-            DiagnosticKind::Type(TypeDiagnosticKind::EmptyCollectionTypeAmbiguity),
-            span,
-            DiagnosticPayload::EmptyCollectionTypeAmbiguity,
-        )
-    }
-
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn unsupported_operator_types(
         operator: DiagnosticOperator,
         lhs: TypeId,
@@ -1902,6 +1533,10 @@ impl CompilerDiagnostic {
         )
     }
 
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn incompatible_choice_comparison(
         reason: IncompatibleChoiceComparisonReason,
         lhs: TypeId,
@@ -1915,6 +1550,10 @@ impl CompilerDiagnostic {
         )
     }
 
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "P4.6z deletes with legacy parity tests")
+    )]
     pub(crate) fn invalid_call_shape(
         reason: crate::compiler_frontend::compiler_messages::InvalidCallShapeReason,
         callee_name: Option<StringId>,
@@ -1929,18 +1568,6 @@ impl CompilerDiagnostic {
             },
         )
     }
-
-    pub(crate) fn invalid_return_shape(
-        reason: crate::compiler_frontend::compiler_messages::InvalidReturnShapeReason,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Rule(RuleDiagnosticKind::InvalidReturnShape),
-            span,
-            DiagnosticPayload::InvalidReturnShape { reason },
-        )
-    }
-
     // ------------------------------------------------------------------
     //  Type Constructors
     // ------------------------------------------------------------------
@@ -1959,24 +1586,6 @@ impl CompilerDiagnostic {
                 found,
                 context,
             },
-        )
-    }
-
-    /// Report a `Route` parameter whose resolved output type cannot carry future inputs.
-    ///
-    /// WHAT: a semantic type diagnostic, because the authored contract is well-formed and only
-    ///       the resolved output type kind is wrong.
-    /// WHY: reporting this from the syntax kind let a fully parsed, semantically invalid
-    ///      signature look like a parse failure.
-    pub(crate) fn invalid_route_output(
-        reason: InvalidRouteOutputReason,
-        output: TypeId,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Type(TypeDiagnosticKind::InvalidRouteOutput),
-            span,
-            DiagnosticPayload::InvalidRouteOutput { reason, output },
         )
     }
 

@@ -1,10 +1,10 @@
 //! Error boundary for expression parsing helpers.
 //!
-//! WHAT: keeps expression-parser user diagnostics as `CompilerDiagnostic` values while still
-//! carrying genuine infrastructure failures from deeper AST helpers.
+//! WHAT: keeps expression-parser user diagnostics as compact drafts while still carrying genuine
+//! infrastructure failures from deeper AST helpers.
 //! WHY: expression parsing is consumed by several AST subsystems. A shared boundary lets each
-//! caller decide whether typed source diagnostics or infrastructure failures fit its own stage
-//! boundary without routing normal diagnostics through `CompilerError`.
+//! caller decide whether source diagnostics or infrastructure failures fit its own stage without
+//! routing normal diagnostics through `CompilerError`.
 
 use crate::compiler_frontend::ast::const_values::ConstValueStoreError;
 use crate::compiler_frontend::ast::expressions::call_validation::CallValidationError;
@@ -15,6 +15,7 @@ use crate::compiler_frontend::ast::numeric_construction::DeferredExpressionSuffi
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
@@ -41,15 +42,24 @@ pub(crate) struct NumericDeferral {
 
 #[derive(Debug)]
 pub(crate) enum ExpressionParseError {
-    Diagnostic(CompilerDiagnostic),
+    Diagnostic(DiagnosticDraft),
+    /// An empty template directive argument that remains eligible for an enclosing directive rewrite.
+    TemplateDirectiveEmptyArguments(DiagnosticDraft),
+    /// A constant-context name failure whose semantic cause is needed by member-shell resolution.
+    NonConstantReferenceInConstant(DiagnosticDraft),
     Infrastructure(Box<InfrastructureErrors>),
     /// A numeric-dependent expression fragment only body completion can finish.
     NumericDeferral(Box<NumericDeferral>),
 }
 
+impl From<DiagnosticDraft> for ExpressionParseError {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
+        Self::Diagnostic(diagnostic)
+    }
+}
 impl From<CompilerDiagnostic> for ExpressionParseError {
     fn from(diagnostic: CompilerDiagnostic) -> Self {
-        ExpressionParseError::Diagnostic(diagnostic)
+        Self::Diagnostic(diagnostic.into())
     }
 }
 
@@ -74,19 +84,15 @@ impl From<ConstValueStoreError> for ExpressionParseError {
 impl From<HeaderParseFailure> for ExpressionParseError {
     fn from(error: HeaderParseFailure) -> Self {
         match error {
-            HeaderParseFailure::Diagnostic(diagnostic) => {
-                ExpressionParseError::Diagnostic(diagnostic)
-            }
-            HeaderParseFailure::Infrastructure(error) => {
-                ExpressionParseError::Infrastructure(error.into())
-            }
+            HeaderParseFailure::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic.into()),
+            HeaderParseFailure::Infrastructure(error) => Self::Infrastructure(error.into()),
         }
     }
 }
 
 impl From<CompilerError> for ExpressionParseError {
     fn from(error: CompilerError) -> Self {
-        ExpressionParseError::Infrastructure(error.into())
+        Self::Infrastructure(error.into())
     }
 }
 
@@ -99,12 +105,8 @@ impl From<Box<InfrastructureErrors>> for ExpressionParseError {
 impl From<CallValidationError> for ExpressionParseError {
     fn from(error: CallValidationError) -> Self {
         match error {
-            CallValidationError::Diagnostic(diagnostic) => {
-                ExpressionParseError::Diagnostic(diagnostic)
-            }
-            CallValidationError::Infrastructure(error) => {
-                ExpressionParseError::Infrastructure(error)
-            }
+            CallValidationError::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
+            CallValidationError::Infrastructure(error) => Self::Infrastructure(error),
         }
     }
 }
@@ -112,12 +114,8 @@ impl From<CallValidationError> for ExpressionParseError {
 impl From<ExpressionTypingError> for ExpressionParseError {
     fn from(error: ExpressionTypingError) -> Self {
         match error {
-            ExpressionTypingError::Diagnostic(diagnostic) => {
-                ExpressionParseError::Diagnostic(diagnostic)
-            }
-            ExpressionTypingError::Infrastructure(error) => {
-                ExpressionParseError::Infrastructure(error)
-            }
+            ExpressionTypingError::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
+            ExpressionTypingError::Infrastructure(error) => Self::Infrastructure(error),
         }
     }
 }
@@ -125,8 +123,14 @@ impl From<ExpressionTypingError> for ExpressionParseError {
 impl From<TemplateError> for ExpressionParseError {
     fn from(error: TemplateError) -> Self {
         match error {
-            TemplateError::Diagnostic(diagnostic) => ExpressionParseError::Diagnostic(diagnostic),
-            TemplateError::Infrastructure(error) => ExpressionParseError::Infrastructure(error),
+            TemplateError::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
+            TemplateError::EmptyArguments(diagnostic) => {
+                Self::TemplateDirectiveEmptyArguments(diagnostic)
+            }
+            TemplateError::NonConstantReferenceInConstant(diagnostic) => {
+                Self::NonConstantReferenceInConstant(diagnostic)
+            }
+            TemplateError::Infrastructure(error) => Self::Infrastructure(error),
         }
     }
 }
@@ -171,9 +175,11 @@ impl ExpressionParseError {
     pub(crate) fn at_boundary_without_numeric_retention(
         self,
         boundary: &str,
-    ) -> Result<CompilerDiagnostic, ExpressionParseError> {
+    ) -> Result<DiagnosticDraft, ExpressionParseError> {
         match self {
-            ExpressionParseError::Diagnostic(diagnostic) => Ok(diagnostic),
+            ExpressionParseError::Diagnostic(diagnostic)
+            | ExpressionParseError::TemplateDirectiveEmptyArguments(diagnostic)
+            | ExpressionParseError::NonConstantReferenceInConstant(diagnostic) => Ok(diagnostic),
             ExpressionParseError::Infrastructure(error) => {
                 Err(ExpressionParseError::Infrastructure(error))
             }

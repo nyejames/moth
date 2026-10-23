@@ -19,7 +19,6 @@ use crate::compiler_frontend::ast::statements::functions::{
     FunctionParameter, FunctionSignature, ParameterContract, ReturnSlot,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -53,10 +52,8 @@ pub(super) fn receiver_result_type_ids_for_call(
             success_return_type_ids.as_slice(),
             type_interner.environment(),
         );
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
-            non_fallible_handler_reason(token_stream.current_tag(), operand_is_optional),
-            Some(token_stream.current_span()),
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::invalid_fallible_handling(non_fallible_handler_reason(token_stream.current_tag(), operand_is_optional),
+        Some(token_stream.current_span()),)
         .into());
     }
 

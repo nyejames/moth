@@ -21,7 +21,8 @@ use crate::compiler_frontend::ast::module_ast::environment::declaration_table::{
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
-use crate::compiler_frontend::compiler_messages::{AstCapacityResource, CompilerDiagnostic};
+use crate::compiler_frontend::compiler_messages::AstCapacityResource;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::number::NumberValue;
@@ -43,12 +44,12 @@ fn checked_const_value_index(
     prefix: usize,
     offset: usize,
     span: Option<SourceSpan>,
-) -> Result<u32, CompilerDiagnostic> {
+) -> Result<u32, DiagnosticDraft> {
     prefix
         .checked_add(offset)
         .and_then(|index| u32::try_from(index).ok())
         .ok_or_else(|| {
-            CompilerDiagnostic::compiler_capacity_exceeded(AstCapacityResource::ConstValues, span)
+            crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::compiler_capacity_exceeded(AstCapacityResource::ConstValues, span)
         })
 }
 
@@ -102,12 +103,12 @@ pub(crate) enum ConstTemplateValue {
 /// User-facing or infrastructure failure while constructing the module store.
 #[derive(Debug)]
 pub(crate) enum ConstValueStoreError {
-    Diagnostic(CompilerDiagnostic),
+    Diagnostic(DiagnosticDraft),
     Infrastructure(Box<InfrastructureErrors>),
 }
 
-impl From<CompilerDiagnostic> for ConstValueStoreError {
-    fn from(diagnostic: CompilerDiagnostic) -> Self {
+impl From<DiagnosticDraft> for ConstValueStoreError {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
         Self::Diagnostic(diagnostic)
     }
 }
@@ -121,7 +122,11 @@ impl From<CompilerError> for ConstValueStoreError {
 impl From<TemplateError> for ConstValueStoreError {
     fn from(error: TemplateError) -> Self {
         match error {
-            TemplateError::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
+            TemplateError::Diagnostic(diagnostic)
+            | TemplateError::EmptyArguments(diagnostic)
+            | TemplateError::NonConstantReferenceInConstant(diagnostic) => {
+                Self::Diagnostic(diagnostic)
+            }
             TemplateError::Infrastructure(error) => Self::Infrastructure(error),
         }
     }

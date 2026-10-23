@@ -22,7 +22,7 @@ use crate::compiler_frontend::ast::module_ast::scope_context::{ScopeContext, Sco
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidFieldAccessReason};
+use crate::compiler_frontend::compiler_messages::InvalidFieldAccessReason;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -644,13 +644,11 @@ pub(super) fn parse_member_name_typed(
             if token.kind == NumericLiteralKind::WholeNumber {
                 Ok(token.normalized_text)
             } else {
-                Err(CompilerDiagnostic::invalid_field_access(
-                    InvalidFieldAccessReason::ExpectedNameAfterDot,
-                    None,
-                    None,
-                    Vec::new(),
-                    Some(token_stream.current_span()),
-                )
+                Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_field_access(InvalidFieldAccessReason::ExpectedNameAfterDot,
+                None,
+                None,
+                Vec::new(),
+                Some(token_stream.current_span()),)
                 .into())
             }
         }
@@ -665,13 +663,11 @@ pub(super) fn parse_member_name_typed(
             Err(reserved_trait_keyword_error(keyword, Some(token_stream.current_span())).into())
         }
 
-        _ => Err(CompilerDiagnostic::invalid_field_access(
-            InvalidFieldAccessReason::ExpectedNameAfterDot,
-            None,
-            None,
-            Vec::new(),
-            Some(token_stream.current_span()),
-        )
+        _ => Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_field_access(InvalidFieldAccessReason::ExpectedNameAfterDot,
+        None,
+        None,
+        Vec::new(),
+        Some(token_stream.current_span()),)
         .into()),
     }
 }
@@ -727,13 +723,11 @@ pub(super) fn parse_field_member_access_typed(
     token_stream.advance();
 
     if token_stream.current_tag() == TokenTag::OPEN_PARENTHESIS {
-        return Err(CompilerDiagnostic::invalid_field_access(
-            InvalidFieldAccessReason::FieldNotMethod,
-            Some(member_name),
-            Some(receiver_type_id),
-            Vec::new(),
-            member_span,
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_field_access(InvalidFieldAccessReason::FieldNotMethod,
+        Some(member_name),
+        Some(receiver_type_id),
+        Vec::new(),
+        member_span,)
         .into());
     }
 

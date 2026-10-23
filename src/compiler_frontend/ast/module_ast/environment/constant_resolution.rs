@@ -53,8 +53,11 @@ use crate::compiler_frontend::build_config::{
     BuildInputName, ConfigResolutionServices, ResolvedBuildConfigMap,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, templates,
+};
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticBag,
+    CompileTimeEvaluationErrorReason, DiagnosticBag,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
@@ -255,7 +258,7 @@ impl ConstantResolutionSession {
                     .find(directive_name)
                     .is_none()
                 {
-                    return Err(CompilerDiagnostic::invalid_template_directive(
+                    return Err(templates::invalid_template_directive(
                     Some(markdown_directive),
                     crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason::UnknownDirective,
                     None,
@@ -476,7 +479,7 @@ impl ConstantResolutionSession {
                 crate::compiler_frontend::ast::const_eval::FoldRequirement::Required,
             ))?;
 
-            return Err(CompilerDiagnostic::compile_time_evaluation_error(
+            return Err(choices_control_flow::compile_time_evaluation_error(
                 CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
                 path_fork.component(declaration.id),
                 header.name_span,
@@ -588,19 +591,22 @@ fn non_constant_initializer_fold_refusal(
 ) -> Result<(), ExpressionParseError> {
     match fold {
         Ok(ConstantFoldOutcome::Refused { reason, .. }) => {
-            Err(ExpressionParseError::from(reason.into_diagnostic()))
+            Err(ExpressionParseError::from(reason.into_draft()))
         }
         // A broken compiler invariant must not surface as a source refusal.
         Err(ConstantFoldError::Infrastructure(error)) => {
             Err(ExpressionParseError::Infrastructure(error))
         }
         // A builder capacity failure is not a source refusal: it must reach the module build.
-        Err(ConstantFoldError::Diagnostic(diagnostic))
-            if diagnostic.is_compiler_capacity_exceeded() =>
-        {
+        Err(
+            ConstantFoldError::Diagnostic(diagnostic)
+            | ConstantFoldError::NumericFailure(diagnostic),
+        ) if diagnostic.code() == "MOTH-SYNTAX-0037" => {
             Err(ExpressionParseError::Diagnostic(diagnostic))
         }
-        Ok(_) | Err(ConstantFoldError::Diagnostic(_)) => Ok(()),
+        Ok(_)
+        | Err(ConstantFoldError::Diagnostic(_))
+        | Err(ConstantFoldError::NumericFailure(_)) => Ok(()),
     }
 }
 

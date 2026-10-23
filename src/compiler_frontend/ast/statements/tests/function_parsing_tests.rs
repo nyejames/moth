@@ -21,6 +21,8 @@ use crate::compiler_frontend::ast::statements::value_production::types::ValueBlo
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
     calls_data::InvalidValueReceiverView, types_borrows_targets::TypeMismatchView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
 use crate::compiler_frontend::compiler_messages::{TypeMismatchContext, ValueReceiverContext};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -430,6 +432,39 @@ value = box.show()\n";
         ast_error_primary_span(diagnostic),
         Some(SourceSpan::new(SourceId::COMPILATION_ROOT, member_span))
     );
+}
+
+#[test]
+fn nonconstant_function_reference_in_parameter_default_keeps_member_label() {
+    let source = "runtime || -> Bool:\n\
+    return true\n\
+;\n\
+consume |enabled Bool = runtime()|:\n\
+    return false\n\
+;\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0053",
+        Some("compile_time_evaluation_error.non_constant_reference_in_constant"),
+    );
+
+    let member_start = source
+        .find("enabled")
+        .expect("the function parameter should be present") as u32;
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let member_span = SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::exact(member_start, "enabled".len() as u32, &mut span_builder)
+            .expect("the parameter name should fit an inline span"),
+    );
+    let labels = diagnostic.durable_labels().collect::<Vec<_>>();
+    assert_eq!(labels.len(), 1);
+    assert!(matches!(labels[0].message, DurableLabelMessage::None));
+    assert!(matches!(
+        labels[0].site,
+        SiteRef::Local(span) if span == member_span
+    ));
 }
 
 #[test]

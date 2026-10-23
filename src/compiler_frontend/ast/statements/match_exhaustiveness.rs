@@ -16,7 +16,9 @@ use crate::compiler_frontend::ast::numeric_construction::{
 use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchPattern, PatternValue, PatternValueKind,
 };
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, NonExhaustiveMatchReason};
+use crate::compiler_frontend::compiler_messages::NonExhaustiveMatchReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::number::NumberValue;
@@ -327,7 +329,7 @@ pub(crate) struct MatchExhaustivenessCheck<'a> {
 /// actionable diagnostics listing the specific missing variants.
 pub(crate) fn enforce_match_exhaustiveness(
     check: MatchExhaustivenessCheck<'_>,
-) -> Result<(), CompilerDiagnostic> {
+) -> Result<(), DiagnosticDraft> {
     let subject_span = match &check.subject {
         MatchExhaustivenessSubject::Known { span, .. } => *span,
         MatchExhaustivenessSubject::PendingChoice { span, .. }
@@ -354,7 +356,7 @@ pub(crate) fn enforce_match_exhaustiveness(
             return Ok(());
         }
 
-        return Err(CompilerDiagnostic::non_exhaustive_match(
+        return Err(choices_control_flow::non_exhaustive_match(
             NonExhaustiveMatchReason::MissingOptionPatterns,
             vec![],
             subject_span,
@@ -391,7 +393,7 @@ pub(crate) fn enforce_match_exhaustiveness(
             NonExhaustiveMatchReason::MissingElseArm
         };
 
-        return Err(CompilerDiagnostic::non_exhaustive_match(
+        return Err(choices_control_flow::non_exhaustive_match(
             reason,
             vec![],
             subject_span,
@@ -404,7 +406,7 @@ pub(crate) fn enforce_match_exhaustiveness(
         return Ok(());
     }
 
-    Err(CompilerDiagnostic::non_exhaustive_match(
+    Err(choices_control_flow::non_exhaustive_match(
         NonExhaustiveMatchReason::MissingElseArm,
         vec![],
         subject_span,
@@ -420,14 +422,14 @@ fn enforce_choice_variants(
     subject_type_id: TypeId,
     subject_span: Option<SourceSpan>,
     check: &MatchExhaustivenessCheck<'_>,
-) -> Result<(), CompilerDiagnostic> {
+) -> Result<(), DiagnosticDraft> {
     // `else` intentionally acts as an explicit "future variants" fallback in Alpha.
     if check.has_default {
         return Ok(());
     }
 
     if check.facts.has_guarded_arms {
-        return Err(CompilerDiagnostic::non_exhaustive_match(
+        return Err(choices_control_flow::non_exhaustive_match(
             NonExhaustiveMatchReason::GuardedArmsRequireElse,
             vec![],
             subject_span,
@@ -450,7 +452,7 @@ fn enforce_choice_variants(
         return Ok(());
     }
 
-    Err(CompilerDiagnostic::non_exhaustive_match(
+    Err(choices_control_flow::non_exhaustive_match(
         NonExhaustiveMatchReason::MissingVariants,
         missing_variants,
         subject_span,

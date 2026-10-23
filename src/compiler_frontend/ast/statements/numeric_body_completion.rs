@@ -81,8 +81,13 @@ use crate::compiler_frontend::builtins::casts::resolution::{
     CastResolutionInput, resolve_cast_expression,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    names_declarations, types_borrows_targets,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidAssignmentTargetReason, TypeMismatchContext, ValueReceiverContext,
+    InvalidAssignmentTargetReason, TypeMismatchContext, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -1046,7 +1051,7 @@ impl Completion<'_, '_> {
                 let Some(place) =
                     place_expression_from_expression(self.expression_builder, expression)?
                 else {
-                    return Err(CompilerDiagnostic::invalid_assignment_target(
+                    return Err(names_declarations::invalid_assignment_target(
                         InvalidAssignmentTargetReason::TemporaryNotAssignable,
                         None,
                         Some(
@@ -1054,7 +1059,6 @@ impl Completion<'_, '_> {
                                 .view_owned(expression)?
                                 .require_single(ValueReceiverContext::ReceiverBase)?,
                         ),
-                        None,
                         None,
                         None,
                         self.expression_builder.view_owned(expression)?.span(),
@@ -1330,7 +1334,7 @@ impl Completion<'_, '_> {
         }
         for (target, slot_type) in targets.iter().zip(slot_types) {
             if target.type_id != *slot_type {
-                return Err(CompilerDiagnostic::type_mismatch(
+                return Err(types_borrows_targets::type_mismatch(
                     target.type_id,
                     *slot_type,
                     TypeMismatchContext::General,
@@ -2805,16 +2809,22 @@ fn immutable_binding_diagnostic(
     type_id: TypeId,
     declaration_span: Option<SourceSpan>,
     assignment_span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_assignment_target(
+) -> DiagnosticDraft {
+    let diagnostic = names_declarations::invalid_assignment_target(
         InvalidAssignmentTargetReason::ImmutableBinding,
         None,
         Some(type_id),
         None,
         None,
-        declaration_span,
         assignment_span,
-    )
+    );
+    match declaration_span {
+        Some(span) => diagnostic.with_label(
+            Some(span),
+            Some(LabelDraftMessage::ImmutableBindingDeclaration),
+        ),
+        None => diagnostic,
+    }
 }
 
 /// Finishes one retained option selector's capture pattern against its completed subject.

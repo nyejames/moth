@@ -87,9 +87,10 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidBuiltinCallReason,
-    InvalidFieldAccessReason, InvalidReceiverCallReason, ValueReceiverContext,
+    InvalidAssignmentTargetReason, InvalidBuiltinCallReason, InvalidFieldAccessReason,
+    InvalidReceiverCallReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -233,7 +234,7 @@ fn validate_retained_step_access(
     requires_mutable: bool,
     diagnostic: &ReceiverAccessDiagnostic,
     member_span: Option<SourceSpan>,
-) -> Result<(), CompilerDiagnostic> {
+) -> Result<(), DiagnosticDraft> {
     if receiver.is_place {
         return validate_place_receiver_access(
             chain_access.mode,
@@ -1928,13 +1929,11 @@ fn parse_retained_postfix_steps(
             || token_stream.current_tag() == TokenTag::EOF
         {
             let dot_span = previous_token_span(token_stream);
-            return Err(CompilerDiagnostic::invalid_field_access(
-                InvalidFieldAccessReason::ExpectedNameAfterDot,
-                None,
-                None,
-                Vec::new(),
-                dot_span,
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_field_access(InvalidFieldAccessReason::ExpectedNameAfterDot,
+            None,
+            None,
+            Vec::new(),
+            dot_span,)
             .into());
         }
 
@@ -1992,13 +1991,11 @@ fn parse_retained_postfix_steps(
         if let Some((declared_type_id, field_shape)) = declared_field {
             token_stream.advance();
             if token_stream.current_tag() == TokenTag::OPEN_PARENTHESIS {
-                return Err(CompilerDiagnostic::invalid_field_access(
-                    InvalidFieldAccessReason::FieldNotMethod,
-                    Some(member_name),
-                    Some(declared_type_id),
-                    Vec::new(),
-                    member_span,
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_field_access(InvalidFieldAccessReason::FieldNotMethod,
+                Some(member_name),
+                Some(declared_type_id),
+                Vec::new(),
+                member_span,)
                 .into());
             }
             // A declared field never inlines a const value, so it keeps the receiver's place.
@@ -2025,14 +2022,12 @@ fn parse_retained_postfix_steps(
                 scope_context.lookup_generic_function_template(&method_entry.function_path)
         {
             if token_stream.peek_next_tag() != Some(TokenTag::OPEN_PARENTHESIS) {
-                return Err(CompilerDiagnostic::invalid_receiver_call(
-                    InvalidReceiverCallReason::MustUseParentheses,
-                    None,
-                    Some(member_name),
-                    None,
-                    None,
-                    member_span,
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_receiver_call(InvalidReceiverCallReason::MustUseParentheses,
+                None,
+                Some(member_name),
+                None,
+                None,
+                member_span,)
                 .into());
             }
             token_stream.advance();
@@ -2132,13 +2127,11 @@ fn parse_retained_postfix_steps(
         {
             token_stream.advance();
             if token_stream.current_tag() == TokenTag::OPEN_PARENTHESIS {
-                return Err(CompilerDiagnostic::invalid_field_access(
-                    InvalidFieldAccessReason::FieldNotMethod,
-                    Some(member_name),
-                    Some(type_id),
-                    Vec::new(),
-                    member_span,
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_field_access(InvalidFieldAccessReason::FieldNotMethod,
+                Some(member_name),
+                Some(type_id),
+                Vec::new(),
+                member_span,)
                 .into());
             }
             let field_preserves_place =
@@ -2167,11 +2160,9 @@ fn parse_retained_postfix_steps(
             string_table,
         )? {
             if token_stream.peek_next_tag() != Some(TokenTag::OPEN_PARENTHESIS) {
-                return Err(CompilerDiagnostic::invalid_builtin_call(
-                    InvalidBuiltinCallReason::MissingParentheses,
-                    Some(member_name),
-                    member_span,
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_builtin_call(InvalidBuiltinCallReason::MissingParentheses,
+                Some(member_name),
+                member_span,)
                 .into());
             }
             token_stream.advance();
@@ -2227,15 +2218,12 @@ fn parse_retained_postfix_steps(
                         path_fork,
                     )?;
                 }
-                return Err(CompilerDiagnostic::invalid_assignment_target(
-                    InvalidAssignmentTargetReason::CollectionGetTargetNotWritable,
-                    None,
-                    concrete_shape_type(scope_context, member.element_shape),
-                    None,
-                    None,
-                    None,
-                    Some(token_stream.current_span()),
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::invalid_assignment_target(InvalidAssignmentTargetReason::CollectionGetTargetNotWritable,
+                None,
+                concrete_shape_type(scope_context, member.element_shape),
+                None,
+                None,
+                Some(token_stream.current_span()),)
                 .into());
             }
 
@@ -2276,11 +2264,9 @@ fn parse_retained_postfix_steps(
 
             if member.op.is_property() {
                 if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS) {
-                    return Err(CompilerDiagnostic::invalid_builtin_call(
-                        InvalidBuiltinCallReason::MapLengthIsProperty,
-                        Some(member_name),
-                        member_span,
-                    )
+                    return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_builtin_call(InvalidBuiltinCallReason::MapLengthIsProperty,
+                    Some(member_name),
+                    member_span,)
                     .into());
                 }
 
@@ -2297,24 +2283,19 @@ fn parse_retained_postfix_steps(
                 token_stream.advance();
 
                 if token_stream.current_tag().is_assignment_operator() {
-                    return Err(CompilerDiagnostic::invalid_assignment_target(
-                        InvalidAssignmentTargetReason::ReadOnlyMapProperty,
-                        None,
-                        concrete_shape_type(scope_context, resolved_shape),
-                        None,
-                        None,
-                        None,
-                        Some(token_stream.current_span()),
-                    )
+                    return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::invalid_assignment_target(InvalidAssignmentTargetReason::ReadOnlyMapProperty,
+                    None,
+                    concrete_shape_type(scope_context, resolved_shape),
+                    None,
+                    None,
+                    Some(token_stream.current_span()),)
                     .into());
                 }
             } else {
                 if token_stream.peek_next_tag() != Some(TokenTag::OPEN_PARENTHESIS) {
-                    return Err(CompilerDiagnostic::invalid_builtin_call(
-                        InvalidBuiltinCallReason::MissingParentheses,
-                        Some(member_name),
-                        member_span,
-                    )
+                    return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_builtin_call(InvalidBuiltinCallReason::MissingParentheses,
+                    Some(member_name),
+                    member_span,)
                     .into());
                 }
 
@@ -2370,15 +2351,12 @@ fn parse_retained_postfix_steps(
                             path_fork,
                         )?;
                     }
-                    return Err(CompilerDiagnostic::invalid_assignment_target(
-                        InvalidAssignmentTargetReason::MapGetTargetNotWritable,
-                        None,
-                        concrete_shape_type(scope_context, member.value_shape),
-                        None,
-                        None,
-                        None,
-                        Some(token_stream.current_span()),
-                    )
+                    return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::invalid_assignment_target(InvalidAssignmentTargetReason::MapGetTargetNotWritable,
+                    None,
+                    concrete_shape_type(scope_context, member.value_shape),
+                    None,
+                    None,
+                    Some(token_stream.current_span()),)
                     .into());
                 }
             }
@@ -2412,14 +2390,12 @@ fn parse_retained_postfix_steps(
             )
         {
             if token_stream.peek_next_tag() != Some(TokenTag::OPEN_PARENTHESIS) {
-                return Err(CompilerDiagnostic::invalid_receiver_call(
-                    InvalidReceiverCallReason::MustUseParentheses,
-                    None,
-                    Some(member_name),
-                    None,
-                    None,
-                    member_span,
-                )
+                return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_receiver_call(InvalidReceiverCallReason::MustUseParentheses,
+                None,
+                Some(member_name),
+                None,
+                None,
+                member_span,)
                 .into());
             }
             token_stream.advance();
@@ -2654,13 +2630,11 @@ fn unknown_member_diagnostic(
     };
 
     let known_fields = collect_known_member_names(receiver_type_id, type_interner, path_fork);
-    CompilerDiagnostic::invalid_field_access(
-        reason,
-        Some(member_name),
-        Some(receiver_type_id),
-        known_fields,
-        member_span,
-    )
+    crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_field_access(reason,
+    Some(member_name),
+    Some(receiver_type_id),
+    known_fields,
+    member_span,)
     .into()
 }
 
@@ -2713,13 +2687,11 @@ fn consume_invalid_member_access(
     if token_stream.position() >= token_stream.length()
         || token_stream.current_tag() == TokenTag::EOF
     {
-        return Err(CompilerDiagnostic::invalid_field_access(
-            InvalidFieldAccessReason::ExpectedNameAfterDot,
-            None,
-            None,
-            Vec::new(),
-            dot_span,
-        )
+        return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_field_access(InvalidFieldAccessReason::ExpectedNameAfterDot,
+        None,
+        None,
+        Vec::new(),
+        dot_span,)
         .into());
     }
 
@@ -2778,13 +2750,11 @@ fn consume_rejected_member_steps(
         if token_stream.position() >= token_stream.length()
             || token_stream.current_tag() == TokenTag::EOF
         {
-            return Err(CompilerDiagnostic::invalid_field_access(
-                InvalidFieldAccessReason::ExpectedNameAfterDot,
-                None,
-                None,
-                Vec::new(),
-                Some(token_stream.current_span()),
-            )
+            return Err(crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_field_access(InvalidFieldAccessReason::ExpectedNameAfterDot,
+            None,
+            None,
+            Vec::new(),
+            Some(token_stream.current_span()),)
             .into());
         }
         parse_member_name_typed(token_stream, string_table)?;

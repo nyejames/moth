@@ -26,9 +26,9 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateStructureReason,
-};
+use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -62,7 +62,7 @@ pub(crate) fn parse_if_suffix(
         return Err(with_token_span(
             token_stream,
             marker_span,
-            CompilerDiagnostic::invalid_template_structure(
+            templates::invalid_template_structure(
                 InvalidTemplateStructureReason::MissingTemplateIfCondition,
                 Some(SourceSpan::new(token_stream.source_id(), marker_span)),
             ),
@@ -148,7 +148,7 @@ pub(crate) fn parse_if_suffix(
             return Err(with_token_span(
                 token_stream,
                 marker_span,
-                CompilerDiagnostic::invalid_template_structure(
+                templates::invalid_template_structure(
                     InvalidTemplateStructureReason::TemplateMatchStyleControlFlowUnsupported,
                     scrutinee_span,
                 ),
@@ -207,7 +207,7 @@ pub(crate) fn parse_loop_suffix(
         return Err(with_token_span(
             token_stream,
             marker_span,
-            CompilerDiagnostic::invalid_template_structure(
+            templates::invalid_template_structure(
                 InvalidTemplateStructureReason::MissingTemplateLoopHeader,
                 Some(SourceSpan::new(token_stream.source_id(), marker_span)),
             ),
@@ -225,7 +225,7 @@ pub(crate) fn parse_loop_suffix(
         return Err(with_token_span(
             token_stream,
             marker_span,
-            CompilerDiagnostic::invalid_template_structure(
+            templates::invalid_template_structure(
                 InvalidTemplateStructureReason::ControlFlowSuffixNotFinal,
                 Some(SourceSpan::new(token_stream.source_id(), marker_span)),
             ),
@@ -370,7 +370,7 @@ fn ensure_suffix_ends_at_body_start(token_stream: &AstCursor) -> ControlFlowSuff
         TokenTag::START_TEMPLATE_BODY => Ok(()),
         TokenTag::COMMA => Err(with_current_token_span(
             token_stream,
-            CompilerDiagnostic::invalid_template_structure(
+            templates::invalid_template_structure(
                 InvalidTemplateStructureReason::ControlFlowSuffixNotFinal,
                 None,
             ),
@@ -378,7 +378,7 @@ fn ensure_suffix_ends_at_body_start(token_stream: &AstCursor) -> ControlFlowSuff
         .into()),
         _ => Err(with_current_token_span(
             token_stream,
-            CompilerDiagnostic::invalid_template_structure(
+            templates::invalid_template_structure(
                 InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix,
                 None,
             ),
@@ -408,7 +408,7 @@ fn find_template_body_start(token_stream: &mut AstCursor) -> ControlFlowSuffixRe
             outcome = Some(Err(with_token_span(
                 token_stream,
                 span.local(),
-                CompilerDiagnostic::invalid_template_structure(
+                templates::invalid_template_structure(
                     InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix,
                     Some(span),
                 ),
@@ -429,7 +429,7 @@ fn find_template_body_start(token_stream: &mut AstCursor) -> ControlFlowSuffixRe
     outcome.unwrap_or_else(|| {
         Err(with_current_token_span(
             token_stream,
-            CompilerDiagnostic::invalid_template_structure(
+            templates::invalid_template_structure(
                 InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix,
                 None,
             ),
@@ -441,23 +441,20 @@ fn find_template_body_start(token_stream: &mut AstCursor) -> ControlFlowSuffixRe
 /// Attach the exact source span for a direct suffix diagnostic.
 fn with_current_token_span(
     token_stream: &AstCursor,
-    diagnostic: CompilerDiagnostic,
-) -> CompilerDiagnostic {
-    if diagnostic.primary_span.is_none() {
-        let mut diagnostic = diagnostic;
-        diagnostic.primary_span = Some(token_stream.current_span());
-        return diagnostic;
+    mut diagnostic: DiagnosticDraft,
+) -> DiagnosticDraft {
+    if diagnostic.primary_span().is_none() {
+        diagnostic.set_primary_span(Some(token_stream.current_span()));
     }
     diagnostic
 }
-
 fn with_token_span(
     token_stream: &AstCursor,
     span: LocalSpan,
-    mut diagnostic: CompilerDiagnostic,
-) -> CompilerDiagnostic {
-    if diagnostic.primary_span.is_none() {
-        diagnostic.primary_span = Some(SourceSpan::new(token_stream.source_id(), span));
+    mut diagnostic: DiagnosticDraft,
+) -> DiagnosticDraft {
+    if diagnostic.primary_span().is_none() {
+        diagnostic.set_primary_span(Some(SourceSpan::new(token_stream.source_id(), span)));
     }
     diagnostic
 }

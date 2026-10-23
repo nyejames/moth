@@ -4,8 +4,11 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, CoercionOperation, ExpressionOp, OwnedExpr, SuccessShape,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidValueReceiverView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::TypeMismatchView;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, TypeMismatchContext, ValueReceiverContext,
+    DiagnosticBag, TypeMismatchContext, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
@@ -56,6 +59,7 @@ fn assert_type_mismatch(
     failure: crate::compiler_frontend::ast::expressions::expression_store::ExpressionConstructionFailure,
     expected: TypeId,
     found: TypeId,
+    environment: &TypeEnvironment,
 ) {
     let diagnostic = match failure {
         crate::compiler_frontend::ast::expressions::expression_store::ExpressionConstructionFailure::Diagnostic(
@@ -65,18 +69,37 @@ fn assert_type_mismatch(
             error,
         ) => panic!("expected a type mismatch diagnostic, got invariant {error:?}"),
     };
-    match diagnostic.payload {
-        DiagnosticPayload::TypeMismatch {
-            expected: expected_id,
-            found: found_id,
-            context,
-        } => {
-            assert_eq!(expected_id, expected);
-            assert_eq!(found_id, found);
-            assert_eq!(context, TypeMismatchContext::Declaration);
-        }
-        other => panic!("expected a TypeMismatch diagnostic, got {other:?}"),
-    }
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), Some(environment));
+    let diagnostic = compact.first().expect("the type mismatch should compact");
+    let facts = diagnostic
+        .family_view::<TypeMismatchView>()
+        .expect("the compact diagnostic should retain type mismatch facts");
+    assert_eq!(facts.context, TypeMismatchContext::Declaration);
+
+    let strings = crate::compiler_frontend::symbols::string_interning::StringTable::new();
+    let paths = crate::compiler_frontend::symbols::path_interner::PathInternerBuilder::new();
+    assert_eq!(
+        diagnostic
+            .types()
+            .display_for_render(facts.expected, &strings, Some(paths.paths())),
+        crate::compiler_frontend::datatypes::display::display_type(
+            expected,
+            environment,
+            &strings,
+            paths.paths(),
+        )
+    );
+    assert_eq!(
+        diagnostic
+            .types()
+            .display_for_render(facts.found, &strings, Some(paths.paths())),
+        crate::compiler_frontend::datatypes::display::display_type(
+            found,
+            environment,
+            &strings,
+            paths.paths(),
+        )
+    );
 }
 
 #[test]
@@ -263,7 +286,7 @@ fn numeric_explicit_type_boundary_rejects_implicit_conversion() {
             &mut builder,
         )
         .expect_err("a numeric value must not cross to another exact type implicitly");
-        assert_type_mismatch(failure, expected, found);
+        assert_type_mismatch(failure, expected, found, &environment);
     }
 }
 
@@ -378,13 +401,15 @@ fn explicit_boundary_checks_success_arity_before_scalar_type_access() {
                 error,
             ) => panic!("expected an arity diagnostic, got invariant {error:?}"),
         };
-        assert_eq!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidValueReceiver {
-                receiver: ValueReceiverContext::Declaration,
-                target_count: 1,
-                produced_count,
-            }
-        );
+        let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+        let diagnostic = compact
+            .first()
+            .expect("the invalid value receiver should compact");
+        let facts = diagnostic
+            .family_view::<InvalidValueReceiverView>()
+            .expect("the compact diagnostic should retain value receiver facts");
+        assert_eq!(facts.receiver, ValueReceiverContext::Declaration);
+        assert_eq!(facts.target_count, 1);
+        assert_eq!(facts.produced_count, produced_count);
     }
 }

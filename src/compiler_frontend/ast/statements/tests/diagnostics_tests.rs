@@ -5,9 +5,10 @@
 
 use super::{UnexpectedScopeCloseContext, unexpected_scope_close, unexpected_statement_token};
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidStatementPositionReason,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::InvalidStatementPositionView;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, InvalidStatementPositionReason};
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionId, ExternalPackageRegistry, ExternalSymbolId,
 };
@@ -73,14 +74,18 @@ fn unexpected_statement_token_retains_exact_multibyte_span() {
     let token_span = cursor.current_span();
     let diagnostic = unexpected_statement_token(&cursor, &mut string_table)
         .expect("unexpected statement token projection should stay on the diagnostic lane");
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidStatementPosition {
-            reason: InvalidStatementPositionReason::UnexpectedComma
-        }
-    ));
-    assert_eq!(diagnostic.primary_span, Some(token_span));
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact
+        .first()
+        .expect("the draft compacts to a diagnostic view");
+    let facts = diagnostic
+        .family_view::<InvalidStatementPositionView>()
+        .expect("the diagnostic is an invalid statement position");
+    assert_eq!(
+        facts.reason,
+        InvalidStatementPositionReason::UnexpectedComma
+    );
+    assert!(matches!(diagnostic.primary_site(), SiteRef::Local(span) if span == token_span));
 }
 #[test]
 fn unexpected_scope_close_retains_exact_multibyte_span() {
@@ -98,14 +103,18 @@ fn unexpected_scope_close_retains_exact_multibyte_span() {
     assert_eq!(cursor.current_tag(), TokenTag::END);
     let token_span = cursor.current_span();
     let diagnostic = unexpected_scope_close(UnexpectedScopeCloseContext::Expression, &cursor);
-
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidStatementPosition {
-            reason: InvalidStatementPositionReason::UnexpectedScopeCloseInExpression
-        }
-    ));
-    assert_eq!(diagnostic.primary_span, Some(token_span));
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact
+        .first()
+        .expect("the draft compacts to a diagnostic view");
+    let facts = diagnostic
+        .family_view::<InvalidStatementPositionView>()
+        .expect("the diagnostic is an invalid statement position");
+    assert_eq!(
+        facts.reason,
+        InvalidStatementPositionReason::UnexpectedScopeCloseInExpression
+    );
+    assert!(matches!(diagnostic.primary_site(), SiteRef::Local(span) if span == token_span));
 }
 
 fn assert_external_binding_collision(source: &str, name: &str) {
