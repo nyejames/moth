@@ -12,8 +12,9 @@
 
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure, SourceSpanCapacityResource,
+    CompilerDiagnostic, DiagnosticBag, PremergeFailure, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole,
@@ -692,11 +693,14 @@ impl ModulePreparationContext<'_> {
                 .merge_delta_from(&chunk.local_path_fork, &remap)
                 .map_err(|error| match error {
                     crate::compiler_frontend::symbols::path_interner::PathInternError::TableFull => {
-                        PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
-                            CompilerDiagnostic::source_table_capacity(
+                        PremergeFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+                            DiagnosticBag::from(CompilerDiagnostic::source_table_capacity(
                                 SourceSpanCapacityResource::LogicalPath,
-                            ),
+                            )),
                             std::mem::take(string_table),
+                            None,
+                            false,
+                            None,
                         ))
                     }
                     error => PremergeFailure::Infrastructure(CompilerError::compiler_error(
@@ -792,16 +796,16 @@ impl ModulePreparationContext<'_> {
         );
 
         if !diagnostics.is_empty() {
-            // Move the module table into the batch; the caller discards its table on this
-            // diagnosed path, so no clone is needed to carry the diagnostics.
+            // Move the module table into the prepared batch; the caller discards its table on
+            // this diagnosed path, so no clone is needed to carry the diagnostics.
             let table = std::mem::take(string_table);
-            let mut batch = PremergeDiagnosticBatch::from_diagnostics(diagnostics, table);
-            if let Err(error) =
-                batch.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()))
-            {
-                return Err(PremergeFailure::Infrastructure(error.into()));
-            }
-            batch.prepend_diagnostics(warnings);
+            warnings.extend(diagnostics);
+            let batch = PreparedDiagnosticBatch::capture_with_required_paths(
+                DiagnosticBag::from_diagnostics(warnings),
+                table,
+                None,
+                || Some(Arc::new(path_fork.snapshot_table())),
+            )?;
             return Err(PremergeFailure::Diagnosed(batch));
         }
         prepared_outputs
@@ -824,16 +828,16 @@ impl ModulePreparationContext<'_> {
             Err(bag) => {
                 return Err(match bag {
                     HeaderPreparationFailure::Diagnosed(bag) => {
-                        // Move the module table and owned warnings into the batch; header
-                        // aggregation failed, so the caller discards both and the batch
-                        let mut batch =
-                            PremergeDiagnosticBatch::from_bag(bag, std::mem::take(string_table));
-                        if let Err(error) =
-                            batch.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()))
-                        {
-                            return Err(PremergeFailure::Infrastructure(error.into()));
-                        }
-                        batch.prepend_diagnostics(warnings);
+                        // Move the module table and owned warnings into the prepared batch;
+                        // header aggregation failed, so the caller discards both without cloning.
+                        let mut diagnostics = warnings;
+                        diagnostics.extend(bag.into_diagnostics());
+                        let batch = PreparedDiagnosticBatch::capture_with_required_paths(
+                            DiagnosticBag::from_diagnostics(diagnostics),
+                            std::mem::take(string_table),
+                            None,
+                            || Some(Arc::new(path_fork.snapshot_table())),
+                        )?;
                         PremergeFailure::Diagnosed(batch)
                     }
                     HeaderPreparationFailure::Infrastructure(error) => {
@@ -1138,15 +1142,19 @@ impl ModuleSyntaxDiscovery<'_, '_> {
         let mut output = match result {
             Ok(delta) => delta,
             Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
-                // Move the discovery table into the batch; this source failed, so the
+                // Move the discovery table into the prepared batch; this source failed, so the
                 // discovery owner hands its table to the diagnosed lane instead of cloning.
-                let table = std::mem::take(&mut self.string_table);
-                let mut batch = error.into_premerge_batch(table);
-                if let Err(error) =
-                    batch.attach_path_table_if_missing(Arc::new(self.path_fork.snapshot_table()))
-                {
-                    return Err(PremergeFailure::Infrastructure(error.into()));
-                }
+                let FileFrontendPrepareError {
+                    mut warnings,
+                    diagnostic,
+                } = error;
+                warnings.push(diagnostic);
+                let batch = PreparedDiagnosticBatch::capture_with_required_paths(
+                    DiagnosticBag::from_diagnostics(warnings),
+                    std::mem::take(&mut self.string_table),
+                    None,
+                    || Some(Arc::new(self.path_fork.snapshot_table())),
+                )?;
                 return Err(PremergeFailure::Diagnosed(batch));
             }
             Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
@@ -1206,15 +1214,16 @@ impl ModuleSyntaxDiscovery<'_, '_> {
             Err(bag) => {
                 return Err(match bag {
                     HeaderPreparationFailure::Diagnosed(bag) => {
-                        // `finish` owns `self`, so move its table and warnings into the batch
-                        // instead of cloning the local table to carry the diagnostics.
-                        let mut batch = PremergeDiagnosticBatch::from_bag(bag, self.string_table);
-                        if let Err(error) = batch
-                            .attach_path_table_if_missing(Arc::new(self.path_fork.snapshot_table()))
-                        {
-                            return Err(PremergeFailure::Infrastructure(error.into()));
-                        }
-                        batch.prepend_diagnostics(self.warnings);
+                        // `finish` owns `self`, so move its table and warnings into the prepared
+                        // batch instead of cloning the local table to carry the diagnostics.
+                        let mut diagnostics = self.warnings;
+                        diagnostics.extend(bag.into_diagnostics());
+                        let batch = PreparedDiagnosticBatch::capture_with_required_paths(
+                            DiagnosticBag::from_diagnostics(diagnostics),
+                            self.string_table,
+                            None,
+                            || Some(Arc::new(self.path_fork.snapshot_table())),
+                        )?;
                         PremergeFailure::Diagnosed(batch)
                     }
                     HeaderPreparationFailure::Infrastructure(error) => {

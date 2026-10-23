@@ -21,6 +21,7 @@ use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionStore;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -77,6 +78,7 @@ pub(in crate::compiler_frontend) fn lower_module(
         capacity_estimate,
         external_packages,
         None,
+        None,
     )
 }
 
@@ -84,15 +86,16 @@ pub(in crate::compiler_frontend) fn lower_module(
     clippy::too_many_arguments,
     reason = "HIR lowering keeps the AST, mutable string and path tables, origin lookup, module resources, arena estimate, external packages and the owner that failures capture against separate"
 )]
-pub(in crate::compiler_frontend) fn lower_module_with_owner(
+pub(in crate::compiler_frontend) fn lower_module_with_owner<'a>(
     mut ast: Ast,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
+    string_table: &'a mut StringTable,
+    path_fork: &'a mut PathInternerFork,
     function_origin_lookup: HirFunctionOriginLookup,
     module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
     capacity_estimate: FrontendArenaCapacityEstimate,
     external_packages: &ExternalPackageRegistry,
     frozen_identity_handle: Option<&FrozenIdentityHandle>,
+    prior_diagnostics: Option<&'a mut DiagnosticBag>,
 ) -> Result<HirLoweringResult, AstDiagnosticFailure> {
     // The builder owns the module environment for lowering and publication; `build_hir_module`
     // never reads the AST copy, so take it instead of cloning every module-local type table.
@@ -104,6 +107,7 @@ pub(in crate::compiler_frontend) fn lower_module_with_owner(
         function_origin_lookup,
         capacity_estimate,
     );
+    ctx.set_prior_diagnostics(prior_diagnostics);
 
     ctx.set_frozen_identity_handle(frozen_identity_handle.cloned());
     ctx.set_module_resources(module_resources);
@@ -166,6 +170,7 @@ pub struct HirBuilder<'a> {
     /// WHY: HIR stores frontend `TypeId`s directly and queries this table for type facts.
     pub(super) type_environment: TypeEnvironment,
     frozen_identity_handle: Option<FrozenIdentityHandle>,
+    prior_diagnostics: Option<&'a mut DiagnosticBag>,
 
     /// Shared module resource table for re-interning handoff resource origins.
     ///
@@ -332,6 +337,7 @@ impl<'a> HirBuilder<'a> {
             path_fork,
             type_environment,
             frozen_identity_handle: None,
+            prior_diagnostics: None,
             module_resources: None,
             function_origin_lookup,
             next_block_id: 0,
@@ -387,12 +393,21 @@ impl<'a> HirBuilder<'a> {
     }
 
     fn lower_error_messages(
-        &self,
+        &mut self,
         error: impl Into<HirConstructionFailure>,
     ) -> AstDiagnosticFailure {
         let mut messages = match error.into() {
             HirConstructionFailure::Diagnosed(diagnostic) => {
-                CompilerMessages::from_diagnostic_ref(diagnostic, self.string_table)
+                let warnings = self
+                    .prior_diagnostics
+                    .take()
+                    .map(|diagnostics| diagnostics.take_diagnostics())
+                    .unwrap_or_default();
+                CompilerMessages::from_diagnostic_with_warnings(
+                    diagnostic,
+                    warnings,
+                    self.string_table,
+                )
             }
             HirConstructionFailure::Infrastructure(error) => {
                 CompilerMessages::from_error_ref(error, self.string_table)
@@ -414,6 +429,12 @@ impl<'a> HirBuilder<'a> {
         frozen_identity_handle: Option<FrozenIdentityHandle>,
     ) {
         self.frozen_identity_handle = frozen_identity_handle;
+    }
+    pub(crate) fn set_prior_diagnostics(
+        &mut self,
+        prior_diagnostics: Option<&'a mut DiagnosticBag>,
+    ) {
+        self.prior_diagnostics = prior_diagnostics;
     }
 
     /// Installs the shared module resource table captured by the lowering entry point.

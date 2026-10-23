@@ -20,7 +20,8 @@ use super::store::{DiagnosticId, DiagnosticStore};
 #[cfg(test)]
 use super::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::compiler_errors::{
-    BoundaryFailure, CompilerMessages, InfrastructureErrors, RenderPathContext, RenderSourceContext,
+    BoundaryFailure, CompilerError, CompilerMessages, InfrastructureErrors, RenderPathContext,
+    RenderSourceContext,
 };
 use crate::compiler_frontend::compiler_messages::diagnostic_types::{
     type_display_snapshot::TypeDisplaySnapshot,
@@ -34,9 +35,11 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
-use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase};
+use crate::compiler_frontend::source::{
+    FrozenIdentityHandle, SourceDatabase, SourceId, SourceSpan,
+};
 use crate::compiler_frontend::symbols::path_interner::{
-    PathIdRemap, PathInternError, PathInternerBuilder,
+    PathId, PathIdRemap, PathInternError, PathInternerBuilder,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use std::ops::Range;
@@ -63,10 +66,25 @@ impl PreparedDiagnostic {
             .severity
             .resolve(self.draft.core.family.default_severity())
     }
+    pub(crate) fn append_type_paths(&self, paths: &mut Vec<PathId>) {
+        self.types.required_paths(paths);
+    }
 
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.draft.remap_string_ids(remap);
         self.types.remap_string_ids(remap);
+    }
+    pub(crate) fn rebind_source_ids(
+        &mut self,
+        rebind: &mut impl FnMut(SourceId) -> Result<SourceId, CompilerError>,
+    ) -> Result<(), CompilerError> {
+        rebind_source_span(&mut self.draft.core.span, rebind)?;
+        if let Some(extra) = self.draft.extra.as_deref_mut() {
+            for label in &mut extra.labels {
+                rebind_source_span(&mut label.span, rebind)?;
+            }
+        }
+        Ok(())
     }
 
     #[cfg(feature = "data_layout_memory_probe")]
@@ -89,6 +107,15 @@ impl PreparedDiagnostic {
     pub(crate) fn set_explicit_path(&mut self, explicit_path: Option<usize>) {
         self.explicit_path = explicit_path;
     }
+}
+fn rebind_source_span(
+    span: &mut Option<SourceSpan>,
+    rebind: &mut impl FnMut(SourceId) -> Result<SourceId, CompilerError>,
+) -> Result<(), CompilerError> {
+    if let Some(span) = span {
+        *span = SourceSpan::new(rebind(span.source())?, span.local());
+    }
+    Ok(())
 }
 
 /// One compacted diagnostic, with the store and the type snapshot that its record reads from.

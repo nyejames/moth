@@ -599,6 +599,7 @@ impl<'a> CompilerFrontend<'a> {
             module_resources,
             capacity_estimate,
             None,
+            None,
         )
     }
 
@@ -609,6 +610,7 @@ impl<'a> CompilerFrontend<'a> {
         module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
         capacity_estimate: FrontendArenaCapacityEstimate,
         frozen_identity_handle: Option<&FrozenIdentityHandle>,
+        prior_diagnostics: Option<&mut DiagnosticBag>,
     ) -> Result<HirLoweringResult, AstDiagnosticFailure> {
         let static_if_function_provenance = ast.static_if_function_provenance.clone();
         let mut result = lower_module_with_owner(
@@ -620,6 +622,7 @@ impl<'a> CompilerFrontend<'a> {
             capacity_estimate,
             self.external_package_registry.as_ref(),
             frozen_identity_handle,
+            prior_diagnostics,
         )?;
         for (function_path, provenance) in static_if_function_provenance {
             let Some(function_id) = result.hir_module.functions.iter().find_map(|function| {
@@ -656,7 +659,7 @@ impl<'a> CompilerFrontend<'a> {
         &mut self,
         hir_module: &HirModule,
         type_environment: &TypeEnvironment,
-        prior_diagnostics_require_path_table: bool,
+        prior_diagnostics: &mut DiagnosticBag,
         frozen_identity_handle: Option<&FrozenIdentityHandle>,
     ) -> Result<BorrowCheckReport, AstDiagnosticFailure> {
         match run_borrow_checker(
@@ -667,24 +670,29 @@ impl<'a> CompilerFrontend<'a> {
         ) {
             Ok(report) => Ok(report),
             Err(BorrowCheckError::Diagnostic(mut diagnostic)) => {
-                let mut required_paths = Vec::new();
-                diagnostic
-                    .payload
-                    .required_path_payload_paths(&mut required_paths);
-                let path_table_is_available =
-                    prior_diagnostics_require_path_table || !required_paths.is_empty();
-                let path_table =
-                    path_table_is_available.then(|| Arc::new(self.path_fork.snapshot_table()));
                 if let Some(handle) = frozen_identity_handle {
                     diagnostic.attach_frozen_identity_handle_if_missing(handle.clone());
                 }
-                let batch = PreparedDiagnosticBatch::capture_from_bag(
-                    DiagnosticBag::from(diagnostic),
+                let mut diagnostics = prior_diagnostics
+                    .take_diagnostics()
+                    .into_iter()
+                    .map(|mut warning| {
+                        if let Some(handle) = frozen_identity_handle {
+                            warning.attach_frozen_identity_handle_if_missing(handle.clone());
+                        }
+                        warning
+                    })
+                    .collect::<Vec<_>>();
+                diagnostics.push(diagnostic);
+                // Borrow and preceding warning payloads carry no type-display facts, so only a
+                // rendered path payload retains the issuing fork's snapshot.
+                let batch = PreparedDiagnosticBatch::capture_with_required_paths(
+                    DiagnosticBag::from_diagnostics(diagnostics),
                     std::mem::take(&mut self.string_table),
                     Some(type_environment),
-                    path_table_is_available,
-                    path_table,
-                );
+                    || Some(Arc::new(self.path_fork.snapshot_table())),
+                )
+                .map_err(AstDiagnosticFailure::from)?;
                 Err(AstDiagnosticFailure::Prepared(batch))
             }
             Err(BorrowCheckError::Infrastructure(error)) => Err(AstDiagnosticFailure::from(*error)),

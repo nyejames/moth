@@ -88,6 +88,34 @@ fn config_failure_boundary(failure: ConfigCompilationFailure) -> BoundaryFailure
                 messages,
             )
         }
+        ConfigCompilationFailure::Premerge(failure) => {
+            let mut accumulator =
+                crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator::new();
+            match failure {
+                crate::compiler_frontend::compiler_messages::PremergeFailure::Diagnosed(batch) => {
+                    accumulator.append_prepared(batch, None);
+                }
+                crate::compiler_frontend::compiler_messages::PremergeFailure::Infrastructure(
+                    errors,
+                ) => {
+                    let mut messages = CompilerMessages::empty(StringTable::new());
+                    messages.append_infrastructure_errors(errors);
+                    accumulator.append(messages);
+                }
+                crate::compiler_frontend::compiler_messages::PremergeFailure::Mixed {
+                    batch,
+                    error,
+                } => {
+                    accumulator.append_prepared(batch, None);
+                    let mut messages = CompilerMessages::empty(StringTable::new());
+                    messages.append_infrastructure_errors(error);
+                    accumulator.append(messages);
+                }
+            }
+            accumulator.finish(
+                crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode::Unfrozen,
+            )
+        }
     }
 }
 

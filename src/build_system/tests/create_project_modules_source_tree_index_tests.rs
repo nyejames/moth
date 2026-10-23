@@ -1,4 +1,68 @@
 use super::*;
+use crate::compiler_frontend::compiler_errors::BoundaryFailure;
+use crate::compiler_frontend::compiler_messages::PremergeFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+    InvalidConfigCode, InvalidConfigView,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReport;
+use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
+
+fn diagnosed_boundary(failure: PremergeFailure) -> BoundaryFailure {
+    let PremergeFailure::Diagnosed(batch) = failure else {
+        panic!("expected a diagnosed source-tree failure, got {failure:?}");
+    };
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, None);
+    accumulator.finish(InstallMode::Unfrozen)
+}
+
+fn first_invalid_config(failure: &BoundaryFailure) -> (&DiagnosticReport, DiagnosticView<'_>) {
+    let (report, diagnostic) = failure
+        .reports
+        .iter_severity(crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error)
+        .next()
+        .expect("source-tree failure should retain its diagnostic");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-CONFIG-0001");
+    diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("source-tree failure should retain typed config facts");
+    (report, diagnostic)
+}
+
+fn assert_source_file_folder_collision(failure: PremergeFailure) {
+    let boundary = diagnosed_boundary(failure);
+    let (_, diagnostic) = first_invalid_config(&boundary);
+    assert_eq!(
+        diagnostic
+            .family_view::<InvalidConfigView>()
+            .expect("config failure should retain typed facts")
+            .reason,
+        InvalidConfigCode::SourceFileFolderCollision
+    );
+}
+
+fn assert_multiple_module_roots(failure: PremergeFailure, expected_directory: &Path) {
+    let boundary = diagnosed_boundary(failure);
+    let (report, diagnostic) = first_invalid_config(&boundary);
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("config failure should retain typed facts");
+    assert_eq!(facts.reason, InvalidConfigCode::MultipleModuleRootFiles);
+
+    let strings = diagnostic.string_ids();
+    assert_eq!(
+        strings.len(),
+        3,
+        "directory plus two candidates should be retained"
+    );
+    assert_eq!(
+        report.context().strings().resolve(strings[0]),
+        expected_directory.display().to_string()
+    );
+}
+
 #[test]
 fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
@@ -196,12 +260,7 @@ fn source_tree_index_detects_collision_in_non_skipped_directory() {
         &mut string_table,
     )
     .expect_err("non-skipped bst/folder collision should be rejected");
-    let messages = failure.into_messages(&string_table);
-
-    assert!(matches!(
-        first_invalid_config_reason(&messages),
-        InvalidConfigReason::SourceFileFolderCollision { .. }
-    ));
+    assert_source_file_folder_collision(failure);
 }
 
 #[test]
@@ -267,12 +326,7 @@ fn bounded_module_roots_for_single_file_rejects_dependency_name_collisions() {
         &mut string_table,
     )
     .expect_err("single-file normal module roots should reject real dependency-name collisions");
-    let messages = failure.into_messages(&string_table);
-
-    assert!(matches!(
-        first_invalid_config_reason(&messages),
-        InvalidConfigReason::SourceFileFolderCollision { .. }
-    ));
+    assert_source_file_folder_collision(failure);
 }
 
 #[test]
@@ -302,19 +356,5 @@ fn source_tree_index_rejects_duplicate_normal_module_root_files() {
         &mut string_table,
     )
     .expect_err("a module directory may contain only one normal module root");
-    let messages = failure.into_messages(&string_table);
-
-    let reason = first_invalid_config_reason(&messages);
-    let InvalidConfigReason::MultipleModuleRootFiles {
-        directory,
-        candidates,
-    } = reason
-    else {
-        panic!("expected duplicate module root diagnostic, got {reason:?}");
-    };
-    assert_eq!(
-        messages.string_table.resolve(*directory),
-        fs::canonicalize(&entry_root).unwrap().display().to_string()
-    );
-    assert_eq!(candidates.len(), 2);
+    assert_multiple_module_roots(failure, &fs::canonicalize(&entry_root).unwrap());
 }

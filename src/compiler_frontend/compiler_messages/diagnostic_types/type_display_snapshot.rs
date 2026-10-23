@@ -206,6 +206,22 @@ fn decode_fixed_scalar(word: u32) -> FixedScalar {
 }
 
 impl TypeDisplaySnapshot {
+    /// Appends every path needed to render the captured type spellings.
+    pub(crate) fn required_paths(&self, paths: &mut Vec<PathId>) {
+        paths.extend(
+            self.records
+                .iter()
+                .filter(|record| record.tag == DiagnosticTypeTag::Struct)
+                .map(|record| decode_path(record.data_0)),
+        );
+        paths.extend(self.choices.iter().map(|choice| choice.path));
+        paths.extend(
+            self.generic_instances
+                .iter()
+                .filter_map(|instance| instance.base_path),
+        );
+    }
+
     /// Renders the spelling of `type_id`. The result matches `display_type` for the live type.
     pub(crate) fn display(
         &self,

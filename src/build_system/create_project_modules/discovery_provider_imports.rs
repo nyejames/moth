@@ -144,7 +144,7 @@ fn invoke_provider_and_record_resolution(
 
         provider
             .resolve_external_import(provider_request, &mut context)
-            .map_err(SourceDiscoveryError::from)?
+            .map_err(SourceDiscoveryError::Premerge)?
     };
 
     if let Some(resolved) = result {

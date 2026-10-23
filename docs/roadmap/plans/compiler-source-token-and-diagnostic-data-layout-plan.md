@@ -109,9 +109,16 @@ ACTIVE_PLAN:
   checklists remain the acceptance contract. Only their order and grouping changed, under the
   architecture document's repository-discovered corrections rule.
 - NEXT_SUBSTEP: P4.5 slice S6 of `PHASE_4_5_SEQUENCE`, owning-site type capture, at sub-slice
-  S6f: retype the remaining type-free `PremergeFailure` producers to prepared batches, then
-  delete `PremergeDiagnosticBatch`, `RenderTypeContext` and the unresolved type-display
-  fallbacks. S6c–S6e are accepted in "Phase 4 P4.5 S6c-S6e: HIR, borrow, convergence and
+  S6f2: delete `RenderTypeContext`, live type-environment rendering and the transitional
+  unresolved type-display fallbacks; the captured `TypeId(N)` spelling for owners without an
+  environment or path table stays. S6f1 is accepted in "Phase 4 P4.5 S6f1: premerge failures
+  carry prepared batches": `PremergeFailure::{Diagnosed, Mixed}` carry
+  `PreparedDiagnosticBatch`, every producer captures at its site
+  (`capture_with_required_paths` retains the issuing fork's snapshot only for rendered-path
+  payloads, `capture_with_required_paths_and_types` also for typed owners), and
+  `PremergeDiagnosticBatch`, `from_premerge` and `classify_module_messages` are deleted. The
+  provider trait's failure type is now `PremergeFailure`. S6c–S6e are accepted in "Phase 4 P4.5
+  S6c-S6e: HIR, borrow, convergence and
   success warnings capture at their owners": `HirBuilder`, the borrow checker, private failure
   lane convergence and builtin-boundary validation capture against their borrowed type
   environment and return `AstDiagnosticFailure::Prepared`; published successful-module warnings

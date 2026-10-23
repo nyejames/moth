@@ -15,7 +15,7 @@ use crate::compiler_frontend::build_config::{
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidDependencyClauseReason, PremergeDiagnosticBatch, PremergeFailure,
+    CompilerDiagnostic, DiagnosticBag, InvalidDependencyClauseReason, PremergeFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
@@ -80,7 +80,7 @@ enum DirectoryModuleTaskOutcome {
     Blocked,
     Infrastructure(Box<InfrastructureErrors>),
     Mixed {
-        batch: PremergeDiagnosticBatch,
+        batch: PreparedDiagnosticBatch,
         error: Box<InfrastructureErrors>,
     },
 }
@@ -624,12 +624,17 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                 // module, so the prepared payload is discarded and no clone is needed.
                 let PreparedModule { mut semantic, .. } = prepared;
                 let table = std::mem::take(&mut semantic.string_table);
-                let batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, table);
-                let outcome =
-                    match PreparedDiagnosticBatch::from_premerge(batch).classify_premerge() {
-                        Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics),
-                        Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error.into()),
-                    };
+                let batch = PreparedDiagnosticBatch::capture_from_bag(
+                    DiagnosticBag::from(diagnostic),
+                    table,
+                    None,
+                    false,
+                    None,
+                );
+                let outcome = match batch.classify_premerge() {
+                    Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics),
+                    Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error.into()),
+                };
                 return DirectoryModuleTaskResult {
                     module_id,
                     string_table_base_len: base_len,
@@ -803,12 +808,10 @@ fn compile_check_only_job(
                 fallback_span,
                 &mut prepared.semantic.string_table,
             ) {
-                PremergeFailure::Diagnosed(batch) => {
-                    match PreparedDiagnosticBatch::from_premerge(batch).classify_premerge() {
-                        Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics),
-                        Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error.into()),
-                    }
-                }
+                PremergeFailure::Diagnosed(batch) => match batch.classify_premerge() {
+                    Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics),
+                    Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error.into()),
+                },
                 PremergeFailure::Infrastructure(error) => {
                     DirectoryModuleTaskOutcome::Infrastructure(error)
                 }
@@ -958,28 +961,13 @@ pub(super) fn check_only_success_batch(
     if warnings.is_empty() {
         return Ok(None);
     }
-    let mut required_paths = Vec::new();
-    for warning in &warnings {
-        warning
-            .payload
-            .required_path_payload_paths(&mut required_paths);
-    }
-    let path_table_is_available = !required_paths.is_empty();
-    let mut premerge_batch =
-        PremergeDiagnosticBatch::from_diagnostics(warnings, module_string_table);
-    let path_table = path_table_is_available.then(|| Arc::new(path_fork.snapshot_table()));
-    if let Some(path_table) = &path_table {
-        premerge_batch.attach_path_table_if_missing(Arc::clone(path_table))?;
-    }
-    let (bag, string_table, _type_contexts, path_contexts) = premerge_batch.into_parts();
-    let path_table = path_contexts.into_iter().next().map(|row| row.path_table);
-    Ok(Some(PreparedDiagnosticBatch::capture_from_bag(
-        bag,
-        string_table,
+    let path_table = || Some(Arc::new(path_fork.snapshot_table()));
+    Ok(Some(PreparedDiagnosticBatch::capture_with_required_paths(
+        DiagnosticBag::from_diagnostics(warnings),
+        module_string_table,
         Some(&module.executable.type_environment),
-        path_table_is_available,
         path_table,
-    )))
+    )?))
 }
 
 #[allow(

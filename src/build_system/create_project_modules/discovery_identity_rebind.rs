@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 pub(super) type SourceIdentityMap = FxHashMap<SourceId, SourceId>;
 
 /// Join traversal-local preparation identities to the final source registrations.
@@ -98,18 +99,11 @@ pub(super) fn rebind_discovery_compiler_error(
 }
 
 pub(super) fn rebind_discovery_batch(
-    batch: PremergeDiagnosticBatch,
+    mut batch: PreparedDiagnosticBatch,
     source_ids: &SourceIdentityMap,
-) -> Result<PremergeDiagnosticBatch, CompilerError> {
-    let (bag, string_table, render_type_contexts, render_path_contexts) = batch.into_parts();
-    let mut diagnostics = bag.into_diagnostics();
-    rebind_discovery_diagnostics(&mut diagnostics, source_ids)?;
-    Ok(PremergeDiagnosticBatch::from_parts(
-        diagnostics,
-        string_table,
-        render_type_contexts,
-        render_path_contexts,
-    ))
+) -> Result<PreparedDiagnosticBatch, CompilerError> {
+    batch.rebind_source_ids(&mut |source_id| final_source_id(source_id, source_ids))?;
+    Ok(batch)
 }
 
 pub(super) fn rebind_discovery_failure(

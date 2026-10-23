@@ -21,8 +21,9 @@ use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
 #[cfg(feature = "boracle")]
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure, SourceSpanCapacityResource,
+    CompilerDiagnostic, DiagnosticBag, PremergeFailure, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
@@ -232,11 +233,14 @@ fn compile_single_file_frontend_with_target(
                     // travels without a path snapshot, because the exhausted table owns no further
                     // PathId to render.
                     return Err(PremergeFailure::Diagnosed(
-                        PremergeDiagnosticBatch::from_diagnostic(
-                            CompilerDiagnostic::source_table_capacity(
+                        PreparedDiagnosticBatch::capture_from_bag(
+                            DiagnosticBag::from(CompilerDiagnostic::source_table_capacity(
                                 SourceSpanCapacityResource::LogicalPath,
-                            ),
+                            )),
                             std::mem::take(string_table),
+                            None,
+                            false,
+                            None,
                         ),
                     )
                     .into());
@@ -253,13 +257,12 @@ fn compile_single_file_frontend_with_target(
 
         // Move the local string table and path identity into the diagnosed lane. Discovery aborts
         // before a source database exists, so the path snapshot must travel with the diagnostic.
-        let table = std::mem::take(string_table);
-        let mut batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, table);
-        if let Err(error) =
-            batch.attach_path_table_if_missing(Arc::new(discovery_path_fork.snapshot_table()))
-        {
-            return Err(PremergeFailure::Infrastructure(error.into()).into());
-        }
+        let batch = PreparedDiagnosticBatch::capture_with_required_paths(
+            DiagnosticBag::from(diagnostic),
+            std::mem::take(string_table),
+            None,
+            || Some(Arc::new(discovery_path_fork.snapshot_table())),
+        )?;
         return Err(PremergeFailure::Diagnosed(batch).into());
     }
 

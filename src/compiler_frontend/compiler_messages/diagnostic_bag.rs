@@ -1,23 +1,15 @@
-//! Local diagnostic accumulator and premerge batch owner.
+//! Local diagnostic accumulator for owning-site capture.
 //!
-//! WHAT: `DiagnosticBag` stores diagnostics emitted by a stage before a build or render
-//! boundary packages them into `CompilerMessages`. `PremergeDiagnosticBatch` additionally owns the
-//! file-local `StringTable` and any local render type-context ranges so a diagnosed file result can
-//! cross the preparation boundary as one move-only owner without constructing `CompilerMessages`
-//! early.
-//! WHY: file stages must not build the final boundary vessel; later module aggregation owns
-//! the single merge into `CompilerMessages`. Both owners are move-only so a diagnostic can
-//! never be observed through two owners at once.
+//! WHAT: `DiagnosticBag` stores diagnostics emitted by a stage before its owner captures them in
+//! a `PreparedDiagnosticBatch`.
+//! WHY: stages can accumulate diagnostics without constructing `CompilerMessages`; the prepared
+//! batch owns frozen diagnostic facts and the identity tables needed by the final boundary.
 
-use super::compiler_errors::{
-    CompilerError, CompilerMessages, InfrastructureErrors, RenderPathContext, RenderTypeContext,
-};
-use super::diagnostics::freeze::InstallMode;
+use super::compiler_errors::{CompilerError, InfrastructureErrors};
+use super::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
-use crate::compiler_frontend::source::SourceDatabase;
-use crate::compiler_frontend::symbols::path_interner::{PathIdRemap, PathTable};
-use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
-use std::sync::Arc;
+use crate::compiler_frontend::symbols::path_interner::PathIdRemap;
+use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 
 #[derive(Debug, Default, PartialEq)]
 pub(crate) struct DiagnosticBag {
@@ -76,26 +68,24 @@ impl DiagnosticBag {
         &self.diagnostics
     }
 
-    pub(crate) fn take_diagnostics(&mut self) -> Vec<CompilerDiagnostic> {
-        std::mem::take(&mut self.diagnostics)
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        for diagnostic in &mut self.diagnostics {
+            diagnostic.remap_path_ids(remap);
+        }
     }
 
-    pub(crate) fn into_diagnostics(self) -> Vec<CompilerDiagnostic> {
-        self.diagnostics
-    }
-
-    /// Remap every interned string owned by the bagged diagnostics into the merged table.
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         for diagnostic in &mut self.diagnostics {
             diagnostic.remap_string_ids(remap);
         }
     }
 
-    /// Remap every complete path identity owned by the bag into the merged path table.
-    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
-        for diagnostic in &mut self.diagnostics {
-            diagnostic.remap_path_ids(remap);
-        }
+    pub(crate) fn take_diagnostics(&mut self) -> Vec<CompilerDiagnostic> {
+        std::mem::take(&mut self.diagnostics)
+    }
+
+    pub(crate) fn into_diagnostics(self) -> Vec<CompilerDiagnostic> {
+        self.diagnostics
     }
 }
 
@@ -105,45 +95,24 @@ impl From<CompilerDiagnostic> for DiagnosticBag {
     }
 }
 
-/// Move-only premerge owner for one diagnosed file result.
+/// Shared prepared failure lane preserving diagnosed vs infrastructure outcomes.
 ///
-/// WHAT: owns the file's diagnostics as a `DiagnosticBag` plus the file-local `StringTable`
-/// that issued their interned ids, and any local render type-context ranges the producer
-/// already attached for later module aggregation. File-stage producers carry no type
-/// contexts yet, so the range list starts empty and only shifts through prepend/append.
-/// WHY: the diagnosed file result must cross the preparation boundary as a single owner
-/// without constructing the final `CompilerMessages` vessel. Source snapshots stay with
-/// the final source owner and attach only at the render boundary, so this batch never
-/// carries source contexts.
+/// WHAT: carries prepared diagnosed facts, an owned infrastructure aggregate, or both when source
+/// finalization races a semantic failure.
+/// WHY: owning sites capture diagnostics before they leave the type/path context that produced
+/// them; only the final boundary assembles source ownership and freezes reports.
 #[derive(Debug)]
-pub(crate) struct PremergeDiagnosticBatch {
-    bag: DiagnosticBag,
-    string_table: StringTable,
-    render_type_contexts: Vec<RenderTypeContext>,
-    render_path_contexts: Vec<RenderPathContext>,
-}
-
-/// Shared premerge failure lane preserving diagnosed vs infrastructure outcomes.
-///
-/// WHAT: carries a move-only diagnosed [`PremergeDiagnosticBatch`], an owned infrastructure
-/// aggregate, or both when source finalization races a semantic failure. The mixed form keeps
-/// the diagnosed batch authoritative for user output while preserving every operational cause
-/// on the outer lane. Infrastructure aggregates are boxed to keep the common failure lane small.
-/// WHY: premerge producers must return one lane that keeps authored-source rejection
-/// separate from malformed retained state; the final merge boundary owns the single
-/// conversion into `CompilerMessages`.
-#[derive(Debug)]
-pub(crate) enum PremergeFailure {
-    Diagnosed(PremergeDiagnosticBatch),
+pub enum PremergeFailure {
+    Diagnosed(PreparedDiagnosticBatch),
     Infrastructure(Box<InfrastructureErrors>),
     Mixed {
-        batch: PremergeDiagnosticBatch,
+        batch: PreparedDiagnosticBatch,
         error: Box<InfrastructureErrors>,
     },
 }
 
-impl From<PremergeDiagnosticBatch> for PremergeFailure {
-    fn from(batch: PremergeDiagnosticBatch) -> Self {
+impl From<PreparedDiagnosticBatch> for PremergeFailure {
+    fn from(batch: PreparedDiagnosticBatch) -> Self {
         Self::Diagnosed(batch)
     }
 }
@@ -151,260 +120,5 @@ impl From<PremergeDiagnosticBatch> for PremergeFailure {
 impl From<CompilerError> for PremergeFailure {
     fn from(error: CompilerError) -> Self {
         Self::Infrastructure(error.into())
-    }
-}
-
-impl PremergeFailure {
-    /// Attach a path table when a diagnosed batch still has a render-time path consumer.
-    ///
-    /// Infrastructure failures have no diagnostics or type contexts, so attaching remains a
-    /// harmless no-op. Diagnosed batches with no rendered path payload and no type context also
-    /// discard a supplied table rather than retaining incidental foreign-domain state.
-    pub(crate) fn attach_path_table_if_missing(
-        &mut self,
-        path_table: Arc<PathTable>,
-    ) -> Result<(), CompilerError> {
-        match self {
-            Self::Diagnosed(batch) => batch.attach_path_table_if_missing(path_table),
-            Self::Infrastructure(_) => Ok(()),
-            Self::Mixed { batch, .. } => batch.attach_path_table_if_missing(path_table),
-        }
-    }
-
-    /// Convert the premerge lane into the final boundary vessel exactly once.
-    ///
-    /// WHAT: moves a diagnosed batch into `CompilerMessages`, carries every infrastructure cause
-    /// on the outer lane, or carries both for a mixed double-failure, without cloning diagnostics
-    /// or infrastructure causes.
-    /// WHY: only true final build/package/check/benchmark boundaries own this conversion;
-    /// intermediate stages return the failure lane itself so `StringId` remap and source
-    /// attachment each happen exactly once at the merge boundary.
-    pub(crate) fn into_messages(self, string_table: &StringTable) -> CompilerMessages {
-        match self {
-            Self::Diagnosed(batch) => batch.into_messages(),
-            Self::Infrastructure(errors) => {
-                let mut messages = CompilerMessages::empty(string_table.clone());
-                messages.append_infrastructure_errors(errors);
-                messages
-            }
-            Self::Mixed { batch, error } => {
-                let mut messages = batch.into_messages();
-                messages.append_infrastructure_errors(error);
-                messages
-            }
-        }
-    }
-
-    /// Convert the lane into the final vessel and attach the finalized source database.
-    ///
-    /// WHAT: builds the message set as [`Self::into_messages`] then attaches `source_database`
-    /// as the render source context for every diagnostic.
-    /// WHY: discovery/preparation failures carry no source contexts; the final owner that just
-    /// finished the source tables attaches them once here instead of at every intermediate site.
-    pub(crate) fn into_messages_with_source(
-        self,
-        string_table: &StringTable,
-        source_database: Arc<SourceDatabase>,
-    ) -> CompilerMessages {
-        let mut messages = self.into_messages(string_table);
-        messages.set_source_database(source_database);
-        messages
-    }
-}
-
-/// Transitional classifier for AST/HIR APIs that still return `CompilerMessages`.
-///
-/// WHAT: routes a legacy boundary vessel through the premerge classifier in
-/// [`prepared_batch`](super::prepared_batch), keeping its type contexts until the module owner
-/// attaches the final path table.
-/// WHY: direct migration of those public AST/HIR methods is outside this stage-handoff slice.
-/// New orchestration wrappers classify immediately and carry `PremergeFailure` upward without
-/// rebuilding a second vessel. Warning companions of infrastructure failures are discarded by
-/// the classifier because the typed lane aborts the owning compilation.
-impl From<super::compiler_errors::CompilerMessages> for PremergeFailure {
-    fn from(messages: super::compiler_errors::CompilerMessages) -> Self {
-        match super::prepared_batch::classify_module_messages(messages) {
-            Ok(batch) => Self::Diagnosed(batch),
-            Err(errors) => Self::Infrastructure(errors),
-        }
-    }
-}
-impl PremergeDiagnosticBatch {
-    /// Rebuild a batch from already-merged diagnostics, table and type contexts.
-    ///
-    pub(crate) fn from_parts(
-        diagnostics: Vec<CompilerDiagnostic>,
-        string_table: StringTable,
-        render_type_contexts: Vec<RenderTypeContext>,
-        render_path_contexts: Vec<RenderPathContext>,
-    ) -> Self {
-        Self {
-            bag: DiagnosticBag::from_diagnostics(diagnostics),
-            string_table,
-            render_type_contexts,
-            render_path_contexts,
-        }
-    }
-
-    pub(crate) fn new(bag: DiagnosticBag, string_table: StringTable) -> Self {
-        Self {
-            bag,
-            string_table,
-            render_type_contexts: Vec::new(),
-            render_path_contexts: Vec::new(),
-        }
-    }
-
-    pub(crate) fn from_bag(bag: DiagnosticBag, string_table: StringTable) -> Self {
-        Self::new(bag, string_table)
-    }
-
-    pub(crate) fn from_diagnostic(
-        diagnostic: CompilerDiagnostic,
-        string_table: StringTable,
-    ) -> Self {
-        Self::new(DiagnosticBag::from(diagnostic), string_table)
-    }
-
-    pub(crate) fn from_diagnostics(
-        diagnostics: Vec<CompilerDiagnostic>,
-        string_table: StringTable,
-    ) -> Self {
-        Self::new(DiagnosticBag::from_diagnostics(diagnostics), string_table)
-    }
-
-    /// Attach one complete path identity snapshot to this batch when a renderer consumes paths.
-    ///
-    /// A caller-supplied table is retained only for diagnostics with direct rendered path
-    /// payloads or for a type-render context whose nominal names resolve through the table.
-    /// Path-free diagnostics without type contexts retain nothing. When retention is required,
-    /// pairing validates every payload path and ancestor it renders and every non-root node in
-    /// the table, because later aggregation remaps the complete retained table. Missing required
-    /// paths or components outside the batch's string domain return a typed `CompilerError`.
-    /// Same-index ownership across foreign domains is not detectable from bare tables; the
-    /// provider/materialisation boundary retains each table with its source `FrozenStringTable`
-    /// and rebases by spelling.
-    pub(crate) fn attach_path_table_if_missing(
-        &mut self,
-        path_table: Arc<PathTable>,
-    ) -> Result<(), CompilerError> {
-        if self.bag.diagnostics.is_empty() || !self.render_path_contexts.is_empty() {
-            return Ok(());
-        }
-
-        let mut required_paths = Vec::new();
-        for diagnostic in &self.bag.diagnostics {
-            diagnostic
-                .payload
-                .required_path_payload_paths(&mut required_paths);
-        }
-        if required_paths.is_empty() && self.render_type_contexts.is_empty() {
-            return Ok(());
-        }
-
-        if let Some(index) = super::compiler_errors::unpaired_path_table_component_index(
-            &path_table,
-            &self.string_table,
-            &required_paths,
-        ) {
-            return Err(CompilerError::compiler_error(format!(
-                "diagnostic path table is not pairable with this batch's string table: path node \
-                 {index} is unaddressable or carries a component StringId the batch cannot \
-                 resolve"
-            )));
-        }
-
-        self.render_path_contexts.push(RenderPathContext {
-            diagnostic_range: 0..self.bag.diagnostics.len(),
-            path_table,
-        });
-        Ok(())
-    }
-    /// WHAT: moves the incoming diagnostics in front of this batch and shifts each retained type
-    ///       context by their count.
-    /// WHY: preparation warnings are collected before a later diagnosed batch; moving them here
-    /// keeps authored order and avoids cloning diagnostics or their interned IDs.
-    pub(crate) fn prepend_diagnostics(
-        &mut self,
-        prior_diagnostics: impl IntoIterator<Item = CompilerDiagnostic>,
-    ) {
-        let mut prior_diagnostics = prior_diagnostics.into_iter().collect::<Vec<_>>();
-        let shift = prior_diagnostics.len();
-
-        if shift == 0 {
-            return;
-        }
-
-        prior_diagnostics.append(&mut self.bag.diagnostics);
-        self.bag.diagnostics = prior_diagnostics;
-
-        for type_context in &mut self.render_type_contexts {
-            type_context.diagnostic_range.start += shift;
-            type_context.diagnostic_range.end += shift;
-        }
-        for path_context in &mut self.render_path_contexts {
-            path_context.diagnostic_range.start += shift;
-            path_context.diagnostic_range.end += shift;
-        }
-    }
-
-    /// Remap every interned string owned by this batch into the merged global table.
-    ///
-    /// WHAT: remaps the bagged diagnostics and every retained type environment.
-    /// WHY: per-file preparation uses local tables; merging them into the module table
-    /// requires shifting every `StringId` so later stages resolve through one table.
-    #[allow(dead_code)]
-    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.bag.remap_string_ids(remap);
-        for context in &mut self.render_type_contexts {
-            context.type_environment.remap_string_ids(remap);
-        }
-        for context in &mut self.render_path_contexts {
-            Arc::make_mut(&mut context.path_table).remap_string_ids(remap);
-        }
-    }
-
-    /// Remap every complete path identity owned by this batch after its path fork merges.
-    #[allow(dead_code)]
-    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
-        self.bag.remap_path_ids(remap);
-    }
-
-    /// Consume the batch into its owned parts for the final merge boundary.
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        DiagnosticBag,
-        StringTable,
-        Vec<RenderTypeContext>,
-        Vec<RenderPathContext>,
-    ) {
-        (
-            self.bag,
-            self.string_table,
-            self.render_type_contexts,
-            self.render_path_contexts,
-        )
-    }
-
-    /// Consume the batch into the final boundary vessel, preserving type-context ranges.
-    ///
-    /// WHAT: moves the owned diagnostics, string table and render type contexts into
-    /// `CompilerMessages` with no source contexts attached.
-    /// WHY: this is the single vessel construction for a premerge batch; the final owner
-    /// attaches its finalized source database afterwards so each diagnostic keeps exactly one
-    /// source association.
-    pub(crate) fn into_messages(self) -> CompilerMessages {
-        let (bag, string_table, render_type_contexts, render_path_contexts) = self.into_parts();
-        CompilerMessages {
-            diagnostics: bag.into_diagnostics(),
-            infrastructure_errors: None,
-            string_table: Box::new(string_table),
-            install_mode: InstallMode::Unfrozen,
-            render_source_contexts: Vec::new(),
-            render_type_contexts,
-            render_path_contexts: (!render_path_contexts.is_empty())
-                .then(|| render_path_contexts.into_boxed_slice()),
-        }
     }
 }

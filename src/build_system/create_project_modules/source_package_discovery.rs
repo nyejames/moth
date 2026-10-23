@@ -10,8 +10,9 @@
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::{ProvidedSourceRoot, SourceFileKindRegistry, SourcePackageRegistry};
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    InvalidConfigReason, PremergeDiagnosticBatch, PremergeFailure,
+    DiagnosticBag, InvalidConfigReason, PremergeFailure,
 };
 use crate::compiler_frontend::project_globals::PROJECT_GLOBALS_DEPENDENCY_NAME;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
@@ -114,7 +115,13 @@ pub(crate) fn build_source_package_boundary_indexes(
                 project_structure_diagnostic(InvalidConfigReason::ProjectGlobalsNameReserved);
             let table = std::mem::take(string_table);
             return Err(PremergeFailure::Diagnosed(
-                PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
+                PreparedDiagnosticBatch::capture_from_bag(
+                    DiagnosticBag::from(diagnostic),
+                    table,
+                    None,
+                    false,
+                    None,
+                ),
             ));
         }
 

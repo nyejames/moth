@@ -31,10 +31,12 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeIdentity, CanonicalTypeProjectionContext, NominalOriginResolver,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
+use crate::compiler_frontend::compiler_messages::prepared_batch::{
+    AstDiagnosticFailure, PreparedDiagnosticBatch,
+};
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticBag, DiagnosticKind,
-    InvalidConfigReason, RuleDiagnosticKind, SourceSpanCapacityResource,
+    InvalidConfigReason, PremergeFailure, RuleDiagnosticKind, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
@@ -103,11 +105,12 @@ pub(crate) struct CompiledConfigSource {
     pub(crate) project_field_dependencies: Vec<FoldedConfigProjectFieldDependency>,
 }
 
-/// A config failure may still be owned by the legacy boundary, or may carry AST's prepared lane.
+/// A config failure may be owned by the legacy boundary, an AST stage, or a prepared premerge stage.
 #[derive(Debug)]
 pub(crate) enum ConfigCompilationFailure {
     Legacy(CompilerMessages),
     Ast(AstDiagnosticFailure),
+    Premerge(PremergeFailure),
 }
 
 impl From<CompilerMessages> for ConfigCompilationFailure {
@@ -119,6 +122,12 @@ impl From<CompilerMessages> for ConfigCompilationFailure {
 impl From<AstDiagnosticFailure> for ConfigCompilationFailure {
     fn from(failure: AstDiagnosticFailure) -> Self {
         Self::Ast(failure)
+    }
+}
+
+impl From<PremergeFailure> for ConfigCompilationFailure {
+    fn from(failure: PremergeFailure) -> Self {
+        Self::Premerge(failure)
     }
 }
 /// The semantic config result plus the source-local span owner produced while compiling it.
@@ -273,14 +282,21 @@ fn compile_prepared_config_source(
         path_fork,
     )
     .map_err(|failure| match failure {
-        HeaderPreparationFailure::Diagnosed(bag) => CompilerMessages::from_diagnostics(
-            classify_header_diagnostics(bag, request.file_id),
-            string_table.clone(),
-        ),
+        HeaderPreparationFailure::Diagnosed(bag) => {
+            match PreparedDiagnosticBatch::capture_with_required_paths(
+                DiagnosticBag::from_diagnostics(classify_header_diagnostics(bag, request.file_id)),
+                string_table.clone(),
+                None,
+                || Some(std::sync::Arc::new(path_fork.snapshot_table())),
+            ) {
+                Ok(batch) => ConfigCompilationFailure::Ast(AstDiagnosticFailure::Prepared(batch)),
+                Err(error) => ConfigCompilationFailure::Ast(AstDiagnosticFailure::Infrastructure(
+                    error.into(),
+                )),
+            }
+        }
         HeaderPreparationFailure::Infrastructure(errors) => {
-            let mut messages = CompilerMessages::empty(string_table.clone());
-            messages.append_infrastructure_errors(errors);
-            messages
+            ConfigCompilationFailure::Ast(AstDiagnosticFailure::Infrastructure(errors))
         }
     })?;
     let bound_headers = bind_module_headers(
@@ -294,14 +310,21 @@ fn compile_prepared_config_source(
         path_fork,
     )
     .map_err(|failure| match failure {
-        HeaderPreparationFailure::Diagnosed(bag) => CompilerMessages::from_diagnostics(
-            classify_header_diagnostics(bag, request.file_id),
-            string_table.clone(),
-        ),
+        HeaderPreparationFailure::Diagnosed(bag) => {
+            match PreparedDiagnosticBatch::capture_with_required_paths(
+                DiagnosticBag::from_diagnostics(classify_header_diagnostics(bag, request.file_id)),
+                string_table.clone(),
+                None,
+                || Some(std::sync::Arc::new(path_fork.snapshot_table())),
+            ) {
+                Ok(batch) => ConfigCompilationFailure::Ast(AstDiagnosticFailure::Prepared(batch)),
+                Err(error) => ConfigCompilationFailure::Ast(AstDiagnosticFailure::Infrastructure(
+                    error.into(),
+                )),
+            }
+        }
         HeaderPreparationFailure::Infrastructure(errors) => {
-            let mut messages = CompilerMessages::empty(string_table.clone());
-            messages.append_infrastructure_errors(errors);
-            messages
+            ConfigCompilationFailure::Ast(AstDiagnosticFailure::Infrastructure(errors))
         }
     })?;
 
@@ -312,7 +335,7 @@ fn compile_prepared_config_source(
         string_table,
         path_fork,
     )
-    .map_err(|failure| failure.into_messages(string_table))?;
+    .map_err(ConfigCompilationFailure::from)?;
 
     // Preserve key-name spans before AST consumes the headers. The full header path becomes the
     // declaration ID, so every folded declaration can carry its exact authored name span.

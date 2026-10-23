@@ -9,8 +9,41 @@
 //!      module rather than living in the oversized Stage 0 orchestration test file.
 
 use super::*;
-use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::{DiagnosticSeverity, PremergeFailure};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+
+fn prepared_failure_boundary(failure: PremergeFailure) -> BoundaryFailure {
+    let PremergeFailure::Diagnosed(batch) = failure else {
+        panic!("expected a diagnosed failure, got {failure:?}");
+    };
+    assert!(
+        batch.has_errors(),
+        "expected a user-facing error diagnostic"
+    );
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, None);
+    accumulator.finish(InstallMode::Unfrozen)
+}
+
+fn primary_infrastructure_error(failure: PremergeFailure) -> CompilerError {
+    let PremergeFailure::Infrastructure(errors) = failure else {
+        panic!("expected an infrastructure failure, got {failure:?}");
+    };
+    errors.primary
+}
+
+fn assert_first_boundary_error_code(failure: PremergeFailure, expected_code: &str) {
+    let boundary = prepared_failure_boundary(failure);
+    let (_, diagnostic) = boundary
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("expected a boundary error diagnostic");
+    assert_eq!(diagnostic.descriptor().code, expected_code);
+}
 
 #[cfg(test)]
 fn compile_single_file_for_filesystem_test(
@@ -42,10 +75,8 @@ mod non_utf8_filesystem_identity {
     use std::os::unix::ffi::OsStringExt;
     use std::path::PathBuf;
 
-    fn assert_file_infrastructure_error(messages: &CompilerMessages) {
-        let error = messages
-            .primary_infrastructure_error()
-            .expect("expected an infrastructure file error");
+    fn assert_file_infrastructure_error(failure: PremergeFailure) {
+        let error = primary_infrastructure_error(failure);
         assert_eq!(
             error.error_type,
             ErrorType::File,
@@ -90,9 +121,7 @@ mod non_utf8_filesystem_identity {
             &mut string_table,
         )
         .expect_err("non-UTF-8 file name should be rejected");
-        let messages = failure.into_messages(&string_table);
-
-        assert_file_infrastructure_error(&messages);
+        assert_file_infrastructure_error(failure);
     }
 
     #[test]
@@ -127,9 +156,7 @@ mod non_utf8_filesystem_identity {
             &mut string_table,
         )
         .expect_err("non-UTF-8 folder name should be rejected");
-        let messages = failure.into_messages(&string_table);
-
-        assert_file_infrastructure_error(&messages);
+        assert_file_infrastructure_error(failure);
     }
 
     #[test]
@@ -166,9 +193,7 @@ mod non_utf8_filesystem_identity {
             &mut string_table,
         )
         .expect_err("non-UTF-8 project-root child should be rejected during facade discovery");
-        let messages = failure.into_messages(&string_table);
-
-        assert_file_infrastructure_error(&messages);
+        assert_file_infrastructure_error(failure);
     }
 
     #[test]
@@ -198,9 +223,7 @@ mod non_utf8_filesystem_identity {
             &mut string_table,
         )
         .expect_err("non-UTF-8 name in package boundary traversal should be rejected");
-        let messages = failure.into_messages(&string_table);
-
-        assert_file_infrastructure_error(&messages);
+        assert_file_infrastructure_error(failure);
     }
 
     #[test]
@@ -368,7 +391,10 @@ mod source_package_boundary_indexes_tests {
     use crate::builder_surface::external_import_providers::provider::ExternalFileExtension;
     use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
     use crate::compiler_frontend::compiler_errors::ErrorType;
-    use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidConfigReason};
+    use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+        InvalidConfigCode, InvalidConfigView,
+    };
     #[cfg(unix)]
     use crate::compiler_tests::test_fs::RestrictedDirectory;
     use crate::projects::html_project::external_js::js_import_provider::JsExternalImportProvider;
@@ -399,16 +425,19 @@ mod source_package_boundary_indexes_tests {
         );
     }
 
-    fn assert_invalid_config_reason(
-        messages: &CompilerMessages,
-        matcher: impl Fn(&InvalidConfigReason) -> bool,
-    ) {
+    fn assert_invalid_config_reason(failure: PremergeFailure, expected_reason: InvalidConfigCode) {
+        let boundary = prepared_failure_boundary(failure);
         assert!(
-            messages.error_diagnostics().any(|diagnostic| {
-                matches!(&diagnostic.payload,
-                    DiagnosticPayload::InvalidConfig { reason, .. } if matcher(reason))
-            }),
-            "expected an InvalidConfig diagnostic, got {messages:?}"
+            boundary
+                .reports
+                .iter_severity(DiagnosticSeverity::Error)
+                .any(|(_, diagnostic)| {
+                    diagnostic.descriptor().code == "MOTH-CONFIG-0001"
+                        && diagnostic
+                            .family_view::<InvalidConfigView>()
+                            .is_some_and(|facts| facts.reason == expected_reason)
+                }),
+            "expected the typed config failure {expected_reason:?}",
         );
     }
 
@@ -430,11 +459,7 @@ mod source_package_boundary_indexes_tests {
         let mut string_table = StringTable::new();
         let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("project source-package prefix must remain reserved");
-        let messages = failure.into_messages(&string_table);
-
-        assert_invalid_config_reason(&messages, |reason| {
-            matches!(reason, InvalidConfigReason::ProjectGlobalsNameReserved)
-        });
+        assert_invalid_config_reason(failure, InvalidConfigCode::ProjectGlobalsNameReserved);
     }
 
     #[test]
@@ -502,10 +527,7 @@ mod source_package_boundary_indexes_tests {
         let mut string_table = StringTable::new();
         let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("nonexistent root should fail canonicalization");
-        let messages = failure.into_messages(&string_table);
-        let error = messages
-            .primary_infrastructure_error()
-            .expect("expected an infrastructure file error");
+        let error = primary_infrastructure_error(failure);
         assert_eq!(error.error_type, ErrorType::File);
         assert!(
             error.msg.contains("canonicalize"),
@@ -527,11 +549,7 @@ mod source_package_boundary_indexes_tests {
         let mut string_table = StringTable::new();
         let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("package root without a normal module root should fail boundary indexing");
-        let messages = failure.into_messages(&string_table);
-
-        assert_invalid_config_reason(&messages, |reason| {
-            matches!(reason, InvalidConfigReason::SourcePackageMissingRoot { .. })
-        });
+        assert_invalid_config_reason(failure, InvalidConfigCode::SourcePackageMissingRoot);
     }
 
     #[test]
@@ -548,11 +566,7 @@ mod source_package_boundary_indexes_tests {
         let mut string_table = StringTable::new();
         let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("a support root cannot replace the package normal module root");
-        let messages = failure.into_messages(&string_table);
-
-        assert_invalid_config_reason(&messages, |reason| {
-            matches!(reason, InvalidConfigReason::SourcePackageMissingRoot { .. })
-        });
+        assert_invalid_config_reason(failure, InvalidConfigCode::SourcePackageMissingRoot);
     }
 
     #[test]
@@ -570,11 +584,7 @@ mod source_package_boundary_indexes_tests {
         let mut string_table = StringTable::new();
         let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("one directory cannot contain hash and support roots");
-        let messages = failure.into_messages(&string_table);
-
-        assert_invalid_config_reason(&messages, |reason| {
-            matches!(reason, InvalidConfigReason::MultipleModuleRootFiles { .. })
-        });
+        assert_invalid_config_reason(failure, InvalidConfigCode::MultipleModuleRootFiles);
     }
 
     #[test]
@@ -595,14 +605,7 @@ mod source_package_boundary_indexes_tests {
         let failure = build_indexes(&source_packages, &mut string_table).expect_err(
             "package root with multiple normal module roots should fail boundary indexing",
         );
-        let messages = failure.into_messages(&string_table);
-
-        assert_invalid_config_reason(&messages, |reason| {
-            matches!(
-                reason,
-                InvalidConfigReason::SourcePackageMultipleRoots { .. }
-            )
-        });
+        assert_invalid_config_reason(failure, InvalidConfigCode::SourcePackageMultipleRoots);
     }
 
     #[cfg(unix)]
@@ -624,10 +627,7 @@ mod source_package_boundary_indexes_tests {
         let mut string_table = StringTable::new();
         let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("unreadable package root should fail boundary indexing");
-        let messages = failure.into_messages(&string_table);
-        let error = messages
-            .primary_infrastructure_error()
-            .expect("expected an infrastructure file error");
+        let error = primary_infrastructure_error(failure);
         assert_eq!(error.error_type, ErrorType::File);
     }
 
@@ -753,10 +753,8 @@ mod non_utf8_package_boundary_candidate_tests {
     use std::os::unix::ffi::OsStringExt;
     use std::path::PathBuf;
 
-    fn assert_non_utf8_file_error(messages: &CompilerMessages) {
-        let error = messages
-            .primary_infrastructure_error()
-            .expect("expected an infrastructure file error");
+    fn assert_non_utf8_file_error(failure: PremergeFailure) {
+        let error = primary_infrastructure_error(failure);
         assert_eq!(
             error.error_type,
             ErrorType::File,
@@ -814,9 +812,7 @@ mod non_utf8_package_boundary_candidate_tests {
         let mut string_table = StringTable::new();
         let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("valid root plus invalid candidate should still fail");
-        let messages = failure.into_messages(&string_table);
-
-        assert_non_utf8_file_error(&messages);
+        assert_non_utf8_file_error(failure);
         drop(root);
     }
 }
@@ -1224,9 +1220,7 @@ mod module_identity_tests {
             &mut string_table,
         )
         .expect_err("missing project root should surface a file error, not a missing facade");
-        let messages = failure.into_messages(&string_table);
-
-        assert_file_infrastructure_error(&messages, "discovering package facade");
+        assert_file_infrastructure_error(failure, "discovering package facade");
     }
 
     #[cfg(unix)]
@@ -1262,16 +1256,13 @@ mod module_identity_tests {
             &mut string_table,
         )
         .expect_err("unreadable project root should surface a file error, not a missing facade");
-        let messages = failure.into_messages(&string_table);
-
-        assert_file_infrastructure_error(&messages, "discovering package facade");
+        assert_file_infrastructure_error(failure, "discovering package facade");
     }
-    fn assert_file_infrastructure_error(messages: &CompilerMessages, expected_text: &str) {
+
+    fn assert_file_infrastructure_error(failure: PremergeFailure, expected_text: &str) {
         use crate::compiler_frontend::compiler_errors::ErrorType;
 
-        let error = messages
-            .primary_infrastructure_error()
-            .expect("expected an infrastructure file error");
+        let error = primary_infrastructure_error(failure);
         assert_eq!(
             error.error_type,
             ErrorType::File,
@@ -1314,9 +1305,7 @@ mod module_identity_tests {
             &mut string_table,
         )
         .expect_err("mixed normal and support roots should be rejected");
-        let messages = failure.into_messages(&string_table);
-
-        assert_eq!(first_diagnostic_code(&messages), "MOTH-CONFIG-0001");
+        assert_first_boundary_error_code(failure, "MOTH-CONFIG-0001");
     }
 
     #[test]
@@ -1349,9 +1338,7 @@ mod module_identity_tests {
             &mut string_table,
         )
         .expect_err("multiple support roots should be rejected");
-        let messages = failure.into_messages(&string_table);
-
-        assert_eq!(first_diagnostic_code(&messages), "MOTH-CONFIG-0001");
+        assert_first_boundary_error_code(failure, "MOTH-CONFIG-0001");
     }
 
     #[test]
@@ -1711,14 +1698,6 @@ mod module_identity_tests {
             "synthetic single-file origin must be deterministic"
         );
     }
-
-    fn first_diagnostic_code(messages: &CompilerMessages) -> String {
-        let diagnostic = messages
-            .error_diagnostics()
-            .next()
-            .expect("expected at least one typed error diagnostic");
-        diagnostic.kind.code().to_owned()
-    }
 }
 mod owned_source_inventory_tests {
     use super::module_identity::ModuleId;
@@ -1732,7 +1711,6 @@ mod owned_source_inventory_tests {
     };
     use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
     use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry, SourcePackageRegistry};
-    use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
     use crate::compiler_frontend::semantic_identity::ModuleRootRole;
     use crate::compiler_frontend::symbols::string_interning::StringTable;
     use std::path::{Path, PathBuf};
@@ -2603,7 +2581,7 @@ mod owned_source_inventory_tests {
             &self,
             _request: ExternalImportRequest,
             _context: &mut ExternalImportProviderContext,
-        ) -> Result<Option<ResolvedExternalImport>, CompilerMessages> {
+        ) -> Result<Option<ResolvedExternalImport>, PremergeFailure> {
             Ok(None)
         }
     }

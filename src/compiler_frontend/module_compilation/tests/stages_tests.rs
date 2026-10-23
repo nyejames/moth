@@ -102,15 +102,18 @@ fn lower_hir_capacity_failure_keeps_each_warning_and_captured_site_once() {
         Ok(_) => panic!("the first authored HIR expression should exceed the forced row limit"),
         Err(failure) => failure,
     };
-    failure.prepend_diagnostics(
-        warnings
-            .take_diagnostics()
-            .into_iter()
-            .map(|mut diagnostic| {
-                diagnostic.attach_frozen_identity_handle_if_missing(frozen_identity.clone());
-                diagnostic
-            }),
-    );
+    failure
+        .prepend_diagnostics_with_required_paths(
+            warnings
+                .take_diagnostics()
+                .into_iter()
+                .map(|mut diagnostic| {
+                    diagnostic.attach_frozen_identity_handle_if_missing(frozen_identity.clone());
+                    diagnostic
+                }),
+            || None,
+        )
+        .expect("test warnings have no rendered paths");
     let failure =
         crate::compiler_frontend::tests::parse_support::freeze_ast_diagnostic_failure(failure);
 

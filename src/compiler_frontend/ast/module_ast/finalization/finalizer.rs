@@ -540,14 +540,15 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         let mut diagnostics = warnings.to_vec();
         diagnostics.push(diagnostic);
         let environment = capture_types.then_some(&self.environment.type_environment);
-        let path_table = Some(Arc::new(self.path_fork.snapshot_table()));
-        AstDiagnosticFailure::Prepared(PreparedDiagnosticBatch::capture_from_bag(
+        match PreparedDiagnosticBatch::capture_with_required_paths_and_types(
             DiagnosticBag::from_diagnostics(diagnostics),
             string_table.clone(),
             environment,
-            true,
-            path_table,
-        ))
+            || Some(Arc::new(self.path_fork.snapshot_table())),
+        ) {
+            Ok(batch) => AstDiagnosticFailure::Prepared(batch),
+            Err(error) => AstDiagnosticFailure::from(error),
+        }
     }
 
     /// Routes infrastructure failures through their typed lane.

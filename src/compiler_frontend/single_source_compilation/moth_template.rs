@@ -28,10 +28,10 @@ use crate::compiler_frontend::compiler_errors::{
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
-use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,
+use crate::compiler_frontend::compiler_messages::prepared_batch::{
+    AstDiagnosticFailure, PreparedDiagnosticBatch,
 };
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PremergeFailure};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, owned_folded_string_from_const_string,
@@ -122,12 +122,12 @@ pub(crate) struct FoldedMothTemplate {
     pub(crate) source_database: Arc<SourceDatabase>,
 }
 
-/// A template failure that keeps AST-prepared diagnostics out of the legacy vessel.
+/// A template failure that retains prepared diagnostics and their source owners.
 #[derive(Debug)]
 pub(crate) enum MothTemplateCompilationFailure {
     Messages(CompilerMessages),
     Ast {
-        failure: AstDiagnosticFailure,
+        failure: PremergeFailure,
         source_database: Option<Arc<SourceDatabase>>,
         source_finalization_error: Option<Box<InfrastructureErrors>>,
         prior_diagnostics: Vec<CompilerDiagnostic>,
@@ -158,26 +158,49 @@ impl MothTemplateCompilationFailure {
                 source_finalization_error,
                 prior_diagnostics,
             } => {
-                if !prior_diagnostics.is_empty() {
-                    let mut messages =
-                        CompilerMessages::from_diagnostics(prior_diagnostics, string_table.clone());
-                    if let Some(source_database) = source_database.as_ref() {
-                        messages.set_source_database(Arc::clone(source_database));
-                    }
-                    accumulator.append(messages);
-                }
-
                 match failure {
-                    AstDiagnosticFailure::Prepared(batch) => {
+                    PremergeFailure::Diagnosed(batch) => {
+                        append_prior_diagnostics(
+                            accumulator,
+                            prior_diagnostics,
+                            source_database.as_ref(),
+                            string_table,
+                        );
                         accumulator.append_prepared(
                             batch,
                             source_database.map(|source_database| (source_database, None)),
                         );
                     }
-                    AstDiagnosticFailure::Infrastructure(errors) => {
+                    PremergeFailure::Infrastructure(errors) => {
+                        append_prior_diagnostics(
+                            accumulator,
+                            prior_diagnostics,
+                            source_database.as_ref(),
+                            string_table,
+                        );
                         append_infrastructure_failure(
                             accumulator,
                             errors,
+                            source_database,
+                            string_table,
+                        );
+                    }
+                    PremergeFailure::Mixed { batch, error } => {
+                        append_prior_diagnostics(
+                            accumulator,
+                            prior_diagnostics,
+                            source_database.as_ref(),
+                            string_table,
+                        );
+                        accumulator.append_prepared(
+                            batch,
+                            source_database
+                                .as_ref()
+                                .map(|source_database| (Arc::clone(source_database), None)),
+                        );
+                        append_infrastructure_failure(
+                            accumulator,
+                            error,
                             source_database,
                             string_table,
                         );
@@ -190,6 +213,21 @@ impl MothTemplateCompilationFailure {
             }
         }
     }
+}
+fn append_prior_diagnostics(
+    accumulator: &mut BoundaryAccumulator,
+    diagnostics: Vec<CompilerDiagnostic>,
+    source_database: Option<&Arc<SourceDatabase>>,
+    string_table: &StringTable,
+) {
+    if diagnostics.is_empty() {
+        return;
+    }
+    let mut messages = CompilerMessages::from_diagnostics(diagnostics, string_table.clone());
+    if let Some(source_database) = source_database {
+        messages.set_source_database(Arc::clone(source_database));
+    }
+    accumulator.append(messages);
 }
 
 fn append_infrastructure_failure(
@@ -444,9 +482,21 @@ pub(crate) fn compile_moth_template_source(
     ) {
         Ok(sorted) => sorted,
         Err(failure) => {
-            let mut messages = failure.into_messages(string_table);
-            messages.prepend_diagnostics_preserving_context(preparation_warnings);
-            return Err(attach_finalized_source_database(messages, source_builder).into());
+            let (failure, prior_diagnostics) = capture_prior_diagnostics_in_batch(
+                failure,
+                std::mem::take(&mut preparation_warnings),
+                &path_fork,
+            );
+            let (source_database, source_finalization_error) = match source_builder.finish() {
+                Ok(source_database) => (Some(Arc::new(source_database)), None),
+                Err(error) => (None, Some(error.into())),
+            };
+            return Err(MothTemplateCompilationFailure::Ast {
+                failure,
+                source_database,
+                source_finalization_error,
+                prior_diagnostics,
+            });
         }
     };
 
@@ -501,6 +551,11 @@ pub(crate) fn compile_moth_template_source(
             failure,
             source_builder,
         } => {
+            let (failure, prior_diagnostics) = capture_prior_diagnostics_in_batch(
+                failure.into(),
+                std::mem::take(&mut preparation_warnings),
+                &path_fork,
+            );
             let (source_database, source_finalization_error) = match source_builder.finish() {
                 Ok(source_database) => (Some(Arc::new(source_database)), None),
                 Err(error) => (None, Some(error.into())),
@@ -509,7 +564,7 @@ pub(crate) fn compile_moth_template_source(
                 failure,
                 source_database,
                 source_finalization_error,
-                prior_diagnostics: preparation_warnings,
+                prior_diagnostics,
             })
         }
     }
@@ -549,9 +604,17 @@ fn order_template_headers(
         path_fork,
     )
     .map_err(|failure| match failure {
-        HeaderPreparationFailure::Diagnosed(bag) => PremergeFailure::Diagnosed(
-            PremergeDiagnosticBatch::from_bag(bag, std::mem::take(string_table)),
-        ),
+        HeaderPreparationFailure::Diagnosed(bag) => {
+            match PreparedDiagnosticBatch::capture_with_required_paths(
+                bag,
+                std::mem::take(string_table),
+                None,
+                || Some(Arc::new(path_fork.snapshot_table())),
+            ) {
+                Ok(batch) => PremergeFailure::Diagnosed(batch),
+                Err(error) => PremergeFailure::from(error),
+            }
+        }
         HeaderPreparationFailure::Infrastructure(error) => PremergeFailure::Infrastructure(error),
     })?;
     let bound_headers = bind_module_headers(
@@ -565,9 +628,17 @@ fn order_template_headers(
         path_fork,
     )
     .map_err(|failure| match failure {
-        HeaderPreparationFailure::Diagnosed(bag) => PremergeFailure::Diagnosed(
-            PremergeDiagnosticBatch::from_bag(bag, std::mem::take(string_table)),
-        ),
+        HeaderPreparationFailure::Diagnosed(bag) => {
+            match PreparedDiagnosticBatch::capture_with_required_paths(
+                bag,
+                std::mem::take(string_table),
+                None,
+                || Some(Arc::new(path_fork.snapshot_table())),
+            ) {
+                Ok(batch) => PremergeFailure::Diagnosed(batch),
+                Err(error) => PremergeFailure::from(error),
+            }
+        }
         HeaderPreparationFailure::Infrastructure(error) => PremergeFailure::Infrastructure(error),
     })?;
 
@@ -588,6 +659,41 @@ fn order_template_headers(
         string_table,
         path_fork,
     )
+}
+
+fn capture_prior_diagnostics_in_batch(
+    failure: PremergeFailure,
+    mut prior_diagnostics: Vec<CompilerDiagnostic>,
+    path_fork: &PathInternerFork,
+) -> (PremergeFailure, Vec<CompilerDiagnostic>) {
+    match failure {
+        PremergeFailure::Diagnosed(mut batch) => {
+            match batch.prepend_diagnostics_with_required_paths(
+                std::mem::take(&mut prior_diagnostics),
+                || Some(Arc::new(path_fork.snapshot_table())),
+            ) {
+                Ok(()) => (PremergeFailure::Diagnosed(batch), Vec::new()),
+                Err(error) => (PremergeFailure::from(error), Vec::new()),
+            }
+        }
+        PremergeFailure::Mixed {
+            mut batch,
+            error: original_error,
+        } => match batch
+            .prepend_diagnostics_with_required_paths(std::mem::take(&mut prior_diagnostics), || {
+                Some(Arc::new(path_fork.snapshot_table()))
+            }) {
+            Ok(()) => (
+                PremergeFailure::Mixed {
+                    batch,
+                    error: original_error,
+                },
+                Vec::new(),
+            ),
+            Err(error) => (PremergeFailure::from(error), Vec::new()),
+        },
+        failure @ PremergeFailure::Infrastructure(_) => (failure, prior_diagnostics),
+    }
 }
 
 #[allow(

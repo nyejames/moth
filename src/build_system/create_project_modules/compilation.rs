@@ -16,21 +16,12 @@ use crate::compiler_frontend::build_config::{
     BuildConfigContractFact, BuildConfigInputSet, BuildConfigResolutionError,
     ResolvedBuildConfigMap,
 };
-#[cfg(feature = "boracle")]
-use crate::compiler_frontend::compiler_errors::InfrastructureErrors;
-use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError};
+use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
-use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::{
-    BoundaryAccumulator, into_boundary_failure,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
-#[cfg(feature = "boracle")]
-use crate::compiler_frontend::compiler_messages::prepared_batch::{
-    AstDiagnosticFailure, SemanticStageFailure,
-};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, PremergeDiagnosticBatch, PremergeFailure,
-    SourceSpanCapacityResource,
+    CompilerDiagnostic, DiagnosticBag, PremergeFailure, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
@@ -165,12 +156,16 @@ pub(super) fn publish_compiled_module(
         .merge_delta_from(&compiled.path_fork, &remap)
         .map_err(|error| match error {
             crate::compiler_frontend::symbols::path_interner::PathInternError::TableFull => {
-                PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
-                    CompilerDiagnostic::source_table_capacity(
+                let batch = PreparedDiagnosticBatch::capture_from_bag(
+                    DiagnosticBag::from(CompilerDiagnostic::source_table_capacity(
                         SourceSpanCapacityResource::LogicalPath,
-                    ),
+                    )),
                     std::mem::take(string_table),
-                ))
+                    None,
+                    false,
+                    None,
+                );
+                PremergeFailure::Diagnosed(batch)
             }
             error => PremergeFailure::Infrastructure(
                 CompilerError::compiler_error(format!("module path merge failed: {error:?}"))
@@ -346,35 +341,24 @@ struct SourcePackageCheckOnlyInventory {
 
 /// Typed boundary-orchestration failure retaining its source owner.
 ///
-/// WHAT: carries a premerge failure or a Boracle AST batch until the terminal source owner is
-///       finalized and the diagnostic adapter can pair it with the correct database.
-/// WHY: intermediate compiler and build stages preserve their typed failure lane; the terminal
-///      boundary performs the one conversion with the source identity that owns each span.
-enum BoundaryFailurePayload {
-    Premerge(PremergeFailure),
-    #[cfg(feature = "boracle")]
-    Prepared {
-        batch: PreparedDiagnosticBatch,
-        infrastructure: Option<Box<InfrastructureErrors>>,
-    },
-}
-
+/// The terminal source owner is attached after finalization, when this prepared failure can be
+/// paired with the database that owns its spans.
 pub(super) struct BoundaryPremergeFailure {
-    failure: Box<BoundaryFailurePayload>,
+    failure: Box<PremergeFailure>,
     package_source: Option<Box<SourceDatabase>>,
 }
 
 impl BoundaryPremergeFailure {
     pub(super) fn project(failure: PremergeFailure) -> Self {
         Self {
-            failure: Box::new(BoundaryFailurePayload::Premerge(failure)),
+            failure: Box::new(failure),
             package_source: None,
         }
     }
 
     pub(super) fn package(failure: PremergeFailure, source: SourceDatabase) -> Self {
         Self {
-            failure: Box::new(BoundaryFailurePayload::Premerge(failure)),
+            failure: Box::new(failure),
             package_source: Some(Box::new(source)),
         }
     }
@@ -392,79 +376,61 @@ impl From<CompilerError> for BoundaryPremergeFailure {
     }
 }
 
-#[cfg(feature = "boracle")]
-impl From<SemanticStageFailure> for BoundaryPremergeFailure {
-    fn from(failure: SemanticStageFailure) -> Self {
-        match failure {
-            SemanticStageFailure::Premerge(failure) => Self::project(failure),
-            SemanticStageFailure::Ast(AstDiagnosticFailure::Infrastructure(errors)) => {
-                Self::project(PremergeFailure::Infrastructure(errors))
-            }
-            SemanticStageFailure::Ast(AstDiagnosticFailure::Prepared(batch)) => {
-                match batch.classify_premerge() {
-                    Ok(batch) => Self {
-                        failure: Box::new(BoundaryFailurePayload::Prepared {
-                            batch,
-                            infrastructure: None,
-                        }),
-                        package_source: None,
-                    },
-                    Err(error) => Self::project(PremergeFailure::from(error)),
-                }
-            }
-        }
-    }
-}
-
 impl From<SourceDatabaseError> for BoundaryPremergeFailure {
     fn from(error: SourceDatabaseError) -> Self {
         match error {
-            SourceDatabaseError::Capacity(capacity) => Self::project(PremergeFailure::Diagnosed(
-                PremergeDiagnosticBatch::from_diagnostic(
-                    CompilerDiagnostic::source_table_capacity(capacity.resource()),
+            SourceDatabaseError::Capacity(capacity) => {
+                let batch = PreparedDiagnosticBatch::capture_from_bag(
+                    DiagnosticBag::from(CompilerDiagnostic::source_table_capacity(
+                        capacity.resource(),
+                    )),
                     StringTable::new(),
-                ),
-            )),
+                    None,
+                    false,
+                    None,
+                );
+                Self::project(PremergeFailure::Diagnosed(batch))
+            }
             SourceDatabaseError::Infrastructure(error) => {
                 Self::project(PremergeFailure::from(error))
             }
         }
     }
 }
-/// Consume a terminal premerge failure with its package owner or project fallback.
-///
-/// Diagnosed batches run Pass A after path pairing and append directly to the one boundary
-/// accumulator. Infrastructure and mixed failures keep their legacy causes and freeze through
-/// the same accumulator without retyping the failure lane.
+/// Consume a terminal prepared failure with its package owner or project fallback.
 pub(super) fn premerge_failure_to_boundary(
     failure: PremergeFailure,
-    string_table: &StringTable,
+    _string_table: &StringTable,
     package_source: Option<Box<SourceDatabase>>,
     project_source: Option<Arc<SourceDatabase>>,
 ) -> BoundaryFailure {
+    let source = package_source
+        .map(|source| Arc::new(*source))
+        .or(project_source);
+    let mut accumulator = BoundaryAccumulator::new();
     match failure {
         PremergeFailure::Diagnosed(batch) => {
-            let source = match package_source {
-                Some(source) => Some((Arc::new(*source), None)),
-                None => project_source.map(|source| (source, None)),
-            };
-            let mut accumulator = BoundaryAccumulator::new();
-            accumulator.append_prepared(PreparedDiagnosticBatch::from_premerge(batch), source);
-            accumulator.finish(InstallMode::Unfrozen)
+            accumulator.append_prepared(batch, source.map(|source| (source, None)));
         }
-        failure @ (PremergeFailure::Infrastructure(_) | PremergeFailure::Mixed { .. }) => {
-            let mut messages = match package_source {
-                Some(source) => failure.into_messages_with_source(string_table, Arc::new(*source)),
-                None => failure.into_messages(string_table),
-            };
-            if messages.source_database_for_diagnostic(0).is_none()
-                && let Some(source) = project_source
-            {
+        PremergeFailure::Infrastructure(errors) => {
+            let mut messages = CompilerMessages::empty(StringTable::empty_unallocated());
+            messages.append_infrastructure_errors(errors);
+            if let Some(source) = source {
                 messages.set_source_database(source);
             }
-            into_boundary_failure(messages)
+            accumulator.append(messages);
+        }
+        PremergeFailure::Mixed { batch, error } => {
+            accumulator.append_prepared(batch, source.clone().map(|source| (source, None)));
+            let mut messages = CompilerMessages::empty(StringTable::empty_unallocated());
+            messages.append_infrastructure_errors(error);
+            if let Some(source) = source {
+                messages.set_source_database(source);
+            }
+            accumulator.append(messages);
         }
     }
+    accumulator.finish(InstallMode::Unfrozen)
 }
 
 /// Convert one typed boundary failure after its last source owner has finalized.
@@ -481,31 +447,7 @@ pub(super) fn boundary_failure_to_boundary(
         .map(|source| Arc::new(*source))
         .or(project_source);
 
-    match *failure {
-        BoundaryFailurePayload::Premerge(failure) => {
-            premerge_failure_to_boundary(failure, string_table, None, source)
-        }
-        #[cfg(feature = "boracle")]
-        BoundaryFailurePayload::Prepared {
-            batch,
-            infrastructure,
-        } => {
-            let mut accumulator = BoundaryAccumulator::new();
-            match infrastructure {
-                Some(infrastructure) => {
-                    accumulator.append_prepared(batch, source.clone().map(|source| (source, None)));
-                    let failure = PremergeFailure::Infrastructure(infrastructure);
-                    let messages = match source {
-                        Some(source) => failure.into_messages_with_source(string_table, source),
-                        None => failure.into_messages(string_table),
-                    };
-                    accumulator.append(messages);
-                }
-                None => accumulator.append_prepared(batch, source.map(|source| (source, None))),
-            }
-            accumulator.finish(InstallMode::Unfrozen)
-        }
-    }
+    premerge_failure_to_boundary(*failure, string_table, None, source)
 }
 
 /// Keep an earlier typed failure beside an error from its last-source finalization.
@@ -513,29 +455,7 @@ pub(super) fn append_boundary_finish_failure(
     mut failure: BoundaryPremergeFailure,
     finish_error: CompilerError,
 ) -> BoundaryPremergeFailure {
-    let payload = match *failure.failure {
-        BoundaryFailurePayload::Premerge(existing) => {
-            BoundaryFailurePayload::Premerge(append_finish_failure(existing, finish_error))
-        }
-        #[cfg(feature = "boracle")]
-        BoundaryFailurePayload::Prepared {
-            batch,
-            infrastructure,
-        } => {
-            let infrastructure = match infrastructure {
-                Some(mut errors) => {
-                    errors.push(finish_error);
-                    Some(errors)
-                }
-                None => Some(finish_error.into()),
-            };
-            BoundaryFailurePayload::Prepared {
-                batch,
-                infrastructure,
-            }
-        }
-    };
-    failure.failure = Box::new(payload);
+    failure.failure = Box::new(append_finish_failure(*failure.failure, finish_error));
     failure
 }
 

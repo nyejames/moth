@@ -8,8 +8,14 @@
 use super::*;
 use crate::builder_surface::SourceFileKind;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
+use crate::compiler_frontend::compiler_errors::BoundaryFailure;
 use crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason;
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
+use crate::compiler_frontend::compiler_messages::PremergeFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::CircularDependencyView;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::module_symbols::{PublicExportEntry, PublicExportTarget};
@@ -34,6 +40,15 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use std::path::PathBuf;
+
+fn diagnosed_boundary(failure: PremergeFailure) -> BoundaryFailure {
+    let PremergeFailure::Diagnosed(batch) = failure else {
+        panic!("dependency-cycle test expected a diagnosed failure, got {failure:?}");
+    };
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, None);
+    accumulator.finish(InstallMode::Unfrozen)
+}
 
 fn parse_module_headers(
     files: &[(&str, &str)],
@@ -218,33 +233,44 @@ fn reports_circular_dependencies() {
         .map(|header| header.name_span)
         .expect("cycle fixture must contain the Middle header");
 
-    let messages = resolve_module_dependencies(
-        headers,
-        &ContentSourceTargets::empty(),
-        &mut string_table,
-        &mut path_fork,
-    )
-    .expect_err("cycle should fail dependency sorting")
-    .into_messages(&string_table);
-    let diagnostic_string_table = &messages.string_table;
+    let boundary = diagnosed_boundary(
+        resolve_module_dependencies(
+            headers,
+            &ContentSourceTargets::empty(),
+            &mut string_table,
+            &mut path_fork,
+        )
+        .expect_err("cycle should fail dependency sorting"),
+    );
 
     let mut cycle_path_scratch = Vec::new();
-    let cycle_diagnostic = messages
-        .diagnostic_slice()
+    let (report, cycle_diagnostic, cycle_facts) = boundary
+        .reports
         .iter()
-        .find(|diagnostic| {
-            let DiagnosticPayload::CircularDependency { path } = &diagnostic.payload else {
-                return false;
-            };
-
-            let path =
-                path_fork.render_portable(*path, diagnostic_string_table, &mut cycle_path_scratch);
-            path.contains("Top") || path.contains("Middle")
+        .find_map(|(report, diagnostic)| {
+            let facts = diagnostic.family_view::<CircularDependencyView>()?;
+            let path = path_fork.render_portable_frozen(
+                facts.path,
+                report.context().strings(),
+                &mut cycle_path_scratch,
+            );
+            (path.contains("Top") || path.contains("Middle")).then_some((report, diagnostic, facts))
         })
-        .unwrap_or_else(|| panic!("expected a cycle diagnostic, got: {messages:?}"));
-
+        .unwrap_or_else(|| panic!("expected a cycle diagnostic, got: {boundary:?}"));
+    assert_eq!(cycle_diagnostic.descriptor().code, "MOTH-RULE-0033");
+    let rendered_cycle_path = path_fork.render_portable_frozen(
+        cycle_facts.path,
+        report.context().strings(),
+        &mut cycle_path_scratch,
+    );
+    assert!(rendered_cycle_path.contains("Top") || rendered_cycle_path.contains("Middle"));
+    let actual_span = match cycle_diagnostic.primary_site() {
+        SiteRef::Local(span) => span,
+        site => panic!("cycle should retain its exact local header span, got {site:?}"),
+    };
     assert_eq!(
-        cycle_diagnostic.primary_span, cycle_header_name_span,
+        Some(actual_span),
+        cycle_header_name_span,
         "cycle diagnostics must retain the exact owning header name span"
     );
 }
@@ -851,26 +877,22 @@ fn qualified_alias_cycle_reports_circular_dependency() {
         "src/app.moth",
     );
 
-    let messages = resolve_module_dependencies(
-        headers,
-        &ContentSourceTargets::empty(),
-        &mut string_table,
-        &mut path_fork,
-    )
-    .expect_err("qualified aliases that reference each other must form a cycle")
-    .into_messages(&string_table);
+    let boundary = diagnosed_boundary(
+        resolve_module_dependencies(
+            headers,
+            &ContentSourceTargets::empty(),
+            &mut string_table,
+            &mut path_fork,
+        )
+        .expect_err("qualified aliases that reference each other must form a cycle"),
+    );
     assert!(
-        messages
-            .diagnostic_slice()
-            .iter()
-            .any(|diagnostic| matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::CircularDependency { .. }
-            )),
-        "qualified alias cycle should retain the circular-dependency diagnostic: {messages:?}"
+        boundary.reports.iter().any(|(_, diagnostic)| {
+            diagnostic.family_view::<CircularDependencyView>().is_some()
+        }),
+        "qualified alias cycle should retain the circular-dependency diagnostic: {boundary:?}"
     );
 }
-
 #[test]
 fn trait_requirement_type_dependencies_order_required_type_before_trait() {
     let (headers, mut string_table, mut path_fork) = parse_module_headers(
@@ -1447,36 +1469,45 @@ fn content_dependency_cycle_is_diagnosed_by_the_ordering_authority() {
             "@page.moth",
         );
 
-    let messages = resolve_module_dependencies(
-        headers,
-        &content_source_targets,
-        &mut string_table,
-        &mut path_fork,
-    )
-    .expect_err("a real content dependency cycle should fail dependency sorting")
-    .into_messages(&string_table);
-    let diagnostic_string_table = &messages.string_table;
+    let boundary = diagnosed_boundary(
+        resolve_module_dependencies(
+            headers,
+            &content_source_targets,
+            &mut string_table,
+            &mut path_fork,
+        )
+        .expect_err("a real content dependency cycle should fail dependency sorting"),
+    );
     let mut cycle_path_scratch = Vec::new();
-    let cycle_diagnostic = messages
-        .diagnostic_slice()
+    let (report, cycle_diagnostic, cycle_facts) = boundary
+        .reports
         .iter()
-        .find(|diagnostic| {
-            let DiagnosticPayload::CircularDependency { path } = &diagnostic.payload else {
-                return false;
-            };
-
-            let path =
-                path_fork.render_portable(*path, diagnostic_string_table, &mut cycle_path_scratch);
-            path.contains("docs/intro.mtf/content") || path.contains("legal/license.mtf/content")
+        .find_map(|(report, diagnostic)| {
+            let facts = diagnostic.family_view::<CircularDependencyView>()?;
+            let path = path_fork.render_portable_frozen(
+                facts.path,
+                report.context().strings(),
+                &mut cycle_path_scratch,
+            );
+            (path.contains("docs/intro.mtf/content") || path.contains("legal/license.mtf/content"))
+                .then_some((report, diagnostic, facts))
         })
-        .unwrap_or_else(|| panic!("expected a content cycle diagnostic, got: {messages:?}"));
-
+        .unwrap_or_else(|| panic!("expected a content cycle diagnostic, got: {boundary:?}"));
+    assert_eq!(cycle_diagnostic.descriptor().code, "MOTH-RULE-0033");
+    let rendered_cycle_path = path_fork.render_portable_frozen(
+        cycle_facts.path,
+        report.context().strings(),
+        &mut cycle_path_scratch,
+    );
     assert!(
-        cycle_diagnostic.primary_span.is_some(),
+        rendered_cycle_path.contains("docs/intro.mtf/content")
+            || rendered_cycle_path.contains("legal/license.mtf/content")
+    );
+    assert!(
+        !matches!(cycle_diagnostic.primary_site(), SiteRef::Absent),
         "the cycle diagnostic should point at a content constant's own span"
     );
 }
-
 #[test]
 fn nested_module_content_reference_orders_through_resolved_targets() {
     // A nested module root (its own @page.moth below the entry root) compiles with entry-root-

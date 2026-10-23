@@ -283,7 +283,7 @@ pub(crate) fn parse_single_file_ast_build_result_with_registry(
     )
     .map_err(|failure| match failure {
         crate::compiler_frontend::compiler_messages::PremergeFailure::Diagnosed(batch) => {
-            AstDiagnosticFailure::Prepared(PreparedDiagnosticBatch::from_premerge(batch))
+            AstDiagnosticFailure::Prepared(batch)
         }
         crate::compiler_frontend::compiler_messages::PremergeFailure::Infrastructure(error) => {
             panic!("dependency sorting infrastructure failure: {error:?}")

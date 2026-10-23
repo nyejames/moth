@@ -12,9 +12,10 @@
 //! attached. Production discovery never constructs [`CompilerMessages`]; that vessel is built
 //! exactly once by the final render-test tails and the parent single-file boundary.
 
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,
+    CompilerDiagnostic, DiagnosticBag, PremergeFailure,
 };
 use crate::compiler_frontend::paths::dependency_resolution::DependencyPathResolutionError;
 use crate::compiler_frontend::source::{SourceDatabase, SourceDatabaseError};
@@ -51,6 +52,7 @@ impl FinalizedDiscoveryFailure {
 /// Stage 0 source discovery failure.
 pub(crate) enum SourceDiscoveryError {
     Diagnostic(CompilerDiagnostic),
+    /// Diagnostics captured by their producer, including external import providers.
     Premerge(PremergeFailure),
     Finalized(Box<FinalizedDiscoveryFailure>),
     Infrastructure(CompilerError),
@@ -67,14 +69,13 @@ impl SourceDiscoveryError {
 
     /// Convert the discovery failure into the premerge lane without an intermediate vessel.
     ///
-    /// WHAT: moves a diagnostic plus the caller's local table into a diagnosed batch, or
-    ///       propagates an infrastructure error typed. The table moves via `mem::take`; no
-    ///       clone carries diagnostics. The issuing path-table snapshot moves with the batch so
-    ///       every retained `PathId` remains in its original identity domain.
+    /// WHAT: moves a diagnostic plus the caller's local table into a prepared batch, or
+    ///       propagates a prepared failure or infrastructure error typed. The table moves via
+    ///       `mem::take`; no clone carries diagnostics. Required path identities retain their
+    ///       issuing path snapshot with the prepared batch.
     /// WHY: inventory preparation aborts on the first discovery failure and discards its
     ///      discovery owner, so the batch becomes the sole table owner. The final boundary owns
-    ///      the single vessel conversion.
-    ///
+    ///      the single render conversion.
     /// A finalized failure already owns a finished source database this lane cannot carry:
     /// [`PremergeFailure`] has no source owner, so converting here would drop the finished owner.
     /// Finalized failures must be matched explicitly and split with
@@ -89,18 +90,17 @@ impl SourceDiscoveryError {
         match self {
             SourceDiscoveryError::Diagnostic(diagnostic) => {
                 let table = std::mem::take(string_table);
-                let mut batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, table);
-                if let Err(error) = batch.attach_path_table_if_missing(path_table) {
-                    return PremergeFailure::Infrastructure(error.into());
+                match PreparedDiagnosticBatch::capture_with_required_paths(
+                    DiagnosticBag::from(diagnostic),
+                    table,
+                    None,
+                    || Some(path_table),
+                ) {
+                    Ok(batch) => PremergeFailure::Diagnosed(batch),
+                    Err(error) => PremergeFailure::Infrastructure(error.into()),
                 }
-                PremergeFailure::Diagnosed(batch)
             }
-            SourceDiscoveryError::Premerge(mut failure) => {
-                if let Err(error) = failure.attach_path_table_if_missing(path_table) {
-                    return super::compilation::append_finish_failure(failure, error);
-                }
-                failure
-            }
+            SourceDiscoveryError::Premerge(failure) => failure,
             SourceDiscoveryError::Finalized(_) => {
                 unreachable!(
                     "finalized discovery failures own a finished SourceDatabase; match Finalized \
@@ -136,12 +136,6 @@ impl From<SourceDatabaseError> for SourceDiscoveryError {
                 SourceDiscoveryError::Infrastructure(error)
             }
         }
-    }
-}
-
-impl From<CompilerMessages> for SourceDiscoveryError {
-    fn from(messages: CompilerMessages) -> Self {
-        SourceDiscoveryError::Premerge(PremergeFailure::from(messages))
     }
 }
 

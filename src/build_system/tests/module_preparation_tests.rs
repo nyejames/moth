@@ -2429,7 +2429,11 @@ fn assert_counter_value(
 #[test]
 fn forced_path_exhaustion_during_chunk_merge_reports_capacity_diagnostic() {
     use crate::compiler_frontend::compiler_messages::{
-        PremergeFailure, SourceSpanCapacityResource,
+        DiagnosticSeverity, PremergeFailure, SourceSpanCapacityResource,
+        diagnostics::{
+            families::token_lexical::SourceSpanCapacityView, freeze::InstallMode,
+            legacy_adapter::BoundaryAccumulator,
+        },
     };
     use crate::compiler_frontend::symbols::path_interner::ForcedExhaustionGuard;
 
@@ -2442,6 +2446,7 @@ fn forced_path_exhaustion_during_chunk_merge_reports_capacity_diagnostic() {
     );
 
     let mut string_table = StringTable::new();
+    let ownership_marker = string_table.get_or_intern("chunk merge ownership marker".to_owned());
     let _gate = ForcedExhaustionGuard::new();
     let error = match super::ModulePreparationContext::merge_file_preparation_chunks(
         &mut string_table,
@@ -2457,26 +2462,25 @@ fn forced_path_exhaustion_during_chunk_merge_reports_capacity_diagnostic() {
     let PremergeFailure::Diagnosed(batch) = error else {
         panic!("authored chunk-merge exhaustion must produce the diagnosed capacity lane");
     };
-    let (diagnostic_bag, taken_string_table, ..) = batch.into_parts();
-    let diagnostics = diagnostic_bag.diagnostics();
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, None);
+    let failure = accumulator.finish(InstallMode::Unfrozen);
+    assert_eq!(failure.error_count(), 1);
+    let (report, diagnostic) = failure
+        .reports
+        .iter()
+        .next()
+        .expect("exhaustion must retain one frozen diagnostic");
+    assert_eq!(diagnostic.severity(), DiagnosticSeverity::Error);
+    let facts = diagnostic
+        .family_view::<SourceSpanCapacityView>()
+        .expect("exhaustion must retain the typed capacity facts");
+    assert_eq!(facts.start, 0);
+    assert_eq!(facts.length, u32::MAX as usize);
+    assert_eq!(facts.resource, SourceSpanCapacityResource::LogicalPath);
     assert_eq!(
-        diagnostics.len(),
-        1,
-        "exhaustion must diagnose exactly once"
+        report.context().strings().resolve(ownership_marker),
+        "chunk merge ownership marker",
+        "the diagnosed batch must retain its original string-table identity"
     );
-    let diagnostic = &diagnostics[0];
-    assert_eq!(
-        diagnostic.payload,
-        DiagnosticPayload::SourceSpanCapacity {
-            start: 0,
-            length: u32::MAX,
-            resource: SourceSpanCapacityResource::LogicalPath,
-        }
-    );
-    assert_eq!(
-        diagnostic.severity,
-        crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error
-    );
-    // The merged table must move into the diagnosed batch as the owner of the interned ids.
-    let _owned_string_table = taken_string_table;
 }

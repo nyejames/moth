@@ -20,8 +20,7 @@ use crate::builder_surface::external_import_providers::resolution_table::Externa
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DependencyClauseKind, InvalidDependencyClauseReason,
-    PremergeDiagnosticBatch, PremergeFailure,
+    CompilerDiagnostic, DependencyClauseKind, InvalidDependencyClauseReason, PremergeFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;

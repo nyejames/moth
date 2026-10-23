@@ -5,8 +5,10 @@
 //! WHY: keeps the provider API general so JS, WIT, Rust, and host-manifest providers all
 //!      fit the same shape without leaking JS-specific concepts into the trait.
 
+use crate::compiler_frontend::compiler_messages::PremergeFailure;
 use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionId, ExternalPackageId, ExternalPackageRegistry, ExternalTypeId,
 };
@@ -16,6 +18,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Stable kind key for an external import provider.
 ///
@@ -116,6 +119,23 @@ pub struct ExternalImportProviderContext<'a> {
     pub path_fork: &'a mut PathInternerFork,
     pub string_table: &'a mut StringTable,
 }
+impl ExternalImportProviderContext<'_> {
+    /// Capture diagnostics against the identity tables owned by this provider invocation.
+    ///
+    /// Provider failures cross Stage 0 as prepared batches, so path-bearing diagnostics must
+    /// snapshot the caller's fork before the provider context is dropped.
+    pub(crate) fn capture_diagnostic_failure(&self, diagnostics: DiagnosticBag) -> PremergeFailure {
+        match PreparedDiagnosticBatch::capture_with_required_paths(
+            diagnostics,
+            self.string_table.clone(),
+            None,
+            || Some(Arc::new(self.path_fork.snapshot_table())),
+        ) {
+            Ok(batch) => PremergeFailure::Diagnosed(batch),
+            Err(error) => PremergeFailure::Infrastructure(error.into()),
+        }
+    }
+}
 
 impl std::fmt::Debug for ExternalImportProviderContext<'_> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -144,20 +164,14 @@ pub trait ExternalImportProvider: Send + Sync + std::fmt::Debug {
     /// Examples: `["js"]` for a JavaScript provider, `["wit"]` for a WIT provider.
     fn supported_extensions(&self) -> &[ExternalFileExtension];
 
-    /// Attempts to resolve an external import request.
-    ///
-    /// WHAT: parses the canonical source file, registers discovered symbols in the
-    ///       package registry, and returns a structured result.
-    /// WHY: the compiler frontend sees only typed external IDs, not raw file syntax.
-    ///
-    /// Returns `Ok(None)` when the provider declines this request (e.g. the file
-    /// extension matches but the content is unrecognizable). Returns
-    /// `Err(CompilerMessages)` when the provider emits user-facing diagnostics.
+    /// Returns `Ok(None)` when the provider declines this request (e.g. the file extension
+    /// matches but the content is unrecognizable). Returns a typed premerge failure carrying
+    /// prepared diagnostics or infrastructure errors when resolution fails.
     fn resolve_external_import(
         &self,
         request: ExternalImportRequest,
         context: &mut ExternalImportProviderContext,
-    ) -> Result<Option<ResolvedExternalImport>, CompilerMessages>;
+    ) -> Result<Option<ResolvedExternalImport>, PremergeFailure>;
 }
 
 /// Identity for a runtime asset that the backend must emit.

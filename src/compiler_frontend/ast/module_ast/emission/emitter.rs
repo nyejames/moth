@@ -1412,13 +1412,15 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     ) -> AstDiagnosticFailure {
         let mut diagnostics = self.warnings.clone();
         diagnostics.push(diagnostic);
-        AstDiagnosticFailure::Prepared(PreparedDiagnosticBatch::capture_from_bag(
+        match PreparedDiagnosticBatch::capture_with_required_paths_and_types(
             DiagnosticBag::from_diagnostics(diagnostics),
             string_table.clone(),
             Some(&self.environment.type_environment),
-            true,
-            Some(Arc::new(self.path_fork.snapshot_table())),
-        ))
+            || Some(Arc::new(self.path_fork.snapshot_table())),
+        ) {
+            Ok(batch) => AstDiagnosticFailure::Prepared(batch),
+            Err(error) => AstDiagnosticFailure::from(error),
+        }
     }
 
     /// Converts a [`TemplateError`] (which may be user-facing or infrastructure) into the

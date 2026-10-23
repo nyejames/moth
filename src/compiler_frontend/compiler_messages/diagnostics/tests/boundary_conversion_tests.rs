@@ -11,8 +11,7 @@ use std::sync::Arc;
 
 use super::exact_span;
 use crate::compiler_frontend::compiler_messages::compiler_errors::{
-    BoundaryFailure, CompilerError, CompilerMessages, RenderPathContext, RenderSourceContext,
-    RenderTypeContext,
+    BoundaryFailure, CompilerError, CompilerMessages, RenderSourceContext,
 };
 use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostic_types::type_display_snapshot_builder::ForcedTypeDisplayExhaustionGuard;
@@ -28,8 +27,8 @@ use crate::compiler_frontend::compiler_messages::render::{
 };
 use crate::compiler_frontend::compiler_messages::{
     BorrowAccessKind, BorrowDiagnosticKind, CompilerDiagnostic, DiagnosticKind, DiagnosticLabel,
-    DiagnosticLabelMessage, DiagnosticPayload, DiagnosticPlace, PremergeDiagnosticBatch,
-    SourceSpanCapacityResource, TypeMismatchContext,
+    DiagnosticLabelMessage, DiagnosticPayload, DiagnosticPlace, SourceSpanCapacityResource,
+    TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -1564,65 +1563,20 @@ fn accumulator_parity_installs_a_donor_from_another_vessel() {
 }
 
 type PreparedTestBatch = (
-    PremergeDiagnosticBatch,
+    PreparedDiagnosticBatch,
     Option<(Arc<SourceDatabase>, Option<StablePackageIdentity>)>,
 );
 
-/// Compare the direct prepared carrier with an independently rebuilt legacy-vessel route.
-fn assert_prepared_batch_parity(
-    prepared_batches: Vec<PreparedTestBatch>,
-    vessel_batches: Vec<PreparedTestBatch>,
+/// Freeze direct prepared captures with their owning source contexts.
+fn finish_prepared_batches(
+    batches: Vec<PreparedTestBatch>,
     install: InstallMode,
-) -> (BoundaryFailure, BoundaryFailure) {
-    let mut prepared = BoundaryAccumulator::new();
-    for (batch, source) in prepared_batches {
-        prepared.append_prepared(PreparedDiagnosticBatch::from_premerge(batch), source);
+) -> BoundaryFailure {
+    let mut accumulator = BoundaryAccumulator::new();
+    for (batch, source) in batches {
+        accumulator.append_prepared(batch, source);
     }
-    let prepared_failure = prepared.finish(install);
-
-    let mut vessel = BoundaryAccumulator::new();
-    for (batch, source) in vessel_batches {
-        let mut messages = batch.into_messages();
-        if let Some((source_database, domain)) = source {
-            let diagnostic_count = messages.diagnostic_slice().len();
-            messages.install_source_contexts(
-                [RenderSourceContext {
-                    diagnostic_range: 0..diagnostic_count,
-                    source_database,
-                    domain,
-                }],
-                0,
-            );
-        }
-        vessel.append(messages);
-    }
-    let vessel_failure = vessel.finish(install);
-
-    assert_render_parity(
-        &frozen_render(&vessel_failure),
-        &frozen_render(&prepared_failure),
-    );
-    let counts = |failure: &BoundaryFailure| {
-        let counts = failure.reports.counts();
-        (counts.errors, counts.warnings, counts.notes)
-    };
-    assert_eq!(counts(&prepared_failure), counts(&vessel_failure));
-    let metadata = |failure: &BoundaryFailure| {
-        failure
-            .reports
-            .iter()
-            .map(|(_, view)| (view.descriptor().code, view.reason_key(), view.severity()))
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(metadata(&prepared_failure), metadata(&vessel_failure));
-    (prepared_failure, vessel_failure)
-}
-
-fn assert_prepared_batches_match_vessel(
-    make_batches: impl Fn() -> Vec<PreparedTestBatch>,
-    install: InstallMode,
-) -> (BoundaryFailure, BoundaryFailure) {
-    assert_prepared_batch_parity(make_batches(), make_batches(), install)
+    accumulator.finish(install)
 }
 
 #[test]
@@ -1632,7 +1586,7 @@ fn prepared_batch_carrier_stays_within_its_size_budget() {
 
 /// Colliding local ids remap a captured type name and a later unknown-name draft across distinct paths.
 #[test]
-fn prepared_batch_parity_remaps_type_names_paths_and_path_row_offsets() {
+fn prepared_batch_capture_remaps_type_names_paths_and_path_row_offsets() {
     let dir = tempfile::tempdir().expect("should create temp dir");
     let identity = StablePackageIdentity::project_local("prepared-type-paths");
     let make_batches = || {
@@ -1697,18 +1651,12 @@ fn prepared_batch_parity_remaps_type_names_paths_and_path_row_offsets() {
                     Some(inline_span(source, 0, 4)),
                 ));
             }
-            let path_end = diagnostics.len();
-            PremergeDiagnosticBatch::from_parts(
-                diagnostics,
+            PreparedDiagnosticBatch::capture_from_bag(
+                DiagnosticBag::from_diagnostics(diagnostics),
                 strings,
-                vec![RenderTypeContext {
-                    diagnostic_range: 0..1,
-                    type_environment: environment,
-                }],
-                vec![RenderPathContext {
-                    diagnostic_range: 0..path_end,
-                    path_table: explicit,
-                }],
+                Some(&environment),
+                true,
+                Some(explicit),
             )
         };
         let owner = || Some((Arc::clone(&database), Some(identity.clone())));
@@ -1736,22 +1684,19 @@ fn prepared_batch_parity_remaps_type_names_paths_and_path_row_offsets() {
         ]
     };
 
-    let (prepared, vessel) =
-        assert_prepared_batches_match_vessel(make_batches, InstallMode::Frozen);
-    for failure in [&prepared, &vessel] {
-        let rendered = frozen_render(failure);
-        assert_eq!(rendered.len(), 5);
-        assert!(rendered[0].message.contains("TAlpha"));
-        assert!(rendered[1].message.contains("pkg/alpha-only.moth"));
-        assert!(rendered[2].message.contains("TBeta"));
-        assert!(rendered[3].message.contains("pkg/beta-only.moth"));
-        assert!(rendered[4].message.contains("missing-beta"));
-    }
+    let failure = finish_prepared_batches(make_batches(), InstallMode::Frozen);
+    let rendered = frozen_render(&failure);
+    assert_eq!(rendered.len(), 5);
+    assert!(rendered[0].message.contains("TAlpha"));
+    assert!(rendered[1].message.contains("pkg/alpha-only.moth"));
+    assert!(rendered[2].message.contains("TBeta"));
+    assert!(rendered[3].message.contains("pkg/beta-only.moth"));
+    assert!(rendered[4].message.contains("missing-beta"));
 }
 
 /// Shared explicit tables stay shared, while later distinct tables retain their own path rows.
 #[test]
-fn prepared_batch_parity_preserves_shared_and_distinct_explicit_path_tables() {
+fn prepared_batch_capture_preserves_shared_and_distinct_explicit_path_tables() {
     let dir = tempfile::tempdir().expect("should create temp dir");
     let identity = StablePackageIdentity::project_local("prepared-path-owners");
     let make_batches = || {
@@ -1784,17 +1729,15 @@ fn prepared_batch_parity_preserves_shared_and_distinct_explicit_path_tables() {
         }
         let database = Arc::new(database);
         let make_batch = |path, path_table| {
-            PremergeDiagnosticBatch::from_parts(
-                vec![CompilerDiagnostic::missing_import_target(
+            PreparedDiagnosticBatch::capture_from_bag(
+                DiagnosticBag::from(CompilerDiagnostic::missing_import_target(
                     path,
                     Some(inline_span(source, 0, 4)),
-                )],
+                )),
                 strings.clone(),
-                Vec::new(),
-                vec![RenderPathContext {
-                    diagnostic_range: 0..1,
-                    path_table,
-                }],
+                None,
+                true,
+                Some(path_table),
             )
         };
         let owner = || Some((Arc::clone(&database), Some(identity.clone())));
@@ -1805,20 +1748,17 @@ fn prepared_batch_parity_preserves_shared_and_distinct_explicit_path_tables() {
         ]
     };
 
-    let (prepared, vessel) =
-        assert_prepared_batches_match_vessel(make_batches, InstallMode::Frozen);
-    for failure in [&prepared, &vessel] {
-        let rendered = frozen_render(failure);
-        assert_eq!(rendered.len(), 3);
-        assert!(rendered[0].message.contains("pkg/alpha-shared.moth"));
-        assert!(rendered[1].message.contains("pkg/beta-shared.moth"));
-        assert!(rendered[2].message.contains("vendor/gamma-distinct.moth"));
-    }
+    let failure = finish_prepared_batches(make_batches(), InstallMode::Frozen);
+    let rendered = frozen_render(&failure);
+    assert_eq!(rendered.len(), 3);
+    assert!(rendered[0].message.contains("pkg/alpha-shared.moth"));
+    assert!(rendered[1].message.contains("pkg/beta-shared.moth"));
+    assert!(rendered[2].message.contains("vendor/gamma-distinct.moth"));
 }
 
 /// An empty prepared donor row must still install the identity handle used by an earlier batch.
 #[test]
-fn prepared_batch_parity_installs_a_foreign_donor_without_its_own_diagnostic() {
+fn prepared_batch_capture_installs_a_foreign_donor_without_its_own_diagnostic() {
     let dir = tempfile::tempdir().expect("should create temp dir");
     let donor_identity = StablePackageIdentity::project_local("prepared-donor");
     let make_batches = || {
@@ -1832,8 +1772,20 @@ fn prepared_batch_parity_installs_a_foreign_donor_without_its_own_diagnostic() {
         let mut diagnostic =
             CompilerDiagnostic::unknown_value_name(name, Some(inline_span(donor_source, 0, 5)));
         diagnostic.primary_frozen_identity_handle = Some(handle);
-        let diagnosed = PremergeDiagnosticBatch::from_diagnostic(diagnostic, strings.clone());
-        let empty = PremergeDiagnosticBatch::from_diagnostics(Vec::new(), strings);
+        let diagnosed = PreparedDiagnosticBatch::capture_from_bag(
+            DiagnosticBag::from(diagnostic),
+            strings.clone(),
+            None,
+            false,
+            None,
+        );
+        let empty = PreparedDiagnosticBatch::capture_from_bag(
+            DiagnosticBag::new(),
+            strings,
+            None,
+            false,
+            None,
+        );
         vec![
             (diagnosed, None),
             (
@@ -1843,77 +1795,70 @@ fn prepared_batch_parity_installs_a_foreign_donor_without_its_own_diagnostic() {
         ]
     };
 
-    let (prepared, vessel) =
-        assert_prepared_batches_match_vessel(make_batches, InstallMode::Frozen);
-    for failure in [&prepared, &vessel] {
-        let rendered = frozen_render(failure);
-        assert_eq!(rendered.len(), 1);
-        assert!(primary(&rendered[0]).path.ends_with("donor.moth"));
-        assert_eq!(primary(&rendered[0]).line, "donor");
-    }
+    let failure = finish_prepared_batches(make_batches(), InstallMode::Frozen);
+    let rendered = frozen_render(&failure);
+    assert_eq!(rendered.len(), 1);
+    assert!(primary(&rendered[0]).path.ends_with("donor.moth"));
+    assert_eq!(primary(&rendered[0]).line, "donor");
 }
 
 #[test]
 fn prepared_batch_without_type_context_retains_unresolved_type_ids() {
     let dir = tempfile::tempdir().expect("should create temp dir");
-    let make_batches = || {
-        let mut strings = StringTable::new();
-        let (database, source) = retained_database(dir.path(), "main.moth", "main", &mut strings);
-        let diagnostic = CompilerDiagnostic::type_mismatch(
-            TypeId(999),
-            TypeId(1000),
-            TypeMismatchContext::Assignment,
-            Some(inline_span(source, 0, 4)),
-        );
-        vec![(
-            PremergeDiagnosticBatch::from_diagnostic(diagnostic, strings),
-            Some((Arc::new(database), None)),
-        )]
-    };
-
-    let (prepared, vessel) =
-        assert_prepared_batches_match_vessel(make_batches, InstallMode::Frozen);
-    for failure in [&prepared, &vessel] {
-        let rendered = frozen_render(failure);
-        assert!(rendered[0].message.contains("TypeId("));
-    }
+    let mut strings = StringTable::new();
+    let (database, source) = retained_database(dir.path(), "main.moth", "main", &mut strings);
+    let diagnostic = CompilerDiagnostic::type_mismatch(
+        TypeId(999),
+        TypeId(1000),
+        TypeMismatchContext::Assignment,
+        Some(inline_span(source, 0, 4)),
+    );
+    let batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        strings,
+        None,
+        false,
+        None,
+    );
+    let failure = finish_prepared_batches(
+        vec![(batch, Some((Arc::new(database), None)))],
+        InstallMode::Frozen,
+    );
+    let rendered = frozen_render(&failure);
+    assert!(rendered[0].message.contains("TypeId("));
 }
 
 #[test]
-fn prepared_batch_type_display_capacity_fault_keeps_the_vessel_span_and_code() {
+fn prepared_batch_type_display_capacity_fault_keeps_the_source_span_and_code() {
     let dir = tempfile::tempdir().expect("should create temp dir");
-    let make_batches = || {
-        let mut strings = StringTable::new();
-        let (database, source) = retained_database(dir.path(), "main.moth", "main", &mut strings);
-        let diagnostic = CompilerDiagnostic::type_mismatch(
-            TypeId(999),
-            TypeId(1000),
-            TypeMismatchContext::Assignment,
-            Some(inline_span(source, 0, 4)),
-        );
-        vec![(
-            PremergeDiagnosticBatch::from_diagnostic(diagnostic, strings),
-            Some((Arc::new(database), None)),
-        )]
-    };
-    let prepared_batches = make_batches();
-    let vessel_batches = make_batches();
     let _exhausted = ForcedTypeDisplayExhaustionGuard::new();
-    let (prepared, vessel) =
-        assert_prepared_batch_parity(prepared_batches, vessel_batches, InstallMode::Frozen);
-
-    for failure in [&prepared, &vessel] {
-        let rendered = frozen_render(failure);
-        assert_eq!(
-            rendered[0].message,
-            "This source exceeds the compiler's capacity for diagnostic type displays."
-        );
-        assert_eq!(failure.reports.report(0).len(), 1);
-    }
-    assert_eq!(
-        primary(&frozen_render(&prepared)[0]),
-        primary(&frozen_render(&vessel)[0])
+    let mut strings = StringTable::new();
+    let (database, source) = retained_database(dir.path(), "main.moth", "main", &mut strings);
+    let diagnostic = CompilerDiagnostic::type_mismatch(
+        TypeId(999),
+        TypeId(1000),
+        TypeMismatchContext::Assignment,
+        Some(inline_span(source, 0, 4)),
     );
+    let batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        strings,
+        None,
+        false,
+        None,
+    );
+    let failure = finish_prepared_batches(
+        vec![(batch, Some((Arc::new(database), None)))],
+        InstallMode::Frozen,
+    );
+    let rendered = frozen_render(&failure);
+    assert_eq!(
+        rendered[0].message,
+        "This source exceeds the compiler's capacity for diagnostic type displays."
+    );
+    assert_eq!(failure.reports.report(0).len(), 1);
+    assert!(primary(&rendered[0]).path.ends_with("main.moth"));
+    assert_eq!(primary(&rendered[0]).line, "main");
 }
 
 #[test]
@@ -1927,32 +1872,26 @@ fn prepared_batch_path_capacity_fault_matches_the_vessel_code_and_span() {
             .expect("portable path should intern");
         let explicit = Arc::new(paths.freeze());
         let (database, source) = retained_database(dir.path(), "main.moth", "main", &mut strings);
-        let batch = PremergeDiagnosticBatch::from_parts(
-            vec![CompilerDiagnostic::missing_import_target(
+        let batch = PreparedDiagnosticBatch::capture_from_bag(
+            DiagnosticBag::from(CompilerDiagnostic::missing_import_target(
                 new_path,
                 Some(inline_span(source, 0, 4)),
-            )],
+            )),
             strings,
-            Vec::new(),
-            vec![RenderPathContext {
-                diagnostic_range: 0..1,
-                path_table: explicit,
-            }],
+            None,
+            true,
+            Some(explicit),
         );
         vec![(batch, Some((Arc::new(database), None)))]
     };
-    let prepared_batches = make_batches();
-    let vessel_batches = make_batches();
+    let batches = make_batches();
     let _exhausted = ForcedExhaustionGuard::new();
-    let (prepared, vessel) =
-        assert_prepared_batch_parity(prepared_batches, vessel_batches, InstallMode::Frozen);
-
-    assert_eq!(prepared.reports.report(0).len(), 1);
-    assert_eq!(vessel.reports.report(0).len(), 1);
+    let failure = finish_prepared_batches(batches, InstallMode::Frozen);
+    assert_eq!(failure.reports.report(0).len(), 1);
 }
 
 #[test]
-fn prepared_batch_owning_site_capture_matches_premerge_contexts() {
+fn prepared_batch_owning_site_capture_retains_type_and_path_contexts() {
     let mut strings = StringTable::new();
     let name = strings.intern("TOwningSite");
     let mut paths = PathInternerBuilder::new();
@@ -1973,42 +1912,17 @@ fn prepared_batch_owning_site_capture_matches_premerge_contexts() {
         CompilerDiagnostic::missing_import_target(import_path, None),
     ];
     let captured = PreparedDiagnosticBatch::capture_from_bag(
-        DiagnosticBag::from_diagnostics(diagnostics.clone()),
-        strings.clone(),
+        DiagnosticBag::from_diagnostics(diagnostics),
+        strings,
         Some(&environment),
         true,
-        Some(Arc::clone(&path_table)),
+        Some(path_table),
     );
-    let premerge = PremergeDiagnosticBatch::from_parts(
-        diagnostics,
-        strings,
-        vec![RenderTypeContext {
-            diagnostic_range: 0..2,
-            type_environment: environment,
-        }],
-        vec![RenderPathContext {
-            diagnostic_range: 0..2,
-            path_table,
-        }],
-    );
-    let expected = PreparedDiagnosticBatch::from_premerge(premerge);
-
-    let mut captured_run = BoundaryAccumulator::new();
-    captured_run.append_prepared(captured, None);
-    let captured = captured_run.finish(InstallMode::Frozen);
-    let mut expected_run = BoundaryAccumulator::new();
-    expected_run.append_prepared(expected, None);
-    let expected = expected_run.finish(InstallMode::Frozen);
-
-    let expected_render = frozen_render(&expected);
-    let captured_render = frozen_render(&captured);
-    assert_render_parity(&expected_render, &captured_render);
-    assert!(captured_render[0].message.contains("TOwningSite"));
-    assert!(
-        captured_render[1]
-            .message
-            .contains("pkg/owning-site-only.moth")
-    );
+    let failure = finish_prepared_batches(vec![(captured, None)], InstallMode::Frozen);
+    let rendered = frozen_render(&failure);
+    assert_eq!(rendered.len(), 2);
+    assert!(rendered[0].message.contains("TOwningSite"));
+    assert!(rendered[1].message.contains("pkg/owning-site-only.moth"));
 }
 
 #[test]

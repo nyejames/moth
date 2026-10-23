@@ -16,8 +16,9 @@
 //! headers so AST emission sees all top-level declarations before processing the start body.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, PremergeDiagnosticBatch, PremergeFailure,
+    CompilerDiagnostic, DiagnosticBag, PremergeFailure,
 };
 use crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment;
 use crate::compiler_frontend::headers::module_symbols::{ModuleSymbols, PublicExportEntry};
@@ -572,7 +573,13 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
                         let failure = if diagnostic_bag.has_errors() {
                             drop(graph);
                             let table = std::mem::take(string_table);
-                            let batch = PremergeDiagnosticBatch::from_bag(diagnostic_bag, table);
+                            let batch = PreparedDiagnosticBatch::capture_with_required_paths(
+                                diagnostic_bag,
+                                table,
+                                None,
+                                || Some(std::sync::Arc::new(path_fork.snapshot_table())),
+                            )
+                            .map_err(PremergeFailure::from)?;
                             PremergeFailure::Mixed {
                                 batch,
                                 error: error.into(),
@@ -589,7 +596,13 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
         if diagnostic_bag.has_errors() {
             drop(graph);
             let table = std::mem::take(string_table);
-            let batch = PremergeDiagnosticBatch::from_bag(diagnostic_bag, table);
+            let batch = PreparedDiagnosticBatch::capture_with_required_paths(
+                diagnostic_bag,
+                table,
+                None,
+                || Some(std::sync::Arc::new(path_fork.snapshot_table())),
+            )
+            .map_err(PremergeFailure::from)?;
             return Err(PremergeFailure::Diagnosed(batch));
         }
 

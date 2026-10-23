@@ -24,7 +24,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::names_de
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, DiagnosticSeverity, PremergeDiagnosticBatch,
+    CompilerDiagnostic, DiagnosticBag, DiagnosticSeverity,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids::NONE;
@@ -914,10 +914,15 @@ fn test_prepared_diagnostics(
 ) -> PreparedDiagnosticBatch {
     let name = string_table.intern("missing_name");
     let diagnostic = CompilerDiagnostic::unknown_value_name(name, None);
-    let batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, string_table.clone());
-    PreparedDiagnosticBatch::from_premerge(batch)
-        .classify_premerge()
-        .expect("user diagnostic should classify")
+    PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        string_table.clone(),
+        None,
+        false,
+        None,
+    )
+    .classify_premerge()
+    .expect("user diagnostic should classify")
 }
 
 #[test]

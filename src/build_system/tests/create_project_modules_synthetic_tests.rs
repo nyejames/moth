@@ -1,4 +1,23 @@
 use super::*;
+use crate::compiler_frontend::compiler_errors::BoundaryFailure;
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+use crate::compiler_frontend::compiler_messages::PremergeFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidDependencyClauseView;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
+
+fn diagnosed_boundary_with_source(
+    failure: PremergeFailure,
+    source_files: Arc<SourceDatabase>,
+) -> BoundaryFailure {
+    let PremergeFailure::Diagnosed(batch) = failure else {
+        panic!("expected diagnosed synthetic preparation, got {failure:?}");
+    };
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, Some((source_files, None)));
+    accumulator.finish(InstallMode::Unfrozen)
+}
 
 #[test]
 fn synthetic_rebinding_makes_file_and_shell_identities_discovery_order_independent() {
@@ -431,24 +450,6 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
     };
     let source_files =
         source_database.expect("diagnosed discovery must publish its finalized source context");
-    let messages = failure.into_messages_with_source(&string_table, Arc::new(source_files));
-    let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
-    assert_eq!(
-        diagnostics.len(),
-        1,
-        "a diagnosed synthetic preparation must not be consumed by a second preparation pass"
-    );
-    assert!(matches!(
-        diagnostics[0].payload,
-        DiagnosticPayload::InvalidDependencyClause {
-            reason: InvalidDependencyClauseReason::ContinuationEnteredStatement,
-            ..
-        }
-    ));
-
-    let source_files = messages
-        .source_database_for_diagnostic(0)
-        .expect("diagnosed discovery must publish its finalized source context");
     let entry_id = source_files
         .get_by_canonical_path(&entry_file_path)
         .expect("the previously prepared entry must remain in the diagnosed context")
@@ -459,36 +460,79 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
         .id;
     assert_eq!(helper_id, SourceId::from_index(1));
     assert_eq!(entry_id, SourceId::from_index(2));
-    let diagnostic_span = diagnostics[0]
-        .primary_span
-        .expect("preparation diagnosis must retain its exact span");
-    assert_eq!(diagnostic_span.source(), helper_id);
-    let diagnostic_range = diagnostic_span.byte_range(source_files);
-    let helper_text = source_files.retained_text(helper_id).unwrap();
+    let entry_snapshot = source_files
+        .retained_text(entry_id)
+        .expect("the entry source snapshot must remain available")
+        .to_owned();
+    let helper_snapshot = source_files
+        .retained_text(helper_id)
+        .expect("the helper source snapshot must remain available")
+        .to_owned();
+    let boundary = diagnosed_boundary_with_source(failure, Arc::new(source_files));
     assert_eq!(
-        &helper_text[diagnostic_range.start() as usize..diagnostic_range.end() as usize],
+        boundary.reports.counts().errors,
+        1,
+        "a diagnosed synthetic preparation must not be consumed by a second preparation pass"
+    );
+    let (report, diagnostic) = boundary
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("diagnosed preparation should retain its error");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0019");
+    let facts = diagnostic
+        .family_view::<InvalidDependencyClauseView>()
+        .expect("preparation failure should retain typed dependency-clause facts");
+    assert_eq!(
+        facts.reason,
+        InvalidDependencyClauseReason::ContinuationEnteredStatement
+    );
+
+    let helper_slot = report
+        .context()
+        .get(helper_id)
+        .expect("the failed source must remain in the frozen diagnostic context");
+    assert_eq!(
+        helper_slot.canonical_os_path.as_deref(),
+        Some(helper_file_path.as_path())
+    );
+    let entry_slot = report
+        .context()
+        .get(entry_id)
+        .expect("the previously prepared entry must remain in the frozen diagnostic context");
+    assert_eq!(
+        entry_slot.canonical_os_path.as_deref(),
+        Some(entry_file_path.as_path())
+    );
+
+    let diagnostic_span = match diagnostic.primary_site() {
+        SiteRef::Local(span) => span,
+        site => panic!("preparation diagnosis should retain a local span, got {site:?}"),
+    };
+    assert_eq!(diagnostic_span.source(), helper_id);
+    let diagnostic_range = diagnostic_span.byte_range(report.context());
+    assert_eq!(
+        &helper_snapshot[diagnostic_range.start() as usize..diagnostic_range.end() as usize],
         "value"
     );
-    assert_eq!(diagnostics[0].labels.len(), 1);
-    let comma_label = &diagnostics[0].labels[0];
-    let comma_span = comma_label
-        .span
-        .expect("discovery retains every preparation label span");
+    let labels = diagnostic.durable_labels().collect::<Vec<_>>();
+    assert_eq!(labels.len(), 1);
+    let comma_span = match labels[0].site {
+        SiteRef::Local(span) => span,
+        site => panic!("preparation label should retain a local span, got {site:?}"),
+    };
     assert_eq!(
         comma_span.source(),
         helper_id,
         "related spans must use the finalized source identity"
     );
-    let comma_range = comma_span.byte_range(source_files);
+    let comma_range = comma_span.byte_range(report.context());
     assert_eq!(
-        &helper_text[comma_range.start() as usize..comma_range.end() as usize],
+        &helper_snapshot[comma_range.start() as usize..comma_range.end() as usize],
         ","
     );
-    assert_eq!(source_files.retained_text(entry_id), Some("@helper\n"));
-    assert_eq!(
-        source_files.retained_text(helper_id),
-        Some("-- é🦋\n@core/math sin,\nvalue = 1\n")
-    );
+    assert_eq!(entry_snapshot, "@helper\n");
+    assert_eq!(helper_snapshot, "-- é🦋\n@core/math sin,\nvalue = 1\n");
     assert_eq!(
         super::source_loading_test_support::source_read_count_for_path_for_test(&entry_file_path),
         1,

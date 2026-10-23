@@ -176,7 +176,7 @@ pub(crate) struct RenderPathContext {
 /// Rare failure causes and their explicitly paired source owners. Cause ranges, unlike diagnostic
 /// ranges, remain meaningful when a failed compilation produced no diagnostic at all.
 #[derive(Debug)]
-pub(crate) struct InfrastructureErrors {
+pub struct InfrastructureErrors {
     pub(crate) primary: CompilerError,
     pub(crate) additional: Vec<CompilerError>,
     source_contexts: Vec<InfrastructureSourceContext>,

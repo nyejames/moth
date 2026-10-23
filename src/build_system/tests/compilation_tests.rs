@@ -723,6 +723,10 @@ fn semantic_result_with_local_path()
 fn forced_path_exhaustion_during_module_publication_reports_capacity_diagnostic() {
     use crate::compiler_frontend::compiler_messages::{
         DiagnosticSeverity, PremergeFailure, SourceSpanCapacityResource,
+        diagnostics::{
+            families::token_lexical::SourceSpanCapacityView, freeze::InstallMode,
+            legacy_adapter::BoundaryAccumulator,
+        },
     };
     use crate::compiler_frontend::symbols::path_interner::{
         ForcedExhaustionGuard, PathInternerBuilder,
@@ -762,30 +766,34 @@ fn forced_path_exhaustion_during_module_publication_reports_capacity_diagnostic(
     let PremergeFailure::Diagnosed(batch) = error else {
         panic!("authored publication exhaustion must produce the diagnosed capacity lane");
     };
-    let (diagnostic_bag, _moved_string_table, ..) = batch.into_parts();
-    let diagnostics = diagnostic_bag.diagnostics();
-    assert_eq!(
-        diagnostics.len(),
-        1,
-        "exhaustion must diagnose exactly once"
-    );
-    assert_eq!(
-        diagnostics[0].payload,
-        crate::compiler_frontend::compiler_messages::DiagnosticPayload::SourceSpanCapacity {
-            start: 0,
-            length: u32::MAX,
-            resource: SourceSpanCapacityResource::LogicalPath,
-        }
-    );
-    assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Error);
+    assert_eq!(batch.diagnostic_count(), 1);
+    assert!(batch.has_errors());
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, None);
+    let failure = accumulator.finish(InstallMode::Unfrozen);
+    assert_eq!(failure.error_count(), 1);
+    let (_, diagnostic) = failure
+        .reports
+        .iter()
+        .next()
+        .expect("exhaustion must retain one frozen diagnostic");
+    assert_eq!(diagnostic.severity(), DiagnosticSeverity::Error);
+    let facts = diagnostic
+        .family_view::<SourceSpanCapacityView>()
+        .expect("exhaustion must retain the typed capacity facts");
+    assert_eq!(facts.start, 0);
+    assert_eq!(facts.length, u32::MAX as usize);
+    assert_eq!(facts.resource, SourceSpanCapacityResource::LogicalPath);
 }
+
 #[test]
 fn source_finish_failures_preserve_every_cause_and_original_provenance() {
     use crate::compiler_frontend::compiler_errors::{
-        CompilerErrorMetadataKey, CompilerMessages, ErrorType,
+        CompilerErrorMetadataKey, ErrorType, InfrastructureErrors,
     };
+    use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
     use crate::compiler_frontend::compiler_messages::{
-        CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,
+        CompilerDiagnostic, DiagnosticBag, PremergeFailure,
     };
     use crate::compiler_frontend::source::{LocalSpan, SourceDatabase, SourceId, SourceSpan};
 
@@ -797,21 +805,21 @@ fn source_finish_failures_preserve_every_cause_and_original_provenance() {
             CompilerErrorMetadataKey::CompilationStage,
             "semantic compilation".to_owned(),
         );
-        let mut messages = CompilerMessages::from_error(primary, StringTable::new());
-        messages.set_source_database(Arc::new(SourceDatabase::empty()));
-        let PremergeFailure::Infrastructure(errors) = PremergeFailure::from(messages) else {
-            panic!("an infrastructure-only vessel must retain its typed lane");
-        };
+        let mut errors = InfrastructureErrors::new(primary);
+        errors.set_source_database(Arc::new(SourceDatabase::empty()));
         let failure = if mixed {
             PremergeFailure::Mixed {
-                batch: PremergeDiagnosticBatch::from_diagnostic(
-                    CompilerDiagnostic::unreachable_match_arm(None),
+                batch: PreparedDiagnosticBatch::capture_from_bag(
+                    DiagnosticBag::from(CompilerDiagnostic::unexpected_trailing_comma(None)),
                     StringTable::new(),
+                    None,
+                    false,
+                    None,
                 ),
-                error: errors,
+                error: Box::new(errors),
             }
         } else {
-            PremergeFailure::Infrastructure(errors)
+            PremergeFailure::Infrastructure(Box::new(errors))
         };
         let mut finish = CompilerError::file_error(
             std::path::Path::new("finish-source.moth"),
@@ -829,7 +837,8 @@ fn source_finish_failures_preserve_every_cause_and_original_provenance() {
         let errors = match failure {
             PremergeFailure::Infrastructure(errors) if !mixed => errors,
             PremergeFailure::Mixed { batch, error } if mixed => {
-                assert_eq!(batch.into_messages().diagnostic_slice().len(), 1);
+                assert_eq!(batch.diagnostic_count(), 1);
+                assert!(batch.has_errors());
                 error
             }
             _ => panic!("appending finish failures must preserve the original failure lane"),
@@ -1055,9 +1064,10 @@ fn canonical_tail_preserves_facade_failure_and_warning_sources() {
     use crate::compiler_frontend::compiler_errors::{
         CompilerError, CompilerErrorMetadataKey, ErrorType,
     };
+    use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
     use crate::compiler_frontend::compiler_messages::{
-        CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, NameNamespace,
-        PremergeDiagnosticBatch, RuleDiagnosticKind,
+        CompilerDiagnostic, DiagnosticBag, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
+        NameNamespace, RuleDiagnosticKind,
     };
     use crate::compiler_frontend::source::{
         ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceSpan,
@@ -1100,8 +1110,12 @@ fn canonical_tail_preserves_facade_failure_and_warning_sources() {
         },
     );
     let expected_warning_code = warning.kind.code();
-    let batch = crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch::from_premerge(
-        PremergeDiagnosticBatch::from_diagnostics(vec![warning], strings.clone()),
+    let batch = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from_diagnostics(vec![warning]),
+        strings.clone(),
+        None,
+        false,
+        None,
     );
     let project = CompiledGraphBoundary {
         structure: ProjectModuleGraph::from_normal_roots(Vec::new()),

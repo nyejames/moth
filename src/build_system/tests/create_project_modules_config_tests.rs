@@ -7,6 +7,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_da
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
     InvalidConfigCode, InvalidConfigView,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidPathView;
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::into_boundary_failure;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -853,27 +854,32 @@ fn malformed_dependency_path_keeps_precise_location_during_module_discovery() {
     )
     .expect("config should parse");
     let resolver = configured_resolver(&config);
-    let messages = match discover_modules_for_test_messages(&config, &resolver, &style_directives) {
+    let failure = match discover_modules_for_test_messages(&config, &resolver, &style_directives) {
         Ok(_) => panic!("malformed dependency path should fail discovery"),
-        Err(messages) => messages,
+        Err(failure) => failure,
     };
 
-    let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
+    let diagnostics = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
     assert_eq!(diagnostics.len(), 1);
-    let diagnostic = diagnostics[0];
+    let (_, diagnostic) = diagnostics[0];
     assert!(
-        diagnostic.primary_span.is_some(),
+        !matches!(
+            diagnostic.primary_site(),
+            crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent
+        ),
         "the malformed dependency diagnostic should retain its authored span"
     );
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidPath {
-                path_kind: PathKind::EmptyComponent
-            }
-        ),
-        "unexpected diagnostic payload: {:?}",
-        diagnostic.payload
+    let facts = diagnostic
+        .family_view::<InvalidPathView>()
+        .expect("malformed dependency diagnostic should retain typed path facts");
+    assert_eq!(
+        facts.path_kind,
+        PathKind::EmptyComponent,
+        "unexpected invalid path fact: {:?}",
+        facts.path_kind
     );
 }
 
@@ -1382,12 +1388,12 @@ fn entry_root_requires_at_least_one_root_entry_file() {
     .expect("config should parse");
 
     let resolver = configured_resolver(&config);
-    let Err(messages) = discover_modules_for_test(&config, &resolver, &style_directives) else {
+    let Err(failure) = discover_modules_for_test(&config, &resolver, &style_directives) else {
         panic!("entry root without @*.moth entries should fail");
     };
 
-    assert!(matches!(
-        first_invalid_config_reason(&messages),
-        InvalidConfigReason::NoRootModuleEntries { .. }
-    ));
+    assert_eq!(
+        first_invalid_config(&failure).reason,
+        InvalidConfigCode::NoRootModuleEntries
+    );
 }

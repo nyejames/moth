@@ -7,6 +7,8 @@ use super::discovery_identity_rebind::{
 use super::discovery_missing_source_load::load_missing_sources;
 use super::*;
 use crate::build_system::create_project_modules::compilation::append_finish_failure;
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use std::sync::Arc;
 /// Finish only retained work on an aborted walk. Queued sources remain unloaded.
@@ -16,11 +18,11 @@ use std::sync::Arc;
 /// terminal rebinding failure still carries the finalized source context.
 ///
 /// WHAT: rebinds retained warnings and the terminal diagnostic to final identities, moves the
-///       live local table into a diagnosed batch via `mem::take`, and finishes the source
+///       live local table into a prepared batch via `mem::take`, and finishes the source
 ///       owner before the finalized failure escapes.
 /// WHY: no intermediate vessel may carry diagnostics; the parent final boundary owns the
-///      single conversion and attaches the finished database. Infrastructure terminals stay
-///      typed and drop companion warnings, matching the premerge lane contract.
+///      single render conversion. Infrastructure terminals stay typed and drop companion
+///      warnings, matching the premerge lane contract.
 pub(super) fn finalize_failed_discovery(
     mut files: Vec<ReachableSourceFile>,
     mut source_cache: FxHashMap<PathBuf, PreparedDiscoverySource>,
@@ -106,20 +108,25 @@ pub(super) fn finalize_failed_discovery(
             );
         }
     };
-    let mut terminal_failure = match terminal_error {
+    let terminal_failure = match terminal_error {
         SourceDiscoveryError::Diagnostic(diagnostic) => {
             let table = std::mem::take(string_table);
             let mut diagnostics = warnings;
             diagnostics.push(diagnostic);
-            let mut batch = PremergeDiagnosticBatch::from_diagnostics(diagnostics, table);
-            if let Err(error) = batch
-                .attach_path_table_if_missing(Arc::new(source_builder.sources().paths().clone()))
-            {
-                return finish_discovery_source_owner(
-                    PremergeFailure::Infrastructure(error.into()),
-                    source_builder,
-                );
-            }
+            let batch = match PreparedDiagnosticBatch::capture_with_required_paths(
+                DiagnosticBag::from_diagnostics(diagnostics),
+                table,
+                None,
+                || Some(Arc::new(source_builder.sources().paths().clone())),
+            ) {
+                Ok(batch) => batch,
+                Err(error) => {
+                    return finish_discovery_source_owner(
+                        PremergeFailure::Infrastructure(error.into()),
+                        source_builder,
+                    );
+                }
+            };
             PremergeFailure::Diagnosed(batch)
         }
         SourceDiscoveryError::Premerge(mut failure) => {
@@ -138,13 +145,6 @@ pub(super) fn finalize_failed_discovery(
             unreachable!("discovery failure cannot already carry a finalized source owner")
         }
     };
-    let path_table = Arc::new(source_builder.sources().paths().clone());
-    if let Err(error) = terminal_failure.attach_path_table_if_missing(path_table) {
-        return finish_discovery_source_owner(
-            append_finish_failure(terminal_failure, error),
-            source_builder,
-        );
-    }
     finish_discovery_source_owner(terminal_failure, source_builder)
 }
 

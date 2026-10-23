@@ -658,12 +658,12 @@ fn indexed_namespace_rejects_direct_entry_root_dependency() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let messages = match discover_modules_for_test(&config, &resolver, &style_directives) {
+    let failure = match discover_modules_for_test(&config, &resolver, &style_directives) {
         Ok(_) => panic!("direct entry-root @@page dependency must be rejected by the path parser"),
-        Err(messages) => messages,
+        Err(failure) => failure,
     };
     assert_eq!(
-        first_error_diagnostic(&messages).kind.code(),
+        first_error_diagnostic(&failure).descriptor().code,
         "MOTH-SYNTAX-0018"
     );
 }
@@ -696,14 +696,14 @@ fn indexed_namespace_rejects_direct_nested_child_root_dependency() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let messages = match discover_modules_for_test(&config, &resolver, &style_directives) {
+    let failure = match discover_modules_for_test(&config, &resolver, &style_directives) {
         Ok(_) => {
             panic!("direct nested-child root dependencies must be rejected by the path parser")
         }
-        Err(messages) => messages,
+        Err(failure) => failure,
     };
     assert_eq!(
-        first_error_diagnostic(&messages).kind.code(),
+        first_error_diagnostic(&failure).descriptor().code,
         "MOTH-SYNTAX-0018"
     );
 }

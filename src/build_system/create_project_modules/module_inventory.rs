@@ -14,8 +14,9 @@
 use crate::builder_surface::SourceFileKind;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    InvalidConfigReason, PremergeDiagnosticBatch, PremergeFailure,
+    DiagnosticBag, InvalidConfigReason, PremergeFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
@@ -177,15 +178,19 @@ fn resolve_directory_dependency_path(
             // path, so no clone is needed to carry the diagnostic.  Keep the issuing fork beside
             // it so its `PathId` domain remains valid after the source owner is finalized.
             let table = std::mem::take(string_table);
-            let mut failure = PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
-                diagnostic, table,
-            ));
-            if let Err(error) = failure.attach_path_table_if_missing(Arc::new(
-                directory_dependency_resolution.path_fork().snapshot_table(),
-            )) {
-                return PremergeFailure::Infrastructure(error.into());
+            match PreparedDiagnosticBatch::capture_with_required_paths(
+                DiagnosticBag::from(diagnostic),
+                table,
+                None,
+                || {
+                    Some(Arc::new(
+                        directory_dependency_resolution.path_fork().snapshot_table(),
+                    ))
+                },
+            ) {
+                Ok(batch) => PremergeFailure::Diagnosed(batch),
+                Err(error) => PremergeFailure::Infrastructure(error.into()),
             }
-            failure
         })
 }
 
@@ -499,7 +504,13 @@ fn discover_all_modules_in_boundary(
         );
         let table = std::mem::take(string_table);
         return Err(PremergeFailure::Diagnosed(
-            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
+            PreparedDiagnosticBatch::capture_from_bag(
+                DiagnosticBag::from(diagnostic),
+                table,
+                None,
+                false,
+                None,
+            ),
         ));
     }
 

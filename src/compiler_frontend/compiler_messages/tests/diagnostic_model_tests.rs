@@ -13,18 +13,30 @@ use super::{
     InvalidMapTypeReason, InvalidOutputFolderReason, InvalidReceiverCallReason,
     InvalidSignatureMemberReason, InvalidStandaloneStatementReason, InvalidStatementPositionReason,
     InvalidStringEscapeReason, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
-    InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason, NameNamespace,
-    NamespaceTypeValueMisuseKind, PathKind, ReceiverCallKind, RuleDiagnosticKind,
+    InvalidTraitConformanceReason, InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason,
+    NameNamespace, NamespaceTypeValueMisuseKind, PathKind, ReceiverCallKind, RuleDiagnosticKind,
     SyntaxDiagnosticKind, TokenTag, TypeAnnotationContext, TypeDiagnosticKind, TypeMismatchContext,
     UnsupportedBackendFeatureReason, ValueReceiverContext, is_well_formed_reason_key,
 };
-use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerErrorMetadataKey, CompilerMessages, ErrorType, RenderTypeContext,
+    BoundaryFailure, CompilerError, CompilerErrorMetadataKey, CompilerMessages, ErrorType,
 };
-use crate::compiler_frontend::compiler_messages::PremergeDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    calls_data::{InvalidCallShapeView, InvalidReceiverCallView},
+    choices_control_flow::CompileTimeEvaluationErrorView,
+    generics_traits_api::{
+        InvalidReceiverDeclarationView, InvalidTraitConformanceShape, InvalidTraitConformanceView,
+    },
+    imports::NotExportedByPublicSurfaceView,
+    names_declarations::DuplicateDeclarationView,
+    project_config::LegacyDependencyClauseView,
+    token_lexical::ExpectedTokenView,
+    types_borrows_targets::{SharedMutableConflictView, TypeMismatchView},
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::{
     BoundaryAccumulator, into_boundary_failure,
 };
@@ -33,13 +45,14 @@ use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, dev_server, invalid_config_message, terminal, terse,
 };
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
+use crate::compiler_frontend::datatypes::display::{TypeDisplayShape, TypeDisplayView};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, builtin_type_ids};
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityContext, FrozenIdentityHandle, LocalSpan, SourceDatabase,
-    SourceId, SourceKind, SourceRegistrationIndex, SourceSpan,
+    SourceId, SourceSpan,
 };
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
@@ -74,21 +87,38 @@ fn unknown_name_diagnostic(
     )
 }
 
-fn borrow_conflict_diagnostic(
-    place: DiagnosticPlace,
-    existing_access: BorrowAccessKind,
-    requested_access: BorrowAccessKind,
-    span: Option<SourceSpan>,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::new(
-        DiagnosticKind::Borrow(BorrowDiagnosticKind::BorrowConflict),
-        span,
-        DiagnosticPayload::BorrowConflict {
-            place,
-            existing_access,
-            requested_access,
-        },
-    )
+fn capture_rebased_batch(
+    diagnostics: Vec<CompilerDiagnostic>,
+    local_table: StringTable,
+    root_table: &mut StringTable,
+    environment: Option<&TypeEnvironment>,
+    path_table_is_available: bool,
+    path_table: Option<Arc<PathTable>>,
+) -> PreparedDiagnosticBatch {
+    let remap = root_table.merge_from(&local_table);
+    assert!(
+        !remap.is_identity(),
+        "the fixture must exercise a shifting string-table remap"
+    );
+    let mut prepared = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from_diagnostics(diagnostics),
+        local_table,
+        environment,
+        path_table_is_available,
+        path_table,
+    );
+    prepared.rebase_strings(&remap);
+    prepared
+}
+
+fn finish_prepared_batch(
+    prepared: PreparedDiagnosticBatch,
+    string_table: StringTable,
+) -> BoundaryFailure {
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append(CompilerMessages::empty(string_table));
+    accumulator.append_prepared(prepared, None);
+    accumulator.finish(InstallMode::Frozen)
 }
 
 #[test]
@@ -737,12 +767,10 @@ fn infrastructure_setter_and_message_append_preserve_every_ordered_cause() {
 }
 
 #[test]
-fn attach_rejects_foreign_domain_table_behind_rendered_path_payload() {
-    // The batch's string table only knows its own domain. The candidate table was issued by
-    // an independent domain whose component IDs exceed the batch's next ID, so the rendered
-    // leaf's walk resolves nowhere and pairing would silently render wrong spellings. The
-    // foreign table interns padding strings so no foreign component ID collides with a
-    // batch-table ID.
+fn capture_with_required_paths_rejects_foreign_domain_table_behind_rendered_path_payload() {
+    // The candidate table was issued by an independent domain whose component IDs exceed the
+    // batch's next ID, so the rendered leaf's walk resolves nowhere and pairing would silently
+    // render wrong spellings. The foreign table interns padding strings to avoid ID collisions.
     let mut batch_table = StringTable::new();
     batch_table.intern("batch");
     batch_table.intern("second");
@@ -751,7 +779,6 @@ fn attach_rejects_foreign_domain_table_behind_rendered_path_payload() {
         .try_intern_portable_path("batch/import", &mut batch_table)
         .expect("batch path fits");
     let diagnostic = CompilerDiagnostic::missing_import_target(batch_leaf, None);
-    let mut batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, batch_table);
 
     let mut foreign_strings = StringTable::new();
     foreign_strings.intern("foreign-pad-a");
@@ -763,21 +790,28 @@ fn attach_rejects_foreign_domain_table_behind_rendered_path_payload() {
         .expect("foreign path fits");
     let foreign_table = Arc::new(foreign_fork.snapshot_table());
 
+    let error = PreparedDiagnosticBatch::capture_with_required_paths(
+        DiagnosticBag::from(diagnostic),
+        batch_table,
+        None,
+        || Some(foreign_table),
+    )
+    .expect_err("a foreign table behind a rendered path must be rejected");
     assert!(
-        batch.attach_path_table_if_missing(foreign_table).is_err(),
-        "a foreign table behind a rendered path must be rejected"
+        error.msg.contains("path node"),
+        "pairing should identify the unresolved path node: {}",
+        error.msg
     );
 }
 
 #[test]
-fn attach_rejects_rendered_path_beyond_the_candidate_table() {
+fn capture_with_required_paths_rejects_rendered_path_beyond_candidate_table() {
     // A retained diagnostic whose PathId points past the candidate table has lost its issuing
     // table: rendering would dereference a node the table cannot address. Pairing must fail
     // visibly instead of silently attaching a context that cannot spell the payload's path.
     let batch_table = StringTable::new();
     let orphan_path = PathId::try_from_index(9).expect("index 9 fits the compact path domain");
     let diagnostic = CompilerDiagnostic::missing_import_target(orphan_path, None);
-    let mut batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, batch_table);
 
     let mut local_strings = StringTable::new();
     let mut local_fork = PathInternerFork::empty();
@@ -787,22 +821,24 @@ fn attach_rejects_rendered_path_beyond_the_candidate_table() {
     let local_table = Arc::new(local_fork.snapshot_table());
 
     assert!(
-        batch.attach_path_table_if_missing(local_table).is_err(),
+        PreparedDiagnosticBatch::capture_with_required_paths(
+            DiagnosticBag::from(diagnostic),
+            batch_table,
+            None,
+            || Some(local_table),
+        )
+        .is_err(),
         "a retained path outside the candidate table must fail pairing"
     );
 }
 
 #[test]
-fn attach_ignores_foreign_domain_table_for_diagnostics_without_path_payloads() {
-    // A diagnostic with no PathId payload never dereferences the attached table, so a table
-    // issued by a foreign string domain must not be retained merely because a caller supplies
-    // one. Retaining it would expose foreign component IDs to the complete-table rewrite at the
-    // next aggregation. The path-free diagnostic must still render its own name after a
-    // non-identity string merge.
+fn capture_with_required_paths_skips_foreign_table_without_path_payloads() {
+    // A path-free diagnostic must not retain an unrelated candidate table; its string identity
+    // must still survive the boundary's non-identity merge.
     let mut batch_table = StringTable::new();
     let name = batch_table.intern("local");
     let diagnostic = CompilerDiagnostic::unknown_value_name(name, None);
-    let mut batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, batch_table);
 
     let mut foreign_strings = StringTable::new();
     let mut foreign_fork = PathInternerFork::empty();
@@ -810,45 +846,40 @@ fn attach_ignores_foreign_domain_table_for_diagnostics_without_path_payloads() {
         .try_intern_portable_path("foreign/import", &mut foreign_strings)
         .expect("foreign path fits");
     let foreign_table = Arc::new(foreign_fork.snapshot_table());
-
-    batch
-        .attach_path_table_if_missing(foreign_table)
-        .expect("a path-free diagnostic must ignore a foreign table");
+    let mut requested_path_table = false;
+    let prepared = PreparedDiagnosticBatch::capture_with_required_paths(
+        DiagnosticBag::from(diagnostic),
+        batch_table,
+        None,
+        || {
+            requested_path_table = true;
+            Some(foreign_table)
+        },
+    )
+    .expect("a path-free diagnostic does not need a candidate table");
+    assert!(
+        !requested_path_table,
+        "path-free diagnostics must not request or retain a caller-supplied path table"
+    );
 
     let mut aggregate_table = StringTable::new();
     aggregate_table.intern("aggregate-padding");
-    let mut messages = CompilerMessages::empty(aggregate_table);
-    messages.append_messages_preserving_context(batch.into_messages());
-
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append(CompilerMessages::empty(aggregate_table));
+    accumulator.append_prepared(prepared, None);
+    let failure = accumulator.finish(InstallMode::Frozen);
+    let rendered = terse::format_terse_boundary_messages(&failure);
     assert!(
-        messages
-            .render_path_contexts
-            .as_ref()
-            .is_none_or(|contexts| contexts.is_empty()),
-        "a path-free diagnostic must not retain a caller-supplied path table"
-    );
-    let DiagnosticPayload::UnknownName { name, .. } = &messages.diagnostic_slice()[0].payload
-    else {
-        panic!("expected unknown-name diagnostic");
-    };
-    assert_eq!(
-        messages.string_table.resolve(*name),
-        "local",
-        "the incoming name must follow the non-identity string merge"
-    );
-    let failure = into_boundary_failure(messages);
-    let rendered = terse::format_terse_boundary_messages(&failure).join("\n");
-    assert!(
-        rendered.contains("local"),
-        "path-free rendering lost its authored name after aggregation: {rendered}"
+        rendered.iter().any(|line| line.contains("local")),
+        "path-free rendering lost its authored name after aggregation: {rendered:?}"
     );
 }
 
 #[test]
-fn attach_rejects_unresolvable_unused_path_table_node() {
+fn capture_with_required_paths_rejects_unresolvable_unused_path_table_node() {
     // The required path is valid in the batch string domain, but the retained table also carries
-    // an unused node whose component ID is outside that domain. Retained tables are remapped in
-    // full during aggregation, so this must fail at attachment rather than panic later.
+    // an unused node whose component ID is outside that domain. The complete table must validate
+    // before it can be retained and remapped.
     let mut batch_table = StringTable::new();
     batch_table.intern("local");
     batch_table.intern("leaf");
@@ -857,7 +888,6 @@ fn attach_rejects_unresolvable_unused_path_table_node() {
         .try_intern_portable_path("local/leaf", &mut batch_table)
         .expect("required path fits");
     let diagnostic = CompilerDiagnostic::missing_import_target(required_path, None);
-    let mut batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, batch_table);
 
     let mut candidate_strings = StringTable::new();
     candidate_strings.intern("local");
@@ -876,9 +906,13 @@ fn attach_rejects_unresolvable_unused_path_table_node() {
         "the valid required path must exercise the same node identity"
     );
 
-    let error = batch
-        .attach_path_table_if_missing(Arc::new(candidate_fork.snapshot_table()))
-        .expect_err("an unresolvable unused node must reject a retained table");
+    let error = PreparedDiagnosticBatch::capture_with_required_paths(
+        DiagnosticBag::from(diagnostic),
+        batch_table,
+        None,
+        || Some(Arc::new(candidate_fork.snapshot_table())),
+    )
+    .expect_err("an unresolvable unused node must reject a retained table");
     assert!(
         error.msg.contains("path node"),
         "the producer boundary should identify the invalid retained node: {}",
@@ -887,8 +921,8 @@ fn attach_rejects_unresolvable_unused_path_table_node() {
 }
 
 #[test]
-fn not_exported_by_public_surface_remaps_path_and_surface_name_after_aggregation() {
-    // Both values must survive a non-identity aggregation and final boundary conversion.
+fn not_exported_by_public_surface_remaps_path_and_surface_name_after_prepared_capture() {
+    // Both values must survive a non-identity aggregation and frozen boundary conversion.
     let mut local_table = StringTable::new();
     let surface_name = local_table.intern("surface-name");
     let mut local_fork = PathInternerFork::empty();
@@ -901,40 +935,41 @@ fn not_exported_by_public_surface_remaps_path_and_surface_name_after_aggregation
         ImportPublicSurfaceType::ModuleRoot,
         None,
     );
-    let mut local_messages = CompilerMessages::from_diagnostic(diagnostic, local_table);
-    local_messages
-        .attach_path_table_if_missing(Arc::new(local_fork.snapshot_table()))
-        .expect("requested path table must pair with the local string table");
+    let prepared = PreparedDiagnosticBatch::capture_with_required_paths(
+        DiagnosticBag::from(diagnostic),
+        local_table,
+        None,
+        || Some(Arc::new(local_fork.snapshot_table())),
+    )
+    .expect("requested path table must pair with the local string table");
 
     let mut aggregate_table = StringTable::new();
     aggregate_table.intern("collision-padding");
-    let mut messages = CompilerMessages::empty(aggregate_table);
-    messages.append_messages_preserving_context(local_messages);
-
-    let project_path = Path::new("/project/main.moth");
-    let registration = SourceRegistrationIndex::from_rows(std::iter::once((
-        project_path,
-        SourceKind::Compiler(SourceFileKind::Moth),
-    )));
-    let source_database = {
-        let mut frozen_table = messages.string_table.as_ref().clone();
-        let path_fork = PathInternerFork::empty();
-        SourceDatabase::from_registration_index_sorted_by_logical_path_with_path_builder(
-            &registration,
-            project_path,
-            None,
-            &mut frozen_table,
-            path_fork.clone_path_builder(),
-        )
-        .expect("frozen source identity should build")
-    };
-    messages.set_source_database(Arc::new(source_database));
-    assert!(
-        messages.path_table_for_diagnostic(0).is_some(),
-        "the retained path table must serve the requested path"
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append(CompilerMessages::empty(aggregate_table));
+    accumulator.append_prepared(prepared, None);
+    let failure = accumulator.finish(InstallMode::Frozen);
+    let (report, view) = failure
+        .reports
+        .iter()
+        .next()
+        .expect("the prepared batch must freeze one diagnostic");
+    let frozen = view
+        .family_view::<NotExportedByPublicSurfaceView>()
+        .expect("the frozen diagnostic must retain public-surface facts");
+    assert_eq!(frozen.requested_path, requested_path);
+    assert_eq!(
+        frozen.public_surface_type,
+        ImportPublicSurfaceType::ModuleRoot
     );
-    messages.mark_frozen();
-    let failure = into_boundary_failure(messages);
+    assert_eq!(
+        report
+            .context()
+            .strings()
+            .resolve(frozen.public_surface_name),
+        "surface-name",
+        "the public-surface name must follow the non-identity string merge"
+    );
     let rendered = terse::format_terse_boundary_messages(&failure).join("\n");
     assert!(
         rendered.contains("Cannot bind 'module/root' from module 'surface-name'"),
@@ -943,10 +978,9 @@ fn not_exported_by_public_surface_remaps_path_and_surface_name_after_aggregation
 }
 
 #[test]
-fn attach_retains_table_for_nominal_type_render_context_without_path_payloads() {
+fn capture_from_bag_preserves_nominal_type_rendering_without_path_payloads() {
     // TypeMismatch stores TypeIds rather than PathIds, but its nominal type name is rendered by
-    // walking the attached path table. Type-render contexts therefore remain legitimate path
-    // consumers even when payload-only classification sees no path identity.
+    // the captured type display using the paired path table.
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let nominal_path = path_fork
@@ -966,85 +1000,52 @@ fn attach_retains_table_for_nominal_type_render_context_without_path_payloads() 
         TypeMismatchContext::Assignment,
         None,
     );
-    let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table)
-        .with_type_context_for_all_diagnostics(type_environment);
-    messages
-        .attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()))
-        .expect("type rendering must retain its paired path table");
-    assert!(
-        messages.path_table_for_diagnostic(0).is_some(),
-        "type-render context must retain a path table even without a path payload"
-    );
-
-    let mut aggregate_table = StringTable::new();
-    aggregate_table.intern("aggregate-padding");
-    let mut aggregate = CompilerMessages::empty(aggregate_table);
-    aggregate.append_messages_preserving_context(messages);
-    let failure = into_boundary_failure(aggregate);
-    let rendered = terse::format_terse_boundary_messages(&failure).join("\n");
-    assert!(
-        rendered.contains("expected NominalType, found I32"),
-        "nominal type rendering lost its path context after aggregation: {rendered}"
-    );
-}
-
-#[test]
-fn batch_attaches_table_for_nominal_type_context_and_appends_prepared() {
-    // A nominal TypeMismatch stores TypeIds, so its paired table and environment must survive
-    // Pass A and the boundary's non-identity string remap.
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let nominal_path = path_fork
-        .try_intern_portable_path("NominalType", &mut string_table)
-        .expect("nominal path fits");
-    let mut type_environment = TypeEnvironment::new();
-    let (_, nominal_type) = type_environment.register_nominal_struct(StructTypeDefinition {
-        id: NominalTypeId(0),
-        path: nominal_path,
-        fields: Box::new([]),
-        generic_parameters: None,
-        const_record: false,
-    });
-    let diagnostic = CompilerDiagnostic::type_mismatch(
-        nominal_type,
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        TypeMismatchContext::Assignment,
-        None,
-    );
-    let mut batch = PremergeDiagnosticBatch::from_parts(
-        vec![diagnostic],
+    let prepared = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
         string_table,
-        vec![RenderTypeContext {
-            diagnostic_range: 0..1,
-            type_environment,
-        }],
-        Vec::new(),
+        Some(&type_environment),
+        true,
+        Some(Arc::new(path_fork.snapshot_table())),
     );
-    batch
-        .attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()))
-        .expect("type rendering must retain its paired path table at the batch boundary");
-    let prepared = PreparedDiagnosticBatch::from_premerge(batch)
-        .classify_premerge()
-        .expect("a nominal type-context batch must classify as diagnosed");
 
     let mut aggregate_table = StringTable::new();
     aggregate_table.intern("aggregate-padding");
     let mut accumulator = BoundaryAccumulator::new();
     accumulator.append(CompilerMessages::empty(aggregate_table));
     accumulator.append_prepared(prepared, None);
-    let failure = accumulator.finish(InstallMode::Unfrozen);
+    let failure = accumulator.finish(InstallMode::Frozen);
+    let (_, view) = failure
+        .reports
+        .iter()
+        .next()
+        .expect("the prepared batch must freeze one diagnostic");
+    let mismatch = view
+        .family_view::<TypeMismatchView>()
+        .expect("the frozen diagnostic must retain type-mismatch facts");
+    assert_eq!(mismatch.context, TypeMismatchContext::Assignment);
+    assert_eq!(
+        view.types().shape(mismatch.expected),
+        TypeDisplayShape::Struct {
+            path: nominal_path,
+            const_record: false,
+        }
+    );
+    assert_eq!(
+        view.types().shape(mismatch.found),
+        TypeDisplayShape::FixedScalar(FixedScalar::I32)
+    );
     let rendered = terse::format_terse_boundary_messages(&failure);
     assert!(
         rendered
             .iter()
             .any(|line| line
                 .contains("Type mismatch in assignment: expected NominalType, found I32")),
-        "prepared append lost nominal type rendering after a non-identity table remap: {rendered:?}"
+        "frozen type rendering lost its nominal context after a non-identity table remap: {rendered:?}"
     );
 }
 
 #[test]
-fn attach_rejects_unresolved_rendered_ancestor() {
+fn capture_with_required_paths_rejects_unresolved_rendered_ancestor() {
     // The leaf component resolves in the batch string table, but its rendered ancestor does not.
     // Pairing must walk the entire referenced chain rather than validating only the leaf.
     let mut batch_table = StringTable::new();
@@ -1062,12 +1063,16 @@ fn attach_rejects_unresolved_rendered_ancestor() {
     foreign_fork
         .try_intern_portable_path("ancestor/leaf/unreferenced", &mut foreign_strings)
         .expect("unreferenced foreign path fits");
-    let foreign_table = Arc::new(foreign_fork.snapshot_table());
     let diagnostic = CompilerDiagnostic::missing_import_target(rendered_leaf, None);
-    let mut batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, batch_table);
 
     assert!(
-        batch.attach_path_table_if_missing(foreign_table).is_err(),
+        PreparedDiagnosticBatch::capture_with_required_paths(
+            DiagnosticBag::from(diagnostic),
+            batch_table,
+            None,
+            || Some(Arc::new(foreign_fork.snapshot_table())),
+        )
+        .is_err(),
         "an unresolved rendered ancestor must fail pairing"
     );
 }
@@ -1151,228 +1156,304 @@ fn compiler_messages_preserve_type_context_ranges_when_prepending_and_appending(
 }
 
 #[test]
-fn remap_string_ids_updates_payloads_labels_and_tokens() {
+fn prepared_rebase_updates_payloads_labels_and_tokens() {
     let mut local_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let import_path = path_fork
         .try_intern_portable_path("lib.moth", &mut local_table)
         .expect("test path fits");
+    let rendered_import = path_fork.render_portable(import_path, &local_table, &mut Vec::new());
     let name = local_table.intern("Button");
     let alias = local_table.intern("AliasButton");
     let label_text = local_table.intern("temporary label");
     let source = SourceId::from_index(1);
     let mut span_builder = ExtendedSpanBuilder::new();
-    let primary_span = Some(exact_span(source, 4, 3, &mut span_builder));
+    let primary_span = exact_span(source, 4, 3, &mut span_builder);
     let first_span = exact_span(source, 10, 2, &mut span_builder);
 
     let expected_token = CompilerDiagnostic::expected_token_from_projections(
         DiagnosticToken::from_string_tag(TokenTag::SYMBOL, name),
         Some(DiagnosticToken::from_static_tag(TokenTag::PATH)),
-        primary_span,
+        Some(primary_span),
     );
-    let duplicate = CompilerDiagnostic::duplicate_declaration(name, Some(first_span), primary_span);
-    let import = CompilerDiagnostic::import_name_collision(alias, Some(first_span), primary_span)
-        .with_labels(vec![DiagnosticLabel::secondary(
-            Some(first_span),
-            Some(DiagnosticLabelMessage::RenderedText(label_text)),
-        )]);
-    let borrow = borrow_conflict_diagnostic(
+    let duplicate =
+        CompilerDiagnostic::duplicate_declaration(name, Some(first_span), Some(primary_span));
+    let conformance = CompilerDiagnostic::invalid_trait_conformance(
+        alias,
+        None,
+        InvalidTraitConformanceReason::ImportedModuleRoot,
+        Some(primary_span),
+    )
+    .with_labels(vec![DiagnosticLabel::secondary(
+        Some(first_span),
+        Some(DiagnosticLabelMessage::RenderedText(label_text)),
+    )]);
+    let borrow = CompilerDiagnostic::shared_mutable_conflict(
         DiagnosticPlace::Local(name),
         BorrowAccessKind::Shared,
         BorrowAccessKind::Mutable,
-        primary_span,
+        None,
+        Some(first_span),
+        Some(primary_span),
     );
-    let mut bag = DiagnosticBag::from_diagnostics(vec![expected_token, duplicate, import, borrow]);
 
     let mut merged_table = StringTable::new();
-    let remap = merged_table.merge_from(&local_table);
-    bag.remap_string_ids(&remap);
+    merged_table.intern("another module's string");
+    let prepared = capture_rebased_batch(
+        vec![expected_token, duplicate, conformance, borrow],
+        local_table,
+        &mut merged_table,
+        None,
+        false,
+        None,
+    );
+    let failure = finish_prepared_batch(prepared, merged_table);
+    let mut diagnostics = failure.reports.iter();
 
-    let diagnostics = bag.diagnostics();
-    match &diagnostics[0].payload {
-        DiagnosticPayload::ExpectedToken {
-            expected,
-            found: Some(found),
-        } => {
-            assert_eq!(expected.tag(), TokenTag::SYMBOL);
-            assert_eq!(found.tag(), TokenTag::PATH);
-            assert_eq!(found.data(), 0);
+    let (token_report, token_view) = diagnostics.next().expect("expected-token record");
+    let token = token_view
+        .family_view::<ExpectedTokenView>()
+        .expect("the first frozen record must be an expected-token diagnostic");
+    assert_eq!(token.expected.tag(), TokenTag::SYMBOL);
+    assert_eq!(
+        token_report
+            .context()
+            .strings()
+            .resolve(StringId::from_index(token.expected.data())),
+        "Button"
+    );
+    let found = token.found.expect("the test token has a found-token fact");
+    assert_eq!(found.tag(), TokenTag::PATH);
+    assert_eq!(found.data(), 0);
+    assert_eq!(rendered_import, "lib.moth");
+    assert!(matches!(
+        token_view.primary_site(),
+        SiteRef::Local(span) if span == primary_span
+    ));
+
+    let (duplicate_report, duplicate_view) =
+        diagnostics.next().expect("duplicate-declaration record");
+    let duplicate = duplicate_view
+        .family_view::<DuplicateDeclarationView>()
+        .expect("the second frozen record must be a duplicate declaration");
+    assert_eq!(
+        duplicate_report.context().strings().resolve(duplicate.name),
+        "Button"
+    );
+    let previous = duplicate_view
+        .durable_labels()
+        .next()
+        .expect("duplicate declaration should retain its previous-location label");
+    assert!(matches!(
+        previous.message,
+        DurableLabelMessage::PreviousDeclaration
+    ));
+    assert!(matches!(
+        previous.site,
+        SiteRef::Local(span) if span == first_span
+    ));
+    assert!(matches!(
+        duplicate_view.primary_site(),
+        SiteRef::Local(span) if span == primary_span
+    ));
+
+    let (conformance_report, conformance_view) = diagnostics
+        .next()
+        .expect("invalid-trait-conformance record");
+    let conformance = conformance_view
+        .family_view::<InvalidTraitConformanceView>()
+        .expect("the third frozen record must be an invalid trait conformance");
+    assert!(matches!(
+        conformance.shape,
+        InvalidTraitConformanceShape::ImportedModuleRoot
+    ));
+    let target_name = conformance_view
+        .string_ids()
+        .first()
+        .expect("trait conformance should retain its target name");
+    assert_eq!(
+        conformance_report.context().strings().resolve(*target_name),
+        "AliasButton"
+    );
+    let label = conformance_view
+        .durable_labels()
+        .next()
+        .expect("trait conformance should retain its authored label");
+    match label.message {
+        DurableLabelMessage::RenderedText(text) => {
             assert_eq!(
-                path_fork.render_portable(import_path, &local_table, &mut Vec::new()),
-                "lib.moth"
+                conformance_report.context().strings().resolve(text),
+                "temporary label"
             );
         }
-        payload => panic!("unexpected expected-token payload: {payload:?}"),
+        message => panic!("unexpected frozen trait-conformance label: {message:?}"),
     }
+    assert!(matches!(
+        label.site,
+        SiteRef::Local(span) if span == first_span
+    ));
+    assert!(matches!(
+        conformance_view.primary_site(),
+        SiteRef::Local(span) if span == primary_span
+    ));
 
-    match &diagnostics[1].payload {
-        DiagnosticPayload::DuplicateDeclaration { name } => {
-            assert_eq!(merged_table.resolve(*name), "Button");
+    let (borrow_report, borrow_view) = diagnostics.next().expect("borrow-conflict record");
+    let borrow = borrow_view
+        .family_view::<SharedMutableConflictView>()
+        .expect("the fourth frozen record must be a shared/mutable conflict");
+    match borrow.place.diagnostic_place() {
+        DiagnosticPlace::Local(name) => {
+            assert_eq!(borrow_report.context().strings().resolve(name), "Button");
         }
-        payload => panic!("unexpected duplicate payload: {payload:?}"),
+        place => panic!("unexpected frozen borrow place: {place:?}"),
     }
-    let previous_label = diagnostics[1]
-        .labels
-        .iter()
-        .find(|label| label.message == Some(DiagnosticLabelMessage::PreviousDeclaration))
-        .expect("duplicate declaration should carry a previous declaration label");
-    assert_eq!(previous_label.span, Some(first_span));
-
-    match &diagnostics[2].payload {
-        DiagnosticPayload::ImportNameCollision { name } => {
-            assert_eq!(merged_table.resolve(*name), "AliasButton");
-        }
-        payload => panic!("unexpected import payload: {payload:?}"),
-    }
-    assert_eq!(diagnostics[2].labels[0].span, Some(first_span));
-    match &diagnostics[2].labels[0].message {
-        Some(DiagnosticLabelMessage::RenderedText(message)) => {
-            assert_eq!(merged_table.resolve(*message), "temporary label");
-        }
-        message => panic!("unexpected label message: {message:?}"),
-    }
-
-    match &diagnostics[3].payload {
-        DiagnosticPayload::BorrowConflict {
-            place: DiagnosticPlace::Local(name),
-            ..
-        } => assert_eq!(merged_table.resolve(*name), "Button"),
-        payload => panic!("unexpected borrow payload: {payload:?}"),
-    }
-    assert_eq!(diagnostics[0].primary_span, primary_span);
-    assert_eq!(diagnostics[1].primary_span, primary_span);
-    assert_eq!(diagnostics[2].primary_span, primary_span);
-    assert_eq!(diagnostics[3].primary_span, primary_span);
+    assert_eq!(borrow.existing_access, BorrowAccessKind::Shared);
+    assert_eq!(borrow.requested_access, BorrowAccessKind::Mutable);
+    let conflict = borrow_view
+        .durable_labels()
+        .next()
+        .expect("shared/mutable conflict should retain its access label");
+    assert!(matches!(
+        conflict.message,
+        DurableLabelMessage::ConflictingAccess
+    ));
+    assert!(matches!(
+        conflict.site,
+        SiteRef::Local(span) if span == first_span
+    ));
+    assert!(matches!(
+        borrow_view.primary_site(),
+        SiteRef::Local(span) if span == primary_span
+    ));
+    assert!(
+        diagnostics.next().is_none(),
+        "expected exactly four frozen records"
+    );
 }
 
 #[test]
-fn remap_string_ids_updates_legacy_dependency_replacement() {
+fn prepared_rebase_updates_legacy_dependency_replacement() {
     let mut local_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork
-        .try_intern_portable_path("main.moth", &mut local_table)
-        .expect("test path fits");
     let replacement = local_table.intern("@vendor/drawing.js as drawing");
-
-    let diagnostic =
-        CompilerDiagnostic::legacy_dependency_clause(Some(replacement), span(source_path));
-
-    let mut bag = DiagnosticBag::from_diagnostics(vec![diagnostic]);
+    let diagnostic = CompilerDiagnostic::legacy_dependency_clause(Some(replacement), None);
 
     let mut merged_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let remap = merged_table.merge_from(&local_table);
-    bag.remap_string_ids(&remap);
-
-    match &bag.diagnostics()[0].payload {
-        DiagnosticPayload::LegacyDependencyClause {
-            replacement: Some(replacement),
-            ..
-        } => {
-            assert_eq!(
-                merged_table.resolve(*replacement),
-                "@vendor/drawing.js as drawing",
-                "migration replacement StringId must remain valid after table merge/remap"
-            );
-        }
-        payload => panic!("unexpected migration payload after remap: {payload:?}"),
-    }
+    merged_table.intern("another module's string");
+    let prepared = capture_rebased_batch(
+        vec![diagnostic],
+        local_table,
+        &mut merged_table,
+        None,
+        false,
+        None,
+    );
+    let failure = finish_prepared_batch(prepared, merged_table);
+    let (report, view) = failure
+        .reports
+        .iter()
+        .next()
+        .expect("the prepared batch must freeze one diagnostic");
+    let dependency = view
+        .family_view::<LegacyDependencyClauseView>()
+        .expect("the frozen diagnostic must retain legacy dependency facts");
+    let replacement = dependency
+        .replacement
+        .expect("legacy dependency migration should retain its replacement");
+    assert_eq!(
+        report.context().strings().resolve(replacement),
+        "@vendor/drawing.js as drawing",
+        "migration replacement StringId must remain valid after table rebase"
+    );
 }
 
 #[test]
-fn remap_string_ids_updates_compile_time_evaluation_operation() {
+fn prepared_rebase_updates_compile_time_evaluation_operation() {
     let mut local_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork
-        .try_intern_portable_path("main.moth", &mut local_table)
-        .expect("test path fits");
     let operation = local_table.intern("string equality comparison");
-
     let diagnostic = CompilerDiagnostic::compile_time_evaluation_error(
         CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText,
         Some(operation),
-        span(source_path),
+        None,
     );
-    let mut bag = DiagnosticBag::from_diagnostics(vec![diagnostic]);
 
-    // Occupy the merged table first so the merge cannot be an identity remap. A stale operation id
-    // would then silently resolve to another module's text instead of naming the real operation.
     let mut merged_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
     merged_table.intern("a string owned by another module");
     merged_table.intern("a second string owned by another module");
-    let remap = merged_table.merge_from(&local_table);
-    assert!(
-        !remap.is_identity(),
-        "the fixture must exercise a shifting remap"
+    let prepared = capture_rebased_batch(
+        vec![diagnostic],
+        local_table,
+        &mut merged_table,
+        None,
+        false,
+        None,
     );
-    bag.remap_string_ids(&remap);
-
-    let DiagnosticPayload::CompileTimeEvaluationError {
-        operation: Some(operation),
-        ..
-    } = &bag.diagnostics()[0].payload
-    else {
-        panic!(
-            "unexpected compile-time evaluation payload after remap: {:?}",
-            bag.diagnostics()[0].payload
-        );
-    };
+    let failure = finish_prepared_batch(prepared, merged_table);
+    let (report, view) = failure
+        .reports
+        .iter()
+        .next()
+        .expect("the prepared batch must freeze one diagnostic");
+    let evaluation = view
+        .family_view::<CompileTimeEvaluationErrorView>()
+        .expect("the frozen diagnostic must retain compile-time evaluation facts");
     assert_eq!(
-        merged_table.resolve(*operation),
+        report
+            .context()
+            .strings()
+            .resolve(evaluation.operation.expect("operation name")),
         "string equality comparison",
-        "the operation name must survive a module table merge"
+        "the operation name must survive a shifting table rebase"
     );
 }
 
 #[test]
-fn remap_string_ids_updates_receiver_declaration_function_names() {
+fn prepared_rebase_updates_receiver_declaration_function_name_and_type() {
     use crate::compiler_frontend::compiler_messages::InvalidReceiverDeclarationReason;
 
     let mut local_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork
-        .try_intern_portable_path("main.moth", &mut local_table)
-        .expect("test path fits");
     let function_name = local_table.intern("describe");
-    // The receiver type crosses this boundary as semantic identity, so no string remap can stale it.
     let type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
-
     let diagnostic = CompilerDiagnostic::invalid_receiver_declaration(
         InvalidReceiverDeclarationReason::UnsupportedType {
             function_name,
             type_id,
         },
-        span(source_path),
+        None,
     );
-    let mut bag = DiagnosticBag::from_diagnostics(vec![diagnostic]);
-
-    // A shifting remap: stale ids would name another module's strings in the rendered message.
+    let type_environment = TypeEnvironment::new();
+    let path_table = Arc::new(PathInternerFork::empty().snapshot_table());
     let mut merged_table = StringTable::new();
     merged_table.intern("a string owned by another module");
     merged_table.intern("a second string owned by another module");
-    let remap = merged_table.merge_from(&local_table);
-    assert!(
-        !remap.is_identity(),
-        "the fixture must exercise a shifting remap"
+    let prepared = capture_rebased_batch(
+        vec![diagnostic],
+        local_table,
+        &mut merged_table,
+        Some(&type_environment),
+        true,
+        Some(path_table),
     );
-    bag.remap_string_ids(&remap);
-
-    let DiagnosticPayload::InvalidReceiverDeclaration {
-        reason:
-            InvalidReceiverDeclarationReason::UnsupportedType {
-                function_name,
-                type_id: remapped_type_id,
-            },
-    } = &bag.diagnostics()[0].payload
-    else {
-        panic!(
-            "unexpected receiver payload after remap: {:?}",
-            bag.diagnostics()[0].payload
-        );
-    };
-    assert_eq!(merged_table.resolve(*function_name), "describe");
-    assert_eq!(*remapped_type_id, type_id);
+    let failure = finish_prepared_batch(prepared, merged_table);
+    let (report, view) = failure
+        .reports
+        .iter()
+        .next()
+        .expect("the prepared batch must freeze one diagnostic");
+    let receiver = view
+        .family_view::<InvalidReceiverDeclarationView>()
+        .expect("the frozen diagnostic must retain receiver-declaration facts");
+    assert_eq!(
+        report
+            .context()
+            .strings()
+            .resolve(receiver.function_name.expect("function name")),
+        "describe"
+    );
+    assert_eq!(
+        view.types().shape(receiver.type_id.expect("receiver type")),
+        TypeDisplayShape::FixedScalar(FixedScalar::I32),
+        "string rebasing must not alter the receiver's semantic type"
+    );
 }
 
 #[test]
@@ -3053,16 +3134,11 @@ fn mutable_access_not_allowed_tells_author_to_remove_authored_marker() {
 }
 
 #[test]
-fn invalid_call_shape_remap_updates_binding_name_and_parameter_name() {
+fn prepared_rebase_updates_invalid_call_shape_names() {
     let mut local_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork
-        .try_intern_portable_path("main.moth", &mut local_table)
-        .expect("test path fits");
     let parameter = local_table.intern("values");
     let binding = local_table.intern("values");
     let callee = local_table.intern("consume");
-
     let diagnostic = CompilerDiagnostic::invalid_call_shape(
         InvalidCallShapeReason::ImmutablePlaceMutableAccessRequired {
             parameter_name: Some(parameter),
@@ -3070,31 +3146,46 @@ fn invalid_call_shape_remap_updates_binding_name_and_parameter_name() {
             binding_name: Some(binding),
         },
         Some(callee),
-        span(source_path),
+        None,
     );
-    let mut bag = DiagnosticBag::from_diagnostics(vec![diagnostic]);
 
     let mut merged_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let remap = merged_table.merge_from(&local_table);
-    bag.remap_string_ids(&remap);
-
-    let DiagnosticPayload::InvalidCallShape {
-        reason:
-            InvalidCallShapeReason::ImmutablePlaceMutableAccessRequired {
-                parameter_name,
-                binding_name,
-                ..
-            },
-        callee_name,
-    } = &bag.diagnostics()[0].payload
-    else {
-        panic!("expected remapped ImmutablePlaceMutableAccessRequired payload");
+    merged_table.intern("another module's string");
+    let prepared = capture_rebased_batch(
+        vec![diagnostic],
+        local_table,
+        &mut merged_table,
+        None,
+        false,
+        None,
+    );
+    let failure = finish_prepared_batch(prepared, merged_table);
+    let (report, view) = failure
+        .reports
+        .iter()
+        .next()
+        .expect("the prepared batch must freeze one diagnostic");
+    let call = view
+        .family_view::<InvalidCallShapeView>()
+        .expect("the frozen diagnostic must retain invalid-call-shape facts");
+    assert_eq!(
+        report
+            .context()
+            .strings()
+            .resolve(call.callee_name.expect("callee name")),
+        "consume"
+    );
+    assert_eq!(
+        report
+            .context()
+            .strings()
+            .resolve(call.parameter_name.expect("parameter name")),
+        "values"
+    );
+    let [binding] = view.string_ids() else {
+        panic!("expected one frozen binding-name string ID");
     };
-
-    assert_eq!(merged_table.resolve(callee_name.unwrap()), "consume");
-    assert_eq!(merged_table.resolve(parameter_name.unwrap()), "values");
-    assert_eq!(merged_table.resolve(binding_name.unwrap()), "values");
+    assert_eq!(report.context().strings().resolve(*binding), "values");
 }
 
 fn render_invalid_receiver_call(
@@ -3390,41 +3481,52 @@ fn const_record_runtime_call_renders_current_source_term() {
 }
 
 #[test]
-fn invalid_receiver_call_remap_updates_receiver_binding_name() {
+fn prepared_rebase_updates_invalid_receiver_call_binding_name() {
     let mut local_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork
-        .try_intern_portable_path("main.moth", &mut local_table)
-        .expect("test path fits");
     let method = local_table.intern("move");
     let binding = local_table.intern("p");
-
     let diagnostic = CompilerDiagnostic::invalid_receiver_call(
         InvalidReceiverCallReason::ImmutableReceiverMutableMethod,
         None,
         Some(method),
         Some(ReceiverCallKind::SourceMethod),
         Some(binding),
-        span(source_path),
+        None,
     );
-    let mut bag = DiagnosticBag::from_diagnostics(vec![diagnostic]);
 
     let mut merged_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let remap = merged_table.merge_from(&local_table);
-    bag.remap_string_ids(&remap);
-
-    let DiagnosticPayload::InvalidReceiverCall {
-        method_name,
-        receiver_binding_name,
-        ..
-    } = &bag.diagnostics()[0].payload
-    else {
-        panic!("expected remapped InvalidReceiverCall payload");
-    };
-
-    assert_eq!(merged_table.resolve(method_name.unwrap()), "move");
-    assert_eq!(merged_table.resolve(receiver_binding_name.unwrap()), "p");
+    merged_table.intern("another module's string");
+    let prepared = capture_rebased_batch(
+        vec![diagnostic],
+        local_table,
+        &mut merged_table,
+        None,
+        false,
+        None,
+    );
+    let failure = finish_prepared_batch(prepared, merged_table);
+    let (report, view) = failure
+        .reports
+        .iter()
+        .next()
+        .expect("the prepared batch must freeze one diagnostic");
+    let call = view
+        .family_view::<InvalidReceiverCallView>()
+        .expect("the frozen diagnostic must retain receiver-call facts");
+    assert_eq!(
+        report
+            .context()
+            .strings()
+            .resolve(call.method_name.expect("method name")),
+        "move"
+    );
+    assert_eq!(
+        crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::invalid_receiver_call_binding_name(
+            view.string_ids(),
+        )
+        .map(|binding| report.context().strings().resolve(binding)),
+        Some("p")
+    );
 }
 
 #[test]
@@ -3590,9 +3692,8 @@ fn borrow_labels_preserve_order_and_exact_source_spans() {
 }
 
 #[test]
-fn remapping_diagnostic_strings_leaves_source_spans_unchanged() {
+fn prepared_rebase_preserves_source_spans_and_strings() {
     let mut local_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
     let name = local_table.intern("Button");
     let label_text = local_table.intern("previous declaration");
     let primary_source = SourceId::from_index(3);
@@ -3600,37 +3701,66 @@ fn remapping_diagnostic_strings_leaves_source_spans_unchanged() {
     let mut builder = ExtendedSpanBuilder::new();
     let primary = exact_span(primary_source, 4, 6, &mut builder);
     let related = exact_span(related_source, 18, 5, &mut builder);
-
-    let diagnostic = CompilerDiagnostic::import_name_collision(name, Some(related), Some(primary))
-        .with_labels(vec![DiagnosticLabel::secondary(
-            Some(related),
-            Some(DiagnosticLabelMessage::RenderedText(label_text)),
-        )]);
-    let mut bag = DiagnosticBag::from_diagnostics(vec![diagnostic]);
+    let diagnostic = CompilerDiagnostic::invalid_trait_conformance(
+        name,
+        None,
+        InvalidTraitConformanceReason::ImportedModuleRoot,
+        Some(primary),
+    )
+    .with_labels(vec![DiagnosticLabel::secondary(
+        Some(related),
+        Some(DiagnosticLabelMessage::RenderedText(label_text)),
+    )]);
 
     let mut merged_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
     merged_table.intern("preexisting string");
-    let remap = merged_table.merge_from(&local_table);
-    bag.remap_string_ids(&remap);
-
-    let diagnostic = &bag.diagnostics()[0];
-    assert_eq!(diagnostic.primary_span, Some(primary));
-    assert_eq!(diagnostic.labels[0].span, Some(related));
-    match &diagnostic.payload {
-        DiagnosticPayload::ImportNameCollision {
-            name: remapped_name,
-        } => {
-            assert_eq!(merged_table.resolve(*remapped_name), "Button");
+    let prepared = capture_rebased_batch(
+        vec![diagnostic],
+        local_table,
+        &mut merged_table,
+        None,
+        false,
+        None,
+    );
+    let failure = finish_prepared_batch(prepared, merged_table);
+    let (report, view) = failure
+        .reports
+        .iter()
+        .next()
+        .expect("the prepared batch must freeze one diagnostic");
+    let conformance = view
+        .family_view::<InvalidTraitConformanceView>()
+        .expect("the frozen diagnostic must retain invalid trait-conformance facts");
+    assert!(matches!(
+        conformance.shape,
+        InvalidTraitConformanceShape::ImportedModuleRoot
+    ));
+    let target_name = view
+        .string_ids()
+        .first()
+        .expect("trait conformance should retain its target name");
+    assert_eq!(report.context().strings().resolve(*target_name), "Button");
+    assert!(matches!(
+        view.primary_site(),
+        SiteRef::Local(span) if span == primary
+    ));
+    let label = view
+        .durable_labels()
+        .next()
+        .expect("the frozen trait-conformance label must remain present");
+    match label.message {
+        DurableLabelMessage::RenderedText(text) => {
+            assert_eq!(
+                report.context().strings().resolve(text),
+                "previous declaration"
+            );
         }
-        payload => panic!("unexpected import payload: {payload:?}"),
+        message => panic!("unexpected frozen trait-conformance label: {message:?}"),
     }
-    match diagnostic.labels[0].message {
-        Some(DiagnosticLabelMessage::RenderedText(remapped_text)) => {
-            assert_eq!(merged_table.resolve(remapped_text), "previous declaration");
-        }
-        ref message => panic!("unexpected label message: {message:?}"),
-    }
+    assert!(matches!(
+        label.site,
+        SiteRef::Local(span) if span == related
+    ));
 }
 
 #[test]
@@ -3886,7 +4016,7 @@ impl DeferredFeatureDiagnosticKind {
 }
 
 #[test]
-fn failure_writeback_label_keeps_target_type_through_prepared_handoff() {
+fn failure_writeback_label_keeps_target_type_in_frozen_prepared_output() {
     let mut string_table = StringTable::new();
     let source_path = Path::new("/project/writeback.moth");
     let mut sources = SourceDatabase::build(
@@ -3910,39 +4040,45 @@ fn failure_writeback_label_keeps_target_type_through_prepared_handoff() {
                 call_spans: vec![],
                 origin_span,
                 origin: BuiltinFailureOriginKind::CompoundWriteBack {
-                    target: builtin_type_ids::fixed_scalar(
-                        moth_lexical::numeric::fixed_scalar::FixedScalar::U8,
-                    ),
+                    target: builtin_type_ids::fixed_scalar(FixedScalar::U8),
                 },
                 elided_call_hops: 0,
             }),
         },
         None,
     );
-    // The label keeps its semantic target through Pass A, the local path pairing and the
-    // boundary's non-identity string-table append.
-    let mut batch = PremergeDiagnosticBatch::from_parts(
-        vec![diagnostic],
+    // Pass A captures the label's type against the live environment and the paired source path
+    // table; the boundary then rebases the local string table and freezes the typed label fact.
+    let prepared = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
         string_table,
-        vec![RenderTypeContext {
-            diagnostic_range: 0..1,
-            type_environment,
-        }],
-        vec![],
+        Some(&type_environment),
+        true,
+        Some(Arc::new(sources.paths().clone())),
     );
-    batch
-        .attach_path_table_if_missing(Arc::new(sources.paths().clone()))
-        .expect("the type context must retain its paired source path table");
-    let prepared = PreparedDiagnosticBatch::from_premerge(batch)
-        .classify_premerge()
-        .expect("the diagnostic batch has a user-facing error");
 
     let mut aggregate_table = StringTable::new();
     aggregate_table.intern("aggregate-padding");
     let mut accumulator = BoundaryAccumulator::new();
     accumulator.append(CompilerMessages::empty(aggregate_table));
     accumulator.append_prepared(prepared, Some((Arc::new(sources), None)));
-    let failure = accumulator.finish(InstallMode::Unfrozen);
+    let failure = accumulator.finish(InstallMode::Frozen);
+    let mut found_writeback_type = false;
+    for (_, view) in failure.reports.iter() {
+        for label in view.durable_labels() {
+            if let DurableLabelMessage::BuiltinWriteBackOrigin { target_type } = label.message {
+                assert_eq!(
+                    view.types().shape(target_type),
+                    TypeDisplayShape::FixedScalar(FixedScalar::U8)
+                );
+                found_writeback_type = true;
+            }
+        }
+    }
+    assert!(
+        found_writeback_type,
+        "the frozen diagnostic must retain the write-back target type"
+    );
     let labels = failure
         .reports
         .iter()

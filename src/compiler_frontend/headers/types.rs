@@ -7,9 +7,7 @@
 
 use crate::compiler_frontend::arena::{HeaderStats, TokenStats};
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DependencyClauseKind, PremergeDiagnosticBatch,
-};
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DependencyClauseKind};
 use crate::compiler_frontend::datatypes::generic_parameters::GenericParameterList;
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::declaration_syntax::build_config_contract::SourceBuildConfigContract;
@@ -2442,15 +2440,6 @@ impl FileFrontendPrepareError {
         }
 
         self.diagnostic.remap_string_ids(remap);
-    }
-
-    pub(crate) fn into_premerge_batch(self, string_table: StringTable) -> PremergeDiagnosticBatch {
-        let Self {
-            mut warnings,
-            diagnostic,
-        } = self;
-        warnings.push(diagnostic);
-        PremergeDiagnosticBatch::from_diagnostics(warnings, string_table)
     }
 }
 

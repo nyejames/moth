@@ -21,8 +21,9 @@ use crate::builder_surface::external_import_providers::provider::ExternalFileExt
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry, SourcePackageRegistry};
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    InvalidConfigReason, PremergeDiagnosticBatch, PremergeFailure,
+    DiagnosticBag, InvalidConfigReason, PremergeFailure,
 };
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::project_globals::PROJECT_GLOBALS_DEPENDENCY_NAME;
@@ -628,7 +629,13 @@ impl SourceTreeIndex {
                     );
                     let table = std::mem::take(string_table);
                     return Err(PremergeFailure::Diagnosed(
-                        PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
+                        PreparedDiagnosticBatch::capture_from_bag(
+                            DiagnosticBag::from(diagnostic),
+                            table,
+                            None,
+                            false,
+                            None,
+                        ),
                     ));
                 }
 
@@ -647,7 +654,13 @@ impl SourceTreeIndex {
                     let diagnostic = project_structure_diagnostic(reason);
                     let table = std::mem::take(string_table);
                     return Err(PremergeFailure::Diagnosed(
-                        PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
+                        PreparedDiagnosticBatch::capture_from_bag(
+                            DiagnosticBag::from(diagnostic),
+                            table,
+                            None,
+                            false,
+                            None,
+                        ),
                     ));
                 }
 
@@ -762,7 +775,13 @@ impl SourceTreeIndex {
                     let diagnostic = project_structure_diagnostic(reason);
                     let table = std::mem::take(string_table);
                     return Err(PremergeFailure::Diagnosed(
-                        PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
+                        PreparedDiagnosticBatch::capture_from_bag(
+                            DiagnosticBag::from(diagnostic),
+                            table,
+                            None,
+                            false,
+                            None,
+                        ),
                     ));
                 }
             }
@@ -774,7 +793,13 @@ impl SourceTreeIndex {
                     project_structure_diagnostic(InvalidConfigReason::ProjectGlobalsNameReserved);
                 let table = std::mem::take(string_table);
                 return Err(PremergeFailure::Diagnosed(
-                    PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
+                    PreparedDiagnosticBatch::capture_from_bag(
+                        DiagnosticBag::from(diagnostic),
+                        table,
+                        None,
+                        false,
+                        None,
+                    ),
                 ));
             }
 
@@ -796,7 +821,13 @@ impl SourceTreeIndex {
                         let diagnostic = project_structure_diagnostic(reason);
                         let table = std::mem::take(string_table);
                         return Err(PremergeFailure::Diagnosed(
-                            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
+                            PreparedDiagnosticBatch::capture_from_bag(
+                                DiagnosticBag::from(diagnostic),
+                                table,
+                                None,
+                                false,
+                                None,
+                            ),
                         ));
                     }
                 }
@@ -1141,7 +1172,13 @@ fn discover_project_package_facade(
                 project_structure_diagnostic(InvalidConfigReason::ProjectGlobalsNameReserved);
             let table = std::mem::take(string_table);
             return Err(PremergeFailure::Diagnosed(
-                PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
+                PreparedDiagnosticBatch::capture_from_bag(
+                    DiagnosticBag::from(diagnostic),
+                    table,
+                    None,
+                    false,
+                    None,
+                ),
             ));
         }
 
@@ -1170,7 +1207,13 @@ fn discover_project_package_facade(
             });
         let table = std::mem::take(string_table);
         return Err(PremergeFailure::Diagnosed(
-            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
+            PreparedDiagnosticBatch::capture_from_bag(
+                DiagnosticBag::from(diagnostic),
+                table,
+                None,
+                false,
+                None,
+            ),
         ));
     }
 
@@ -1205,7 +1248,13 @@ fn classify_directory_root(
             });
         let table = std::mem::take(string_table);
         return Err(PremergeFailure::Diagnosed(
-            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
+            PreparedDiagnosticBatch::capture_from_bag(
+                DiagnosticBag::from(diagnostic),
+                table,
+                None,
+                false,
+                None,
+            ),
         ));
     }
 
@@ -1243,7 +1292,13 @@ fn classify_package_root_directory(
             });
         let table = std::mem::take(string_table);
         return Err(PremergeFailure::Diagnosed(
-            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
+            PreparedDiagnosticBatch::capture_from_bag(
+                DiagnosticBag::from(diagnostic),
+                table,
+                None,
+                false,
+                None,
+            ),
         ));
     }
 
@@ -1265,7 +1320,13 @@ fn classify_package_root_directory(
             });
         let table = std::mem::take(string_table);
         return Err(PremergeFailure::Diagnosed(
-            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
+            PreparedDiagnosticBatch::capture_from_bag(
+                DiagnosticBag::from(diagnostic),
+                table,
+                None,
+                false,
+                None,
+            ),
         ));
     }
 

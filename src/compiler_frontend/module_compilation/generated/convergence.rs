@@ -23,7 +23,7 @@ use crate::compiler_frontend::ast::generic_functions::{
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::prepared_batch::{
-    AstDiagnosticFailure, PreparedDiagnosticBatch, SemanticStageFailure,
+    AstDiagnosticFailure, PreparedDiagnosticBatch,
 };
 use crate::compiler_frontend::compiler_messages::{
     BuiltinFailureOriginKind, BuiltinFailureWitness, CompilerDiagnostic, DiagnosticBag,
@@ -422,7 +422,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
     type_environment: &mut TypeEnvironment,
     warnings: &mut DiagnosticBag,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<BorrowCheckReport, SemanticStageFailure> {
+) -> Result<BorrowCheckReport, PremergeFailure> {
     let base_public_origins = hir_module
         .function_ids_by_origin
         .keys()
@@ -439,7 +439,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
         &base_public_origins,
         &base_private_identities,
     )
-    .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+    .map_err(PremergeFailure::from)?;
     convergence_model.include_deferred_validation_dependencies(
         hir_module,
         generated_transaction,
@@ -457,12 +457,9 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
     while let Some(node_id) = convergence_queue.pop_front() {
         queued_nodes[node_id.index()] = false;
         let node = convergence_model.node(node_id).cloned().ok_or_else(|| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(format!(
-                    "convergence queue received unknown node {node_id:?}"
-                )),
-                &compiler.string_table,
-            )
+            PremergeFailure::from(CompilerError::compiler_error(format!(
+                "convergence queue received unknown node {node_id:?}"
+            )))
         })?;
         let direct_summaries = direct_convergence_summaries(
             &convergence_model,
@@ -471,7 +468,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
             hir_module,
             &borrow_analysis,
         )
-        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+        .map_err(PremergeFailure::from)?;
 
         match node {
             ConvergenceNode::BaseModule => {
@@ -500,7 +497,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                     &previous_summaries,
                     &borrow_analysis.analysis.public_call_summaries,
                 )
-                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+                .map_err(PremergeFailure::from)?;
                 if !summary_changes.is_empty() {
                     enqueue_base_dependents(
                         &convergence_model,
@@ -508,9 +505,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                         &mut convergence_queue,
                         &mut queued_nodes,
                     )
-                    .map_err(|error| {
-                        CompilerMessages::from_error_ref(error, &compiler.string_table)
-                    })?;
+                    .map_err(PremergeFailure::from)?;
                 }
             }
             ConvergenceNode::Generated(identity) => {
@@ -519,12 +514,9 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                     identity.declaration().module_origin().package().clone(),
                 );
                 let summary = {
-                    let sidecar =
-                        generated_transaction
-                            .sidecar_mut(&identity)
-                            .map_err(|error| {
-                                CompilerMessages::from_error_ref(error, &compiler.string_table)
-                            })?;
+                    let sidecar = generated_transaction
+                        .sidecar_mut(&identity)
+                        .map_err(PremergeFailure::from)?;
                     let summaries_changed = install_convergence_summaries(
                         &mut sidecar.module.executable.hir,
                         &direct_summaries.generated,
@@ -554,22 +546,19 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                         &sidecar.module.executable.hir,
                         &mut sidecar.module.executable.borrow_analysis,
                     )?;
-                    exact_generated_sidecar_summary(&identity, &sidecar.module).map_err(
-                        |error| CompilerMessages::from_error_ref(error, &compiler.string_table),
-                    )?
+                    exact_generated_sidecar_summary(&identity, &sidecar.module)
+                        .map_err(PremergeFailure::from)?
                 };
-                if update_generated_summary(generated_transaction, &identity, summary).map_err(
-                    |error| CompilerMessages::from_error_ref(error, &compiler.string_table),
-                )? {
+                if update_generated_summary(generated_transaction, &identity, summary)
+                    .map_err(PremergeFailure::from)?
+                {
                     enqueue_convergence_callers(
                         &convergence_model,
                         node_id,
                         &mut convergence_queue,
                         &mut queued_nodes,
                     )
-                    .map_err(|error| {
-                        CompilerMessages::from_error_ref(error, &compiler.string_table)
-                    })?;
+                    .map_err(PremergeFailure::from)?;
                 }
             }
         }
@@ -799,7 +788,7 @@ fn refresh_private_failure_lanes(
     type_environment: &mut TypeEnvironment,
     warnings: &mut DiagnosticBag,
     source_owner: Option<&FrozenIdentityHandle>,
-) -> Result<Option<BorrowCheckReport>, SemanticStageFailure> {
+) -> Result<Option<BorrowCheckReport>, PremergeFailure> {
     let installation = install_private_failure_lanes(
         hir,
         report,
@@ -822,7 +811,7 @@ fn refresh_private_failure_lanes(
                 warnings.collect(),
                 &compiler.string_table,
             );
-            SemanticStageFailure::from(AstDiagnosticFailure::capture_messages(
+            PremergeFailure::from(AstDiagnosticFailure::capture_messages(
                 messages,
                 Some(type_environment),
                 true,
@@ -830,15 +819,14 @@ fn refresh_private_failure_lanes(
             ))
         }
         HirConstructionFailure::Infrastructure(error) => {
-            SemanticStageFailure::from(AstDiagnosticFailure::from(error))
+            PremergeFailure::from(AstDiagnosticFailure::from(error))
         }
     })?;
     if installation == PrivateFailureLaneInstallation::Unchanged {
         return Ok(None);
     }
     let mut refreshed = check_borrows(compiler, hir, type_environment, warnings, source_owner)?;
-    infer_builtin_failure_summaries(hir, &mut refreshed)
-        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+    infer_builtin_failure_summaries(hir, &mut refreshed).map_err(PremergeFailure::from)?;
     Ok(Some(refreshed))
 }
 
@@ -1355,7 +1343,7 @@ fn validate_builtin_failure_boundaries(
     type_environment: &TypeEnvironment,
     warnings: &mut DiagnosticBag,
     source_owner: Option<&FrozenIdentityHandle>,
-) -> Result<(), SemanticStageFailure> {
+) -> Result<(), PremergeFailure> {
     for function in &hir.functions {
         let Some(mut diagnostic) = builtin_failure_diagnostic(hir, report, function.id)? else {
             continue;
@@ -1363,19 +1351,24 @@ fn validate_builtin_failure_boundaries(
         if let Some(owner) = source_owner {
             diagnostic.attach_frozen_identity_handle_if_missing(owner.clone());
         }
-        let mut batch = PreparedDiagnosticBatch::capture_from_bag(
-            DiagnosticBag::from(diagnostic),
+        let mut diagnostics = warnings
+            .take_diagnostics()
+            .into_iter()
+            .map(|mut warning| {
+                if let Some(owner) = source_owner {
+                    warning.attach_frozen_identity_handle_if_missing(owner.clone());
+                }
+                warning
+            })
+            .collect::<Vec<_>>();
+        diagnostics.push(diagnostic);
+        let batch = PreparedDiagnosticBatch::capture_with_required_paths_and_types(
+            DiagnosticBag::from_diagnostics(diagnostics),
             std::mem::take(&mut compiler.string_table),
             Some(type_environment),
-            true,
-            Some(Arc::new(compiler.path_fork.snapshot_table())),
-        );
-        batch.prepend_diagnostics(warnings.take_diagnostics().into_iter().map(|mut warning| {
-            if let Some(owner) = source_owner {
-                warning.attach_frozen_identity_handle_if_missing(owner.clone());
-            }
-            warning
-        }));
+            || Some(Arc::new(compiler.path_fork.snapshot_table())),
+        )
+        .map_err(PremergeFailure::from)?;
         return Err(AstDiagnosticFailure::Prepared(batch).into());
     }
     Ok(())

@@ -16,8 +16,10 @@ use crate::compiler_frontend::ast::generic_functions::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
-use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
-use crate::compiler_frontend::compiler_messages::{PremergeDiagnosticBatch, PremergeFailure};
+use crate::compiler_frontend::compiler_messages::PremergeFailure;
+use crate::compiler_frontend::compiler_messages::prepared_batch::{
+    AstDiagnosticFailure, PreparedDiagnosticBatch,
+};
 use crate::compiler_frontend::hir::failure_facts::HirBuiltinFailureBoundary;
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::reachability::{
@@ -61,7 +63,7 @@ struct MaterialisingRequest {
     timing_context: Option<crate::timing::TimingContext>,
 }
 
-/// Separates prepared generated-AST diagnostics from the older premerge failures.
+/// Separates prepared generated-AST diagnostics from other typed premerge failures.
 #[derive(Debug)]
 pub(in crate::compiler_frontend::module_compilation) enum GeneratedMaterialisationFailure {
     Ast(AstDiagnosticFailure),
@@ -126,45 +128,7 @@ pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_re
     Ok(())
 }
 
-/// Attach the compiler's live path table to any diagnosed generated request before its local
-/// compiler owner is dropped.
 fn materialise_generated_request<'build>(
-    context: &ModuleCompilationContext<'build>,
-    request_id: GeneratedRequestId,
-    request: &MaterialisingRequest,
-    transaction: &mut GeneratedFunctionTransaction<'_>,
-    requester_context: &ModuleMaterialisationPreparation,
-    compiler: &mut CompilerFrontend<'_>,
-    entry_file_path: &Path,
-) -> Result<(), GeneratedMaterialisationFailure> {
-    let result = materialise_generated_request_inner(
-        context,
-        request_id,
-        request,
-        transaction,
-        requester_context,
-        compiler,
-        entry_file_path,
-    );
-    match result {
-        Ok(()) => Ok(()),
-        Err(GeneratedMaterialisationFailure::Ast(failure)) => {
-            Err(GeneratedMaterialisationFailure::Ast(failure))
-        }
-        Err(GeneratedMaterialisationFailure::Premerge(mut failure)) => {
-            if let Err(error) =
-                failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()))
-            {
-                return Err(GeneratedMaterialisationFailure::Premerge(
-                    PremergeFailure::from(error),
-                ));
-            }
-            Err(GeneratedMaterialisationFailure::Premerge(failure))
-        }
-    }
-}
-
-fn materialise_generated_request_inner<'build>(
     context: &ModuleCompilationContext<'build>,
     request_id: GeneratedRequestId,
     request: &MaterialisingRequest,
@@ -189,13 +153,14 @@ fn materialise_generated_request_inner<'build>(
             } else {
                 diagnostic
             };
-            return Err(
-                PremergeFailure::from(PremergeDiagnosticBatch::from_diagnostic(
-                    diagnostic,
-                    std::mem::take(&mut compiler.string_table),
-                ))
-                .into(),
-            );
+            let batch = PreparedDiagnosticBatch::capture_with_required_paths(
+                DiagnosticBag::from(diagnostic),
+                std::mem::take(&mut compiler.string_table),
+                None,
+                || Some(Arc::new(compiler.path_fork.snapshot_table())),
+            )
+            .map_err(PremergeFailure::from)?;
+            return Err(PremergeFailure::Diagnosed(batch).into());
         }
         GeneratedRequestEntry::Materialise => {}
     }

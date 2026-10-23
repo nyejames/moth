@@ -1,4 +1,9 @@
 use super::*;
+
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
+    CrossModuleImportNotExportedView, UnsupportedExternalExtensionView,
+};
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 #[test]
 fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
@@ -952,33 +957,37 @@ fn unsupported_external_extension_in_multi_entry_preserves_diagnostic_shape() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let messages = match discover_modules_for_test(&config, &resolver, &style_directives) {
+    let failure = match discover_modules_for_test(&config, &resolver, &style_directives) {
         Ok(_) => panic!("unsupported .js import should fail discovery"),
-        Err(messages) => messages,
+        Err(failure) => failure,
     };
 
-    let diagnostic = first_error_diagnostic(&messages);
+    let diagnostic = first_error_diagnostic(&failure);
     assert_eq!(
-        diagnostic.kind.code(),
+        diagnostic.descriptor().code,
         "MOTH-IMPORT-0021",
-        "expected unsupported external extension diagnostic, got {:?}",
-        diagnostic
+        "expected unsupported external extension diagnostic, got {}",
+        diagnostic.descriptor().code
     );
-    if let DiagnosticPayload::UnsupportedExternalExtension { path, extension } = &diagnostic.payload
-    {
-        let path_text = messages.diagnostic_render_context(0).render_path(*path);
-        assert_eq!(path_text, "drawing.js", "unexpected path in diagnostic");
-        assert_eq!(
-            messages.string_table.resolve(*extension),
-            "js",
-            "unexpected extension in diagnostic"
-        );
-    } else {
-        panic!(
-            "expected UnsupportedExternalExtension payload, got {:?}",
-            diagnostic.payload
-        );
-    }
+    let facts = diagnostic
+        .family_view::<UnsupportedExternalExtensionView>()
+        .expect("unsupported external extension should retain typed path facts");
+    let (report, _) = failure
+        .reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("unsupported external extension should retain its error report");
+    let context = DiagnosticRenderContext::for_report(report);
+    assert_eq!(
+        context.render_path(facts.path),
+        "drawing.js",
+        "unexpected path in diagnostic"
+    );
+    assert_eq!(
+        context.string_table.resolve(facts.extension),
+        "js",
+        "unexpected extension in diagnostic"
+    );
 }
 
 #[test]
@@ -1067,14 +1076,14 @@ fn directory_provider_dependency_rejects_cross_module_target() {
         &calls,
     ))));
 
-    let messages = match discover_modules_for_test_with_providers(
+    let failure = match discover_modules_for_test_with_providers(
         &config,
         &resolver,
         &style_directives,
         &providers,
     ) {
         Ok(_) => panic!("cross-module provider import should be rejected"),
-        Err(messages) => messages,
+        Err(failure) => failure,
     };
 
     // The provider must never be invoked for a cross-module target.
@@ -1084,21 +1093,16 @@ fn directory_provider_dependency_rejects_cross_module_target() {
         "provider must not run for a cross-module target"
     );
 
-    let diagnostic = first_error_diagnostic(&messages);
+    let diagnostic = first_error_diagnostic(&failure);
     assert_eq!(
-        diagnostic.kind.code(),
+        diagnostic.descriptor().code,
         "MOTH-IMPORT-0015",
-        "expected cross-module import diagnostic, got {:?}",
-        diagnostic
+        "expected cross-module import diagnostic, got {}",
+        diagnostic.descriptor().code
     );
-    assert!(
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::CrossModuleImportNotExported { .. }
-        ),
-        "expected CrossModuleImportNotExported payload, got {:?}",
-        diagnostic.payload
-    );
+    diagnostic
+        .family_view::<CrossModuleImportNotExportedView>()
+        .expect("cross-module import should retain typed symbol-path facts");
 }
 
 #[test]
@@ -1136,14 +1140,14 @@ fn directory_provider_dependency_missing_target_reports_structured_diagnostic_wi
         &calls,
     ))));
 
-    let messages = match discover_modules_for_test_with_providers(
+    let failure = match discover_modules_for_test_with_providers(
         &config,
         &resolver,
         &style_directives,
         &providers,
     ) {
         Ok(_) => panic!("missing provider target should fail discovery"),
-        Err(messages) => messages,
+        Err(failure) => failure,
     };
 
     // The provider must never be invoked for a target the index could not resolve.
@@ -1159,21 +1163,25 @@ fn directory_provider_dependency_missing_target_reports_structured_diagnostic_wi
     // existing import diagnostic lane, proving no directory-time path probe runs after the
     // index is built.
     assert!(
-        messages.error_diagnostics().next().is_some(),
+        failure
+            .reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .next()
+            .is_some(),
         "missing provider target should surface a structured import diagnostic"
     );
     assert!(
-        messages.infrastructure_errors().is_none(),
+        failure.infrastructure_errors().is_none(),
         "missing provider target must not surface a filesystem infrastructure error"
     );
-    let diagnostic = first_error_diagnostic(&messages);
+    let diagnostic = first_error_diagnostic(&failure);
     assert_eq!(
-        diagnostic.kind.code(),
+        diagnostic.descriptor().code,
         "MOTH-IMPORT-0005",
-        "expected missing import target diagnostic, got {:?}",
-        diagnostic
+        "expected missing import target diagnostic, got {}",
+        diagnostic.descriptor().code
     );
-    assert_primary_span_text(&messages, &src.join("@page.moth"), "@missing.js");
+    assert_primary_span_text(&failure, &src.join("@page.moth"), "@missing.js");
 }
 
 #[test]
@@ -1323,17 +1331,17 @@ fn recognized_source_stem_collision_is_ambiguous_without_extension_precedence() 
     source_file_kinds.register("md", crate::builder_surface::SourceFileKind::PlainMarkdown);
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
-    let messages = match discover_modules_for_test(&config, &resolver, &style_directives) {
+    let failure = match discover_modules_for_test(&config, &resolver, &style_directives) {
         Ok(_) => panic!(
             "case-colliding recognized sources must not resolve by extension or spelling precedence"
         ),
-        Err(messages) => messages,
+        Err(failure) => failure,
     };
     assert_eq!(
-        first_error_diagnostic(&messages).kind.code(),
+        first_error_diagnostic(&failure).descriptor().code,
         "MOTH-IMPORT-0006"
     );
-    assert_primary_span_text(&messages, &src.join("@page.moth"), "@HELPER");
+    assert_primary_span_text(&failure, &src.join("@page.moth"), "@HELPER");
 }
 
 #[test]
@@ -1363,12 +1371,12 @@ fn binding_package_and_local_module_prefix_collision_is_ambiguous() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let messages = match discover_modules_for_test(&config, &resolver, &style_directives) {
+    let failure = match discover_modules_for_test(&config, &resolver, &style_directives) {
         Ok(_) => panic!("a registered package must not take precedence over a local module prefix"),
-        Err(messages) => messages,
+        Err(failure) => failure,
     };
     assert_eq!(
-        first_error_diagnostic(&messages).kind.code(),
+        first_error_diagnostic(&failure).descriptor().code,
         "MOTH-IMPORT-0006"
     );
 }
@@ -1398,12 +1406,12 @@ fn directory_source_dependency_rejects_obsolete_relative_form() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let messages = match discover_modules_for_test(&config, &resolver, &style_directives) {
+    let failure = match discover_modules_for_test(&config, &resolver, &style_directives) {
         Ok(_) => panic!("directory source dependencies must reject @./"),
-        Err(messages) => messages,
+        Err(failure) => failure,
     };
     assert_eq!(
-        first_error_diagnostic(&messages).kind.code(),
+        first_error_diagnostic(&failure).descriptor().code,
         "MOTH-IMPORT-0016"
     );
 }
@@ -1438,12 +1446,12 @@ fn direct_child_private_path_bypass_is_rejected() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let messages = match discover_modules_for_test(&config, &resolver, &style_directives) {
+    let failure = match discover_modules_for_test(&config, &resolver, &style_directives) {
         Ok(_) => panic!("a consumer must not address a child module's private file path"),
-        Err(messages) => messages,
+        Err(failure) => failure,
     };
     assert_eq!(
-        first_error_diagnostic(&messages).kind.code(),
+        first_error_diagnostic(&failure).descriptor().code,
         "MOTH-IMPORT-0015"
     );
 }

@@ -527,7 +527,7 @@ impl MothTemplateScopeFixture {
         )
         .map_err(|failure| match failure {
             crate::compiler_frontend::compiler_messages::PremergeFailure::Diagnosed(batch) => {
-                AstDiagnosticFailure::Prepared(PreparedDiagnosticBatch::from_premerge(batch))
+                AstDiagnosticFailure::Prepared(batch)
             }
             crate::compiler_frontend::compiler_messages::PremergeFailure::Infrastructure(error) => {
                 panic!("dependency sorting infrastructure failure: {error:?}")

@@ -15,9 +15,10 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage, InvalidConfigReason,
-    PremergeDiagnosticBatch, PremergeFailure,
+    CompilerDiagnostic, DiagnosticBag, DiagnosticLabel, DiagnosticLabelMessage,
+    InvalidConfigReason, PremergeFailure,
 };
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
     SourceBuildConfigContract, build_input_type_name,
@@ -774,12 +775,12 @@ fn describe_build_config_contract(fact: &BuildConfigContractFact) -> String {
 /// Map one compiler-owned barrier failure onto the typed premerge config diagnostic lane.
 ///
 /// WHAT: converts a [`BuildConfigResolutionError`] into a [`PremergeFailure`] without
-///       constructing the final `CompilerMessages` vessel. User-facing failures move the
-///       boundary string table into a [`PremergeDiagnosticBatch`]; the declaration-owned config
-///       handoff invariant stays a typed infrastructure error.
+///       constructing the final `CompilerMessages` vessel. User-facing failures capture a
+///       prepared batch at this owning boundary; the declaration-owned config handoff invariant
+///       stays a typed infrastructure error.
 /// WHY: configuration resolution is a Stage 0 boundary operation whose failures must travel
 ///      typed until the final merge boundary owns the single vessel conversion. Moving the
-///      table keeps every interned diagnostic id valid without cloning.
+///      table into the prepared batch keeps every interned diagnostic id valid without cloning.
 pub(super) fn build_config_resolution_failure(
     error: BuildConfigResolutionError,
     fallback_span: Option<SourceSpan>,
@@ -825,9 +826,12 @@ pub(super) fn build_config_resolution_failure(
             }
             None => CompilerDiagnostic::invalid_number_literal(literal, reason, contract.span()),
         };
-        return PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
-            diagnostic,
+        return PremergeFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+            DiagnosticBag::from(diagnostic),
             std::mem::take(string_table),
+            None,
+            false,
+            None,
         ));
     }
     let key = string_table.intern(error.name().as_str());
@@ -908,11 +912,14 @@ pub(super) fn build_config_resolution_failure(
         )
     };
 
-    // Move the boundary table into the batch; every failure path here terminates the
+    // Move the boundary table into the prepared batch; every failure path here terminates
     // resolution, so no clone is needed to carry the diagnostic ids.
-    PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
-        diagnostic,
+    PremergeFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
         std::mem::take(string_table),
+        None,
+        false,
+        None,
     ))
 }
 pub(super) fn resolve_boundary_build_config(

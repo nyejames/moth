@@ -4,15 +4,14 @@
 //! explicit path rows, and frozen-identity handles collected during Pass A.
 //! WHY: a premerge batch joins the run accumulator without constructing `CompilerMessages` or
 //! retaining its live type environment.
-
 use super::compiler_errors::{
-    CompilerError, CompilerMessages, InfrastructureErrors, RenderPathContext, RenderTypeContext,
+    CompilerError, CompilerMessages, InfrastructureErrors, RenderPathContext,
 };
-use super::diagnostic_bag::{DiagnosticBag, PremergeDiagnosticBatch, PremergeFailure};
+use super::diagnostic_bag::{DiagnosticBag, PremergeFailure};
 use super::diagnostics::legacy_adapter::{PreparedDiagnostic, prepare_diagnostic};
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::source::FrozenIdentityHandle;
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
 use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use std::sync::Arc;
@@ -28,7 +27,7 @@ pub(super) struct PreparedBatchIdentity {
 ///
 /// The boxed identity side store keeps this carrier at most 48 bytes. Each draft owns its captured
 /// type snapshot so append remaps the pair in place without a second conversion.
-pub(crate) struct PreparedDiagnosticBatch {
+pub struct PreparedDiagnosticBatch {
     pub(super) prepared: Vec<PreparedDiagnostic>,
     pub(super) identity: Box<PreparedBatchIdentity>,
 }
@@ -56,24 +55,28 @@ impl AstDiagnosticFailure {
             return Self::Infrastructure(errors);
         }
 
-        Self::Prepared(PreparedDiagnosticBatch::capture_from_bag(
+        match PreparedDiagnosticBatch::capture_with_required_paths_and_types(
             DiagnosticBag::from_diagnostics(diagnostics),
             *string_table,
             environment,
-            path_table_is_available,
-            path_table,
-        ))
+            || path_table_is_available.then_some(path_table).flatten(),
+        ) {
+            Ok(batch) => Self::Prepared(batch),
+            Err(error) => Self::from(error),
+        }
     }
 
-    pub(crate) fn prepend_diagnostics(
+    pub(crate) fn prepend_diagnostics_with_required_paths(
         &mut self,
         prior_diagnostics: impl IntoIterator<
             Item = crate::compiler_frontend::compiler_messages::CompilerDiagnostic,
         >,
-    ) {
+        path_table: impl FnOnce() -> Option<Arc<PathTable>>,
+    ) -> Result<(), CompilerError> {
         if let Self::Prepared(batch) = self {
-            batch.prepend_diagnostics(prior_diagnostics);
+            batch.prepend_diagnostics_with_required_paths(prior_diagnostics, path_table)?;
         }
+        Ok(())
     }
 }
 
@@ -83,33 +86,12 @@ impl From<CompilerError> for AstDiagnosticFailure {
     }
 }
 
-/// Typed failures from the semantic pipeline before its owning boundary finalizes sources.
-#[derive(Debug)]
-pub(crate) enum SemanticStageFailure {
-    Premerge(PremergeFailure),
-    Ast(AstDiagnosticFailure),
-}
-
-impl From<PremergeFailure> for SemanticStageFailure {
-    fn from(failure: PremergeFailure) -> Self {
-        Self::Premerge(failure)
-    }
-}
-
-impl From<CompilerError> for SemanticStageFailure {
-    fn from(error: CompilerError) -> Self {
-        Self::Premerge(PremergeFailure::from(error))
-    }
-}
-impl From<CompilerMessages> for SemanticStageFailure {
-    fn from(messages: CompilerMessages) -> Self {
-        Self::Premerge(PremergeFailure::from(messages))
-    }
-}
-
-impl From<AstDiagnosticFailure> for SemanticStageFailure {
+impl From<AstDiagnosticFailure> for PremergeFailure {
     fn from(failure: AstDiagnosticFailure) -> Self {
-        Self::Ast(failure)
+        match failure {
+            AstDiagnosticFailure::Prepared(batch) => Self::Diagnosed(batch),
+            AstDiagnosticFailure::Infrastructure(errors) => Self::Infrastructure(errors),
+        }
     }
 }
 
@@ -125,43 +107,10 @@ impl std::fmt::Debug for PreparedDiagnosticBatch {
 const _: () = assert!(std::mem::size_of::<PreparedDiagnosticBatch>() <= 48);
 
 impl PreparedDiagnosticBatch {
-    /// Capture a premerge batch against its own retained contexts using the legacy adapter's Pass A.
-    pub(crate) fn from_premerge(batch: PremergeDiagnosticBatch) -> Self {
-        let (bag, string_table, type_rows, path_rows) = batch.into_parts();
-        let diagnostics = bag.into_diagnostics();
-        let mut required_handles = Vec::new();
-        let mut prepared = Vec::with_capacity(diagnostics.len());
-
-        for (index, diagnostic) in diagnostics.iter().enumerate() {
-            let explicit_path = path_rows
-                .iter()
-                .position(|row| row.diagnostic_range.contains(&index));
-            let environment = explicit_path
-                .and_then(|_| {
-                    type_rows
-                        .iter()
-                        .find(|row| row.diagnostic_range.contains(&index))
-                })
-                .map(|row: &RenderTypeContext| &row.type_environment);
-            let mut item = prepare_diagnostic(diagnostic, environment, &mut required_handles);
-            item.set_explicit_path(explicit_path);
-            prepared.push(item);
-        }
-
-        Self {
-            prepared,
-            identity: Box::new(PreparedBatchIdentity {
-                string_table,
-                path_rows,
-                required_handles,
-            }),
-        }
-    }
     /// Capture an owning site's bag against the environment it supplies.
     ///
-    /// Unlike `from_premerge`, this site already knows whether its path table was available while
-    /// the environment was live. Capture every diagnostic against that borrowed environment when
-    /// it was available; do not infer availability from a retained path row.
+    /// Type displays are captured when the caller marks the environment available. Path rows
+    /// are retained independently, only when a snapshot is supplied.
     pub(crate) fn capture_from_bag(
         bag: DiagnosticBag,
         string_table: StringTable,
@@ -200,6 +149,108 @@ impl PreparedDiagnosticBatch {
             }),
         }
     }
+    /// Capture diagnostics while retaining a path snapshot only when a payload renders paths.
+    ///
+    /// Path snapshots are paired with the batch-local string table before capture. The type
+    /// environment is consulted only when that pairing succeeds and the snapshot is retained.
+    pub(crate) fn capture_with_required_paths(
+        bag: DiagnosticBag,
+        string_table: StringTable,
+        environment: Option<&TypeEnvironment>,
+        path_table: impl FnOnce() -> Option<Arc<PathTable>>,
+    ) -> Result<Self, CompilerError> {
+        Self::capture_with_required_paths_impl(bag, string_table, environment, path_table, false)
+    }
+
+    /// Capture path payloads and preserve supplied type facts for path-free diagnostics.
+    ///
+    /// When an environment is supplied, the retained path context also resolves PathIds embedded
+    /// in captured type spellings. The type-free helper above does not retain that context.
+    pub(crate) fn capture_with_required_paths_and_types(
+        bag: DiagnosticBag,
+        string_table: StringTable,
+        environment: Option<&TypeEnvironment>,
+        path_table: impl FnOnce() -> Option<Arc<PathTable>>,
+    ) -> Result<Self, CompilerError> {
+        Self::capture_with_required_paths_impl(bag, string_table, environment, path_table, true)
+    }
+
+    fn capture_with_required_paths_impl(
+        bag: DiagnosticBag,
+        string_table: StringTable,
+        environment: Option<&TypeEnvironment>,
+        path_table: impl FnOnce() -> Option<Arc<PathTable>>,
+        capture_types_without_paths: bool,
+    ) -> Result<Self, CompilerError> {
+        let diagnostics = bag.into_diagnostics();
+        let mut required_paths = Vec::new();
+        for diagnostic in &diagnostics {
+            diagnostic
+                .payload
+                .required_path_payload_paths(&mut required_paths);
+        }
+
+        let retain_type_context =
+            capture_types_without_paths && environment.is_some() && !diagnostics.is_empty();
+        let path_table = if required_paths.is_empty() && !retain_type_context {
+            None
+        } else {
+            path_table()
+        };
+        if let Some(path_table) = &path_table
+            && let Some(index) = super::compiler_errors::unpaired_path_table_component_index(
+                path_table,
+                &string_table,
+                &required_paths,
+            )
+        {
+            return Err(CompilerError::compiler_error(format!(
+                "diagnostic path table is not pairable with this string table: path node \
+                 {index} is unaddressable or carries a component StringId the string table \
+                 cannot resolve"
+            )));
+        }
+        let type_environment_is_available = path_table.is_some();
+        let batch = Self::capture_from_bag(
+            DiagnosticBag::from_diagnostics(diagnostics),
+            string_table,
+            environment,
+            type_environment_is_available,
+            path_table,
+        );
+        if let Some(path_table) = batch
+            .identity
+            .path_rows
+            .first()
+            .map(|row| row.path_table.as_ref())
+        {
+            let mut type_paths = Vec::new();
+            for diagnostic in &batch.prepared {
+                diagnostic.append_type_paths(&mut type_paths);
+            }
+            if let Some(index) = super::compiler_errors::unpaired_path_table_component_index(
+                path_table,
+                &batch.identity.string_table,
+                &type_paths,
+            ) {
+                return Err(CompilerError::compiler_error(format!(
+                    "diagnostic path table is not pairable with this string table: path node \
+                     {index} is unaddressable or carries a component StringId the string table \
+                     cannot resolve"
+                )));
+            }
+        }
+        Ok(batch)
+    }
+    pub(crate) fn rebind_source_ids(
+        &mut self,
+        rebind: &mut impl FnMut(SourceId) -> Result<SourceId, CompilerError>,
+    ) -> Result<(), CompilerError> {
+        for diagnostic in &mut self.prepared {
+            diagnostic.rebind_source_ids(rebind)?;
+        }
+        Ok(())
+    }
 
     /// Rebase every prepared string ID onto the run root table and release this batch's local
     /// identity table. After this call, all string IDs belong to the run root table; append the
@@ -228,30 +279,65 @@ impl PreparedDiagnosticBatch {
             return;
         }
 
-        let leading_path = self
-            .identity
-            .path_rows
-            .iter()
-            .position(|row| row.diagnostic_range.start == 0);
         let mut prepared = Vec::with_capacity(self.prepared.len() + shift);
         for diagnostic in &prior_diagnostics {
             let mut item =
                 prepare_diagnostic(diagnostic, None, &mut self.identity.required_handles);
-            item.set_explicit_path(leading_path);
+            item.set_explicit_path(None);
             prepared.push(item);
         }
         prepared.append(&mut self.prepared);
         self.prepared = prepared;
 
-        for (index, row) in self.identity.path_rows.iter_mut().enumerate() {
-            if Some(index) == leading_path {
-                row.diagnostic_range.start = 0;
-                row.diagnostic_range.end += shift;
-            } else {
-                row.diagnostic_range.start += shift;
-                row.diagnostic_range.end += shift;
+        for row in &mut self.identity.path_rows {
+            row.diagnostic_range.start += shift;
+            row.diagnostic_range.end += shift;
+        }
+    }
+
+    pub(crate) fn prepend_diagnostics_with_required_paths(
+        &mut self,
+        prior_diagnostics: impl IntoIterator<
+            Item = crate::compiler_frontend::compiler_messages::CompilerDiagnostic,
+        >,
+        path_table: impl FnOnce() -> Option<Arc<PathTable>>,
+    ) -> Result<(), CompilerError> {
+        let prior_diagnostics = prior_diagnostics.into_iter().collect::<Vec<_>>();
+        let shift = prior_diagnostics.len();
+        if shift == 0 {
+            return Ok(());
+        }
+
+        let mut prior_batch = Self::capture_with_required_paths(
+            DiagnosticBag::from_diagnostics(prior_diagnostics),
+            std::mem::take(&mut self.identity.string_table),
+            None,
+            path_table,
+        )?;
+        let prior_path_rows = std::mem::take(&mut prior_batch.identity.path_rows);
+        let prior_path_index = self.identity.path_rows.len();
+        if !prior_path_rows.is_empty() {
+            for diagnostic in &mut prior_batch.prepared {
+                diagnostic.set_explicit_path(Some(prior_path_index));
             }
         }
+
+        for row in &mut self.identity.path_rows {
+            row.diagnostic_range.start += shift;
+            row.diagnostic_range.end += shift;
+        }
+        self.identity.path_rows.extend(prior_path_rows);
+
+        let mut prepared = Vec::with_capacity(shift + self.prepared.len());
+        prepared.append(&mut prior_batch.prepared);
+        prepared.append(&mut self.prepared);
+        self.prepared = prepared;
+
+        let mut required_handles = std::mem::take(&mut prior_batch.identity.required_handles);
+        required_handles.append(&mut self.identity.required_handles);
+        self.identity.required_handles = required_handles;
+        self.identity.string_table = std::mem::take(&mut prior_batch.identity.string_table);
+        Ok(())
     }
 
     pub(crate) fn classify_premerge(self) -> Result<Self, CompilerError> {
@@ -290,71 +376,5 @@ impl PreparedDiagnosticBatch {
         self.prepared
             .iter()
             .any(PreparedDiagnostic::requires_source_identity)
-    }
-}
-
-/// Classify a legacy semantic failure while keeping its contexts in the pre-Pass-A lane.
-///
-/// The diagnosed premerge carrier still owns the type environment until its last path-table
-/// pairing is known. Capturing here would run Pass A before that owning-site boundary.
-pub(crate) fn classify_module_messages(
-    messages: CompilerMessages,
-) -> Result<PremergeDiagnosticBatch, Box<InfrastructureErrors>> {
-    let CompilerMessages {
-        diagnostics,
-        infrastructure_errors,
-        string_table,
-        render_source_contexts,
-        render_type_contexts,
-        render_path_contexts,
-        ..
-    } = messages;
-
-    let has_user_error = diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error);
-
-    match infrastructure_errors {
-        None => {
-            if !has_user_error {
-                if diagnostics.is_empty() {
-                    return Err(CompilerError::compiler_error(
-                        "module semantic stage returned a failure with no diagnostics",
-                    )
-                    .into());
-                }
-                return Err(CompilerError::compiler_error(
-                    "module semantic stage returned a failure with no user-facing error diagnostic",
-                )
-                .into());
-            }
-
-            if !render_source_contexts.is_empty() {
-                return Err(CompilerError::compiler_error(format!(
-                    "diagnosed module reached canonical merging with {} attached source contexts \
-                     beside {} diagnostics; source attachment must happen after merging",
-                    render_source_contexts.len(),
-                    diagnostics.len(),
-                ))
-                .into());
-            }
-
-            Ok(PremergeDiagnosticBatch::from_parts(
-                diagnostics,
-                *string_table,
-                render_type_contexts,
-                render_path_contexts.map_or_else(Vec::new, |contexts| contexts.into_vec()),
-            ))
-        }
-        Some(mut errors) => {
-            if has_user_error {
-                errors.push(CompilerError::compiler_error(format!(
-                    "module semantic stage returned a malformed diagnostic sequence mixing a \
-                     user-facing error with an infrastructure failure among {total} total",
-                    total = diagnostics.len(),
-                )));
-            }
-            Err(errors)
-        }
     }
 }

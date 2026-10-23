@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::compiler_messages::PremergeFailure;
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 #[derive(Debug)]
@@ -29,7 +30,7 @@ impl ExternalImportProvider for DummyJsImportProvider {
         &self,
         request: ExternalImportRequest,
         context: &mut ExternalImportProviderContext,
-    ) -> Result<Option<ResolvedExternalImport>, CompilerMessages> {
+    ) -> Result<Option<ResolvedExternalImport>, PremergeFailure> {
         self.calls.fetch_add(1, Ordering::SeqCst);
 
         let package_path = dummy_package_path(&request.canonical_source_path);
@@ -75,14 +76,14 @@ fn dummy_package_path(canonical_source_path: &Path) -> String {
 fn register_dummy_package(
     context: &mut ExternalImportProviderContext,
     package_path: String,
-) -> Result<crate::compiler_frontend::external_packages::ExternalPackageId, CompilerMessages> {
+) -> Result<crate::compiler_frontend::external_packages::ExternalPackageId, PremergeFailure> {
     context
         .package_registry
         .register_package(
             package_path,
             crate::builder_surface::PackageOrigin::ProjectLocal,
         )
-        .map_err(|error| provider_error_to_messages(error, context.string_table))
+        .map_err(provider_error_to_failure)
 }
 
 /// Build one JS runtime asset fixture whose origin carries a stable provider owner.
@@ -107,7 +108,7 @@ fn fixture_dummy_js_runtime_asset(canonical_source_path: PathBuf) -> RuntimeAsse
 fn register_dummy_widget_type(
     context: &mut ExternalImportProviderContext,
     package_id: crate::compiler_frontend::external_packages::ExternalPackageId,
-) -> Result<ExternalTypeId, CompilerMessages> {
+) -> Result<ExternalTypeId, PremergeFailure> {
     context
         .package_registry
         .register_external_type(
@@ -117,13 +118,13 @@ fn register_dummy_widget_type(
                 abi_type: ExternalAbiType::Handle,
             },
         )
-        .map_err(|error| provider_error_to_messages(error, context.string_table))
+        .map_err(provider_error_to_failure)
 }
 
 fn register_dummy_draw_function(
     context: &mut ExternalImportProviderContext,
     package_id: crate::compiler_frontend::external_packages::ExternalPackageId,
-) -> Result<ExternalFunctionId, CompilerMessages> {
+) -> Result<ExternalFunctionId, PremergeFailure> {
     context
         .package_registry
         .register_external_function(
@@ -141,14 +142,14 @@ fn register_dummy_draw_function(
                 lowerings: ExternalFunctionLowerings::default(),
             },
         )
-        .map_err(|error| provider_error_to_messages(error, context.string_table))
+        .map_err(provider_error_to_failure)
 }
 
 fn register_dummy_make_widget_function(
     context: &mut ExternalImportProviderContext,
     package_id: crate::compiler_frontend::external_packages::ExternalPackageId,
     widget_type_id: ExternalTypeId,
-) -> Result<ExternalFunctionId, CompilerMessages> {
+) -> Result<ExternalFunctionId, PremergeFailure> {
     context
         .package_registry
         .register_external_function(
@@ -164,14 +165,14 @@ fn register_dummy_make_widget_function(
                 lowerings: ExternalFunctionLowerings::default(),
             },
         )
-        .map_err(|error| provider_error_to_messages(error, context.string_table))
+        .map_err(provider_error_to_failure)
 }
 
 fn register_dummy_use_widget_function(
     context: &mut ExternalImportProviderContext,
     package_id: crate::compiler_frontend::external_packages::ExternalPackageId,
     widget_type_id: ExternalTypeId,
-) -> Result<ExternalFunctionId, CompilerMessages> {
+) -> Result<ExternalFunctionId, PremergeFailure> {
     context
         .package_registry
         .register_external_function(
@@ -194,14 +195,11 @@ fn register_dummy_use_widget_function(
                 lowerings: ExternalFunctionLowerings::default(),
             },
         )
-        .map_err(|error| provider_error_to_messages(error, context.string_table))
+        .map_err(provider_error_to_failure)
 }
 
-fn provider_error_to_messages(
-    error: CompilerError,
-    string_table: &StringTable,
-) -> CompilerMessages {
-    CompilerMessages::from_error_ref(error, string_table)
+fn provider_error_to_failure(error: CompilerError) -> PremergeFailure {
+    error.into()
 }
 
 fn builder_surface_with_dummy_js_provider(calls: Arc<AtomicUsize>) -> BuilderSurface {
@@ -312,7 +310,7 @@ impl ExternalImportProvider for DummyJsImportProviderWithLowering {
         &self,
         request: ExternalImportRequest,
         context: &mut ExternalImportProviderContext,
-    ) -> Result<Option<ResolvedExternalImport>, CompilerMessages> {
+    ) -> Result<Option<ResolvedExternalImport>, PremergeFailure> {
         self.calls.fetch_add(1, Ordering::SeqCst);
 
         let package_path = dummy_package_path(&request.canonical_source_path);
@@ -335,7 +333,7 @@ impl ExternalImportProvider for DummyJsImportProviderWithLowering {
 fn register_dummy_draw_function_with_js_lowering(
     context: &mut ExternalImportProviderContext,
     package_id: crate::compiler_frontend::external_packages::ExternalPackageId,
-) -> Result<ExternalFunctionId, CompilerMessages> {
+) -> Result<ExternalFunctionId, PremergeFailure> {
     context
         .package_registry
         .register_external_function(
@@ -356,7 +354,7 @@ fn register_dummy_draw_function_with_js_lowering(
                 },
             },
         )
-        .map_err(|error| provider_error_to_messages(error, context.string_table))
+        .map_err(provider_error_to_failure)
 }
 
 fn builder_surface_with_dummy_js_provider_with_lowering(calls: Arc<AtomicUsize>) -> BuilderSurface {

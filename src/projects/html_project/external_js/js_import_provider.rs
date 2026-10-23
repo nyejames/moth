@@ -11,10 +11,11 @@ use crate::builder_surface::external_import_providers::provider::{
     ExternalFileExtension, ExternalImportProvider, ExternalImportProviderContext,
     ExternalImportProviderKind, ExternalImportRequest, ResolvedExternalImport,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticSeverity, InvalidExternalModuleReason, SourceSpanCapacityResource,
+    DiagnosticSeverity, InvalidExternalModuleReason, PremergeFailure, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
@@ -64,20 +65,18 @@ impl ExternalImportProvider for JsExternalImportProvider {
         &self,
         request: ExternalImportRequest,
         context: &mut ExternalImportProviderContext,
-    ) -> Result<Option<ResolvedExternalImport>, CompilerMessages> {
+    ) -> Result<Option<ResolvedExternalImport>, PremergeFailure> {
         let source = match std::fs::read_to_string(&request.canonical_source_path) {
             Ok(content) => content,
             Err(error) => {
-                return Err(CompilerMessages::from_error(
-                    CompilerError::file_error(
-                        &request.canonical_source_path,
-                        format!(
-                            "Failed to read JS import '{}': {error}",
-                            request.canonical_source_path.display()
-                        ),
+                return Err(CompilerError::file_error(
+                    &request.canonical_source_path,
+                    format!(
+                        "Failed to read JS import '{}': {error}",
+                        request.canonical_source_path.display()
                     ),
-                    context.string_table.clone(),
-                ));
+                )
+                .into());
             }
         };
 
@@ -89,32 +88,27 @@ impl ExternalImportProvider for JsExternalImportProvider {
         {
             Ok(path) => path,
             Err(PathInternError::NonUtf8(non_utf8)) => {
-                return Err(CompilerMessages::from_error_ref(
-                    CompilerError::file_error(
-                        &non_utf8.path,
-                        format!(
-                            "JS import source path {:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths.",
-                            non_utf8.path
-                        ),
+                return Err(CompilerError::file_error(
+                    &non_utf8.path,
+                    format!(
+                        "JS import source path {:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths.",
+                        non_utf8.path
                     ),
-                    context.string_table,
-                ));
+                )
+                .into());
             }
             Err(PathInternError::TableFull) => {
-                return Err(CompilerMessages::from_diagnostic_ref(
+                return Err(context.capture_diagnostic_failure(DiagnosticBag::from(
                     CompilerDiagnostic::source_table_capacity(
                         SourceSpanCapacityResource::LogicalPath,
                     ),
-                    context.string_table,
-                ));
+                )));
             }
             Err(PathInternError::BaseMismatch { .. }) => {
-                return Err(CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(
-                        "logical path merge base is not a structural prefix of the destination table",
-                    ),
-                    context.string_table,
-                ));
+                return Err(CompilerError::compiler_error(
+                    "logical path merge base is not a structural prefix of the destination table",
+                )
+                .into());
             }
         };
 
@@ -139,10 +133,9 @@ impl ExternalImportProvider for JsExternalImportProvider {
             .iter()
             .any(|d| d.severity == DiagnosticSeverity::Error)
         {
-            return Err(CompilerMessages::from_diagnostics(
-                diagnostics,
-                context.string_table.clone(),
-            ));
+            return Err(
+                context.capture_diagnostic_failure(DiagnosticBag::from_diagnostics(diagnostics))
+            );
         }
 
         let package_path = js_provider_package_path(&request.logical_source_path);
@@ -152,12 +145,10 @@ impl ExternalImportProvider for JsExternalImportProvider {
                 &package_path,
                 crate::builder_surface::PackageOrigin::ProjectLocal,
             )
-            .map_err(|error| CompilerMessages::from_error(error, context.string_table.clone()))?;
+            .map_err(PremergeFailure::from)?;
 
         let registered = register_parsed_js_module(package_id, &parsed, context.package_registry)
-            .map_err(|error| {
-            CompilerMessages::from_error(error, context.string_table.clone())
-        })?;
+            .map_err(PremergeFailure::from)?;
 
         let required_runtime_imports = required_runtime_imports_from_parsed(&parsed);
 
@@ -167,7 +158,7 @@ impl ExternalImportProvider for JsExternalImportProvider {
             request.canonical_source_path,
             request.source_span,
         )
-        .map_err(|error| CompilerMessages::from_error(error, context.string_table.clone()))?;
+        .map_err(PremergeFailure::from)?;
 
         Ok(Some(ResolvedExternalImport {
             package_id,

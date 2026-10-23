@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 #[test]
 fn discover_modules_uses_reachable_files_only() {

@@ -18,8 +18,9 @@ use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{BoundaryFailure, CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::legacy_adapter::BoundaryAccumulator;
-use crate::compiler_frontend::compiler_messages::prepared_batch::AstDiagnosticFailure;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, InvalidConfigReason, PremergeFailure,
+};
 use crate::compiler_frontend::single_source_compilation::{
     CompiledConfigSource, ConfigCompilationFailure, ConfigCompilationOutcome,
     ConfigCompilationRequest, compile_config_source,
@@ -224,7 +225,7 @@ pub(crate) fn compile_project_config_file(
         },
         string_table,
     );
-    let mut ast_failure = None;
+    let mut compiler_failure = None;
     let validated_config = match result {
         Ok(compiled_config) => Some(
             validate_and_apply_compiled_config(config, &compiled_config, services, string_table)
@@ -235,7 +236,11 @@ pub(crate) fn compile_project_config_file(
             Some(Err(ProjectConfigFailure::Legacy(messages)))
         }
         Err(ConfigCompilationFailure::Ast(failure)) => {
-            ast_failure = Some(failure);
+            compiler_failure = Some(failure.into());
+            None
+        }
+        Err(ConfigCompilationFailure::Premerge(failure)) => {
+            compiler_failure = Some(failure);
             None
         }
     };
@@ -245,12 +250,12 @@ pub(crate) fn compile_project_config_file(
         .install_extended_spans(outcome_file_id, span_builder.freeze())
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
-    if let Some(failure) = ast_failure {
+    if let Some(failure) = compiler_failure {
         let source_database = project_source_files
             .take()
             .expect("the config source owner remains available through span finalization");
         return Err(ProjectConfigFailure::Boundary(
-            finalize_ast_diagnostic_failure(failure, source_database),
+            finalize_compiler_diagnostic_failure(failure, source_database),
         ));
     }
 
@@ -266,26 +271,31 @@ pub(crate) fn compile_project_config_file(
     Ok(validated_output_settings)
 }
 
-fn finalize_ast_diagnostic_failure(
-    failure: AstDiagnosticFailure,
+fn finalize_compiler_diagnostic_failure(
+    failure: PremergeFailure,
     source_database: SourceDatabase,
 ) -> BoundaryFailure {
     let source_database = Arc::new(source_database);
+    let mut accumulator = BoundaryAccumulator::new();
     match failure {
-        AstDiagnosticFailure::Prepared(batch) => {
-            let mut accumulator = BoundaryAccumulator::new();
+        PremergeFailure::Diagnosed(batch) => {
             accumulator.append_prepared(batch, Some((source_database, None)));
-            accumulator.finish(InstallMode::Frozen)
         }
-        AstDiagnosticFailure::Infrastructure(mut errors) => {
+        PremergeFailure::Infrastructure(mut errors) => {
             errors.set_source_database(source_database);
             let mut messages = CompilerMessages::empty(StringTable::new());
             messages.append_infrastructure_errors(errors);
-            let mut accumulator = BoundaryAccumulator::new();
             accumulator.append(messages);
-            accumulator.finish(InstallMode::Frozen)
+        }
+        PremergeFailure::Mixed { batch, mut error } => {
+            accumulator.append_prepared(batch, Some((Arc::clone(&source_database), None)));
+            error.set_source_database(source_database);
+            let mut messages = CompilerMessages::empty(StringTable::new());
+            messages.append_infrastructure_errors(error);
+            accumulator.append(messages);
         }
     }
+    accumulator.finish(InstallMode::Frozen)
 }
 
 fn validate_and_apply_compiled_config(

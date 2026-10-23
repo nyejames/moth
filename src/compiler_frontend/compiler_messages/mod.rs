@@ -34,7 +34,7 @@ pub(crate) use crate::compiler_frontend::tokenizer::tokens::TokenDescriptorPaylo
 #[cfg(test)]
 pub(crate) use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 pub(crate) use compiler_diagnostic::CompilerDiagnostic;
-pub(crate) use diagnostic_bag::{DiagnosticBag, PremergeDiagnosticBatch, PremergeFailure};
+pub(crate) use diagnostic_bag::{DiagnosticBag, PremergeFailure};
 pub(crate) use diagnostic_descriptor::DiagnosticDescriptor;
 #[cfg(test)]
 pub(crate) use diagnostic_identity::DiagnosticIdentity;

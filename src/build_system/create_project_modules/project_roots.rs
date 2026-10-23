@@ -13,10 +13,9 @@ use crate::build_system::output::ValidatedDirectoryOutputSettings;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::{SourceFileKindRegistry, SourcePackageRegistry};
 use crate::compiler_frontend::compiler_errors::CompilerError;
-#[cfg(test)]
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    InvalidConfigReason, PremergeDiagnosticBatch, PremergeFailure,
+    DiagnosticBag, InvalidConfigReason, PremergeFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -59,7 +58,7 @@ pub(super) fn build_project_path_resolver(
     builder_source_packages: &SourcePackageRegistry,
     source_file_kinds: &SourceFileKindRegistry,
     string_table: &mut StringTable,
-) -> Result<ProjectPathResolver, CompilerMessages> {
+) -> Result<ProjectPathResolver, PremergeFailure> {
     // Test-only resolver construction defaults to no external import providers; tests that
     // exercise provider-owned indexing call `build_project_path_resolver_with_index` directly.
     let external_import_providers = ExternalImportProviderRegistry::default();
@@ -74,7 +73,6 @@ pub(super) fn build_project_path_resolver(
         string_table,
     )
     .map(|setup| setup.resolver)
-    .map_err(|failure| failure.into_messages(string_table))
 }
 
 /// Build the canonical path resolver for a directory project.
@@ -188,7 +186,13 @@ fn resolve_project_roots(
         );
         let table = std::mem::take(string_table);
         return Err(PremergeFailure::Diagnosed(
-            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
+            PreparedDiagnosticBatch::capture_from_bag(
+                DiagnosticBag::from(diagnostic),
+                table,
+                None,
+                false,
+                None,
+            ),
         ));
     }
 
