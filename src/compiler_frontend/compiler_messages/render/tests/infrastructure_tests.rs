@@ -13,9 +13,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::{
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::display_messages::format_infrastructure_errors;
-use crate::compiler_frontend::compiler_messages::render::relative_display_path_from_root;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_compilation_result_html;
+use crate::compiler_frontend::compiler_messages::render::relative_display_path_from_root;
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_compilation_result;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticSeverity, InvalidConfigReason, InvalidImportPathReason, TypeMismatchContext,
