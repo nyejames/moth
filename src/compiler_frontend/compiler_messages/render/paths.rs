@@ -15,5 +15,10 @@ pub(crate) fn relative_display_path_from_root(scope: &Path, root: &Path) -> Stri
         .strip_prefix(&normalized_root)
         .unwrap_or(&normalized_scope);
 
-    portable_path_text(display_path)
+    // A path equal to the display root is still a real host path.
+    if display_path.as_os_str().is_empty() {
+        ".".to_owned()
+    } else {
+        portable_path_text(display_path)
+    }
 }

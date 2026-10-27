@@ -1,5 +1,5 @@
 use crate::compiler_frontend::tests::parse_support::{
-    assert_ast_diagnostic, parse_single_file_ast_diagnostic,
+    assert_ast_diagnostic, parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 
 fn assert_common_syntax_mistake(source: &str, expected_reason_key: &'static str) {
@@ -17,8 +17,22 @@ fn detects_int_divide_at_statement_start_as_comment_mistake() {
 }
 
 #[test]
-fn detects_fn_keyword_as_function_declaration_mistake() {
-    assert_common_syntax_mistake("fn hello():\n", "common_syntax_mistake.function_keyword");
+fn fn_is_a_valid_binding_name() {
+    parse_single_file_ast("fn = 1\n");
+}
+
+#[test]
+fn fn_statement_uses_ordinary_identifier_diagnostics() {
+    let failure = parse_single_file_ast_diagnostic("fn hello():\n");
+    assert_ast_diagnostic(&failure, "MOTH-SYNTAX-0001", None);
+}
+
+#[test]
+fn detects_function_keyword_as_function_declaration_mistake() {
+    assert_common_syntax_mistake(
+        "function hello():\n",
+        "common_syntax_mistake.function_keyword",
+    );
 }
 
 #[test]
