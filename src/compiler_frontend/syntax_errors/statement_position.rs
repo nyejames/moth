@@ -1,6 +1,6 @@
 //! Common language-mismatch mistakes in statement position.
 //!
-//! WHAT: Detects patterns like `// comment`, `fn name(...)`, `let x = ...`,
+//! WHAT: Detects patterns like `// comment`, `function name(...)`, `let x = ...`,
 //! `match value {`, `else if`, and `struct Name { ... }` that users from other
 //! languages write when they first encounter Moth.
 //!
